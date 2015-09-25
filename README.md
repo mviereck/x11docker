@@ -12,6 +12,10 @@ Doesn't need VNC or SSH. docker applications can directly access the new X serve
 <br>
 Look at 'x11docker --help' to see all options.<br>
 
+To start x11docker from console, switch to tty1 with [CTRL][ALT][F1].<br>
+To start x11docker from within X11, first run 'dpkg-reconfigure x11-common'
+and choose option 'anybody'.
+
 #Explanations
 x11docker creates a new X server on a new X socket on a new display. Instead of using
 display :0 (standard), docker images will run on display :1 or display :2 ...<br>
