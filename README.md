@@ -48,7 +48,7 @@ of X forwarding, which is much faster than VNC tunneling.
 #Known issues / ToDo:
 major:
  - sometimes even well working desktops like lxde and xfce show damaged icons or cannot run desktop manager. Stopping and restarting often solves the issue. It seems to be a problem either in X or in the connection between X and container.
- - The main display 0: is not accessable for containers, as it should be, but the new X server needs to have an authentication so only the container can access it (not implemented yet, important to do).<br>
+ - The main display 0: is not accessable for containers, and that is as it should be, but the new X server needs to have its own authentication so only the container can access it (not implemented yet, important to do).<br>
 
 minor:<br> 
  - containers have to run on the same X socket as the image was running on when creating the container
