@@ -1,7 +1,8 @@
 # x11docker
-Run X applications and desktop environments in docker on a separate X11 server.<br>
-Useful to avoid security issues concerning X forwarding.<br>
-Doesn't need VNC or SSH. docker applications can directly access the new X server.<br>
+ - Run X applications and desktop environments in docker on a separate X11 server.<br>
+ - Useful to avoid security issues concerning X forwarding.<br>
+ - Doesn't need VNC or SSH. docker applications can directly access the new X server.<br>
+ - This software is in development and will have major changes in the next future. Please look at 'Known issues / ToDo' list before using it.
 
 #Usage
  - To run a docker image on a separate X server:<br>
@@ -12,6 +13,7 @@ Doesn't need VNC or SSH. docker applications can directly access the new X serve
 <br>
 Look at 'x11docker --help' to see all options.<br>
 
+Important:<br>
 To start x11docker from console, switch to tty1 with [CTRL][ALT][F1].<br>
 To start x11docker from within X11, first run 'dpkg-reconfigure x11-common'
 and choose option 'anybody'.
@@ -40,12 +42,17 @@ security leaks inside a running X server. There are some solutions in the web to
 applications with X forwarding on display :0, but all of them share the problem of breaking the isolation
 of dockered applications and allowing them access to X resources like keylogging with 'xinput test'.<br>
 With x11docker, GUI applications in docker can be isolated from the main display :0 and use the speed benefit
-of X forwarding, which is much faster than VNC or SSH tunneling.
+of X forwarding, which is much faster than VNC tunneling.
 <br>
 
 #Known issues / ToDo:
- - containers have to run on the same X socket as the image did when creating the container
+major:
+ - sometimes even well working desktops like lxde and xfce show damaged icons or cannot run desktop manager. Stopping and restarting often solves the issue. It seems to be a problem either in X or in the connection between X and container.
+ - The main display 0: is not accessable for containers, as it should be, but the new X server needs to have an authentication so only the container can access it (not implemented yet, important to do).<br>
+
+minor:<br> 
+ - containers have to run on the same X socket as the image was running on when creating the container
  - screensavers from within a docker container appear on the primary X display. (Maybe a security leak? Keylogging is not possible anymore, but maybe "screenlooking")
  - some desktop environment based on QT can start, but have problems to display their content (plasma-desktop, KDE, razorqt)
  - gnome-shell crashes in docker
- - sometimes even well working desktops like lxde and xfce show damaged icons or cannot run desktop manager. Stopping and restarting solves the graphic issues for unknown reasons. Even a 'sleep' command in the startscript inside the docker image doesn't solve the problem.
+
