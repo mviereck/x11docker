@@ -2,7 +2,7 @@
  - Run X applications and desktop environments in docker on a separate X11 server.<br>
  - Useful to avoid security issues concerning X forwarding.<br>
  - Doesn't need VNC or SSH. docker applications can directly access the new X server.<br>
- - This software is in development and will have major changes in the next future. Please look at 'Known issues / ToDo' list before using it.
+ - This software is in development and will have major changes in the near future. Please look at 'Known issues / ToDo' list before using it.
 
 #Usage
  - To run a docker image on a separate X server:<br>
