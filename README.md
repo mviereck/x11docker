@@ -1,7 +1,7 @@
 # x11docker (beta version)
  - Run X applications and desktop environments in docker on a separate X11 server.<br>
  - Useful to avoid security issues concerning X forwarding.<br>
- - Doesn't need VNC or SSH. docker applications can directly access the new X server.<br>
+ - Doesn't need VNC or SSH. docker applications can directly access the new X server via tcp.<br>
  - This software is in development and will have major changes in the near future. Please look at 'Known issues / ToDo' list before using it.
 
 #Usage
@@ -47,7 +47,6 @@ of X forwarding, which is much faster than VNC tunneling.
 
 #Known issues / ToDo:
 major:
- - sometimes even well working desktops like lxde and xfce show damaged icons or cannot run desktop manager. Stopping and restarting often solves the issue. It seems to be a problem either in X or in the connection between X and container.
  - The main display 0: is not accessable for containers, and that is as it should be, but the new X server needs to have its own authentication so only the container can access it (not implemented yet, important to do).<br>
 
 minor:<br> 
