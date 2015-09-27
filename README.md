@@ -1,4 +1,4 @@
-# x11docker (beta version)
+# x11docker
  - Run X applications and desktop environments in docker on a separate X11 server.<br>
  - Useful to avoid security issues concerning X forwarding.<br>
  - Doesn't need VNC or SSH. docker applications can directly access the new X server via tcp.<br>
