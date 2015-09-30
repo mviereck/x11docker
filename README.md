@@ -2,8 +2,8 @@
  - Run X applications and desktop environments in docker on a separate X11 server.
  - Useful to avoid security issues concerning X forwarding.
  - Doesn't need VNC or SSH. docker applications can directly access the new X server via tcp.
- - Authentication via MIT-MAGIC-COOKIES. Separate Xauthority file, it is _not_ ~/.Xauthority
- - This software is in development and will have major changes in the near future. Have a look at ToDo/known issues list
+ - Doesn't need configurations inside the image - can run any GUI applications.
+ - Authentication via MIT-MAGIC-COOKIES. Separate Xauthority file, it is _not_  ~/.Xauthority
 
 #Usage
  - To run a docker image on a separate X server:<br>
@@ -33,20 +33,16 @@ Option '-w, --wm' allows to choose another, more comfortable window manager.
 To run a full desktop environment like LXDE or XFCE, x11docker creates a new X server on a new display.
  - Example: 'xdocker --desktop run x11docker/lxde-desktop'<br>
 
-Desktops known to work well are: LXDE, XFCE, Mate.<br>
-Desktops known to have problems: KDE, razorqt, Gnome 3.<br>
+Desktops known to work well are: LXDE, XFCE, Mate, KDE.<br>
+Desktops known to have problems: Gnome 3.<br>
+
 
 #Security
-Using a separate X server / a new display for docker GUI applications avoids issues concerning 
-security leaks inside a running X server. There are some solutions in the web to run dockered GUI 
-applications with X forwarding on display :0, but all of them share the problem of breaking the isolation
-of dockered applications and allowing them access to X resources like keylogging with 'xinput test'.<br>
-With x11docker, GUI applications in docker can be isolated from the main display :0 and use the speed benefit of a direkt X connection over tcp, which is much faster than VNC or SSH. Authenthication is done with MIT-MAGIC-COOKIE, stored separate from ~/.Xauthority. The new X server doesn't know the cookies from the standart X server on display :0.
-<br>
+ - Using a separate X server / a new display for docker GUI applications avoids issues concerning 
+security leaks inside a running X server. 
+ - There are some solutions in the web to run dockered GUI applications with X forwarding on display :0, but all of them share the problem of breaking the isolation of dockered applications and allowing them access to X resources like keylogging with 'xinput test'.
+ - With x11docker, GUI applications in docker can be isolated from the main display :0 and use the speed benefit of a direkt X connection over tcp, which is much faster than VNC or SSH. 
+ - Authenthication is done with MIT-MAGIC-COOKIE, stored separate from ~/.Xauthority. The new X server doesn't know the cookies from the standart X server on display :0.
 
 #Known issues / ToDo:
- - Good: X listens on tcp, only clients with authentication cookie can connect. Using tcp is secure with local connections. Bad/ToDo: X tcp port should be restricted to local connections, so nobody can try to access from outside.
  - containers have to run on the same X socket as the image was running on when creating the container
- - some desktop environment based on QT can start, but have problems to display their content (plasma-desktop, KDE, razorqt)
- - gnome-shell crashes in docker
-
