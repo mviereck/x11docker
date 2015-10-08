@@ -1,0 +1,727 @@
+#!/bin/bash
+
+# x11docker0.7
+# Run X applications and desktop environments in docker on a separate X11 server
+#
+# 09.10.2014: V0.9  included Xpra, Xephyr and Xvnc
+# 28.09.2015: V0.8  included MIT-MAGIC-COOKIE authorisation
+# 28.09.2015: V0.7  fixed problems with X frame buffers - now using tcp instead of sharing X socket
+# 26.09.2015: V0.6  published on github
+
+set -e           # stop script on occuring errors
+
+usage() {
+    cat << EOF
+
+x11docker: Create a new X server and run GUI applications
+         and / or desktop environments in docker.
+         Useful to avoid security issues concerning X forwarding.
+
+To start x11docker from console, switch to tty1 with <CTRL><ALT><F1>.
+To start x11docker from within X11, first run 'dpkg-reconfigure x11-common'
+and choose option 'anybody', or use either option '--Xpra' or '--Xephyr'.
+
+Usage:
+To run a docker image with new X server:
+   x11docker [OPTIONS] run [DOCKER_RUN_OPTIONS] IMAGE [COMMAND [ARG1 ARG2 ...]]
+To start a docker container with new X server:
+   x11docker [OPTIONS] start [DOCKER_START_OPTIONS] CONTAINER [CONTAINER2 ...]
+To start a host application (no docker) with new X server:
+   x11docker [OPTIONS] exec [APPLICATION [ARG1 ARG2 ...]]
+x11docker without any option will only create a new X server and run fluxbox
+
+Change between displays/X servers pressing <CTRL><ALT><F7 ... F12>
+To shut down new X server, choose 'exit' in the window manager.
+
+Options:
+ -h, --help            display this message and exit
+ -w, --wm COMMAND      window manager to use (default: 'fluxbox')
+ -d, --desktop         don't run twm or another wm on new X server;
+                       image contains its own desktop and/or window manager
+ -x                    use Xpra or Xephir to show dockered applications on 
+                       display :0 instead of switching to another tty
+                       (automated decision depending on option '-d, --desktop')
+ -a, --xpra, --Xpra    use Xpra to show application windows on display :0
+ -y, --xephyr, --Xephyr  use Xephyr to show desktops in a window on display :0
+ -n, --xvnc, --Xvnc    use Xvnc and xvncviewer to show on display :0
+ -c, --clipboard       share clipboard with dockered applications (Xpra & Xvnc)
+ -f, --fullscreen      run in fullscreen mode (Xephyr and Xvnc only)
+ -s, --sudo            use 'sudo' to run 'su -c docker ...'
+ -v, --verbose         be verbose
+ run                   run image in docker. All arguments after 'run' are 
+                       submitted to docker. See 'docker run --help' for options.
+ start                 start container in docker. all arguments after 'start' 
+                       are submitted to docker. See 'docker start --help' for 
+                       options. (Hint: use '-ai' as DOCKER_START_OPTIONS).
+ exec                  execute host application on new X server (no docker)
+Advanced options:
+ -u, --user            adds '--user UID:GID' with UID and GID of host user
+                       to 'docker run'. Useful when sharing host volumes
+ -r, --root            allow root to run x11docker. Default: No
+                       (A new X server should not be run as root)
+ --command             only show created docker command on stdout and exit
+
+Window manager: Default is fluxbox. You can choose another window manager with 
+         option '-w, --wm'. It should be a desktop indepentent window manager
+         to be able to terminate the new X session with exit or logout option.
+         Recommended: flwm, fluxbox, blackbox
+         Also working well: amiwm, jwm, pekwm, sapphire, wmaker, lxsession.
+
+Dependencies: dependending on choosed options, x11docker needs some packages
+         to be installed. It will check for them on startup and show messages 
+         if some are missing. List of possibly needed packages:
+         docker.io xorg xpra xephyr xvfb fluxbox vnc4server xvnc4viewer expect
+         As a core, 'docker.io', 'xorg' and 'fluxbox' should be installed.
+EOF
+}
+
+## description of variables and default settings
+#
+CONFIGFOLDER=$HOME/.config/x11docker            # define config file folder
+CACHEFOLDER=$HOME/.cache/x11docker              # define cache folder to store temporary files
+X11DOCKERRC=$CONFIGFOLDER/x11dockerrc           # config file to preset options
+XDRCARGS=""                                     # variable to store content of X11DOCKERRC
+
+DOCKERMODE="onlyX"                              # can be either "onlyX", "run", "start" or "exec", depends on options
+DOCKERARGS=""                                   # arguments to submit to docker
+X11DOCKERARGS=""                                # arguments for x11docker without arguments for docker
+ARGUMENT=""                                     # variable to step through arguments
+
+DOCKERIP=""                                     # IP adress of docker interface
+
+XINITRC=xinitrc                                 # file to store xinitrc
+XTERMRC=xtermrc
+XTERMLOGFILE=xterm.log                          # file to log output of xterm
+XINITLOGFILE=xinit.log                          # file to store output of X server
+DOCKERLOGFILE=docker.log
+DOCKERPIDFILE=docker.pid
+#CIDFILE=containerID                             # file to store container ID number
+
+XSERVER="X"                                     # X server to use ( one of X | XPRA | XEPHIR )
+STARTXAUTHORITY=$XAUTHORITY                     # store Environment variable
+STARTDISPLAY=$DISPLAY                           # store Environment variable
+
+XSERVERCOOKIE=Xservercookie                     # file to store server cookies
+XCLIENTCOOKIE=Xclientcookie                     # file to store client cookies
+NEWDISPLAY=""                                   # new display for new X server
+#NEWXLOCK=""                                     # .Xn-lock - exists for running X server with socket n
+#NEWXSOCKET=""                                   # New X socket
+
+# special for Xpra:
+XPRASERVERLOGFILE=xpraserver.log                # logfile for Xpra server
+ZEIT=""                                         # for counting time until Xpra server is ready
+
+# special for Xephyr and Xvnc
+WINDOWTITLE=""                                  # window title for Xephyr and Xvnc. Will be filled while parsing options
+
+# constant options for different X servers
+XARGS="-quiet -retro -listen tcp"                     # not changing defaults for X
+XPRAARGS="--no-pulseaudio --speaker --no-microphone"  # not changing defaults for Xpra
+XEPHYRARGS="-retro"                                   # not changing defaults for Xephyr
+XVNCARGS="-localhost"                                 # not changing defaults for Xvnc
+XVNCVIEWERARGS=""                                     # not changing defaults for xvncviewer
+
+# Get screen size for use with Xephyr or Xvnc
+XAXIS=$(xrandr --current | grep '*' | uniq | awk '{print $1}' | cut -d 'x' -f1)
+YAXIS=$(xrandr --current | grep '*' | uniq | awk '{print $1}' | cut -d 'x' -f2)
+
+# special for Xvnc
+VNCPASSWORD=""                                  # Password for VNC, will either be created with mcookie or typed in by user
+VNCPASSWORDFILE=xvnc4passwd                     # File to store obfuszicated VNC password
+VNCEXPECTRC=vncexpectrc                         # File to store expect script to execute vncpasswd (will be removed immediatly)
+EXPECTINSTALLED=""                              # if yes, then expect is installed
+
+# variables depending on options
+WINDOWMANAGER="fluxbox"                         # option '-w, --wm': window manager to use. set default here
+DESKTOPCONTAINER="no"                           # option '-d, --desktop': if "yes", run desktop environment instead of single application
+AUTOCHOOSESERVER="no"                           # option '-x': automated choosing server
+ONLYSHOWCOMMAND="no"                            # option '-c, --command': if not empty, only show docker command and exit
+GETROOT="su --preserve-environment -c"                                 # option '-s, --sudo' will add 'sudo' to command to get root privileges.
+SHARECLIPBOARD="no"                             # option '--clipboard' can allow clipboard sharing for Xpra and Xvnc
+SHOWLOG="no"                                    # option '-l, --log': if 'yes', output of docker will be shown after exit of X server 
+ALLOWROOT="no"                                  # option '-r,--root': allow root to run x11docker
+FULLSCREEN="no"                                 # option '--fullscreen': use fullscreen mode (Xephyr and Xvnc only)
+ADDHOSTUSER="no"                                # option '-u, --user': add user to container with same UID and GID as host user
+VERBOSE="no"
+
+
+error() {
+    ## show error messages on stderr and exit
+    #
+    echo "x11docker ERROR: $*" >&2
+    echo "Type 'x11docker --help' for usage information" >&2
+    echo "For debugging see logfiles in $CACHEFOLDER" >&2
+    exit 1
+}
+
+
+warning() {
+    ## show warning message
+    #
+    echo "x11docker WARNING: $*"
+}
+
+
+verbose() {
+    ## show verbose messages
+    #
+    echo "x11docker: $*"
+    echo ""
+}
+
+
+xdparser() {
+    ## parse args for x11docker (not those for docker)
+    #
+    SHORT="hw:dxXaynsrcufv"
+    LONG="help,wm:,desktop,command,x,X,xpra,Xpra,xephyr,Xephyr,xvnc,Xvnc,sudo,root,clipboard,user,fullscreen,verbose"
+    PARSED=`getopt --options $SHORT --longoptions $LONG --name "$0" -- "$@"`
+    eval set -- "$PARSED"
+    if [[ $? != 0 ]]; then error $? ; fi
+   
+    while true; do
+        case $1 in
+            -h|--help) usage && exit 0                      # show help/usage and exit
+            ;;
+            -w|--wm) WINDOWMANAGER=$2 && shift              # custom window manager
+            ;;
+            -d|--desktop) DESKTOPCONTAINER="yes"            # desktop environment or window manager in image; don't run own window manager
+            ;;
+            --command) ONLYSHOWCOMMAND="yes"                # only show created docker command and exit
+            ;;
+            -s|--sudo) GETROOT="sudo $GETROOT"              # use sudo to run 'su -c docker ...'
+            ;;
+            -x|-X|--x|--X) AUTOCHOOSESERVER="yes"           # use xpra or Xephir instead of switchung to new tty with X (depending on option --desktop) 
+                                                            # autodect best way to run
+            ;;
+            -a|--xpra|--Xpra) XSERVER="XPRA"                # use Xpra instead of X
+            ;;
+            -y|--xephyr|--Xephyr) XSERVER="XEPHYR"          # use Xephyr instead of X
+            ;;
+            -n|--xvnc|--Xvnc) XSERVER="XVNC"                # use Xvnc instead of X
+            ;;
+            -c|--clipboard) SHARECLIPBOARD="yes"            # share host clipboard with dockered applications (Xpra only)
+            ;;
+            -f|--fullscreen) FULLSCREEN="yes"               # fullscreen mode for Xephyr and Xvnc
+            ;;
+            -r|--root) ALLOWROOT="yes"                      # allow x11docker to be run as root
+            ;;
+            -u|--user) ADDHOSTUSER="yes"                    # add option '--user UID:GID' with UID and GID from host user to 'docker run'
+            ;;
+            -v|--verbose) VERBOSE="verbose"                 # be verbose
+            ;;
+            --) break
+            ;;
+            *) error "error while parsing $1 : $@"
+            ;;
+        esac  
+        shift
+    done
+}
+
+
+## split arguments at 'run' or 'start' or 'exec' in those for x11docker and those for docker
+#
+for ARGUMENT in $*
+    do
+        case $ARGUMENT in
+            run) DOCKERMODE="run" && ARGUMENT="" ;;
+            start) DOCKERMODE="start" && ARGUMENT="" ;;
+            exec) DOCKERMODE="exec" && ARGUMENT="" ;;
+        esac
+        case $DOCKERMODE in
+            run|start|exec) 
+                DOCKERARGS="$DOCKERARGS $ARGUMENT" 
+                if [ "$(echo "$ARGUMENT" | cut -c 1)" != "-" ] ; then WINDOWTITLE="$WINDOWTITLE $ARGUMENT" ; fi  # create window title for Xephyr and Xvnc
+            ;;
+                onlyX) X11DOCKERARGS="$X11DOCKERARGS $ARGUMENT" 
+            ;;
+        esac
+    done
+
+
+## parse x11dockerrc, if exists
+#
+if [ -e "$X11DOCKERRC" ] ; then xdparser $(tail -1 $X11DOCKERRC) ;fi
+
+
+## parse command line options for x11docker (not those for docker)
+#
+xdparser $X11DOCKERARGS
+
+
+## check if script is run as root, if yes, show error & exit
+#
+if [ "$ALLOWROOT" = "no" ] ; then   # option '-r,--root': if "yes", allow root to run x11docker
+    if [ "0" = "$(id -u)" ] ; then
+        error "x11docker should not be run as root. Every child process of 
+  the new X server would get root privileges, too. To run docker, you will be
+  prompted for your root password only for this one command.
+  On systems without a root password, like Ubuntu, choose option '-s, --sudo'
+  If you want to allow root to run x11docker, use option '-r, --root'"
+    fi
+fi
+
+
+## if user is member of group docker, then avoid password prompt
+#
+if [ -n "`id | grep docker`" ] ; then GETROOT="" ; fi
+
+
+## option '-x, --X0': show on display :0 instead of switching to another tty
+#  check if either xpra or Xephir should be used for this job
+#  automated decision wehther Xpra or Xephyr should be used
+#  (Xvnc could be interesting, too)
+#
+if [ "$AUTOCHOOSESERVER" = "yes" ] ; then
+    if [ "$DESKTOPCONTAINER" = "no" ] ; then
+        XSERVER="XPRA"      # use xpra for single applications
+    else
+        XSERVER="XEPHYR"    # use Xephyr for desktop environments
+        WINDOWMANAGER=""
+    fi
+fi
+
+
+## check if choosed X server is installed
+#
+if [ "$XSERVER" = "XPRA" ] ; then                                 # check Xpra
+    command -v "/usr/bin/xpra" >/dev/null 2>&1 || { warning "could not find executable '/usr/bin/xpra'. 
+  Try 'apt-get install xpra' to install Xpra.
+  Fallback: x11docker will try to use Xephyr"
+    XSERVER="XEPHYR"
+    }
+fi
+if [ "$XSERVER" = "XEPHYR" ] ; then                               # check Xephyr
+    command -v "/usr/bin/Xephyr" >/dev/null 2>&1 || { warning "could not find executable '/usr/bin/Xephyr'. 
+  Try 'apt-get install xephyr' to install Xephyr.
+  Fallback: x11docker will try to use Xvnc"
+    XSERVER="XVNC"
+    }
+fi
+if [ "$XSERVER" = "XPRA" ] || [ "$XSERVER" = "XEPHYR" ] ; then    # check Xvfb
+    command -v "/usr/bin/Xvfb" >/dev/null 2>&1 || { warning "could not find executable '/usr/bin/Xvfb'. 
+  Try 'apt-get install xvfb' to install Xvfb. Need Xvfb to run Xpra or Xephyr.
+  Fallback: x11docker will try to use Xvnc"
+    XSERVER="XVNC"
+    }
+fi
+if [ "$XSERVER" = "XVNC" ] ; then                                # check Xvnc and xvncviewer
+    command -v "/usr/bin/Xvnc" >/dev/null 2>&1 || { warning "could not find executable '/usr/bin/Xvnc'. 
+  Try 'apt-get install vnc4server' to install Xvnc.
+  Fallback: x11docker will use X server '/usr/bin/X'"
+    XSERVER="X"
+    }
+                                                                 # check xvncviewer 
+    command -v "/usr/bin/xvncviewer" >/dev/null 2>&1 || { warning "could not find executable '/usr/bin/xvncviewer'. 
+  Try 'apt-get install xvnc4viewer' to install xvncviewer.
+  Fallback: x11docker will use X server '/usr/bin/X'"
+    XSERVER="X"
+    }
+    EXPECTINSTALLED="yes"                                        # check expect
+    command -v "/usr/bin/expect" >/dev/null 2>&1 || { warning "could not find executable '/usr/bin/expect'. 
+  Try 'apt-get install expect' to install expect.
+  expect is used to automatically create a VNC password for your Xvnc session.
+  If not installed, you have to type in a VNC password every time you run
+  x11docker with Xvnc."
+    EXPECTINSTALLED="no"
+    }
+fi
+if [ "$XSERVER" = "X" ] ; then                                    # check X
+    command -v "/usr/bin/X" >/dev/null 2>&1 || { error "Could not find executable '/usr/bin/X'. 
+  Try 'apt-get install xorg' to install X server."
+    }
+    # if x11docker is running from within an X server, check if user is allowed to run a new X server
+    if [ -z "`cat /etc/X11/Xwrapper.config | grep "allowed_users=anybody"`" ] && [ -n "$STARTDISPLAY" ] ; then
+            error "You are not allowed to start a new X server.
+  To start a new X server from within an already running X session, you need
+  to run 'dpkg-reconfigure x11-common' and choose option 'anybody'.
+  Otherwise, you can switch to tty1 with <STRG><ALT><F1> and start x11docker
+  there. 
+  (As a default configuration of X, only root or console users can start a 
+  new X server)
+  Otherwise, you can use Xpra, Xephyr or Xvnc."
+    fi
+fi
+
+case $VERBOSE in
+    verbose) verbose "As X server will be used: $XSERVER" 
+    ;;
+esac
+
+
+## check for already running X server, if $XSERVER is not "X"
+# (check could be better, not only for standard :0)
+#
+if [ "$XSERVER" != "X" ] && [ -z "$STARTDISPLAY" ] ; then
+    if [ -S "/tmp/.X11-unix/X0" ] ; then
+        STARTDISPLAY=":0"
+        echo "NOTE: $XSERVER will show its content on display $STARTDISPLAY"
+    else
+        error "No X server found on display :0. You cannot run $XSERVER 
+  without an already running X server. Exiting."
+    fi
+fi
+
+
+## Xpra uses Window manager from display :0, so no other one should be used
+#
+if [ "$XSERVER" = "XPRA" ] ; then
+    WINDOWMANAGER=""
+fi
+
+
+## check if window manager is executable; if not, show error & exit
+# if option '-d, --desktop', then $WINDOWMANAGER is empty and won't be checked
+#
+if [ -n "$WINDOWMANAGER" ] ;then
+    command -v $WINDOWMANAGER >/dev/null 2>&1 || { error "could not find executable window manager '$WINDOWMANAGER'. 
+  You can either install package 'fluxbox' with 'apt-get install fluxbox'
+  or you can choose another window manager with option '-w, --wm'
+  Type 'x11docker --help' to get a list of recommended window managers."; }
+fi
+
+
+## create main cache folder and config folder, if not already present
+#
+mkdir -p $CACHEFOLDER
+mkdir -p $CONFIGFOLDER
+
+
+## Look for next free display and change some display specific variables
+#
+case $XSERVER in                 # set start value for searching
+    X) NEWDISPLAY="0" ;;         # low number for X displays
+    XPRA) NEWDISPLAY="100" ;;    # high numbers fpr Xpra displays
+    XEPHYR) NEWDISPLAY="200" ;;  # higher number for Xephyr displays
+    XVNC) NEWDISPLAY="300" ;;    # highest numbers for Xvnc displays
+esac
+#
+while [ -e "/tmp/.X11-unix/X$NEWDISPLAY" ]; do             # search unused X socket
+    NEWDISPLAY=$(($NEWDISPLAY + 1))
+done
+#
+CACHEFOLDER="$CACHEFOLDER/X$NEWDISPLAY"                    # set cache subfolder
+# 
+XINITRC="$CACHEFOLDER/$XINITRC"
+XINITLOGFILE="$CACHEFOLDER/$XINITLOGFILE"
+XTERMRC="$CACHEFOLDER/$XTERMRC"
+XTERMLOGFILE="$CACHEFOLDER/$XTERMLOGFILE"
+DOCKERLOGFILE="$CACHEFOLDER/$DOCKERLOGFILE"
+DOCKERPIDFILE="$CACHEFOLDER/$DOCKERPIDFILE"
+XSERVERCOOKIE="$CACHEFOLDER/$XSERVERCOOKIE"
+XCLIENTCOOKIE="$CACHEFOLDER/$XCLIENTCOOKIE"
+XPRASERVERLOGFILE="$CACHEFOLDER/$XPRASERVERLOGFILE"
+XCOMMANDFILE="$CACHEFOLDER/$XCOMMANDFILE"
+VNCPASSWORDFILE="$CACHEFOLDER/$VNCPASSWORDFILE"
+VNCEXPECTRC="$CACHEFOLDER/$VNCEXPECTRC"
+VNCPORT="$(expr 5900 + $NEWDISPLAY)"
+#CIDFILE="$CACHEFOLDER/$CIDFILE"
+#NEWXSOCKET="/tmp/.X11-unix/X$NEWDISPLAY"
+#NEWXLOCK="/tmp/.X$NEWDISPLAY-lock"
+#
+NEWDISPLAY=":$NEWDISPLAY"                                  # finally: add ':' to $NEWDISPLAY
+
+
+case $VERBOSE in
+    verbose) verbose "found free display $NEWDISPLAY" 
+    ;;
+esac
+
+
+## create and clean cache subfolder
+#
+mkdir -p $CACHEFOLDER
+rm -f -R $CACHEFOLDER/*
+# here should be a check for "zombie" folders that cannot be deleted
+
+
+## Get inet Adress of docker0 interface (see 'ifconfig', too) (works, but could be scripted better)
+#  and set $TCPDISPLAY (display number for docker image apps over tcp)
+#
+DOCKERIP=$(ip -4 addr show docker0 | grep inet | cut -d/ -f1 | cut -d" " -f6)
+TCPDISPLAY=$DOCKERIP$NEWDISPLAY
+case $VERBOSE in
+    verbose) verbose "IP of docker interface is $DOCKERIP. As a display connection for the container $TCPDISPLAY will be used." 
+    ;;
+esac
+
+
+## Create command to run docker ##################
+#
+case $DOCKERMODE in
+    run)
+        COMMAND='docker run'
+        COMMAND="$COMMAND -e DISPLAY=$TCPDISPLAY "                                 # display over tcp 
+        COMMAND="$COMMAND -v $XCLIENTCOOKIE:/Xcookie:ro -e XAUTHORITY=/Xcookie"    # share new X authentication cookie file
+        #COMMAND="$COMMAND --cidfile=$CIDFILE"                                      # write container id in file $CIDFILE
+        if [ "$ADDHOSTUSER" = "yes" ] ; then                                       # option '-u, --user':
+            COMMAND="$COMMAND --user `id -u`:`id -g`"                              # create user with same UID/GID as on host
+        fi
+    ;;
+    start)
+        COMMAND="docker start"
+        # here should be a way to change the environment variable DISPLAY that can be seen with 'docker inspect'
+    ;;
+    exec|onlyX)
+        COMMAND="# dontrundocker"
+    ;;
+esac
+COMMAND="$COMMAND $DOCKERARGS"                                                      # add custom docker commands
+case $VERBOSE in
+    verbose) verbose "Created docker command:
+$COMMAND"
+    ;;
+esac
+
+## option '-c, --command': only show created docker command and exit
+#
+if [ "$ONLYSHOWCOMMAND" = "yes" ] ; then echo $COMMAND && exit 0 ; fi
+
+
+## create command to start X server #############
+#
+case $XSERVER in
+    X)
+        XCOMMAND="/usr/bin/X $NEWDISPLAY $XARGS -auth $XSERVERCOOKIE"
+    ;;
+    #
+    XPRA)
+        XCOMMAND="/usr/bin/Xvfb $NEWDISPLAY +extension Composite -screen 0 $XAXIS""x""$YAXIS""x24+32 -auth $XSERVERCOOKIE"
+    ;;
+    #
+    XEPHYR)
+        case $FULLSCREEN in    # option '--fullscreen'
+        yes)
+            XEPHYRARGS="$XEPHYRARGS -fullscreen"
+        ;;
+        no)
+            XEPHYRARGS="$XEPHYRARGS -screen $(($XAXIS-50))"x"$(($YAXIS-90)) -resizeable"
+        ;;
+        esac
+        XEPHYRARGS="$XEPHYRARGS -title $(echo $WINDOWTITLE | cut -d ' ' -f 1)"  # set window title (-title doesn't accept spaces, so use first word only)
+        XCOMMAND="/usr/bin/Xephyr $NEWDISPLAY $XEPHYRARGS -auth $XSERVERCOOKIE"
+    ;;
+    #
+    XVNC)
+        # at first, create VNC password file
+        case $EXPECTINSTALLED in     # either automated with expect
+        yes)
+            VNCPASSWORD=`mcookie | cut -c 1-8`
+            # (it would be better not to use a file, instead the created script should be given directly to 'expect')
+            echo '
+log_user 0
+spawn "vncpasswd" "'$VNCPASSWORDFILE'"
+expect "Password:" {send "'$VNCPASSWORD'\r"}
+expect "Verify:" {send "'$VNCPASSWORD'\r"}
+expect eof
+exit
+'           > $VNCEXPECTRC
+            expect $VNCEXPECTRC
+            rm $VNCEXPECTRC
+        ;;
+        no)                          # or manually typed in by user
+            echo ""
+            echo "Please choose a password for your VNC connection. (From 6 to 8 chars):"
+            vncpasswd $VNCPASSWORDFILE
+        ;;
+        esac
+        #
+# for unknown reasons, settings for "no" will cause ugly graphics.
+# now clipboard yes/no decision only by running vncconfig or not.
+#        case $SHARECLIPBOARD in           # check option '--clipboard'
+#        yes)
+#            XVNCARGS="$XVNCARGS -AcceptCutText=1 -SendCutText=1"
+#        ;;
+#        no)
+#            XVNCARGS="$XVNCARGS -AcceptCutText=0 -SendCutText=0"
+#        ;;
+#        esac
+        #
+        case $FULLSCREEN in               # check option '--fullscreen'
+        yes)
+            XVNCARGS="$XVNCARGS -geometry $XAXIS""x""$YAXIS"
+        ;;
+        no)
+            XVNCARGS="$XVNCARGS -geometry $(($XAXIS-50))"x"$(($YAXIS-90))"
+        ;;
+        esac
+        XCOMMAND="/usr/bin/Xvnc $NEWDISPLAY -Passwordfile $VNCPASSWORDFILE $XVNCARGS -auth $XSERVERCOOKIE"
+    ;;
+esac
+case $VERBOSE in
+    verbose) verbose "Created X server command:
+$XCOMMAND" 
+    ;;
+esac
+
+
+## Create new xinitrc ###############################################################################################
+#
+echo "#! /bin/bash"                                                                                       > $XINITRC
+#
+# set keyboard layout to same as on standart display :0
+# (has to be done before creating cookies)
+if [ -n "$STARTDISPLAY" ] ; then 
+    echo "setxkbmap -display $STARTDISPLAY -print | xkbcomp - $NEWDISPLAY"                                >> $XINITRC
+fi
+#
+case $XSERVER in
+XVNC)
+    # set X variables to :0
+    echo "export DISPLAY=$STARTDISPLAY"                                                                   >> $XINITRC
+    echo "export XAUTHORITY=$STARTXAUTHORITY"                                                             >> $XINITRC
+    if [ "$FULLSCREEN" = "yes" ] ; then
+        XVNCVIEWERARGS="$XVNCVIEWERARGS -FullScreen=1"
+    fi
+    echo "xvncviewer localhost:$VNCPORT -PasswordFile=$VNCPASSWORDFILE -name='$WINDOWTITLE on $NEWDISPLAY' $XVNCVIEWERARGS &"  >> $XINITRC
+    ;;
+esac
+#
+# set X variables to new display
+echo "export DISPLAY=$NEWDISPLAY"                                                                         >> $XINITRC
+echo "export XAUTHORITY=$XCLIENTCOOKIE"                                                                   >> $XINITRC
+#
+# create grey background
+#echo "xsetroot -solid darkgrey"                                                                           >> $XINITRC
+#
+# create new XAUTHORITY cookie file 
+echo 'echo "" > '$XCLIENTCOOKIE                                                                           >> $XINITRC
+echo "xauth generate $NEWDISPLAY . untrusted"                                                             >> $XINITRC
+echo "xauth add $TCPDISPLAY . "'`mcookie`'                                                                >> $XINITRC
+echo "cp $XCLIENTCOOKIE $XSERVERCOOKIE"                                                                   >> $XINITRC
+#
+case $XSERVER in
+    X)
+    ;;
+    XPRA)
+        case $SHARECLIPBOARD in         # option '--clipboard'
+        yes)       # option '--clipboard': add clipboard option to Xpra arguments
+            XPRAARGS="$XPRAARGS --clipboard"
+        ;;
+        no)
+            XPRAARGS="$XPRAARGS --no-clipboard"
+        ;;
+        esac
+        # start Xpra server on display created by Xvfb
+        echo "xpra start $NEWDISPLAY --use-display --log-file=$XPRASERVERLOGFILE $XPRAARGS"               >> $XINITRC
+        # wait for Xpra server to be ready
+        echo 'ZEIT=`date +%s`'                                                                            >> $XINITRC
+        echo 'while [ -z $(cat '$XPRASERVERLOGFILE' | grep "xpra is ready") ] ; do'                       >> $XINITRC
+        echo '    echo "waiting for xpra server to be ready..." && sleep 0.2 '                            >> $XINITRC
+        echo '    COUNT=$(echo "`date +%s` - $ZEIT" | bc)'                                                >> $XINITRC
+        echo '    if [ 5 -lt $COUNT ] ; then'                                                             >> $XINITRC
+        echo '        echo "x11docker: Timeout error: Xpra server not ready after 5 seconds. Exiting."'   >> $XINITRC
+        echo '        exit 1'                                                                             >> $XINITRC
+        echo '    fi'                                                                                     >> $XINITRC
+        echo 'done'                                                                                       >> $XINITRC
+        # check for X error
+        echo 'if [ -n "$(cat '$XPRASERVERLOGFILE" | grep 'X Window System error')"'" ] ; then'            >> $XINITRC
+        echo '    echo "x11docker: Error: received an X Window System error. See '$XPRASERVERLOGFILE' for details. Exiting"' >> $XINITRC
+        echo '    exit 1'                                                                                 >> $XINITRC
+        echo 'fi'                                                                                         >> $XINITRC
+    ;;
+    XEPHYR)
+    ;;
+    XVNC)
+        # option '--clipboard': share clipboard with :0
+        if [ "$SHARECLIPBOARD" = "yes" ] ; then echo 'vncconfig -nowin &'                                 >> $XINITRC  ; fi
+    ;;
+esac
+#
+case $DOCKERMODE in
+    run|start)
+    echo "xterm -l -lf $XTERMLOGFILE -title x11docker -e '/bin/bash $XTERMRC'"                            >> $XINITRC
+        case $DESKTOPCONTAINER in
+        yes) # run without window manager (images contains desktop environment)
+            # wait for docker to terminate
+            echo 'DOCKERPID=`cat '$DOCKERPIDFILE'`'                                                       >> $XINITRC
+            echo 'while [ -n "$(ps -A | grep $DOCKERPID | grep docker)" ] ; do'                           >> $XINITRC
+            echo '    sleep 0.5'                                                                          >> $XINITRC
+            echo 'done'                                                                                   >> $XINITRC
+        ;;
+        no)  # run inside of a window manager (for single applications) 
+            echo "$WINDOWMANAGER"                                                                         >> $XINITRC
+        ;;
+        esac
+    ;;
+    exec)
+        echo "$DOCKERARGS &"                                                                              >> $XINITRC
+        echo "$WINDOWMANAGER"                                                                             >> $XINITRC
+    ;;
+    onlyX)
+        # If docker is not started, only run window manager on new X server
+        echo "$WINDOWMANAGER"                                                                             >> $XINITRC
+    ;;
+esac
+#
+# set global Environment variables back to normal
+echo "export XAUTHORITY=$STARTXAUTHORITY"                                                                 >> $XINITRC
+echo "export DISPLAY=$STARTDISPLAY"                                                                       >> $XINITRC
+#
+case $XSERVER in
+    X)
+    ;;
+    XPRA)
+        echo "xpra attach $NEWDISPLAY"                                                                    >> $XINITRC
+    ;;
+    XEPHYR)
+    ;;
+    XVNC)
+    ;;
+esac
+
+
+## Create xtermrc ####################################################################################################
+#
+echo "#! /bin/bash"                                                                       > $XTERMRC
+if [ "$DESKTOPCONTAINER" = "yes" ] ; then
+    echo "echo 'Please move mouse cursor into terminal area to get keyboard focus.'"      >> $XTERMRC
+fi
+echo "echo 'x11docker will start docker on display $NEWDISPLAY with command:'"            >> $XTERMRC
+echo "echo $COMMAND"                                                                      >> $XTERMRC
+echo "echo 'Please type in your password:'"                                               >> $XTERMRC 
+echo "$GETROOT 'nohup $COMMAND > $DOCKERLOGFILE 2>&1 & echo "'$!'" > $DOCKERPIDFILE'"     >> $XTERMRC
+
+
+## Finally: run docker ###############################################################################################
+#
+case $VERBOSE in
+    verbose) 
+        verbose "Created xinitrc:
+$(cat $XINITRC)"
+        verbose "Will run xinit with command
+xinit $XINITRC -- $XCOMMAND > $XINITLOGFILE 2>&1"
+        verbose "Logfiles are:
+$XINITLOGFILE
+$XPRASERVERLOGFILE
+$XTERMLOGFILE
+$DOCKERLOGFILE"
+    ;;
+esac
+xinit $XINITRC -- $XCOMMAND > $XINITLOGFILE 2>&1
+
+
+exit 0
+
+
+#---------------------------------------------------------------------------
+# Notes only:
+#
+# xspice
+# xtrace
+# xvesa
+# x11vnc
+# wininfo
+# x2vnc Dieses Programm vereinigt die Fähigkeiten von x2x und vncviewer. Es
+ erlaubt einer Maschine mit einem X-Display und einer Maschine mit einem
+auf dem Hauptschirm laufenden VNC-Server so zu agieren, als ob die zwei
+Displays mit einer Maschine verbunden wären. Wenn Sie Ihren Mauszeiger
+über den (von Ihnen vorgegebenen) Rand des einen Bildschirms bewegen,
+erscheint er auf dem anderen Bildschirm.
+#
+# tightvncserver
+# x2x
+# xpra --exit-with-client
+#
+# docker run --user
