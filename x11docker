@@ -1,6 +1,9 @@
 #!/bin/bash
-# x11docker V 1.0  16.10.2015
-#
+
+# 25.10.2015  V 1.0.1 options --log and --LOG - show log in terminal on display :0 or new display
+# 24.10.2015          minor bug fix: parsing: replaced sed with cut ( "/" in $IMAGECOMMAND caused sed bug)
+# 20.10.2015          improved exit handling
+# 16.10.2015  V 1.0
 usage() {    # --help: show usage information
     echo "
 x11docker: Create a new X server & run GUI applications and desktop 
@@ -44,7 +47,8 @@ Options:
                        (needs packages 'xpra' and 'xvfb' to be installed)
  -y, --xephyr          use Xephyr to show desktops in a window on display :0
                        (needs package 'xephyr' to be installed)
- -c, --clipboard       share clipboard between X servers (Xpra only)
+ -c, --clipboard       share clipboard between X servers (Xpra only) (clipboard
+                       sharing to Xephyr and X11: text only) 
  -f, --fullscreen      run Xephyr in fullscreen mode
  -z, --size XxY        set Xephyr screen size (f.e. 800x600 )
  -r, --resizeable      make Xephyr window resizeable (Note: some window
@@ -68,11 +72,13 @@ Advanced options:
  --cache               don't delete cache files on exit (including logs)
  -v, --verbose         be verbose
  -V, --VERBOSE         be very verbose
+ -l, --log             show log in an xterm window on display :0
+ -L, --LOG             show log in an xterm window on new display
 
 Dependencies: depending on choosed options, x11docker needs some packages
          to be installed. It will check for them on startup and show messages 
          if some are missing. List of possible needed packages:
-         docker.io xorg wmctrl xpra xephyr xvfb
+         docker.io xorg wmctrl xpra xephyr xvfb xsel
 
 Window manager: x11docker works fine with most common window managers.
          x11docker tries to detect your current running window manager to 
@@ -152,6 +158,7 @@ WINDOWMANAGER=""                                # option '-w, --wm': window mana
 DESKTOPIMAGE="no"                               # option '-d, --desktop': if "yes", run desktop environment instead of single application
 AUTOCHOOSESERVER="no"                           # option '-x': automated choosing server
 SHARECLIPBOARD="no"                             # option '-c, --clipboard' can allow clipboard sharing for Xpra
+SHARECLIPBOARDSCRIPT="clipboard.bash"           #    "              "      script used for text sharing to Xephyr/X11 
 #
 ADDHOSTUSER="no"                                # option '-u, --hostuser': try to add user to container with same UID and GID as host user
 ADDSUDOUSER="no"                                # option '-o, --sudouser': same as '-u, --hostuser', but created user gains root access via sudo without password
@@ -166,6 +173,8 @@ ONLYSHOWCOMMAND="no"                            # option '-c, --command': if not
 GETROOT="su -c"                                 # option '-s, --sudo' will add 'sudo' to command to get root privileges.
 SHOWCIDFILENAME="no"                            # option '--cid': if 'yes', show filename of file containing container ID 
 VERBOSE=""                                      # options '-v, --verbose' and '-V,--VERBOSE' be verbose='verbose/'VERBOSE'=be more verbose, ''=be quiet
+SHOWLOG="no"                                    # option '-l, --log': show log in an xterm window on display :0
+SHOWLOGNEWDISPLAY="no"                          # similar to '--log', but on new display
 PRESERVECACHEFILES="no"                         # option '--cache': preserve cache files instead of removing them on exit
 PRESERVECONTAINER="no"                          # option '-p, --ps': if yes, preserve container instead of removing it with 'docker run --rm'
 
@@ -232,7 +241,11 @@ killbgpids () { # kill background processes listet in $BGPIDFILE
     LINE=""  # line of $BGPIDFILE
     PID=""   # PID to look for
     NAME=""  # name matching to PID
-    touch $BGPIDFILE
+    DOCKERPID=""
+    ZEIT=""
+    COUNT=""
+    #
+#    touch $BGPIDFILE  # make sure it exists to avoid error messages
     while read LINE 
     do 
         PID=$(echo $LINE | awk '{print $1}')
@@ -241,8 +254,34 @@ killbgpids () { # kill background processes listet in $BGPIDFILE
             warning "Found remaining background process.
   Will send signal TERM to process $LINE"
             kill $PID
+            if [ "$NAME" = "docker" ] ; then DOCKERPID=$PID ; fi
         fi
     done < $BGPIDFILE
+    #
+    # if x11docker was interrupted, maybe docker is still running the
+    # container. This can cause some issues; especially, if the cache
+    # is deleted, but not the container, docker will recreate mounted
+    # files 'Xcookie' and 'createuser' as folders belonging to root.
+    #
+    if [ -n "$DOCKERPID" ] ; then
+        warning "Found remaining docker process. Most probably the
+  X session was not closed in a clean way. Could not send TERM signal because 
+  docker runs as root. Will wait up to 5 seconds for docker to finish."
+        ZEIT=`date +%s`
+        while [ -n "$(ps -A | grep $DOCKERPID | grep 'docker')" ] ; do
+            echo "waiting for docker to terminate ..."
+            sleep 0.2
+            COUNT=$(echo "`date +%s` - $ZEIT" | bc)
+            if [ 5 -lt $COUNT ] ; then break ; fi
+        done
+        if [ -n "$(ps -A | grep $DOCKERPID | grep 'docker')" ] ; then
+            warning "docker didn't terminate as it should. Will not clean
+  cache to avoid file permission problems. You should stop docker and remove
+  the new container with command:
+docker stop `cat $CIDFILE` && docker rm `cat $CIDFILE`"
+            PRESERVECACHE="yes"
+        fi
+    fi
 }
 finish() { # trap routine, clean up background processes and cache
     #
@@ -257,8 +296,8 @@ finish() { # trap routine, clean up background processes and cache
 }
 xdparser() { # parse args for x11docker
     #
-    SHORT="hw:dxXayrz:scuomfvVep"
-    LONG="help,wm:,desktop,command,x,X,xpra,Xpra,xephyr,Xephyr,sudo,root,clipboard,hostuser,sudouser,home,fullscreen,verbose,VERBOSE,exe,cid,cache,ps,resizeable,size:,starter"
+    SHORT="hw:dxXayrz:scuomfvVeplL"
+    LONG="help,wm:,desktop,command,x,X,xpra,Xpra,xephyr,Xephyr,sudo,root,clipboard,hostuser,sudouser,home,fullscreen,verbose,VERBOSE,exe,cid,cache,ps,resizeable,size:,starter,log,LOG"
     PARSED=`getopt --options $SHORT --longoptions $LONG --name "$0" -- "$@"`
     eval set -- "$PARSED"
     if [[ $? != 0 ]]; then error $? ; fi
@@ -312,6 +351,10 @@ xdparser() { # parse args for x11docker
             ;;
             -V|--VERBOSE) VERBOSE="VERBOSE"                 # be very verbose
             ;;
+            -l|--log) SHOWLOG="yes"                         # Show logs in an xterm window on display :0
+            ;;
+            -L|--LOG) SHOWLOGNEWDISPLAY="yes"               # Show logs in an xterm window on new display
+            ;;
             --) shift                                       # arguments to submit to docker (or host executable)
                 if [ "$X11DOCKERMODE" != "exe" ] ; then X11DOCKERMODE="run" ; fi             # will run image, if not already changed to '--exe'
                 while [ -n "$1" ] ; do                                                       # get all options for docker after '--'
@@ -325,7 +368,7 @@ xdparser() { # parse args for x11docker
                     shift
                 done
                 if [ -n "$IMAGECOMMAND" ] ; then
-                    IMAGECOMMAND=`echo $IMAGECOMMAND | sed "s/$IMAGENAME//"`                 # remove image name from image command
+                    IMAGECOMMAND=`echo $IMAGECOMMAND | cut -d " " -f 2- `                    # remove image name from image command
                 fi
                 if [ -z "$(eval echo $DOCKERARGS)" ] ; then X11DOCKERMODE="onlyX" ; fi       # if arguments are empty, then only run X server with window manager
             ;;
@@ -408,6 +451,7 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
 #
 trap finish EXIT # SIGINT SIGTERM SIGHUP KILL QUIT
 
+
 ## parse x11dockerrc, if exists
 #
 if [ -e "$X11DOCKERRC" ] ; then xdparser $(tail -1 $X11DOCKERRC) ;fi
@@ -416,6 +460,16 @@ if [ -e "$X11DOCKERRC" ] ; then xdparser $(tail -1 $X11DOCKERRC) ;fi
 ## parse command line options for x11docker
 #
 xdparser $X11DOCKERARGS
+
+
+## check if docker is installed
+#
+if [ "$X11DOCKERMODE" = "run" ] ; then
+    command -v "docker" >/dev/null 2>&1 || { error "could not find docker.
+  You need it to run docker images. Please install docker with command:
+  apt-get install docker.io" 
+  }
+fi
 
 
 ## check if script is run as root, if yes, show error & exit
@@ -436,6 +490,18 @@ fi
 ## if user is member of group docker, then avoid password prompt
 #
 if [ -n "`id | grep docker`" ] ; then GETROOT="" ; fi
+
+
+
+## if desktop starter should be created, check if xdg-user-dir is installed
+#
+if [ "$CREATEDESKTOPSTARTER" = "yes" ] ; then
+    command -v "xdg-user-dir" >/dev/null 2>&1 || { error "could not find xdg-user-dir.
+  x11docker needs it to create a desktop starter. Please install xdg-utils with
+  command:
+  apt-get install xdg-utils"
+    }
+fi
 
 }
 { ######################## part: choose and check X server ##########################################
@@ -572,7 +638,7 @@ case $XSERVER in                 # set initial value for searching
     XEPHYR) NEWDISPLAY="200" ;;  # higher number for Xephyr displays
 esac
 #
-while [ -e "/tmp/.X11-unix/X$NEWDISPLAY" ]; do             # search unused X socket
+while [ -e "/tmp/.X11-unix/X$NEWDISPLAY" ]  || [ -e "$CACHEFOLDER/X$NEWDISPLAY" ] ; do   # search unused X socket, overhop already used cache numbers
     NEWDISPLAY=$(($NEWDISPLAY + 1))
 done
 #
@@ -594,6 +660,7 @@ VNCPORT="$(expr 5900 + $NEWDISPLAY)"
 CIDFILE="$CACHEFOLDER/$CIDFILE"
 BGPIDFILE="$CACHEFOLDER/$BGPIDFILE"
 CREATEUSERSCRIPT="$CACHEFOLDER/$CREATEUSERSCRIPT"
+SHARECLIPBOARDSCRIPT="$CACHEFOLDER/$SHARECLIPBOARDSCRIPT"
 #NEWXSOCKET="/tmp/.X11-unix/X$NEWDISPLAY"
 #NEWXLOCK="/tmp/.X$NEWDISPLAY-lock"
 #
@@ -731,6 +798,63 @@ case $XSERVER in
         ;;
 esac
 }
+{ ######################## part: option '-c, --clipboard' create shareclipboard.bash ################
+# use xsel to share text clipboard content between X servers.
+# xpra has its own clipboard management including image transfer
+if [ "$SHARECLIPBOARD" = "yes" ] && [ ! "$XSERVER" = "XPRA" ] ; then
+    if [ -z "$(command -v 'xsel')" ] ; then
+        warning "Cannot share clipboard. Need package 'xsel' to be
+  installed. Try installing xsel with command: 'apt-get install xsel'"
+        SHARECLIPBOARD="no"
+    else 
+    echo '#! /bin/bash
+# share clipboard between two X servers
+echo "x11docker: starting clipboard service"
+
+while [ 1 ] ; do
+    # read content of clipboard of first X server
+    XAUTHORITY='$STARTXAUTHORITY'
+    D1_CLIP1=$(xsel -p -o --display '$STARTDISPLAY')
+    D1_CLIP2=$(xsel -s -o --display '$STARTDISPLAY')
+    D1_CLIP3=$(xsel -b -o --display '$STARTDISPLAY')
+
+    # check if clipboard of first X server has changed; if yes, set new content to second X server
+    if [ ! "$CLIP1" = "$D1_CLIP1" ]  ||  [ ! "$CLIP2" = "$D1_CLIP2" ]  ||  [ ! "$CLIP3" = "$D1_CLIP3" ] ; then
+        XAUTHORITY='$XCLIENTCOOKIE'
+        CLIP1=$D1_CLIP1
+        CLIP2=$D1_CLIP2
+        CLIP3=$D1_CLIP3
+        echo $CLIP1 | xsel -p -i --display '$NEWDISPLAY'
+        echo $CLIP2 | xsel -s -i --display '$NEWDISPLAY'
+        echo $CLIP3 | xsel -b -i --display '$NEWDISPLAY'
+    fi
+
+    # read content of clipboard of second X server
+    XAUTHORITY='$XCLIENTCOOKIE'
+    D2_CLIP1=$(xsel -p -o --display '$NEWDISPLAY')
+    D2_CLIP2=$(xsel -s -o --display '$NEWDISPLAY')
+    D2_CLIP3=$(xsel -b -o --display '$NEWDISPLAY')
+
+    # check if clipboard of second X server has changed; if yes, set new content to first X server
+    if [ ! "$CLIP1" = "$D2_CLIP1" ]  ||  [ ! "$CLIP2" = "$D2_CLIP2" ]  ||  [ ! "$CLIP3" = "$D2_CLIP3" ] ; then
+        XAUTHORITY='$STARTXAUTHORITY'
+        CLIP1=$D2_CLIP1
+        CLIP2=$D2_CLIP2
+        CLIP3=$D2_CLIP3
+        echo $CLIP1 | xsel -p -i --display '$STARTDISPLAY'
+        echo $CLIP2 | xsel -s -i --display '$STARTDISPLAY'
+        echo $CLIP3 | xsel -b -i --display '$STARTDISPLAY'
+    fi
+
+    # sleep a bit to avoid high cpu usage
+    sleep 0.3
+    
+done
+' > $SHARECLIPBOARDSCRIPT
+    fi
+fi
+
+}
 { ######################## part: create xinitrc #####################################################
 
 echo "#! /bin/bash"                                                                                       > $XINITRC
@@ -773,6 +897,19 @@ if [ -n "$WINDOWMANAGER" ] ; then
     # (adding pid to $XINITJOBSTOKILL later)
 fi
 #
+if [ "$SHOWLOGNEWDISPLAY" = "yes" ] ; then
+    echo 'xterm -title "x11docker log '$IMAGENAME $IMAGECOMMAND'" -e "tail -F '$XINITLOGFILE $XTERMLOGFILE $DOCKERLOGFILE $XPRALOGFILE' 2> /dev/null" & ' >> $XINITRC
+    echo 'storepid $! xterm'                                                                              >> $XINITRC
+    echo $SHOWLOGNEWDISPLAY
+fi
+#
+# option '-c, --clipboard': Run clipboard script for X11/Xephyr 
+# (text copy only) (xpra has its own clipboard managment including images)
+if [ "$SHARECLIPBOARD" = "yes" ] && [ ! "$XSERVER" = "XPRA" ] ; then
+    echo "bash $SHARECLIPBOARDSCRIPT &"                                                                   >> $XINITRC
+    echo 'storepid $! bash'                                                                               >> $XINITRC               
+fi
+#
 case $XSERVER in
     XPRA) # run xpra server and xpra viewer
         # start Xpra server on display created by Xvfb
@@ -782,10 +919,10 @@ case $XSERVER in
         # wait for Xpra server to be ready
         echo 'ZEIT=`date +%s`'                                                                            >> $XINITRC
         echo 'while [ -z "$(cat '$XPRASERVERLOGFILE' | grep '"'xpra is ready'"')" ] ; do'                 >> $XINITRC
-        echo '    echo "waiting for xpra server to be ready..." && sleep 0.2 '                            >> $XINITRC
+        echo '    echo "waiting for xpra server to be ready..." && sleep 0.3 '                            >> $XINITRC
         echo '    COUNT=$(echo "`date +%s` - $ZEIT" | bc)'                                                >> $XINITRC
-        echo '    if [ 5 -lt $COUNT ] ; then'                                                             >> $XINITRC
-        echo '        echo "x11docker: Timeout error: Xpra server not ready after 5 seconds. Exiting."'   >> $XINITRC
+        echo '    if [ 10 -lt $COUNT ] ; then'                                                            >> $XINITRC
+        echo '        echo "x11docker: Timeout error: Xpra server not ready after 10 seconds. Exiting."'  >> $XINITRC
         echo '        exit 1'                                                                             >> $XINITRC
         echo '    fi'                                                                                     >> $XINITRC
         echo 'done'                                                                                       >> $XINITRC
@@ -951,13 +1088,18 @@ Comment=
 Categories=System
 Keywords=` # echo $IMAGENAME | tr / -` $IMAGECOMMAND x11docker docker
 TryExec=x11docker $X11DOCKERARGS
-" > "`xdg-user-dir DESKTOP`/`echo $IMAGENAME | tr / -`x11docker.desktop"
-    verbose "Created desktop icon `xdg-user-dir DESKTOP`/`echo $IMAGENAME | tr / -`x11docker.desktop"
+" > "`xdg-user-dir DESKTOP`/`echo $IMAGENAME | tr / -`_`echo $IMAGECOMMAND | sed "s/ /_/" `_x11docker.desktop"
+    verbose "Created desktop icon `xdg-user-dir DESKTOP`/`echo $IMAGENAME | tr / -`_`echo $IMAGECOMMAND | sed "s/ /_/" `_x11docker.desktop"
     exit 0
 fi
 
 }
-######################## Finally: run new X server ##################################################
+{ ######################## Finally: run new X server ################################################
+
+# option '-l, --log': show logs in an xterm window on display :0
+#if [ "$SHOWLOG" = "yes" ] ; then xterm -title "x11docker log $IMAGENAME $IMAGECOMMAND" -e "tail -F $XINITLOGFILE $XTERMLOGFILE $DOCKERLOGFILE $XPRALOGFILE 2> /dev/null" & ; fi
 
 xinit $XINITRC -- $XCOMMAND  > $XINITLOGFILE 2>&1
-exit 0  # trap EXIT will start finish()
+exit 0         # trap EXIT will start finish()
+
+}
