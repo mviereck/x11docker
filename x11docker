@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # x11docker changelog
+# 29.09.2016  V 1.0.3 new option --pulseaudio: sound with pulseaudio over tcp, upload on github
 # 24.09.2016  V 1.0.2 new upload on github
 # 24.09.2016          New option --no-xhost: disable any access to host X server granted by xhost
 #                     Fixed minor bug: set xkbmap in xephyr after XAUTHORITY&DISPLAY has been set
@@ -83,6 +84,8 @@ Options:
                        permissions via sudo without password
  -m, --home            share folder ~/x11docker/IMAGENAME (in home folder)
                        with created container. For use with option '--hostuser'
+ --pulseaudio          enable sound with pulseaudio over tcp. Needs
+                       pulseaudio to be installed on on and in image
 Advanced options:
  -s, --sudo            use 'sudo' to run 'su -c docker ...' (Ubuntu special)
  --starter             create starter on desktop & exit
@@ -162,11 +165,13 @@ X11DOCKERARGS="$*"                              # arguments for x11docker withou
 ARGUMENT=""                                     # variable to step through arguments
 IMAGENAME=""                                    # name of image to run
 IMAGECOMMAND=""                                 # name of image [+ commands+args]
+CONTAINERNAME=""                                # name of container, set by x11docker
 
 DOCKERIP=""                                     # IP adress of docker interface
+DOCKERFULLIP=""                                 # IP adress of docker interface including suffix /16
 DOCKERPID="123454321"                           # process ID (PID) of docker instance. set a dummy here
 
-XINITRC=xinitrc                                 # file to store xinitrc commands   x11docker [OPTIONS] -- [DOCKER_RUN_OPTIONS] IMAGE [COMMAND [ARG1 ARG2 ...]]
+XINITRC=xinitrc                                 # file to store xinitrc commands
 XINITLOGFILE=xinit.log                          # file to log output of X server
 XTERMRC=xtermrc                                 # file to store xtermrc commands
 XTERMLOGFILE=xterm.log                          # file to log output of xterm
@@ -217,6 +222,9 @@ CREATEUSERSCRIPT=createuser                     #   "          "         : file 
 ADDUSERHOME="no"                                # option '-m, --home': share a folder ~/.local/share/x11docker/IMAGENAME with created container
 ADDUSERHOMEFOLDER=""                            #   "        "   : path to shared folder
 BENUTZER=$USER                                  # name of user to simulate in container
+#
+PULSE_PORT=""                                   # option '--pulseaudio': pulseaudio tcp  to use
+PULSE_MODULE_ID=""                              #   "                    number of customized pulseaudio tcp module, output of pactl
 #
 ZOMBIECHECK="no"                                # option '--zombiecheck': check for non-removed containers and maybe root-owned files in cache
 CREATEDESKTOPSTARTER="no"                       # option '--starter': create desktop starter and exit yes/no
@@ -395,7 +403,7 @@ zombiecheck() {
 xdparser() { # parse args for x11docker
     #
     SHORT="hw:dxXayrz:scuomfvVeplL"
-    LONG="help,license,licence,wm:,desktop,command,x,X,xpra,Xpra,xephyr,Xephyr,sudo,root,clipboard,hostuser,sudouser,home,fullscreen,verbose,VERBOSE,zombiecheck,exe,cid,cache,ps,resizeable,size:,starter,log,LOG,no-xhost"
+    LONG="help,license,licence,wm:,desktop,command,x,X,xpra,Xpra,xephyr,Xephyr,sudo,root,clipboard,hostuser,sudouser,home,fullscreen,pulseaudio,verbose,VERBOSE,zombiecheck,exe,cid,cache,ps,resizeable,size:,starter,log,LOG,no-xhost"
     PARSED=`getopt --options $SHORT --longoptions $LONG --name "$0" -- "$@"`
     if [ "$?" != "0" ] ; then error "Error while parsing options. See 'x11docker --help' for vaild options." ; fi
     eval set -- "$PARSED"
@@ -428,6 +436,8 @@ xdparser() { # parse args for x11docker
             -z|--size) XEPHYRSIZE="-screen $2" && shift     # set screen size for Xephyr
             ;;
             -r|--resizeable) XEPHYRARGS="$XEPHYRARGS -resizeable" # make Xephyr window resizeable
+            ;;
+            --pulseaudio) PULSEAUDIO="yes"                  # enable pulseaudio connection / sound support over tcp
             ;;
             -e|--exe) X11DOCKERMODE="exe"                   # execute application from host instead of running docker image
             ;;
@@ -602,9 +612,18 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
     zombiecheck
     exit
   fi
+  
+  ## option '--pulseaudio': find a free tcp port
+  if [ "$PULSEAUDIO" = "yes" ] ; then
+    read LOWERPORT UPPERPORT < /proc/sys/net/ipv4/ip_local_port_range
+    while : ; do
+      PULSE_PORT="`shuf -i $LOWERPORT-$UPPERPORT -n 1`"
+      ss -lpn | grep -q ":$PULSE_PORT " || break
+    done
+  fi
 }
 
-{ #### part: choose and check X server
+{ #### check X server
   ## option '-x, --X': show on display :0 instead of switching to another tty
   #  check if either xpra or Xephir should be used for this job
   #
@@ -755,7 +774,7 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
   BGPIDFILE="$CACHEFOLDER/$BGPIDFILE"
   CREATEUSERSCRIPT="$CACHEFOLDER/$CREATEUSERSCRIPT"
   SHARECLIPBOARDSCRIPT="$CACHEFOLDER/$SHARECLIPBOARDSCRIPT"
-  #NEWXSOCKET="/tmp/.X11-unix/X$NEWDISPLAY"
+  NEWXSOCKET="/tmp/.X11-unix/X$NEWDISPLAY"
   #NEWXLOCK="/tmp/.X$NEWDISPLAY-lock"
   #
   NEWDISPLAY=":$NEWDISPLAY"                                  # finally: add ':' to $NEWDISPLAY
@@ -764,7 +783,8 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
   ## Get inet Adress of docker0 interface and
   #  set $TCPDISPLAY (display number for dockered applications, connected to X over tcp)
   #
-  DOCKERIP=`ip -4 -o a | grep docker0 | awk '{print $4}' | cut -d/ -f1`
+  DOCKERFULLIP=`ip -4 -o a | grep docker0 | awk '{print $4}'`
+  DOCKERIP=`echo $DOCKERFULLIP | cut -d/ -f1`
   TCPDISPLAY=$DOCKERIP$NEWDISPLAY
 
   ## create and clean cache subfolder
@@ -776,10 +796,15 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
 { #### part: create command to run docker
   case $X11DOCKERMODE in
     run)
+        CONTAINERNAME=
         COMMAND='docker run'
         COMMAND="$COMMAND -e DISPLAY=$TCPDISPLAY"                                  # display over tcp 
+#        COMMAND="$COMMAND -e DISPLAY=$NEWDISPLAY"                                  # display over socket
+        COMMAND="$COMMAND -v $NEWXSOCKET:$NEWXSOCKET"                                  # display over tcp 
         COMMAND="$COMMAND -v $XCLIENTCOOKIE:/Xcookie:ro -e XAUTHORITY=/Xcookie"    # share new X authentication cookie file
         COMMAND="$COMMAND --cidfile=$CIDFILE"                                      # write container id in file $CIDFILE
+        COMMAND="$COMMAND --name=x11docker_X$(echo $NEWDISPLAY | cut -b 2-)_$(mcookie | cut -c -6)"
+        if [ "$PULSEAUDIO" = "yes" ] ; then COMMAND="$COMMAND -e PULSE_SERVER=tcp:$DOCKERIP:$PULSE_PORT" ; fi # provide pulseaudio server
     ;;
     exe|onlyX) COMMAND="# dontrundocker"
     ;;
@@ -823,18 +848,18 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
     # create script createuser. It will also start the image with given (or extracted) command
     #
     { echo "#! /bin/bash"
-    # create user
-    echo "addgroup --gid `id -g $BENUTZER` $BENUTZER"
-    echo "adduser --disabled-password  --uid `id -u` --gid `id -g` --gecos " '""' " --home /home/$BENUTZER $BENUTZER"
-    echo "chown $BENUTZER:$BENUTZER /home/$BENUTZER"
-    echo "HOME=/home/$BENUTZER"
-    # option '--sudouser': add sudo permissions without password
-    if [ "$ADDSUDOUSER" = "yes" ] ; then
-        echo 'echo "%sudo ALL=(ALL) NOPASSWD:ALL"   >> /etc/sudoers'
-        echo "adduser $BENUTZER sudo"
-    fi
-    # run image command as user:
-    echo "su $BENUTZER -c '$IMAGECOMMAND'"
+      # create user
+      echo "addgroup --gid `id -g $BENUTZER` $BENUTZER"
+      echo "adduser --disabled-password  --uid `id -u` --gid `id -g` --gecos " '""' " --home /home/$BENUTZER $BENUTZER"
+      echo "chown $BENUTZER:$BENUTZER /home/$BENUTZER"
+      echo "HOME=/home/$BENUTZER"
+      # option '--sudouser': add sudo permissions without password
+      if [ "$ADDSUDOUSER" = "yes" ] ; then
+          echo 'echo "%sudo ALL=(ALL) NOPASSWD:ALL"   >> /etc/sudoers'
+          echo "adduser $BENUTZER sudo"
+      fi
+      # run image command as user:
+      echo "su $BENUTZER -c '$IMAGECOMMAND'"
     } > $CREATEUSERSCRIPT
     #
     # include created script in container
@@ -944,6 +969,12 @@ done
     echo "no_xhost"
   fi
   #
+  # option '--pulseaudio': enable pulseaudio sound over tcp
+  if [ "$PULSEAUDIO" = "yes" ] ; then
+    # load pulseaudio tcp module, authenticated to docker ip on specified port 
+    echo 'PULSE_MODULE_ID=$(pactl load-module module-native-protocol-tcp port='$PULSE_PORT' auth-ip-acl='$DOCKERFULLIP')'
+  fi
+  #
   # things to be done on new display: 
   #
   # set X variables to new display
@@ -957,6 +988,7 @@ done
   echo ':> '$XCLIENTCOOKIE
   echo "xauth generate $NEWDISPLAY . untrusted"
   echo "xauth add $TCPDISPLAY . "'`mcookie`'
+#  echo "xauth add $NEWDISPLAY . "'`mcookie`'
   echo "cp $XCLIENTCOOKIE $XSERVERCOOKIE"
   #
   # start window manager, if defined
@@ -1020,6 +1052,7 @@ done
   #
   # disable any possible xhost granted access on new X server
   echo "no_xhost"
+#  echo "xhost +SI:localuser:root"
   #
   # choose apps to run and wait for them to exit
   case $X11DOCKERMODE in
@@ -1062,6 +1095,12 @@ $WM_RECOMMENDED_DESKTOP_LIGHT $WM_RECOMMENDED_DESKTOP_HEAVY' ; read" '"'
   # ($WINDOWMANAGERPID can already be empty, see case onlyX above. maybe window manager wasn't running at all)
   echo 'XINITJOBSTOKILL="$XINITJOBSTOKILL $WINDOWMANAGERPID"'
   echo 'for ARGUMENT in $XINITJOBSTOKILL ; do kill $ARGUMENT ; done'
+
+  # option '--pulseaudio'. remove custom tcp module
+  if [ "$PULSEAUDIO" = "yes" ] ; then 
+    echo 'pactl unload-module $PULSE_MODULE_ID'  
+  fi 
+
 } > $XINITRC
 
 { #### part: create xtermrc (used by xinitrc to get password and run docker)
@@ -1194,5 +1233,6 @@ TryExec=x11docker $X11DOCKERARGS
   if [ "$SHOWLOG" = "yes" ] ; then xterm -title "x11docker xinit log $IMAGENAME $IMAGECOMMAND" -e "tail -F $XINITLOGFILE $XTERMLOGFILE $DOCKERLOGFILE $XPRALOGFILE 2> /dev/null" ; fi &
 
   xinit $XINITRC -- $XCOMMAND  > $XINITLOGFILE 2>&1
+  
   exit 0         # trap EXIT will start finish()
 }
