@@ -5,6 +5,7 @@
  - Doesn't need VNC or SSH. docker applications can directly access the new X server via tcp.
  - Doesn't have dependencies inside the image - can run any GUI applications in docker. (Doesn't even need an X server to be installed in the image.)
  - Authentication via MIT-MAGIC-COOKIES. Separate Xauthority file, it is _not_  ~/.Xauthority
+ - Pulseaudio sound over tcp
 
 #GUI for x11docker
 There is a comfortable GUI for x11docker. To run x11docker-gui, you need to install 'kaptain'. 
