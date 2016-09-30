@@ -7,7 +7,7 @@
  - Authentication via MIT-MAGIC-COOKIES. Separate Xauthority file, it is _not_  ~/.Xauthority
  
 #pulseaudio sound support
- x11docker supports pulseaudio sound over tcp. For this to use, pulseaudio needs to be installed on host and in guest.
+ x11docker supports pulseaudio sound over tcp. For this to use, pulseaudio needs to be installed on host and in docker image.
 
 #GUI for x11docker
 There is a comfortable GUI for x11docker. To run x11docker-gui, you need to install 'kaptain'. 
