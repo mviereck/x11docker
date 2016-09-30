@@ -1,6 +1,8 @@
 #!/bin/bash
 
 # x11docker changelog
+# 30.09.2016  V 1.0.5 improved --orphaned; create named containers to check for
+#                     rename option --zombiecheck to --orphaned
 # 30.09.2016  V 1.0.4 improved creating desktop starter: prompting for name
 #                     check for existing $BGPIDFILE on exit to avoid error message
 # 29.09.2016  V 1.0.3 new option --pulseaudio: sound with pulseaudio over tcp
@@ -10,7 +12,7 @@
 #                     Set STARTXAUTHORITY as $HOME/.Xauthority if $XAUTHORITY is empty
 #                     Exit on error while parsing options
 #                     Avoid error message of xclip setting empty CLIP to " "
-# 23.09.2016          new option: zombiecheck. Check for not cleanly removed containers and cache files
+# 23.09.2016          new option: orphaned. Check for not cleanly removed containers and cache files
 # 05.09.2016          bugfix: parsing $IMAGECOMMAND
 #                     included MIT license text in script.
 #                     waiting up to 10 instead if 5 seconds for docker to terminate
@@ -92,7 +94,7 @@ Advanced options:
  -s, --sudo            use 'sudo' to run 'su -c docker ...' (Ubuntu special)
  --starter             create starter on desktop & exit
  --no-xhost            disable any access to host X server granted by xhost
- --zombiecheck         check for non-removed containers and left cache files 
+ --orphaned            check for non-removed containers and left cache files 
                        possibly owned by root and created by docker
  -p, --ps              preserve container on exit (as a default, x11docker sets
                        docker run option '--rm' to remove created container)
@@ -181,7 +183,6 @@ DOCKERLOGFILE=docker.log                        # file to log output of docker
 DOCKERPIDFILE=docker.pid                        # file to store process ID of docker
 CIDFILE=containerID                             # file to store container ID number
 BGPIDFILE=bgpids                                # file to store PIDS and names of background processes that shut be killed on exit
-STORECIDFILE=$CACHEFOLDER/stored.cid            # File to store container ids. useful to detect zombie containers.
 
 XSERVER="X11"                                   # X server to use ( one of X11 | XPRA | XEPHIR)
 STARTXAUTHORITY=$XAUTHORITY                     # store Environment variable pointing to X authority cookies
@@ -228,7 +229,7 @@ BENUTZER=$USER                                  # name of user to simulate in co
 PULSE_PORT=""                                   # option '--pulseaudio': pulseaudio tcp  to use
 PULSE_MODULE_ID=""                              #   "                    number of customized pulseaudio tcp module, output of pactl
 #
-ZOMBIECHECK="no"                                # option '--zombiecheck': check for non-removed containers and maybe root-owned files in cache
+ORPHANEDCHECK="no"                              # option '--orphaned': check for non-removed containers and maybe root-owned files in cache
 CREATEDESKTOPSTARTER="no"                       # option '--starter': create desktop starter and exit yes/no
 ALLOWROOT="no"                                  # option '--root': allow root to run x11docker
 ONLYSHOWCOMMAND="no"                            # option '-c, --command': if not empty, only show docker command and exit
@@ -368,44 +369,36 @@ no_xhost() { # remove any access to X server granted by xhost
   echo "x11docker: The following call of xhost should show no more entrys:"
   xhost
 }
-zombiecheck() {
-  ## option --zombiecheck : check for non-removed containers and left cache files possibly owned by root and created by docker
-  echo "x11docker will check for non-deleted containers from earlier sessions. 
+orphaned() {
+  ## option --orphaned : check for non-removed containers and left cache files possibly owned by root and created by docker
+  echo "x11docker will check for orphaned containers from earlier sessions. 
     This can happen if docker was not closed successfully. If this is the case,
     and option --home was chosen, docker creates missing shared files as 
     folders owned by root in your home folder. This is annoying. x11docker 
     will try to find such containers and docker-created folders and remove them.
     Before proceeding, please close running x11docker sessions first, if any.
     Please type in your password to get a current list of existing containers:"
-  CONTAINERS=$($GETROOT 'docker ps -a')
   MATCHCONTAINERS=""
   MATCHFOLDERS=""
+  cd $CACHEFOLDER
   while read -r LINE ; do
-    FOLDER=$(echo $LINE | cut -s -d '$' -f1)
-    CID=$(echo $LINE | cut -s -d '$' -f2 | cut -c -12)
-    MATCH=$(echo $CONTAINERS | grep $CID 2>/dev/null)
-    if [ -n "$MATCH" ] ; then 
-      MATCHCONTAINERS="$MATCHCONTAINERS $CID"
-      if [ -d "$FOLDER" ] ; then MATCHFOLDERS=$MATCHFOLDERS' "'$FOLDER'"' ; fi
-    fi
-  done < $STORECIDFILE
-  if [ -z "$MATCHCONTAINERS" ] ; then echo "No zombie containers found. good luck!"
+    MATCHCONTAINERS="$MATCHCONTAINERS $(echo $LINE | cut -d ' ' -f1)"
+    FOLDER="$(echo $LINE | rev | cut -d_ -f2 | rev)"
+    if [ -d "$FOLDER" ] ; then MATCHFOLDERS="$MATCHFOLDERS $FOLDER" ; fi
+  done < <($GETROOT 'docker ps -a' | grep "x11docker_")
+  if [ -z "$MATCHCONTAINERS" ] ; then echo "No orphaned containers found. good luck!"
   else
-    echo "Found zombie containers: $MATCHCONTAINERS"
-    echo "Found zombie folders: $MATCHFOLDERS"
-    echo "Type in your password to remove zombie containers:"
-    echo $GETROOT "docker rm -f $MATCHCONTAINERS"
-    $GETROOT "docker rm -f $MATCHCONTAINERS"
-    echo "Type in your password to remove zombie cache folders."
-    echo "PLEASE READ CAREFULLY, THIS IS ROOT EXECUTING rm -R !!!"
-    echo $GETROOT "'"rm -R -v -I $MATCHFOLDERS"'"
-    eval $GETROOT "'"rm -R -v -I $MATCHFOLDERS"'"
+    echo "Found orphaned containers: $MATCHCONTAINERS"
+    echo "Found orphaned folders in $CACHEFOLDER: $MATCHFOLDERS"
+    echo "Type in your password to remove orphaned containers and folders:"
+    echo $GETROOT "'docker rm $MATCHCONTAINERS ; rm -R -v $MATCHFOLDERS'"
+    eval $GETROOT "'docker rm $MATCHCONTAINERS ; rm -R -v $MATCHFOLDERS'"
   fi
 }
 xdparser() { # parse args for x11docker
     #
     SHORT="hw:dxXayrz:scuomfvVeplL"
-    LONG="help,license,licence,wm:,desktop,command,x,X,xpra,Xpra,xephyr,Xephyr,sudo,root,clipboard,hostuser,sudouser,home,fullscreen,pulseaudio,verbose,VERBOSE,zombiecheck,exe,cid,cache,ps,resizeable,size:,starter,log,LOG,no-xhost"
+    LONG="help,license,licence,wm:,desktop,command,x,X,xpra,Xpra,xephyr,Xephyr,sudo,root,clipboard,hostuser,sudouser,home,fullscreen,pulseaudio,verbose,VERBOSE,orphaned,exe,cid,cache,ps,resizeable,size:,starter,log,LOG,no-xhost"
     PARSED=`getopt --options $SHORT --longoptions $LONG --name "$0" -- "$@"`
     if [ "$?" != "0" ] ; then error "Error while parsing options. See 'x11docker --help' for vaild options." ; fi
     eval set -- "$PARSED"
@@ -468,7 +461,7 @@ xdparser() { # parse args for x11docker
             ;;
             -L|--LOG) SHOWLOGNEWDISPLAY="yes"               # Show logs in an xterm window on new display
             ;;
-            --zombiecheck) ZOMBIECHECK="yes"                # check for zombies (unremoved containers and files owned by root, created by docker)
+            --orphaned) ORPHANEDCHECK="yes"                # check for orphaned containers and files owned by root, created by docker)
             ;;
             --no-xhost) NO_XHOST="yes"                      # disable any access granted by xhost
             ;;
@@ -609,9 +602,9 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
   apt-get install xdg-utils" ; }
   fi
   
-  ## option --zombiecheck : check for non-removed containers and left cache files possibly owned by root and created by docker
-  if [ "$ZOMBIECHECK" = "yes" ] ; then 
-    zombiecheck
+  ## option --orphaned : check for non-removed containers and left cache files possibly owned by root and created by docker
+  if [ "$ORPHANEDCHECK" = "yes" ] ; then 
+    orphaned
     exit
   fi
   
@@ -1115,9 +1108,6 @@ $WM_RECOMMENDED_DESKTOP_LIGHT $WM_RECOMMENDED_DESKTOP_HEAVY' ; read" '"'
     echo "echo $GETROOT '$COMMAND'"
     echo "echo 'Please type in your password:'"
     echo "$GETROOT 'nohup $COMMAND > $DOCKERLOGFILE 2>&1 & echo "'$!'" > $DOCKERPIDFILE'"
-    echo "echo -n $CACHEFOLDER'$' >> $STORECIDFILE"
-    echo "sleep 1 && cat $CIDFILE >> $STORECIDFILE"
-    echo "echo '' >> $STORECIDFILE" 
     } > $XTERMRC
   fi   
 }
