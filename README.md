@@ -5,9 +5,8 @@
  - Doesn't need VNC or SSH. docker applications can directly access the new X server via tcp.
  - Doesn't have dependencies inside the image - can run any GUI applications in docker. (Doesn't even need an X server to be installed in the image.)
  - Authentication via MIT-MAGIC-COOKIES. Separate Xauthority file, it is _not_  ~/.Xauthority
- 
-#pulseaudio sound support
- x11docker supports pulseaudio sound over tcp. For this to use, pulseaudio needs to be installed on host and in docker image.
+ - Sound with pulseaudio is possible
+ - Hardware accelerated OpenGL rendering is possible
 
 #GUI for x11docker
 There is a comfortable GUI for x11docker. To run x11docker-gui, you need to install 'kaptain'. 
@@ -15,6 +14,30 @@ There is a comfortable GUI for x11docker. To run x11docker-gui, you need to inst
 
 ![x11docker-gui screenshot](/../screenshots/x11docker-gui.jpeg?raw=true "Optional Title")
 
+ 
+#pulseaudio sound support
+ x11docker supports pulseaudio sound over tcp. For this to use, pulseaudio needs to be installed on host and in docker image.
+
+#Hardware accelerated OpenGL rendering
+Software accelerated OpenGL is available in all provided X servers. 
+ The image should contain an OpenGL implementation to profit from it.  The easiest way to achieve this is to install package \"mesa-utils\" in your image.
+
+ To use the benefits of hardware accelerated 3D graphics, you need to have 
+ a graphics card driver matching the one on your host to be installed in your docker image.
+ As for general, a package from xserver-xorg-video-* and maybe linux-firmware-nonfree
+ may be useful, depending on your host hardware.
+ If you have a proprietary driver on your host, most probably you need this in your image, too.
+ 
+ To achieve hardware acceleration, x11docker provides host devices found in /dev/dri/ 
+ to the image. This may be considered to be a security leak. 
+ 
+ As for now, only core X server provides hardware accelerated 3D / OpenGL rendering. 
+ 
+ To check if hardware acceleration is enabled, you can run \"glxinfo | grep renderer\". 
+ The OpenGL renderer string should contain your graphics card adapter name. 
+ If the renderer string contains \"llvmpipe\", only software rendering is enabled. 
+ As a performance check, you can run glxgears in a maximized window.
+ 
 #Usage in terminal
 To run a docker image with new X server:
  -  x11docker [OPTIONS] IMAGE [COMMAND]
@@ -52,16 +75,10 @@ on your main display:
 #Security
  - Using a separate X server aka a new display for docker GUI applications avoids issues 
  concerning security leaks inside a running X server. There are some solutions in the web to run dockered GUI applications with X forwarding on display :0, but all of them share the problem of breaking isolation of docker containers and allowing them access to X resources like keylogging with 'xinput test'.
- - With x11docker, GUI applications in docker can be isolated from main display :0 and 
- use a fast connection over local tcp to the new X server. This is much faster 
- than VNC or SSH. 
- - x11docker uses tcp instead of mounting a host X socket in docker. (Direct access from 
- docker to a host X socket causes dangerous issues including bad RAM access, framebuffer 
- errors and application crashes, especially seen with composite applications. x11docker avoids this using tcp).
- - Authenthication is done with MIT-MAGIC-COOKIE, stored separate from ~/.Xauthority. 
- The new X server doesn't know the cookies from the standard X server on display :0.
- - With option --no-xhost you can disable any permissions that xhost may already give to others.
- - X over tcp is seen as a possible security leak. As long as no one has a matching MIT-MAGIC-COOKIE, 
- it should not be a problem. But maybe the new X server is insecure in this point. I will have to look for this further. Any hints are welcome.
-
-
+ - With x11docker, GUI applications in docker are isolated from main display :0
+ - x11docker shares the new created X socket with the docker image. Authenthication is done with MIT-MAGIC-COOKIE, stored separate from ~/.Xauthority. Also, authentication is done on new display only with xhost +SI:localuser.dockeruser. 
+ - With option --no-xhost x11docker checks for any access granted to host X server by xhost and disables it. Host applications then use ~.Xauthority only.
+ The new X server doesn't know cookies from the host X server on display :0.
+ 
+ #known issues
+  - It should be possible to authenticate docker applications with MIT-MAGIC-COOKIE only and discard using xhost +SI:localuser.dockeruser. Any help is appreciated.
