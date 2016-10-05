@@ -12,7 +12,7 @@
 There is a comfortable GUI for x11docker. To run x11docker-gui, you need to install 'kaptain'. 
 (debian link to kaptain: https://packages.debian.org/search?keywords=kaptain).
 
-![x11docker-gui screenshot](/../screenshots/x11docker-gui.jpeg?raw=true "Optional Title")
+![x11docker-gui screenshot](/../screenshots/x11docker-gui.png?raw=true "Optional Title")
 
  
 #pulseaudio sound support
