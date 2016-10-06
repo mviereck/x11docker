@@ -22,6 +22,8 @@ There is a comfortable GUI for x11docker. To run x11docker-gui, you need to inst
 Software accelerated OpenGL is available in all provided X servers. 
  The image should contain an OpenGL implementation to profit from it.  The easiest way to achieve this is to install package \"mesa-utils\" in your image.
 
+Note: hardware acceleration still is experimental / beta. Other than stated below, connection to the new X server is done sharing its unix socket.
+
  To use the benefits of hardware accelerated 3D graphics, you need to have 
  a graphics card driver matching the one on your host to be installed in your docker image.
  As for general, a package from xserver-xorg-video-* and maybe linux-firmware-nonfree
@@ -38,6 +40,13 @@ Software accelerated OpenGL is available in all provided X servers.
  If the renderer string contains \"llvmpipe\", only software rendering is enabled. 
  As a performance check, you can run glxgears in a maximized window.
  
+#Dependencies
+Depending on choosed options, x11docker needs some packages to be installed.
+It will check for them on startup and show terminal messages if some are missing.
+List of possible needed packages:
+
+xpra xephyr xvfb xclip kaptain wmctrl pulseaudio docker.io xorg
+
 #Usage in terminal
 To run a docker image with new X server:
  -  x11docker [OPTIONS] IMAGE [COMMAND]
@@ -51,13 +60,6 @@ To run only a new X server with window manager:
  -  x11docker [OPTIONS]
 
 Have a look at 'x11docker --help' to see all options.
-
-#Dependencies
-Depending on choosed options, x11docker needs some packages to be installed.
-It will check for them on startup and show terminal messages if some are missing.
-List of possible needed packages:
-
-xpra xephyr xvfb xclip kaptain wmctrl pulseaudio docker.io xorg
 
 #Explanations
 x11docker creates a new X server on a new X socket on a new display. Instead of using
@@ -76,9 +78,6 @@ on your main display:
  - Using a separate X server aka a new display for docker GUI applications avoids issues 
  concerning security leaks inside a running X server. There are some solutions in the web to run dockered GUI applications with X forwarding on display :0, but all of them share the problem of breaking isolation of docker containers and allowing them access to X resources like keylogging with 'xinput test'.
  - With x11docker, GUI applications in docker are isolated from main display :0
- - x11docker shares the new created X socket with the docker image. Authenthication is done with MIT-MAGIC-COOKIE, stored separate from ~/.Xauthority. Also, authentication is done on new display only with xhost +SI:localuser.dockeruser. 
+ - docker GUI clients connect to new X server over tcp. Authenthication is done with MIT-MAGIC-COOKIE, stored separate from ~/.Xauthority.  The new X server doesn't know cookies from the host X server on display :0.
  - With option --no-xhost x11docker checks for any access granted to host X server by xhost and disables it. Host applications then use ~.Xauthority only.
- The new X server doesn't know cookies from the host X server on display :0.
  
- #known issues
-  - It should be possible to authenticate docker applications with MIT-MAGIC-COOKIE only and discard using xhost +SI:localuser.dockeruser. Any help is appreciated.
