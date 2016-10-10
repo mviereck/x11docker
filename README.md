@@ -20,25 +20,14 @@ There is a comfortable GUI for x11docker. To run x11docker-gui, you need to inst
 
 #Hardware accelerated OpenGL rendering
 Software accelerated OpenGL is available in all provided X servers. 
- The image should contain an OpenGL implementation to profit from it.  The easiest way to achieve this is to install package \"mesa-utils\" in your image.
+ The image needs an OpenGL implementation to profit from it.  The easiest way to achieve this is to install package \"mesa-utils\" in your image.
+ 
+ Usage of host GPU / hardware acceleration is experimental/beta. You may encounter some
+ bugs. For example, Xfce desktop will run fine using software rendering, but will
+ have broken window decorations with hardware rendering.
+ Another issue is GPU acceleration does not work over tcp from within docker,
+ so as a fallback sharing unix socket is used instead.
 
-Note: hardware acceleration still is experimental / beta. Other than stated below, connection to the new X server is done sharing its unix socket.
-
- To use the benefits of hardware accelerated 3D graphics, you need to have 
- a graphics card driver matching the one on your host to be installed in your docker image.
- As for general, a package from xserver-xorg-video-* and maybe linux-firmware-nonfree
- may be useful, depending on your host hardware.
- If you have a proprietary driver on your host, most probably you need this in your image, too.
- 
- To achieve hardware acceleration, x11docker provides host devices found in /dev/dri/ 
- to the image. This may be considered to be a security leak. 
- 
- As for now, only core X server provides hardware accelerated 3D / OpenGL rendering. 
- 
- To check if hardware acceleration is enabled, you can run \"glxinfo | grep renderer\". 
- The OpenGL renderer string should contain your graphics card adapter name. 
- If the renderer string contains \"llvmpipe\", only software rendering is enabled. 
- As a performance check, you can run glxgears in a maximized window.
  
 #Dependencies
 Depending on choosed options, x11docker needs some packages to be installed.
