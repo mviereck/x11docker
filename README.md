@@ -35,19 +35,6 @@ List of possible needed packages:
 
 xpra xephyr xvfb xclip kaptain wmctrl pulseaudio virtualgl docker.io xorg
 
-#Usage in terminal
-To run a docker image with new X server:
- -  x11docker [OPTIONS] IMAGE [COMMAND]
- -  x11docker [OPTIONS] -- [DOCKER_RUN_OPTIONS] IMAGE [COMMAND [ARG1 ARG2 ...]]
-  
-To run a host application on a new X server:
- -  x11docker [OPTIONS] --exe -- COMMAND [ARG1 ARG2 ...]
-
-To run only a new X server with window manager:
- -  x11docker [OPTIONS]
-
-Have a look at 'x11docker --help' to see all options.
-
 #Explanations
 x11docker creates a new X server on a new X socket on a new display. Instead of using
 display :0 (standard), docker images will run on display :1 or display :2 ...
@@ -68,3 +55,18 @@ on your main display:
  - docker GUI clients connect to new X server over tcp. Authenthication is done with MIT-MAGIC-COOKIE, stored separate from ~/.Xauthority.  The new X server doesn't know cookies from the host X server on display :0.
  - With option --no-xhost x11docker checks for any access granted to host X server by xhost and disables it. Host applications then use ~.Xauthority only.
  
+#Usage in terminal
+To run a docker image with new X server:
+ -  x11docker [OPTIONS] IMAGE [COMMAND]
+ -  x11docker [OPTIONS] -- [DOCKER_RUN_OPTIONS] IMAGE [COMMAND [ARG1 ARG2 ...]]
+  
+To run a host application on a new X server:
+ -  x11docker [OPTIONS] --exe -- COMMAND [ARG1 ARG2 ...]
+
+To run only a new X server with window manager:
+ -  x11docker [OPTIONS]
+
+Have a look at 'x11docker --help' to see all options.
+
+Example: Run wine and playonlinux on xfce desktop in a sandbox in a Xephyr window, sharing a home folder to preserve settings and wine installations:
+   - x11docker -x --sudouser --home --desktop -- x11docker/xfce-wine-playonlinux start
