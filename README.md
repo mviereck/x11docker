@@ -14,19 +14,19 @@ There is a comfortable GUI for x11docker. To run x11docker-gui, you need to inst
 
 ![x11docker-gui screenshot](/../screenshots/x11docker-gui.png?raw=true "Optional Title")
 
- 
-#pulseaudio sound support
- x11docker supports pulseaudio sound over tcp. For this to use, pulseaudio needs to be installed on host and in docker image.
 
 #Hardware accelerated OpenGL rendering
 Software accelerated OpenGL is available in all provided X servers. 
  The image needs an OpenGL implementation to profit from it.  The easiest way to achieve this is to install package \"mesa-utils\" in your image.
  
- Usage of host GPU / hardware acceleration is experimental/beta. You may encounter some
- bugs. For example, Xfce desktop will run fine using software rendering, but will
+ Usage of immediate GPU hardware acceleration for OpenGL/GLX with option --gpu is experimental/beta. You may encounter some
+ bugs. For example, Xfce desktop will run fine using software rendering, but can
  have broken window decorations with hardware rendering.
- Another issue is GPU acceleration does not work over tcp from within docker,
- so as a fallback sharing unix socket is used instead.
+ 
+ Mediate GPU hardware acceleration for OpenGL / GLX with option --virtualgl is possible with VirtualGL (http://www.virtualgl.org). Other than option --gpu, it works with xpra and Xephyr, too, but has the drawback to break container isolation from display :0. Use only with full trustet applications and images. Needs VirtualGL to be installed on host.
+ 
+#Pulseaudio sound support
+ x11docker supports pulseaudio sound over tcp. For this to use, pulseaudio needs to be installed on host and in docker image.
 
  
 #Dependencies
@@ -34,7 +34,7 @@ Depending on choosed options, x11docker needs some packages to be installed.
 It will check for them on startup and show terminal messages if some are missing.
 List of possible needed packages:
 
-xpra xephyr xvfb xclip kaptain wmctrl pulseaudio docker.io xorg
+xpra xephyr xvfb xclip kaptain wmctrl pulseaudio virtualgl docker.io xorg
 
 #Usage in terminal
 To run a docker image with new X server:
