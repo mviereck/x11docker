@@ -41,7 +41,6 @@ To run a docker image with new X server:
  -  x11docker [OPTIONS] -- [DOCKER_RUN_OPTIONS] IMAGE [COMMAND [ARG1 ARG2 ...]]
   
 To run a host application on a new X server:
- -  x11docker [OPTIONS] --exe COMMAND
  -  x11docker [OPTIONS] --exe -- COMMAND [ARG1 ARG2 ...]
 
 To run only a new X server with window manager:
