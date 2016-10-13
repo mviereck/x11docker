@@ -1,5 +1,62 @@
 #!/bin/bash
 
+# ToDo:
+# - work on immediate hardware acceleration: try get docker accelerated with X over tcp instead of shared X socket
+# - shared X socket and xfce: GTK rendering issues. Workaround: remove xfwm4.xml in ~/.config. Find reason for issues
+# - Immediate 3d acceleration with core X server should be possible with docker over tcp. Could solve xfce/GTK problem, too
+# - check pulseaudio: daemon on host seems to quit when image terminates. As workaround, tcp module is not disabled on exit for now
+# - improve usage informations in gui
+# - avoid xclip error with empty clipboard
+
+# x11docker changelog
+# 13.10.2016 V1.2.1   some improvements using VirtualGL
+#                     don't unload pulseaudio tcp module on exit to avoid pulseaudio daemon stop
+#                     Xdummy instead of Xvfb for xpra - dependency xvfb lost
+# 12.10.2016          bugfix: set X11DOCKERMODE on default onlyX
+#                     repair damaged parser
+# 12.10.2016  V1.2.0  --virtualgl: Mediate hardware acceleration with VirtualGL in all X servers possible now. Drawback: Full access to :0, breaking container isolation if not using core X
+#                     developer options: --xsocket, --sharegpu
+#                     bugfix: +extension MITSHM disabled videos in Xephyr
+# 11.10.2016          bugfix developer option --xhost: set xhost - on host display at end of xinitrc
+#                     Testing with --virtualgl, share libs and environment variables
+# 10.10.2016  V1.1.3  unified --verbose and --VERBOSE to --verbose
+#                     fixed help message if running as root without option --root
+# 08.10.2016          developer options --devel --xhost --virtualgl
+#                     bugfix: tail -F for log now shows all files frm beginning. was missing --retry -n +1
+#                     change --orphaned: remove all cache files 
+# 06.10.2016  V1.1.2  back to X over tcp. Marked --gpu as experimental. --gpu still with shared socket
+# 05.10.2016  V1.1.1  --glamor: added again
+#                     using /tmp/x11docker instead of ~.cache/x11docker
+# 04.10.2016          disabled X over tcp, sharing new X socket instead.
+#                     authentication with xhost +SI:localuser:user and cookie.
+# 04.10.2016  V1.1.0  --gpu new option for hardware acceleration. drawback= needs xhost +SI:localhost:user instead of cookie, but no tcp
+#                     removed --glamor, keep it as default
+#                     set tty to use for core X server with $NEWXVT
+#                     enabled SelectToClipboard in xterm
+# 02.10.2016          --glamor: new option enables Xephyr 2d acceleration
+#                     enabled many X extensions
+# 01.10.2016          bugfix: removed -glamor in Xephyr for better support of kwin, added +extension GLX +extension RENDER +extension RANDR
+# 30.09.2016  V 1.0.5 improved --orphaned; create named containers to check for
+#                     rename option --zombiecheck to --orphaned
+# 30.09.2016  V 1.0.4 improved creating desktop starter: prompting for name
+#                     check for existing $BGPIDFILE on exit to avoid error message
+# 29.09.2016  V 1.0.3 new option --pulseaudio: sound with pulseaudio over tcp
+# 24.09.2016  V 1.0.2 new upload on github
+# 24.09.2016          New option --no-xhost: disable any access to host X server granted by xhost
+#                     Fixed minor bug: set xkbmap in xephyr after XAUTHORITY&DISPLAY has been set
+#                     Set STARTXAUTHORITY as $HOME/.Xauthority if $XAUTHORITY is empty
+#                     Exit on error while parsing options
+#                     Avoid error message of xclip setting empty CLIP to " "
+# 23.09.2016          new option: orphaned. Check for not cleanly removed containers and cache files
+# 05.09.2016          bugfix: parsing $IMAGECOMMAND
+#                     included MIT license text in script.
+#                     waiting up to 10 instead of 5 seconds for docker to terminate
+# 01.09.2016          some scripting improvements
+# 30.08.2016          bugfix: cache folder was prevented from being deleted
+#                     create symbolic link in $HOME to ~/.local/share/x11docker
+#                     change CACHEFOLDER from ~/.cache/x11docker to /tmp/x11docker
+#                     create file bgpids on init to avoid error message on option --help
+#                     show warning if running pure X with window manager without logout option
 # 28.10.2015          improved shared clipboard with Xephyr / minor bug fix for clips with more than 1 line
 #                     removing not allowed chars in desktop starter file names
 #                     finish(): make sure only cache subfolder will be deleted
@@ -7,19 +64,20 @@
 # 24.10.2015          minor bug fix: parsing: replaced sed with cut ( "/" in $IMAGECOMMAND caused sed bug)
 # 20.10.2015          improved exit handling
 # 16.10.2015  V 1.0
+
 usage() {    # --help: show usage information
     echo "
 x11docker: Create a new X server & run GUI applications and desktop 
-         environments in docker, and show them on your display.
+         environments in docker and show them on your display.
          Useful to avoid security issues concerning X forwarding.
          Doesn't have dependencies inside of docker images.
 
-If using X11 server from Xorg (default):
+If using X11 server from Xorg (default, least dependencies):
  * To start x11docker from console, switch to tty1 with <CTRL><ALT><F1>.
  * To start x11docker from within X11, first run 'dpkg-reconfigure x11-common'
    and choose option 'anybody'.
- * To switch between displays/X servers press <CTRL><ALT><F7 ... F12>
-If using Xpra or Xephyr (see options '--xpra' and '--xephyr'):
+ * To switch between displays/X servers press <CTRL><ALT><F7>...<F12>
+If using Xpra or Xephyr (recommended, see options '--xpra' and '--xephyr'):
  * The dockered applications will appear on your normal display.
    (needs no tty switching, 'x11-common' doesn't need to be changed)
  
@@ -28,16 +86,17 @@ To run a docker image with new X server:
    x11docker [OPTIONS] IMAGE [COMMAND]
    x11docker [OPTIONS] -- [DOCKER_RUN_OPTIONS] IMAGE [COMMAND [ARG1 ARG2 ...]]
 To run a host application on a new X server:
-   x11docker [OPTIONS] --exe COMMAND
    x11docker [OPTIONS] --exe -- COMMAND [ARG1 ARG2 ...]
 To run only a new X server with window manager:
    x11docker [OPTIONS]
 
  * The new X server will be terminated when [docker] application is closed.
  * On systems without a root password, like Ubuntu, use option '--sudo'.
+ * x11docker is designed to run images only. New containers will be discarded.
 
 Options:
  -h, --help            display this message and exit
+ --license             show license of script (MIT)
  -w, --wm COMMAND      window manager to use (otherwise, x11docker tries to run
                        a new instance of the current running window manager; if
                        that's not possible, it will look for a recommended one)
@@ -47,7 +106,7 @@ Options:
                        display :0 instead of switching to another tty
                        (automated decision depending on option '-d, --desktop')
  -a, --xpra            use Xpra to show application windows on display :0
-                       (needs packages 'xpra' and 'xvfb' to be installed)
+                       (needs package 'xpra' to be installed)
  -y, --xephyr          use Xephyr to show desktops in a window on display :0
                        (needs package 'xephyr' to be installed)
  -c, --clipboard       share clipboard between X servers (Xpra only) (clipboard
@@ -56,6 +115,7 @@ Options:
  -z, --size XxY        set Xephyr screen size (f.e. 800x600 )
  -r, --resizeable      make Xephyr window resizeable (Note: some window
                        managers/desktops won't like this and may misbehave)
+ --glamor              enable Xephyr glamor 2D acceleration
  -e, --exe             execute host application on new X server (no docker)
  -u, --hostuser        create a user in the container similar to the host user
                        (same UID, same GID, same name) (experimental)
@@ -63,9 +123,22 @@ Options:
                        permissions via sudo without password
  -m, --home            share folder ~/x11docker/IMAGENAME (in home folder)
                        with created container. For use with option '--hostuser'
+ --pulseaudio          enable sound with pulseaudio over tcp. Needs
+                       pulseaudio to be installed on host and in image
+ --gpu                 use hardware accelerated OpenGL rendering. Needs
+                       mesa-utils in your image to be installed.
+                       Works with core X server only. Experimental / beta
+                       Don't use with xpra or Xephyr -> security leak
+                       Fallback to shared X socket instead of X over tcp
+  --virtualgl          hardware acceleration with VirtualGL. Needs virtualgl
+                       to be installed on host. BREAKS CONTAINER ISOLATION
+                       from display :0 if used with xpra or Xephyr.
 Advanced options:
  -s, --sudo            use 'sudo' to run 'su -c docker ...' (Ubuntu special)
  --starter             create starter on desktop & exit
+ --no-xhost            disable any access to host X server granted by xhost
+ --orphaned            check for non-removed containers and left cache files 
+                       possibly owned by root and created by docker
  -p, --ps              preserve container on exit (as a default, x11docker sets
                        docker run option '--rm' to remove created container)
  --root                allow root to run x11docker. Default: No
@@ -74,14 +147,13 @@ Advanced options:
  --cid                 show filename that contains container ID on stdout
  --cache               don't delete cache files on exit (including logs)
  -v, --verbose         be verbose
- -V, --VERBOSE         be very verbose
  -l, --log             show log in an xterm window on display :0
  -L, --LOG             show log in an xterm window on new display
 
 Dependencies: depending on choosed options, x11docker needs some packages
          to be installed. It will check for them on startup and show messages 
-         if some are missing. List of possible needed packages:
-         docker.io xorg wmctrl xpra xephyr xvfb xclip
+         if some are missing. List of possibly needed packages:
+         docker.io xorg wmctrl xpra xephyr xclip pulseaudio virtualgl
 
 Window manager: x11docker works fine with most common window managers.
          x11docker tries to detect your current running window manager to 
@@ -103,23 +175,50 @@ $WM_UGLY
 $WM_BAD
 "
 }
-{ # variable description and default settings
+license() {  # --license: show license (MIT)
+echo 'MIT License
+
+Copyright (c) 2015,2016 Martin Viereck
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.'
+}
+{ #### part: variable descriptions and default settings
 CONFIGFOLDER=$HOME/.config/x11docker            # define config file folder. Will be changed to path of subfolder
+#CACHEFOLDER=/tmp/x11docker                      # define cache folder to store temporary files
 CACHEFOLDER=$HOME/.cache/x11docker              # define cache folder to store temporary files
 X11DOCKERRC=$CONFIGFOLDER/x11dockerrc           # config file to preset options
+XTERM='xterm -xrm XTerm*selectToClipboard:true' # command to run xterm with clipboard support
 
-X11DOCKERMODE=""                                # can be either "onlyX", "run" or "exe", depends on options
+X11DOCKERMODE="onlyX"                           # can be either "onlyX", "run" or "exe", depends on options
 DOCKERARGS=""                                   # arguments to submit to docker
 DOCKEROPTIONS=""                                # options for docker without image name/image args
-X11DOCKERARGS="$@"                              # arguments for x11docker without arguments for docker
+X11DOCKERARGS="$*"                              # arguments for x11docker without arguments for docker
 ARGUMENT=""                                     # variable to step through arguments
 IMAGENAME=""                                    # name of image to run
 IMAGECOMMAND=""                                 # name of image [+ commands+args]
+CONTAINERNAME=""                                # name of container, set by x11docker, to make --orphaned able to find orphaned containers
+DOCKERUSER=""                                   # username of docker user
 
 DOCKERIP=""                                     # IP adress of docker interface
+DOCKERFULLIP=""                                 # IP adress of docker interface including suffix /16
 DOCKERPID="123454321"                           # process ID (PID) of docker instance. set a dummy here
-
-XINITRC=xinitrc                                 # file to store xinitrc commands   x11docker [OPTIONS] -- [DOCKER_RUN_OPTIONS] IMAGE [COMMAND [ARG1 ARG2 ...]]
+XINITRC=xinitrc                                 # file to store xinitrc commands
 XINITLOGFILE=xinit.log                          # file to log output of X server
 XTERMRC=xtermrc                                 # file to store xtermrc commands
 XTERMLOGFILE=xterm.log                          # file to log output of xterm
@@ -129,19 +228,22 @@ CIDFILE=containerID                             # file to store container ID num
 BGPIDFILE=bgpids                                # file to store PIDS and names of background processes that shut be killed on exit
 
 XSERVER="X11"                                   # X server to use ( one of X11 | XPRA | XEPHIR)
+XEXTENSIONS=""                                  # X extensions to enable on all x11docker X servers
 STARTXAUTHORITY=$XAUTHORITY                     # store Environment variable pointing to X authority cookies
+if [ -z "$STARTXAUTHORITY" ] ; then STARTXAUTHORITY=$HOME/.Xauthority ; fi
 STARTDISPLAY=$DISPLAY                           # store Environment variable containing name of current display
 NEWDISPLAY=""                                   # new display for new X server
 XSERVERCOOKIE=Xservercookie                     # file to store new X server cookies
 XCLIENTCOOKIE=Xclientcookie                     # file to store new X client cookies
 #NEWXLOCK=""                                     # .Xn-lock - exists for running X server with socket n
-#NEWXSOCKET=""                                   # New X socket
+NEWXSOCKET=""                                   # New X socket (unused)
+NEWXVT=""                                       # Virtual console to use for core new X server (>7)
+XCONNECTION="tcp"                               # 'tcp' or 'xsocket'. default: tcp
+SHARENEWXSOCKET=""                              # options --gpu, --sharenewxsocket, --xsocket. if yes, share new X socket
 
-# constant options for different X servers
-X11ARGS="-quiet -retro +extension Composite"                      # not changing defaults for X11
-XPRAARGS="--no-pulseaudio --speaker --no-microphone"              # not changing defaults for Xpra
-XEPHYRARGS="-retro +extension Composite -glamor"                  # not changing defaults for Xephyr
-XVFBARGS="+extension Composite"                                   # not changing defaults for Xvfb
+# options for different X servers
+XPRAARGS=""
+XEPHYRARGS=""
 
 # special for Xpra:
 XPRASERVERLOGFILE=xpraserver.log                # logfile for Xpra server
@@ -152,9 +254,9 @@ WINDOWTITLE=""                                  # window title for Xephyr. Will 
 # Get screen size for use with Xephyr
 XAXIS=$(xrandr --current | grep '*' | tail -1 | awk '{print $1}' | cut -d 'x' -f1)
 YAXIS=$(xrandr --current | grep '*' | tail -1 | awk '{print $1}' | cut -d 'x' -f2)
-XEPHYRRESIZEABLE="no"                           # option '-r, --resizable'
-XEPHYRSIZE="-screen $(($XAXIS-50))"x"$(($YAXIS-90))"   # option '-z, --size' can change this value. otherwise, a nearly maximized window size is set here
+XEPHYRSIZE="-screen $(($XAXIS-100))x$(($YAXIS-100))"   # option '-z, --size' can change this value. otherwise, a nearly maximized window size is set here
 XEPHYRFULLSCREEN="no"                           # option '-f, --fullscreen': use fullscreen mode (Xephyr only)
+XEPHYRGLAMOR="no"                               # option '--glamor': enable Xephyr glamor 2D acceleration
 
 # variables depending on options
 WINDOWMANAGER=""                                # option '-w, --wm': window manager to use
@@ -170,17 +272,23 @@ ADDUSERHOME="no"                                # option '-m, --home': share a f
 ADDUSERHOMEFOLDER=""                            #   "        "   : path to shared folder
 BENUTZER=$USER                                  # name of user to simulate in container
 #
+PULSE_PORT=""                                   # option '--pulseaudio': pulseaudio tcp  to use
+PULSE_MODULE_ID=""                              #   "                    number of customized pulseaudio tcp module, output of pactl
+#
+ORPHANEDCHECK="no"                              # option '--orphaned': check for non-removed containers and maybe root-owned files in cache
 CREATEDESKTOPSTARTER="no"                       # option '--starter': create desktop starter and exit yes/no
 ALLOWROOT="no"                                  # option '--root': allow root to run x11docker
 ONLYSHOWCOMMAND="no"                            # option '-c, --command': if not empty, only show docker command and exit
 GETROOT="su -c"                                 # option '-s, --sudo' will add 'sudo' to command to get root privileges.
 SHOWCIDFILENAME="no"                            # option '--cid': if 'yes', show filename of file containing container ID 
-VERBOSE=""                                      # options '-v, --verbose' and '-V,--VERBOSE' be verbose='verbose/'VERBOSE'=be more verbose, ''=be quiet
+VERBOSE=""                                      # options '-v, --verbose': if "yes", be verbose
 SHOWLOG="no"                                    # option '-l, --log': show log in an xterm window on display :0
 SHOWLOGNEWDISPLAY="no"                          # similar to '--log', but on new display
 PRESERVECACHEFILES="no"                         # option '--cache': preserve cache files instead of removing them on exit
 PRESERVECONTAINER="no"                          # option '-p, --ps': if yes, preserve container instead of removing it with 'docker run --rm'
-
+GPU=""                                          # options '--gpu' and '--virtualgl': Use hardware accelerated OpenGL. Can be empty, "virtualgl" or "xsocket"
+#
+NO_XHOST="no"                                   # option '--no-xhost': if yes, disable all X server access granted by xhost
 # strings collecting pids of background jobs to be killed before exiting
 JOBSTOKILL=""                                   # collections of job pids to kill before exit of script (for 'tail'/option '-V, --VERBOSE')
 XINITJOBSTOKILL=""                              # collection of job pids to kill at end of xinitrc
@@ -194,7 +302,7 @@ WM_GOOD="amiwm blackbox cinnamon compiz ctwm enlightenment fluxbox flwm fvwm"
 WM_GOOD="$WM_GOOD jwm kwin lxsession mate-session mate-wm marco metacity muffin mutter notion olwm olvwm openbox ororobus pekwm"
 WM_GOOD="$WM_GOOD sawfish twm wmaker w9wm xfwm4"
 # these wm's are recommended, lightweight AND desktop independent. best first:
-WM_RECOMMENDED_DESKTOP_LIGHT="flwm blackbox fluxbox jwm mwm wmaker afterstep amiwm fvwm ctwm pekwm olwm olvwm" 
+WM_RECOMMENDED_DESKTOP_LIGHT="flwm blackbox fluxbox jwm mwm wmaker afterstep amiwm fvwm ctwm pekwm olwm olvwm openbox" 
 # these wm's are recommended, heavy AND desktop independent. best first:
 WM_RECOMMENDED_DESKTOP_HEAVY="mate-session lxsession enlightenment"
 # these wm's are recommended and lightweight, but cannot show desktop options. best first:
@@ -215,15 +323,15 @@ WM_ALL="$WM_RECOMMENDED_DESKTOP_LIGHT $WM_RECOMMENDED_NODESKTOP_LIGHT $WM_RECOMM
 error() {    # show error messages on stderr and exit
     echo "x11docker ERROR: $*" >&2
     echo "Type 'x11docker --help' for usage information" >&2
-    echo "For debugging, either enable option '-V, --VERBOSE' or/and" >&2
-    echo "enable option '--cache' and see logfiles in" >&2 
+    echo "For debugging, enable option '-v, --verbose' and run x11docker in terminal" >&2
+    echo "and / or enable option '--cache' and see logfiles in" >&2 
     echo "$CACHEFOLDER" >&2
     echo "" >&2
     exit 1
 }
 warning() {  # show warning message
-    echo "x11docker WARNING: $*"
-    echo ""
+    echo "x11docker WARNING: $*" >&2
+    echo "" >&2
 }
 verbose() {  # show verbose messages
     echo "x11docker: $*"
@@ -248,12 +356,11 @@ killbgpids () { # kill background processes listet in $BGPIDFILE
     ZEIT=""
     COUNT=""
     #
-#    touch $BGPIDFILE  # make sure it exists to avoid error messages
     while read LINE 
     do 
         PID=$(echo $LINE | awk '{print $1}')
         NAME=$(echo $LINE | awk '{print $2}')
-        if [ -n "$(ps -A | grep $PID | grep $NAME)" ] ; then
+        if [ -n "$(pgrep $NAME | grep $PID)" ] ; then
             warning "Found remaining background process.
   Will send signal TERM to process $LINE"
             kill $PID
@@ -269,15 +376,15 @@ killbgpids () { # kill background processes listet in $BGPIDFILE
     if [ -n "$DOCKERPID" ] ; then
         warning "Found remaining docker process. Most probably the
   X session was not closed in a clean way. Could not send TERM signal because 
-  docker runs as root. Will wait up to 5 seconds for docker to finish."
+  docker runs as root. Will wait up to 10 seconds for docker to finish."
         ZEIT=`date +%s`
-        while [ -n "$(ps -A | grep $DOCKERPID | grep 'docker')" ] ; do
+        while [ -n "$(pgrep docker | grep $DOCKERPID)" ] ; do
             echo "waiting for docker to terminate ..."
-            sleep 0.2
+            sleep 0.5
             COUNT=$(echo "`date +%s` - $ZEIT" | bc)
-            if [ 5 -lt $COUNT ] ; then break ; fi
+            if [ 10 -lt $COUNT ] ; then break ; fi
         done
-        if [ -n "$(ps -A | grep $DOCKERPID | grep 'docker')" ] ; then
+        if [ -n "$(pgrep docker | grep $DOCKERPID)" ] ; then
             warning "docker didn't terminate as it should. Will not clean
   cache to avoid file permission problems. You should stop docker and remove
   the new container with command:
@@ -292,25 +399,71 @@ finish() { # trap routine, clean up background processes and cache
     for ARGUMENT in $PIDSTOKILL ; do kill $ARGUMENT ; done  # clean up
     #
     # kill possible remaining background processes (f.e. on interrupt)
-    killbgpids
+    if [ -f "$BGPIDFILE" ] ; then killbgpids ; fi
     #
     # option '--cache': [don't] remove cache files
     if [ "$PRESERVECACHEFILES" = "no" ] ; then 
-        if [ "X$NEWDISPLAY" = "$(basename $CACHEFOLDER)" ] ; then
+        if [ "X`echo $NEWDISPLAY | tr -d :`" = "$(basename $CACHEFOLDER)" ] ; then
             rm -f -R $CACHEFOLDER
         fi
     fi
 }
+no_xhost() { # remove any access to X server granted by xhost
+  xhost | tail -n +2  /dev/stdin | while read LINE ; do  # read all but the first line (header)
+    xhost -$LINE                                         # disable every entry
+  done
+  xhost -                                                # enable access control
+}
+orphaned() { # option --orphaned : check for non-removed containers and left cache files possibly owned by root and created by docker
+  echo "x11docker will check for orphaned containers from earlier sessions. 
+    This can happen if docker was not closed successfully. If this is the case,
+    and option --home was chosen, docker creates missing shared files as 
+    folders owned by root in your home cache folder. This is annoying. x11docker 
+    will try to find such containers and delete all x11docker cache files.
+    Caution: any currently running x11docker sessions will be terminated, too.
+    Please type in your password to get a current list of existing containers:"
+  MATCHCONTAINERS=""
+  MATCHFOLDERS=""
+  cd $CACHEFOLDER
+  while read -r LINE ; do
+    MATCHCONTAINERS="$MATCHCONTAINERS $(echo $LINE | cut -d ' ' -f1)"
+#    FOLDER="$(echo $LINE | rev | cut -d_ -f2 | rev)"
+#    if [ -d "$FOLDER" ] ; then MATCHFOLDERS="$MATCHFOLDERS $FOLDER" ; fi
+  done < <($GETROOT 'docker ps -a' | grep "x11docker_")
+  MATCHFOLDERS=$(echo $(find $CACHEFOLDER -mindepth 1 -maxdepth 1))
+  if [ -z "$MATCHCONTAINERS" ] && [ -z "$MATCHFOLDERS" ] ; then echo "No orphaned containers or cache files found. good luck!"
+  else
+    echo "Found orphaned containers: $MATCHCONTAINERS"
+    echo "Found orphaned folders in $CACHEFOLDER: $MATCHFOLDERS"
+    echo "Type in your password to remove orphaned containers and folders:"
+    if [ -n "$MATCHCONTAINERS" ] && [ -n "$MATCHFOLDERS" ] ; then
+      echo $GETROOT "'docker rm -f $MATCHCONTAINERS ; rm -R -v $MATCHFOLDERS'"
+      eval $GETROOT "'docker rm -f $MATCHCONTAINERS ; rm -R -v $MATCHFOLDERS'"
+    fi
+    if [ -n "$MATCHCONTAINERS" ] && [ -z "$MATCHFOLDERS" ] ; then
+      echo $GETROOT "'docker rm -f $MATCHCONTAINERS'"
+      eval $GETROOT "'docker rm -f $MATCHCONTAINERS'"
+    fi
+    if [ -z "$MATCHCONTAINERS" ] && [ -n "$MATCHFOLDERS" ] ; then
+      echo $GETROOT "'rm -R -v $MATCHFOLDERS'"
+      eval $GETROOT "'rm -R -v $MATCHFOLDERS'"
+    fi
+  fi
+}
 xdparser() { # parse args for x11docker
     #
     SHORT="hw:dxXayrz:scuomfvVeplL"
-    LONG="help,wm:,desktop,command,x,X,xpra,Xpra,xephyr,Xephyr,sudo,root,clipboard,hostuser,sudouser,home,fullscreen,verbose,VERBOSE,exe,cid,cache,ps,resizeable,size:,starter,log,LOG"
+    LONG="help,license,licence,wm:,desktop,command,x,X,xpra,Xpra,xephyr,Xephyr,sudo,root,clipboard,hostuser,sudouser,home,fullscreen,pulseaudio,gpu,virtualgl,verbose,orphaned,exe,cid,cache,ps,resizeable,size:,glamor,starter,log,LOG,no-xhost"
+    LONG="$LONG,devel:,xhost,privileged,xsocket,sharegpu,sharenewxsocket" ### developer options, not for regular use
     PARSED=`getopt --options $SHORT --longoptions $LONG --name "$0" -- "$@"`
+    if [ "$?" != "0" ] ; then error "Error while parsing options. See 'x11docker --help' for vaild options." ; fi
     eval set -- "$PARSED"
-    if [[ $? != 0 ]]; then error $? ; fi
+    if [[ $? != 0 ]]; then error $? ; fi    
     while [ -n "$1" ] ; do
         case $1 in
             -h|--help) usage && exit 0                      # show help/usage and exit
+            ;;
+            --license|--licence) license && exit 0                    # show MIT license and exit
             ;;
             -w|--wm) WINDOWMANAGER=$2 && shift              # custom window manager
             ;;
@@ -320,7 +473,7 @@ xdparser() { # parse args for x11docker
             ;;
             -s|--sudo) GETROOT="sudo $GETROOT"              # use sudo to run 'su -c docker ...'
             ;;
-            -x|-X|--x|--X) AUTOCHOOSESERVER="yes"           # use xpra or Xephir instead of switchung to new tty with X (depending on option --desktop) 
+            -x|--x) AUTOCHOOSESERVER="yes"                  # use xpra or Xephyr instead of switchung to new tty with X (depending on option --desktop) 
                                                             # autodect best way to run
             ;;
             -a|--xpra|--Xpra) XSERVER="XPRA"                # use Xpra instead of X
@@ -329,11 +482,19 @@ xdparser() { # parse args for x11docker
             ;;
             -c|--clipboard) SHARECLIPBOARD="yes"            # share host clipboard with dockered applications (Xpra only)
             ;;
-            -f|--fullscreen) XEPHYRFULLSCREEN="yes"               # fullscreen mode for Xephyr and
+            -f|--fullscreen) XEPHYRFULLSCREEN="yes"         # fullscreen mode for Xephyr
             ;;
             -z|--size) XEPHYRSIZE="-screen $2" && shift     # set screen size for Xephyr
             ;;
-            -r|--resizeable) XEPHYRARGS="$XEPHYRARGS -resizeable" # make Xephyr window resizeable
+            -r|--resizeable) XEPHYRRESIZE="yes"             # make Xephyr window resizeable
+            ;;
+            --glamor) XEPHYRGLAMOR="yes"                    # enable glamor 2D acceleration in Xephyr
+            ;;
+            --pulseaudio) PULSEAUDIO="yes"                  # enable pulseaudio connection / sound support over tcp
+            ;;
+            --gpu) GPU="xsocket" ; XCONNECTION="xsocket"    # use hardware accelerated OpenGL, works only with core X
+            ;;
+            --virtualgl) GPU="virtualgl"                    # use hardware acceleration with VirtualGL
             ;;
             -e|--exe) X11DOCKERMODE="exe"                   # execute application from host instead of running docker image
             ;;
@@ -342,7 +503,7 @@ xdparser() { # parse args for x11docker
             -u|--hostuser) ADDHOSTUSER="yes"                # create user similar to host user in created container
             ;;
             -o|--sudouser) ADDHOSTUSER="yes"                # same as '--hostuser', but with root rights via sudo without password
-                            ADDSUDOUSER="yes"
+                           ADDSUDOUSER="yes"
             ;;
             -m|--home) ADDUSERHOME="yes"                    # share folder ~/x11docker/IMAGENAME with container
             ;;
@@ -354,13 +515,28 @@ xdparser() { # parse args for x11docker
             ;;
             --cache) PRESERVECACHEFILES="yes"               # don't remove cache files on exit
             ;;
-            -v|--verbose) VERBOSE="verbose"                 # be verbose
-            ;;
-            -V|--VERBOSE) VERBOSE="VERBOSE"                 # be very verbose
+            -v|--verbose) VERBOSE="yes"                     # be verbose
             ;;
             -l|--log) SHOWLOG="yes"                         # Show logs in an xterm window on display :0
             ;;
             -L|--LOG) SHOWLOGNEWDISPLAY="yes"               # Show logs in an xterm window on new display
+            ;;
+            --orphaned) ORPHANEDCHECK="yes"                 # check for orphaned containers and files owned by root, created by docker)
+            ;;
+            --no-xhost) NO_XHOST="yes"                      # disable any access granted by xhost
+            ;;
+            #####some developer options, not for regular use, can change any time
+            --devel) DEVMODE="$2" && shift  && echo "DEVMODE $DEVMODE"  # non-documented developer option. effect can change at any time.
+            ;;
+            --xhost) XHOST="+"                              # set 'xhost +' on both X servers
+            ;;
+            --privileged) PRIVILEGED="yes"                  # run docker in privileged mode
+            ;;
+            --xsocket) XCONNECTION="xsocket"                # Use shared X socket instead of default X over tcp
+            ;;
+            --sharegpu) if [ -z "$GPU" ] ; then GPU="sharegpu" ; fi   # share devices in /dev/dri
+            ;;
+            --sharenewxsocket) SHARENEWXSOCKET="yes"
             ;;
             --) shift                                       # arguments to submit to docker (or host executable)
                 if [ "$X11DOCKERMODE" != "exe" ] ; then X11DOCKERMODE="run" ; fi             # will run image, if not already changed to '--exe'
@@ -375,7 +551,7 @@ xdparser() { # parse args for x11docker
                     shift
                 done
                 if [ -n "$IMAGECOMMAND" ] ; then
-                    IMAGECOMMAND=`echo $IMAGECOMMAND | cut -d " " -f 2- `                    # remove image name from image command
+                    IMAGECOMMAND=`echo $IMAGECOMMAND | cut -s -d " " -f 2- `                    # remove image name from image command
                 fi
                 if [ -z "$(eval echo $DOCKERARGS)" ] ; then X11DOCKERMODE="onlyX" ; fi       # if arguments are empty, then only run X server with window manager
             ;;
@@ -402,7 +578,7 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
 " > "$HOME/.config/compiz-1/compizconfig/Default.ini"
             fi
             ;;
-        enlightenment|e17|e16) WINDOWMANAGER="enlightenment_start"
+        enlightenment|e17|e16|e19) WINDOWMANAGER="enlightenment_start"
                                WM_NAME="enlightenment"
             ;;
         gnome|gnome-shell|gnome-session) # crashes without option '--sm-disable' on ubuntu 14.04
@@ -436,7 +612,7 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
   x11docker will try to find another one on your system."
             WINDOWMANAGER="lookfornewwindowmanager"
             ;;
-        openbox) # disable session management of openbox, otherwise it could stop your main session, too
+        openbox) # disable session management of openbox, otherwise it could shut down your main session, too
             WINDOWMANAGER="openbox --sm-disable"
             ;;
     esac
@@ -452,100 +628,110 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
         esac
     fi
 }
-{ ######################## part: some init (parsing, checking permissions)
 
-## trap
-#
-trap finish EXIT
+{ #### part: some init (parsing, checking permissions)
+  trap finish EXIT
 
-## parse x11dockerrc, if exists
-#
-if [ -e "$X11DOCKERRC" ] ; then xdparser $(tail -1 $X11DOCKERRC) ;fi
+  ## parse x11dockerrc, if exists
+  #
+  if [ -e "$X11DOCKERRC" ] ; then xdparser $(tail -1 $X11DOCKERRC) ;fi
+  
+  ## parse command line options for x11docker
+  #
+  xdparser $X11DOCKERARGS
 
-## parse command line options for x11docker
-#
-xdparser $X11DOCKERARGS
-
-## check if docker is installed
-#
-if [ "$X11DOCKERMODE" = "run" ] ; then
+  ## check if docker is installed
+  #
+  if [ "$X11DOCKERMODE" = "run" ] ; then
     command -v "docker" >/dev/null 2>&1 || { error "could not find docker.
   You need it to run docker images. Please install docker with command:
-  apt-get install docker.io" 
-  }
-fi
+  apt-get install docker.io" ; }
+  fi
 
-## check if script runs as root, if yes, show error & exit
-#
-if [ "$ALLOWROOT" = "no" ] ; then   # option '-r,--root': if "yes", allow root to run x11docker
+  ## check if script runs as root, if yes, show error & exit
+  #
+  if [ "$ALLOWROOT" = "no" ] ; then   # option '-r,--root': if "yes", allow root to run x11docker
     if [ "0" = "$(id -u)" ] ; then
         error "x11docker should not run as root. Every child process of 
   the new X server would get root privileges, too. To run docker, you will be
   prompted for your root password only for this one command.
   On systems without a root password, like Ubuntu, choose option '-s, --sudo'
-  If you want to allow root to run x11docker, use option '-r, --root'"
+  If you want to allow root to run x11docker, use option '--root'"
     fi
-else
+  else
     if [ "0" = "$(id -u)" ] ; then GETROOT="" ; fi   # if running as root and it is allowed, then disable password prompt
-fi
+  fi
 
-## if user is member of group docker, then avoid password prompt
-#
-if [ -n "`id | grep docker`" ] ; then GETROOT="" ; fi
+  ## if user is member of group docker, then avoid password prompt
+  #
+  if [ -n "`id | grep docker`" ] ; then GETROOT="" ; fi
 
-## if desktop starter should be created, check if xdg-user-dir is installed
-#
-if [ "$CREATEDESKTOPSTARTER" = "yes" ] ; then
+  ## if desktop starter should be created, check if xdg-user-dir is installed
+  #
+  if [ "$CREATEDESKTOPSTARTER" = "yes" ] ; then
     command -v "xdg-user-dir" >/dev/null 2>&1 || { error "could not find xdg-user-dir.
   x11docker needs it to create a desktop starter. Please install xdg-utils with
   command:
-  apt-get install xdg-utils"
-    }
-fi
-
+  apt-get install xdg-utils" ; }
+  fi
+  
+  ## option --orphaned : check for non-removed containers and left cache files possibly owned by root and created by docker
+  if [ "$ORPHANEDCHECK" = "yes" ] ; then 
+    orphaned
+    exit
+  fi
+  
+  ## option '--pulseaudio': find a free tcp port
+  if [ "$PULSEAUDIO" = "yes" ] ; then
+    read LOWERPORT UPPERPORT < /proc/sys/net/ipv4/ip_local_port_range
+    while : ; do
+      PULSE_PORT="`shuf -i $LOWERPORT-$UPPERPORT -n 1`"
+      ss -lpn | grep -q ":$PULSE_PORT " || break
+    done
+  fi
 }
-{ ######################## part: choose and check X server
 
-## option '-x, --X': show on display :0 instead of switching to another tty
-#  check if either xpra or Xephir should be used for this job
-#
-if [ "$AUTOCHOOSESERVER" = "yes" ] ; then
+{ #### check X server
+  ## option '-x, --X': show on display :0 instead of switching to another tty
+  #  check if either xpra or Xephir should be used for this job
+  #
+  if [ "$AUTOCHOOSESERVER" = "yes" ] ; then
     if [ "$DESKTOPIMAGE" = "no" ] ; then
         XSERVER="XPRA"      # use xpra for single applications
     else
         XSERVER="XEPHYR"    # use Xephyr for desktop environments
     fi
-fi
+  fi
 
-## check if choosed X server is installed
-#
-if [ "$XSERVER" = "XPRA" ] ; then                                 # check Xpra
+  ## check if choosed X server is installed
+  #
+  if [ "$XSERVER" = "XPRA" ] ; then                                 # check Xpra
     command -v "/usr/bin/xpra" >/dev/null 2>&1 || { warning "could not find executable '/usr/bin/xpra'. 
-  Also needed: 'xvfb' Try 'apt-get install xpra xvfb' to install Xpra and Xvfb.
+  Try 'apt-get install xpra' to install Xpra.
   Fallback: x11docker will try to use Xephyr"
     XSERVER="XEPHYR"
     }
-fi
-if [ "$XSERVER" = "XEPHYR" ] ; then                               # check Xephyr
+  fi
+  if [ "$XSERVER" = "XEPHYR" ] ; then                               # check Xephyr
     command -v "/usr/bin/Xephyr" >/dev/null 2>&1 || { warning "could not find executable '/usr/bin/Xephyr'. 
   Try 'apt-get install xephyr' to install Xephyr.
   Fallback: x11docker will try to use X11"
     XSERVER="X11"
     }
-fi
-if [ "$XSERVER" = "XPRA" ] ; then    # check Xvfb
-    command -v "/usr/bin/Xvfb" >/dev/null 2>&1 || { warning "could not find executable '/usr/bin/Xvfb'. 
-  Try 'apt-get install xvfb' to install Xvfb. Need Xvfb to run Xpra.
-  Fallback: x11docker will try to use X11"
-    XSERVER="X11"
-    }
-fi
-if [ "$XSERVER" = "X11" ] ; then                                 # check X
+  fi
+#  if [ "$XSERVER" = "XPRA" ] ; then    # check Xvfb ### now using Xdummy instead
+#    command -v "/usr/bin/Xvfb" >/dev/null 2>&1 || { warning "could not find executable '/usr/bin/Xvfb'. 
+#  Try 'apt-get install xvfb' to install Xvfb. Need Xvfb to run Xpra.
+#  Fallback: x11docker will try to use X11"
+#    XSERVER="X11"
+#    }
+#  fi
+  if [ "$XSERVER" = "X11" ] ; then                                 # check X
     command -v "/usr/bin/X" >/dev/null 2>&1 || { error "Could not find executable '/usr/bin/X'. 
   Try 'apt-get install xorg' to install X server."
     }
     # if x11docker is running from within an X server, check if user is allowed to run a new X server
-    if [ -z "`cat /etc/X11/Xwrapper.config | grep "allowed_users=anybody"`" ] && [ -n "$STARTDISPLAY" ] ; then
+    if [ -z "`grep "allowed_users=anybody" </etc/X11/Xwrapper.config`" ] && [ -n "$STARTDISPLAY" ] ; then
             error "You are not allowed to start a new X server.
   To start a new X server from within an already running X session, you need
   to run 'dpkg-reconfigure x11-common' and choose option 'anybody'.
@@ -555,13 +741,13 @@ if [ "$XSERVER" = "X11" ] ; then                                 # check X
   new X server)
   Otherwise, you can use Xpra or Xephyr (see options '--xpra' and '--xephyr')."
     fi
-fi
+  fi
 
-## check for already running X server, if $XSERVER is not "X11"
-# Xpra and Xephyr need an already running X server for their output window(s)
-# (check could be better, not only for standard :0)
-#
-if [ "$XSERVER" != "X11" ] && [ -z "$STARTDISPLAY" ] ; then
+  ## check for already running X server, if $XSERVER is not "X11"
+  # Xpra and Xephyr need an already running X server for their output window(s)
+  # (check could be better, not only for standard :0)
+  #
+  if [ "$XSERVER" != "X11" ] && [ -z "$STARTDISPLAY" ] ; then
     if [ -S "/tmp/.X11-unix/X0" ] ; then
         STARTDISPLAY=":0"
         echo "NOTE: $XSERVER will show its content on display $STARTDISPLAY"
@@ -569,11 +755,11 @@ if [ "$XSERVER" != "X11" ] && [ -z "$STARTDISPLAY" ] ; then
         error "No X server found on display :0. You cannot run $XSERVER 
   without an already running X server. Exiting."
     fi
-fi
+  fi
 }
-{ ######################## part: choose and check window manager
 
-if [ "$DESKTOPIMAGE" = "no" ] && [ ! "$XSERVER" = "XPRA" ] ; then  # check only if a window manager is needed
+{ #### part: choose and check window manager
+  if [ "$DESKTOPIMAGE" = "no" ] && [ ! "$XSERVER" = "XPRA" ] ; then  # check only if a window manager is needed
     #
     ## try to find out current window manager to use it for x11docker (i.e., run a new instance of it)
     #
@@ -590,7 +776,7 @@ if [ "$DESKTOPIMAGE" = "no" ] && [ ! "$XSERVER" = "XPRA" ] ; then  # check only 
     #
     if [ -n "$WINDOWMANAGER" ] ; then
         # get base name without options of window manager
-        WM_NAME=$(echo `basename $WINDOWMANAGER` | awk '{print $1}')
+        WM_NAME=$(basename $WINDOWMANAGER | awk '{print $1}')
         # check window manager, set configs, if needed
         configwindowmanager
     fi
@@ -605,7 +791,7 @@ if [ "$DESKTOPIMAGE" = "no" ] && [ ! "$XSERVER" = "XPRA" ] ; then  # check only 
     fi
     #
     ## again, get base name without options of window manager
-    WM_NAME=$(echo `basename $WINDOWMANAGER` | awk '{print $1}')
+    WM_NAME=$(basename $WINDOWMANAGER | awk '{print $1}')
     # again, check window manager, set configs, if needed
     configwindowmanager
     #
@@ -617,97 +803,160 @@ if [ "$DESKTOPIMAGE" = "no" ] && [ ! "$XSERVER" = "XPRA" ] ; then  # check only 
   Type 'x11docker --help' to get a list of recommended window managers."
     fi
     #
-else
+  else
     WINDOWMANAGER=""     # if XPRA works as window manager, or image contains its own wm/DE, then x11docker doesn't need one
-fi
+  fi
 }
-{ ######################## part: check free display, create cache folders and rename cache files
 
-## create main cache folder and config folder, if not already present
-#
-mkdir -p $CACHEFOLDER
-mkdir -p $CONFIGFOLDER
+{ #### part: check free display, create cache folders and rename cache files
+  ## create main cache folder and config folder, if not already present
+  #
+  mkdir -p $CACHEFOLDER
+  mkdir -p $CONFIGFOLDER
 
-## Look for next free display and change some display specific variables
-#
-case $XSERVER in                 # set initial value for searching
+  ## Look for next free display and change some display specific variables
+  #
+  case $XSERVER in                 # set initial value for searching
     X11) NEWDISPLAY="0" ;;       # low number for X displays
     XPRA) NEWDISPLAY="100" ;;    # high numbers fpr Xpra displays
     XEPHYR) NEWDISPLAY="200" ;;  # higher number for Xephyr displays
-esac
-#
-while [ -e "/tmp/.X11-unix/X$NEWDISPLAY" ]  || [ -e "$CACHEFOLDER/X$NEWDISPLAY" ] ; do   # search unused X socket, overhop already used cache numbers
+  esac
+  #
+  while [ -e "/tmp/.X11-unix/X$NEWDISPLAY" ]  || [ -e "$CACHEFOLDER/X$NEWDISPLAY" ] ; do   # search unused X socket, overhop already used cache numbers
     NEWDISPLAY=$(($NEWDISPLAY + 1))
-done
-#
-CACHEFOLDER="$CACHEFOLDER/X$NEWDISPLAY"                    # set name of cache subfolder
-#
-XINITRC="$CACHEFOLDER/$XINITRC"
-XINITLOGFILE="$CACHEFOLDER/$XINITLOGFILE"
-XTERMRC="$CACHEFOLDER/$XTERMRC"
-XTERMLOGFILE="$CACHEFOLDER/$XTERMLOGFILE"
-DOCKERLOGFILE="$CACHEFOLDER/$DOCKERLOGFILE"
-DOCKERPIDFILE="$CACHEFOLDER/$DOCKERPIDFILE"
-XSERVERCOOKIE="$CACHEFOLDER/$XSERVERCOOKIE"
-XCLIENTCOOKIE="$CACHEFOLDER/$XCLIENTCOOKIE"
-XPRASERVERLOGFILE="$CACHEFOLDER/$XPRASERVERLOGFILE"
-XCOMMANDFILE="$CACHEFOLDER/$XCOMMANDFILE"
-#VNCPASSWORDFILE="$CACHEFOLDER/$VNCPASSWORDFILE"
-#VNCEXPECTRC="$CACHEFOLDER/$VNCEXPECTRC"
-#VNCPORT="$(expr 5900 + $NEWDISPLAY)"
-CIDFILE="$CACHEFOLDER/$CIDFILE"
-BGPIDFILE="$CACHEFOLDER/$BGPIDFILE"
-CREATEUSERSCRIPT="$CACHEFOLDER/$CREATEUSERSCRIPT"
-SHARECLIPBOARDSCRIPT="$CACHEFOLDER/$SHARECLIPBOARDSCRIPT"
-#NEWXSOCKET="/tmp/.X11-unix/X$NEWDISPLAY"
-#NEWXLOCK="/tmp/.X$NEWDISPLAY-lock"
-#
-NEWDISPLAY=":$NEWDISPLAY"                                  # finally: add ':' to $NEWDISPLAY
+  done
+  #
+  CACHEFOLDER="$CACHEFOLDER/X$NEWDISPLAY"                    # set name of cache subfolder
+  #
+  XINITRC="$CACHEFOLDER/$XINITRC"
+  XINITLOGFILE="$CACHEFOLDER/$XINITLOGFILE"
+  XTERMRC="$CACHEFOLDER/$XTERMRC"
+  XTERMLOGFILE="$CACHEFOLDER/$XTERMLOGFILE"
+  DOCKERLOGFILE="$CACHEFOLDER/$DOCKERLOGFILE"
+  DOCKERPIDFILE="$CACHEFOLDER/$DOCKERPIDFILE"
+  XSERVERCOOKIE="$CACHEFOLDER/$XSERVERCOOKIE"
+  XCLIENTCOOKIE="$CACHEFOLDER/$XCLIENTCOOKIE"
+  XPRASERVERLOGFILE="$CACHEFOLDER/$XPRASERVERLOGFILE"
+  XCOMMANDFILE="$CACHEFOLDER/$XCOMMANDFILE"
+  CIDFILE="$CACHEFOLDER/$CIDFILE"
+  BGPIDFILE="$CACHEFOLDER/$BGPIDFILE"
+  CREATEUSERSCRIPT="$CACHEFOLDER/$CREATEUSERSCRIPT"
+  SHARECLIPBOARDSCRIPT="$CACHEFOLDER/$SHARECLIPBOARDSCRIPT"
+  NEWXSOCKET="/tmp/.X11-unix/X$NEWDISPLAY"
+  #NEWXLOCK="/tmp/.X$NEWDISPLAY-lock"
+  NEWXVT="vt$[7+$NEWDISPLAY]"
+  #
+  NEWDISPLAY=":$NEWDISPLAY"                                  # finally: add ':' to $NEWDISPLAY
 
 
-## Get inet Adress of docker0 interface and
-#  set $TCPDISPLAY (display number for dockered applications, connected to X over tcp)
-#
-DOCKERIP=`ip -4 -o a | grep docker0 | awk '{print $4}' | cut -d/ -f1`
-TCPDISPLAY=$DOCKERIP$NEWDISPLAY
+  ## Get inet Adress of docker0 interface and
+  #  set $TCPDISPLAY (display number for dockered applications, connected to X over tcp)
+  #
+  DOCKERFULLIP=`ip -4 -o a | grep docker0 | awk '{print $4}'`
+  DOCKERIP=`echo $DOCKERFULLIP | cut -d/ -f1`
+  TCPDISPLAY=$DOCKERIP$NEWDISPLAY
 
-## create and clean cache subfolder
-#
-mkdir -p $CACHEFOLDER
-rm -f -R $CACHEFOLDER/*
-
+  ## create and clean cache subfolder
+  #
+  mkdir -p $CACHEFOLDER
+  rm -f -R $CACHEFOLDER/*
 }
-{ ######################## part: create command to run docker
 
-## create docker command
-#
-case $X11DOCKERMODE in
+{ #### part: create command to run docker
+
+  case $X11DOCKERMODE in
     run)
-        COMMAND='docker run'
-        COMMAND="$COMMAND -e DISPLAY=$TCPDISPLAY"                                  # display over tcp 
-        COMMAND="$COMMAND -v $XCLIENTCOOKIE:/Xcookie:ro -e XAUTHORITY=/Xcookie"    # share new X authentication cookie file
-        COMMAND="$COMMAND --cidfile=$CIDFILE"                                      # write container id in file $CIDFILE
+      CONTAINERNAME="x11docker_X$(echo $NEWDISPLAY | cut -b 2-)_$(mcookie | cut -c -6)"
+      COMMAND='docker run'
+      COMMAND="$COMMAND --cidfile=$CIDFILE"                                                           # write container id in file $CIDFILE
+      COMMAND="$COMMAND --name=$CONTAINERNAME"     # give container a name that can be found with --orphaned
+      COMMAND="$COMMAND -v $XCLIENTCOOKIE:/Xcookie:ro -e XAUTHORITY=/Xcookie"                         # share new X authentication cookie file
     ;;
     exe|onlyX) COMMAND="# dontrundocker"
     ;;
-esac
+  esac
+  
+  ## Use X over tcp (default) or shared X socket
+  case $XCONNECTION in
+    tcp)     # default
+      COMMAND="$COMMAND -e DISPLAY=$TCPDISPLAY"
+      ;;
+    xsocket) # options '--gpu' and '--xsocket'
+      COMMAND="$COMMAND -e DISPLAY=$NEWDISPLAY"
+      SHARENEWXSOCKET="yes"
+      ;;
+  esac
 
-## option '-p, --ps': preserve container yes/no
-#
-if [ "$PRESERVECONTAINER" = "no" ] ; then COMMAND="$COMMAND --rm" ; fi
+  
+  ## option '--pulseaudio'
+  #
+  if [ "$PULSEAUDIO" = "yes" ] ; then COMMAND="$COMMAND -e PULSE_SERVER=tcp:$DOCKERIP:$PULSE_PORT" ; fi # provide pulseaudio server
 
-## option '--home': share folder ~/.local/share/x11docker/IMAGENAME with created container as its home directory
-#
-if [ "$ADDUSERHOME" = "yes" ] ; then
+  ### developer option '--privileged' ### SECURITY: breaks container isolation, testing purpuoses only
+  #
+  if [ -n "$PRIVILEGED" ] ; then COMMAND="$COMMAND --privileged" ; fi
+
+
+#  # QT environment variables
+#      COMMAND="$COMMAND -e QT_GRAPHICSSYSTEM=raster"                                # raster or native. Can influence rendering problems in qt4
+#      COMMAND="$COMMAND -e QT_X11_NO_MITSHM=1"
+
+  ## option '--virtualgl' : Provide hardware OpenGL acceleration with VirtualGL
+  #
+  if [ "$GPU" = "virtualgl" ] ; then
+    case $XSERVER in
+      XPRA|XEPHYR)
+        COMMAND="$COMMAND -v /tmp/.X11-unix/X0:/tmp/.X11-unix/X0:ro"            # share X socket from :0 ### SECURITY issue, breaks container isolation from display :0
+        COMMAND="$COMMAND -e VGL_DISPLAY=$STARTDISPLAY"
+        ;;
+      X11)
+        SHARENEWXSOCKET="yes"
+        COMMAND="$COMMAND -e VGL_DISPLAY=$NEWDISPLAY"
+        ;;        
+    esac
+    COMMAND="$COMMAND -e LD_PRELOAD=libdlfaker.so:libvglfaker.so"               # virtualgl libs to catch OpenGL/GLX calls
+    COMMAND="$COMMAND -v /usr/lib/libdlfaker.so:/usr/lib/libdlfaker.so:ro -v /usr/lib/libvglfaker.so:/usr/lib/libvglfaker.so:ro" 
+    COMMAND="$COMMAND -e VBOX_CROGL_FORCE_SUPPORTED=1 -e VGL_ISACTIVE=1"
+    COMMAND="$COMMAND -e PROMAGIC_USEGLX=1 -e GEOPROBE_USEGLX=1"
+    COMMAND="$COMMAND -e VGL_COMPRESS=0"                                        # disable image compression. Without this, xpra crashes
+#    COMMAND="$COMMAND -e VGL_VERBOSE=1"                                         # Makes VirtualGL verbose
+#    COMMAND="$COMMAND -e VGL_LOGO=1"                                            # shows VGL logo in rendered images
+  fi
+  
+  ## options --virtualgl, --xsocket, --sharenewxsocket
+  if [ "$SHARENEWXSOCKET" = "yes" ] ; then
+    COMMAND="$COMMAND -v $NEWXSOCKET:$NEWXSOCKET:ro"    # share X socket from $NEWDISPLAY ### does not break isolation from display :0
+  fi
+  
+  ## options '--gpu', '--virtualgl': share graphic adapter device files ### SECURITY degrades container isolation
+  #
+  if [ -n "$GPU" ] ; then
+    while read -r FILE ; do
+      echo $FILE
+#      if [ -c "$FILE" ] ; then COMMAND="$COMMAND --device=$FILE:$FILE:rw" ; fi
+      COMMAND="$COMMAND --device=$FILE:$FILE:rw"
+    done < <(find /dev/dri/*)
+  fi
+
+  ## option '-p, --ps': preserve container yes/no
+  #
+  if [ "$PRESERVECONTAINER" = "no" ] ; then COMMAND="$COMMAND --rm" ; fi
+
+  ## option '--home': share folder ~/.local/share/x11docker/IMAGENAME with created container as its home directory
+  #
+  if [ "$ADDUSERHOME" = "yes" ] ; then
     # define path to shared folder and remove '/' from image name
     ADDUSERHOMEFOLDER=$HOME/.local/share/x11docker/`echo $IMAGENAME | tr / -`
     mkdir -p $ADDUSERHOMEFOLDER
+    # create symbolic link in $HOME
+    if [ ! -e $HOME/x11docker ] ; then ln -s $HOME/.local/share/x11docker $HOME/x11docker ; fi
     COMMAND="$COMMAND -v $ADDUSERHOMEFOLDER:/home/$BENUTZER"
-fi
+  fi
 
-## option '-u, --hostuser' : create container user similar to host user
-#
-if [ "$ADDHOSTUSER" = "yes" ] ; then
+  ## option '-u, --hostuser' : create container user similar to host user
+  #
+  if [ "$ADDHOSTUSER" = "yes" ] ; then
+    DOCKERUSER=$BENUTZER
     #
     # CMD in image will be overwritten by createuser script. If none is defined on CLI, get CMD from image
     # ('docker inspect' needs root permissions. That's not nice. Have to ask for password)
@@ -727,68 +976,112 @@ if [ "$ADDHOSTUSER" = "yes" ] ; then
     #
     # create script createuser. It will also start the image with given (or extracted) command
     #
-    echo "#! /bin/bash"                                                > $CREATEUSERSCRIPT
-    # create user
-    echo "addgroup --gid `id -g $BENUTZER` $BENUTZER"                  >> $CREATEUSERSCRIPT
-    echo "adduser --disabled-password  --uid `id -u` --gid `id -g` --gecos " '""' " --home /home/$BENUTZER $BENUTZER"  >> $CREATEUSERSCRIPT
-    echo "chown $BENUTZER:$BENUTZER /home/$BENUTZER"                   >> $CREATEUSERSCRIPT
-    echo "HOME=/home/$BENUTZER"                                        >> $CREATEUSERSCRIPT
-    # option '--sudouser': add sudo permissions without password
-    if [ "$ADDSUDOUSER" = "yes" ] ; then
-        echo 'echo "%sudo ALL=(ALL) NOPASSWD:ALL"   >> /etc/sudoers'   >> $CREATEUSERSCRIPT
-        echo "adduser $BENUTZER sudo"                                  >> $CREATEUSERSCRIPT
-    fi
-    # run image command as user:
-    echo "su $BENUTZER -c '$IMAGECOMMAND'"                             >> $CREATEUSERSCRIPT
+    { echo "#! /bin/bash"
+      # create user
+      echo "addgroup --gid `id -g $BENUTZER` $BENUTZER"
+      echo "adduser --disabled-password  --uid `id -u` --gid `id -g` --gecos " '""' " --home /home/$BENUTZER $BENUTZER"
+      echo "chown $BENUTZER:$BENUTZER /home/$BENUTZER"
+      echo "HOME=/home/$BENUTZER"
+      
+      # Workaround to avoid GTK rendering errors in Xfce with shared X socket. Unclear reasons
+      # echo 'rm $HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml'
+      
+      # option '--sudouser': add sudo permissions without password
+      if [ "$ADDSUDOUSER" = "yes" ] ; then
+          echo 'echo "%sudo ALL=(ALL) NOPASSWD:ALL"   >> /etc/sudoers'
+          echo "adduser $BENUTZER sudo"
+      fi
+      
+      # option '--virtualgl': if VirtualGL server is configured for authorisized access, one has to be member of vglusers
+      if [ "$GPU" = "virtualgl" ] ; then      
+        if [ -n "$(cat /etc/group | grep pulse:)" ] ; then
+          echo "addgroup --gid $(cat /etc/group | grep pulse: | cut -d: -f3) vglusers"
+          echo "adduser $BENUTZER vglusers"
+        fi
+      fi
+       # option '--gpu': add user to group video
+      echo "adduser $BENUTZER video" # add user to group video, needed for option --gpu
+      # run image command as user:
+      echo "su $BENUTZER -c '$IMAGECOMMAND'"
+    } > $CREATEUSERSCRIPT
     #
     # include created script in container
     COMMAND="$COMMAND -v $CREATEUSERSCRIPT:/createuser"
     # use created script as command (CMD) to run image
     DOCKERARGS="$DOCKEROPTIONS $IMAGENAME /bin/bash /createuser"
-fi
+  else
+    DOCKERUSER="root"
+  fi
 
-# add custom docker commands
-#
-COMMAND="$COMMAND $DOCKERARGS"
+  # add custom docker commands 
+  #
+  COMMAND="$COMMAND $DOCKERARGS"
 
-## option '-c, --command': only show created docker command and exit
-#
-if [ "$ONLYSHOWCOMMAND" = "yes" ] ; then echo $COMMAND && exit 0 ; fi
+  ## option '-c, --command': only show created docker command and exit
+  #
+  if [ "$ONLYSHOWCOMMAND" = "yes" ] ; then echo $COMMAND && exit 0 ; fi
 
-## option '--cid': show filename of file that will contain container id
-#
-if [ "$SHOWCIDFILENAME" = "yes" ] ; then echo $CIDFILE ; fi
-
+  ## option '--cid': show filename of file that will contain container id
+  #
+  if [ "$SHOWCIDFILENAME" = "yes" ] ; then echo $CIDFILE ; fi
 }
-{ ######################## part: create command to start X server
 
-case $XSERVER in
-    X11) XCOMMAND="/usr/bin/X $NEWDISPLAY $X11ARGS -auth $XSERVERCOOKIE"
-        ;;
-    XPRA) # To use Xpra, Xvfb will run first. Xpra server doesn't allow tcp connections, even if it is told to do it.
-        case $SHARECLIPBOARD in         # option '-c, --clipboard'
-            yes) XPRAARGS="$XPRAARGS --clipboard"   ;;
-            no) XPRAARGS="$XPRAARGS --no-clipboard" ;;
+{ #### part: create command to start X server
+  XEXTENSIONS=""
+  XEXTENSIONS="$XEXTENSIONS +extension Composite +extension RANDR +extension RENDER +extension GLX +extension XVideo +extension DOUBLE-BUFFER +iglx"
+  XEXTENSIONS="$XEXTENSIONS +extension X-Resource +extension SECURITY +extension DAMAGE"
+  case $GPU in
+    yes)
+      XEXTENSIONS="$XEXTENSIONS -nolisten tcp"           # disable connections to X over tcp
+    ;;
+  esac
+  XEXTENSIONS="$XEXTENSIONS -auth $XSERVERCOOKIE"    # cookie authentication
+  
+  ### test SECURITY issue
+#  XEXTENSIONS="$XEXTENSIONS +extension XTEST"
+  
+  case $XSERVER in
+    X11) 
+         XEXTENSIONS="$XEXTENSIONS +extension XFree86-DRI +extension XFree86-DGA +extension XFree86-VidModeExtension"
+         XEXTENSIONS="$XEXTENSIONS +extension MIT-SHM"
+         #XEXTENSIONS="$XEXTENSIONS +extension DRI +extension DRI2 +extension DRI3 +extension SGI-GLX +extension SHAPE"
+         XCOMMAND="/usr/bin/X $NEWDISPLAY $NEWXVT -retro $XEXTENSIONS"
+    ;;
+    XPRA) # To use Xpra, Xdummy will run first. Xpra server doesn't allow tcp connections, even if it is told to do it.
+        XEXTENSIONS="$XEXTENSIONS +extension MIT-SHM"
+        case $SHARECLIPBOARD in                                                           # option '-c, --clipboard'
+            yes) XPRAARGS="--clipboard"   ;;
+            no)  XPRAARGS="--no-clipboard" ;; 
         esac
         # screen size could be checked better - see xpra/xvfb/xdummy sites about this
-        XCOMMAND="/usr/bin/Xvfb $NEWDISPLAY $XVFBARGS -screen 0 16384x8192x24+32 -auth $XSERVERCOOKIE"
-        ;;
+#        XCOMMAND="/usr/bin/Xvfb $NEWDISPLAY $XEXTENSIONS -screen 0 16384x8192x24+32"
+#        XCOMMAND="/usr/bin/Xvfb $NEWDISPLAY $XEXTENSIONS -screen 0 ${XAXIS}x${YAXIS}x24+32"                          # command to run Xvfb for xpra
+        XEXTENSIONS="$XEXTENSIONS +extension MIT-SHM"
+        XCOMMAND="/usr/bin/Xorg $NEWDISPLAY -config /etc/xpra/xorg.conf -verbose $XEXTENSIONS"                        # command to run Xdummy
+    ;;
     XEPHYR)
         case $XEPHYRFULLSCREEN in    # option '--fullscreen'
             yes) XEPHYRARGS="$XEPHYRARGS -fullscreen" ;;
             no) XEPHYRARGS="$XEPHYRARGS $XEPHYRSIZE" ;;
         esac
-        XEPHYRARGS="$XEPHYRARGS -title XEPHYR$WINDOWTITLE"  # set window title 
-        XCOMMAND="/usr/bin/Xephyr $NEWDISPLAY $XEPHYRARGS -auth $XSERVERCOOKIE"
-        ;;
-esac
+        case $XEPHYRRESIZE in        # option '--resizeable'
+            yes) XEPHYRARGS="$XEPHYRARGS -resizeable" ;;
+        esac
+        case $XEPHYRGLAMOR in        # option '--resizeable'
+            yes) XEPHYRARGS="$XEPHYRARGS -glamor" ;;
+        esac
+        XEPHYRARGS="$XEPHYRARGS -title ${NEWDISPLAY}${WINDOWTITLE}"  # set window title 
+        XCOMMAND="/usr/bin/Xephyr $NEWDISPLAY -retro $XEXTENSIONS $XEPHYRARGS"
+    ;;
+  esac
 }
-{ ######################## part: option '-c, --clipboard' create shareclipboard.bash
-#
-# use xclip to share text clipboard content between X servers.
-# xpra has its own clipboard management including image transfer
-#
-if [ "$SHARECLIPBOARD" = "yes" ] && [ ! "$XSERVER" = "XPRA" ] ; then
+
+{ #### part: option '-c, --clipboard' create shareclipboard.bash
+  #
+  # use xclip to share text clipboard content between X servers.
+  # xpra has its own clipboard management including image transfer
+  #
+  if [ "$SHARECLIPBOARD" = "yes" ] && [ ! "$XSERVER" = "XPRA" ] ; then
     if [ -z "$(command -v 'xclip')" ] ; then
         warning "Cannot share clipboard. Need package 'xclip' to be
   installed. Try installing xclip with command: 'apt-get install xclip'"
@@ -798,7 +1091,7 @@ if [ "$SHARECLIPBOARD" = "yes" ] && [ ! "$XSERVER" = "XPRA" ] ; then
 # share clipboard between two X servers
 echo "x11docker: starting clipboard service"
 
-while [ 1 ] ; do
+while true ; do
     # read content of clipboard of first X server
     XAUTHORITY='$STARTXAUTHORITY'
     D1CLIP=$(xclip -selection clipboard -o -display '$STARTDISPLAY')
@@ -816,6 +1109,10 @@ while [ 1 ] ; do
         CLIP=$D2CLIP
         xclip -selection clipboard -o -display '$NEWDISPLAY' | XAUTHORITY='$STARTXAUTHORITY' xclip -selection clipboard -i -display '$STARTDISPLAY'
     fi
+    
+    if [ -z "$CLIP" ] ; then 
+      CLIP=" ";
+    fi
 
     # sleep a bit to avoid high cpu usage
     sleep 0.3
@@ -823,149 +1120,236 @@ while [ 1 ] ; do
 done
 ' > $SHARECLIPBOARDSCRIPT
     fi
-fi
-
+  fi
 }
-{ ######################## part: create xinitrc
 
-echo "#! /bin/bash"                                                                                       > $XINITRC
-#
-# subroutine to store PIDs and process names in file $BGPIDFILE
-#
-echo 'storepid () { echo $1 $2 >> '$BGPIDFILE' ; }'                                                       >> $XINITRC
-#
-# things to be done on display :0 :
-#
-# set X variables to :0
-echo "export DISPLAY=$STARTDISPLAY"                                                                       >> $XINITRC
-echo "export XAUTHORITY=$STARTXAUTHORITY"                                                                 >> $XINITRC
-
-case $XSERVER in
-XEPHYR) echo "setxkbmap -display $STARTDISPLAY -print | xkbcomp - $NEWDISPLAY"                            >> $XINITRC
-    ;;
-esac
-#
-# things to be done on new display:
-#
-# set X variables to new display
-echo "export DISPLAY=$NEWDISPLAY"                                                                         >> $XINITRC
-echo "export XAUTHORITY=$XCLIENTCOOKIE"                                                                   >> $XINITRC
-#
-# create background color. #7F7F7F is color of xfwm4 background
-echo 'xsetroot -solid "#7F7F7F"'                                                                          >> $XINITRC
-#
-# create new XAUTHORITY cookie file 
-echo 'echo "" > '$XCLIENTCOOKIE                                                                           >> $XINITRC
-echo "xauth generate $NEWDISPLAY . untrusted"                                                             >> $XINITRC
-echo "xauth add $TCPDISPLAY . "'`mcookie`'                                                                >> $XINITRC
-echo "cp $XCLIENTCOOKIE $XSERVERCOOKIE"                                                                   >> $XINITRC
-#
-# start window manager, if defined
-if [ -n "$WINDOWMANAGER" ] ; then
-    echo "$WINDOWMANAGER &"                                                                               >> $XINITRC
-    echo 'WINDOWMANAGERPID=$!'                                                                            >> $XINITRC
-    echo 'storepid $! '$WM_NAME                                                                           >> $XINITRC
-    # (adding pid to $XINITJOBSTOKILL later)
-fi
-#
-if [ "$SHOWLOGNEWDISPLAY" = "yes" ] ; then
-    echo 'xterm -title "x11docker log '$IMAGENAME $IMAGECOMMAND'" -e "tail -F '$XINITLOGFILE $XTERMLOGFILE $DOCKERLOGFILE $XPRALOGFILE' 2> /dev/null" & ' >> $XINITRC
-    echo 'storepid $! xterm'                                                                              >> $XINITRC
-    echo $SHOWLOGNEWDISPLAY
-fi
-#
-# option '-c, --clipboard': Run clipboard script for X11/Xephyr 
-# (text copy only) (xpra has its own clipboard managment including images)
-if [ "$SHARECLIPBOARD" = "yes" ] && [ ! "$XSERVER" = "XPRA" ] ; then
-    echo "bash $SHARECLIPBOARDSCRIPT &"                                                                   >> $XINITRC
-    echo 'storepid $! bash'                                                                               >> $XINITRC               
-fi
-#
-case $XSERVER in
-    XPRA) # run xpra server and xpra viewer
-        # start Xpra server on display created by Xvfb
-        echo "xpra start $NEWDISPLAY --use-display --no-daemon $XPRAARGS >$XPRASERVERLOGFILE 2>&1 &"      >> $XINITRC
-        echo 'XINITJOBSTOKILL="$XINITJOBSTOKILL $!"'                                                      >> $XINITRC
-        echo 'storepid $! xpra'                                                                           >> $XINITRC
-        echo 'XPRAPID=$!'                                                                                 >> $XINITRC
-        # wait for Xpra server to be ready
-        echo 'ZEIT=`date +%s`'                                                                            >> $XINITRC
-        echo 'while [ -z "$(cat '$XPRASERVERLOGFILE' | grep '"'xpra is ready'"')" ] ; do'                 >> $XINITRC
-        echo '    echo "waiting for xpra server to be ready..." && sleep 0.3 '                            >> $XINITRC
-        echo '    COUNT=$(echo "`date +%s` - $ZEIT" | bc)'                                                >> $XINITRC
-        echo '    if [ 10 -lt $COUNT ] ; then'                                                            >> $XINITRC
-        echo '        echo "x11docker: Timeout error: Xpra server not ready after 10 seconds. Exiting."'  >> $XINITRC
-        echo '        exit 1'                                                                             >> $XINITRC
-        echo '    fi'                                                                                     >> $XINITRC
-        echo 'done'                                                                                       >> $XINITRC
-        # check for X error
-        echo 'if [ -n "$(cat '$XPRASERVERLOGFILE" | grep 'X Window System error')"'" ] ; then'            >> $XINITRC
-        echo '    echo "x11docker: Error: received an X Window System error. See '$XPRASERVERLOGFILE' for details. Exiting"' >> $XINITRC
-        echo '    exit 1'                                                                                 >> $XINITRC
-        echo 'fi'                                                                                         >> $XINITRC
-        # set X variables to display :0
-        echo "export DISPLAY=$STARTDISPLAY"                                                               >> $XINITRC
-        echo "export XAUTHORITY=$STARTXAUTHORITY"                                                         >> $XINITRC
-        # start xpra viewer on display :0
-        echo "xpra attach $NEWDISPLAY &"                                                                  >> $XINITRC
-        echo 'XINITJOBSTOKILL="$XINITJOBSTOKILL $!"'                                                      >> $XINITRC
-        echo 'storepid $! xpra'                                                                           >> $XINITRC
-        # set X variables back to new display
-        echo "export DISPLAY=$NEWDISPLAY"                                                                 >> $XINITRC
-        echo "export XAUTHORITY=$XCLIENTCOOKIE"                                                           >> $XINITRC
-    ;;
-esac
-#
-# choose apps to run and wait for them to exit
-case $X11DOCKERMODE in
+{ #### part: create xinitrc
+  echo "#! /bin/bash"
+  echo "set -x"
+  #
+  # subroutine to store PIDs and process names in file $BGPIDFILE 
+  #
+  echo 'storepid () { echo $1 $2 >> '$BGPIDFILE' ; }'
+  #
+  # things to be done on display :0 : 
+  #NEWDISPLAY=$TCPDISPLAY   ### test
+  #
+  # set X variables to :0
+  echo "export DISPLAY=$STARTDISPLAY"
+  echo "export XAUTHORITY=$STARTXAUTHORITY"
+  #
+  # xhost settings on display :0
+  declare -f no_xhost # echoes no_xhost(), including it this way in xinitrc
+  if [ "$NO_XHOST" = "yes" ] ; then  echo "no_xhost" ; fi  ## option --no-xhost: disable any access granted by xhost
+  if [ -n "$XHOST" ] ; then echo "xhost $XHOST" ; fi       ### developer option --xhost ### SECURITY issue, testing purpuoses only
+  if [ -n "$GPU" ] && [ "$XSERVER" != "X11" ] ; then       ## option '--virtualgl'
+    if [ "$X11DOCKERMODE" = "onlyX" ]; then DOCKERUSER=$BENUTZER ; fi
+    echo "xhost +SI:localuser:$DOCKERUSER"                 ### SECURITY issue
+  fi 
+  #
+  # Needed for VirtualGL image compression. xpra crashes with compression, disabled
+#  if [ "$GPU" = "virtualgl" ] && [ "$XSERVER" != "X11" ] ; then
+#    echo "vglclient &"
+#    echo 'storepid $! vglclient'
+#    echo 'XINITJOBSTOKILL="$XINITJOBSTOKILL $!"'
+#  fi
+  #
+  # option '--pulseaudio': enable pulseaudio sound over tcp
+  if [ "$PULSEAUDIO" = "yes" ] ; then
+    # load pulseaudio tcp module, authenticated to docker ip on specified port 
+    echo 'PULSE_MODULE_ID=$(pactl load-module module-native-protocol-tcp port='$PULSE_PORT' auth-ip-acl='$DOCKERFULLIP')'
+  fi
+  #
+  # things to be done on new display: 
+  #
+  # set X variables to new display
+  echo "export DISPLAY=$NEWDISPLAY"
+  echo "export XAUTHORITY=$XCLIENTCOOKIE"
+  #
+  # create background color. #7F7F7F is color of xfwm4 background
+  echo 'xsetroot -solid "#7F7F7F"'
+  #
+# disabled: using xhost +SI:localuser:username instead, avoiding tcp. Did not manage to work with cookie this way, sigh.
+#  # create new XAUTHORITY cookie file 
+  echo ':> '$XCLIENTCOOKIE
+#  echo "xauth generate $NEWDISPLAY . untrusted"
+#  echo "xauth generate $NEWDISPLAY . trusted"    # Gives X clients more access to X resources, considered to be less secure
+#  echo "xauth generate $TCPDISPLAY . trusted"
+  echo 'COOKIE=$(mcookie)'
+  echo "xauth add $NEWDISPLAY . "'$COOKIE'
+  echo "xauth add $TCPDISPLAY . "'$COOKIE'
+  echo "cp $XCLIENTCOOKIE $XSERVERCOOKIE"
+  echo "xauth list"
+  #
+  # option '--LOG'
+  if [ "$SHOWLOGNEWDISPLAY" = "yes" ] ; then
+      echo $XTERM' -title "x11docker xinit log '$IMAGENAME $IMAGECOMMAND'" -e "tail -F '$XINITLOGFILE $XTERMLOGFILE $DOCKERLOGFILE $XPRALOGFILE' 2> /dev/null" & '
+      echo 'storepid $! xterm'
+  fi
+  #
+  # option '-c, --clipboard': Run clipboard script for X11/Xephyr 
+  # (text copy only) (xpra has its own clipboard managment including images)
+  if [ "$SHARECLIPBOARD" = "yes" ] && [ ! "$XSERVER" = "XPRA" ] ; then
+      echo "bash $SHARECLIPBOARDSCRIPT &"
+      echo 'storepid $! bash'
+  fi
+  
+  # Needed for VirtualGL image compression. xpra crashes with compression, disabled
+#  if [ "$GPU" = "virtualgl" ] && [ "$XSERVER" = "X11" ] ; then
+#    echo "vglclient -detach"
+#    echo 'storepid $! vglclient'
+#    echo 'XINITJOBSTOKILL="$XINITJOBSTOKILL $!"'
+#  fi
+  if [ "$GPU" = "virtualgl" ] ; then
+    case $XSERVER in
+      XEPHYR)
+        echo "export VGL_DISPLAY=$STARTDISPLAY"
+        ;;
+      X11)
+        echo "export VGL_DISPLAY=$NEWDISPLAY"
+        ;;        
+    esac
+    case $XSERVER in
+      XEPHYR|X11)
+        echo "export LD_PRELOAD=libdlfaker.so:libvglfaker.so"               # virtualgl libs to catch OpenGL/GLX calls
+        echo "export VBOX_CROGL_FORCE_SUPPORTED=1 VGL_ISACTIVE=1"
+        echo "export PROMAGIC_USEGLX=1 GEOPROBE_USEGLX=1"
+        echo "export VGL_COMPRESS=0"                                        # disable image compression. Without this, xpra crashes
+#        echo "export VGL_VERBOSE=1"                                         # Makes VirtualGL verbose
+#        echo "export VGL_LOGO=1"                                            # shows VGL logo in rendered images
+        ;;
+    esac
+  fi
+  #
+  # start window manager, if defined
+  if [ -n "$WINDOWMANAGER" ] ; then
+      echo "$WINDOWMANAGER &"
+      echo 'WINDOWMANAGERPID=$!'
+      echo 'storepid $! '$WM_NAME
+      # (adding pid to $XINITJOBSTOKILL later)
+  fi
+  #
+  case $XSERVER in
+      XPRA) 
+          ## start Xpra server on display created by Xdummy
+          echo "xpra start $NEWDISPLAY --use-display --no-pulseaudio --no-daemon $XPRAARGS > $XPRASERVERLOGFILE 2>&1 &"
+          echo 'XINITJOBSTOKILL="$XINITJOBSTOKILL $!"'
+          echo 'storepid $! xpra'
+          echo 'XPRAPID=$!'
+          # wait for Xpra server to be ready
+          echo 'ZEIT=`date +%s`'
+          echo 'while [ -z "$(cat '$XPRASERVERLOGFILE' | grep '"'xpra is ready'"')" ] ; do'
+          echo '    echo "waiting for xpra server to be ready..." && sleep 0.3 '
+          echo '    COUNT=$(echo "`date +%s` - $ZEIT" | bc)'
+          echo '    if [ 10 -lt $COUNT ] ; then'
+          echo '        echo "x11docker: Timeout error: Xpra server not ready after 10 seconds. Exiting."'
+          echo '        exit 1'
+          echo '    fi'
+          echo 'done'
+          # check for X error
+          echo 'if [ -n "$(cat '$XPRASERVERLOGFILE" | grep 'X Window System error')"'" ] ; then'
+          echo '    echo "x11docker: Error: received an X Window System error. See '$XPRASERVERLOGFILE' for details. Exiting"'
+          echo '    exit 1'
+          echo 'fi'
+          ## run xpra viewer
+          # set X variables to display :0
+          echo "export DISPLAY=$STARTDISPLAY"
+          echo "export XAUTHORITY=$STARTXAUTHORITY"
+          # start xpra viewer on display :0
+          echo "xpra attach $NEWDISPLAY &"
+          echo 'XINITJOBSTOKILL="$XINITJOBSTOKILL $!"'
+          echo 'storepid $! xpra'
+          # set X variables back to new display
+          echo "export DISPLAY=$NEWDISPLAY"
+          echo "export XAUTHORITY=$XCLIENTCOOKIE"
+      ;;
+      XEPHYR)
+          echo "echo '$(setxkbmap -display $STARTDISPLAY -print)' | xkbcomp - $NEWDISPLAY"  # set keyboard layout in Xephyr to same as on host
+      ;;
+  esac
+  #
+  # disable any possible xhost granted access on new X server, except those below, depending on options
+  echo "no_xhost"
+  if [ -n "$XHOST" ] ; then echo "xhost $XHOST" ; fi                         # developer option --xhost
+  if [ "$XCONNECTION" = "xsocket" ] || [ "$GPU" = "virtualgl" ] ; then       # options '--virtualgl' , '--gpu' and '--xsocket'
+    if [ "$X11DOCKERMODE" = "onlyX" ]; then DOCKERUSER=$BENUTZER ; fi
+    #    # enable access of user in docker image to new display. Should be done with cookies only. ### SECURITY ISSUE
+    echo "xhost +SI:localuser:$DOCKERUSER"                                   # workaround until hardware acceleration with X over tcp in docker works        
+  fi
+  #
+  # choose apps to run and wait for them to exit
+  case $X11DOCKERMODE in
     run) # password for docker will be prompted in xterm
-        echo "xterm -l -lf $XTERMLOGFILE -title x11docker -e '/bin/bash $XTERMRC'"                        >> $XINITRC
-        echo "if [ -e $DOCKERPIDFILE ] ; then"                                                            >> $XINITRC
-        echo '    DOCKERPID=`cat '$DOCKERPIDFILE'`'                                                       >> $XINITRC
-        echo '    storepid $DOCKERPID docker'                                                             >> $XINITRC
-        echo '    while [ -n "$(ps -A | grep $DOCKERPID | grep docker)" ] ; do'                           >> $XINITRC
-        echo '        sleep 0.4'                                                                          >> $XINITRC
+        echo "xterm -l -lf $XTERMLOGFILE -title x11docker -e '/bin/bash $XTERMRC'"
+        echo "if [ -e $DOCKERPIDFILE ] ; then"
+        echo '    DOCKERPID=`cat '$DOCKERPIDFILE'`'
+        echo '    storepid $DOCKERPID docker'
+        echo '    set +x'
+        echo '    while [ -n "$(pgrep docker | grep $DOCKERPID)" ] ; do'
+        echo '        sleep 1'
         case $XSERVER in
-          XPRA) # xpra server can crash for unknown reasons, especially with google earth in wine.
-            
+          XPRA) # xpra client can disconnect for unknown reasons, especially with google earth in wine.
+                # This may be catched here in future. Since I want to fix this, it doesn't happen to me anymore ...
           ;;
         esac
-        echo '    done'                                                                                   >> $XINITRC
-        echo 'fi'                                                                                         >> $XINITRC
+        echo '    done'
+        echo '    set -x'
+        echo 'fi'
         ;;
     exe) # run host application (window manager is already running)
-        echo "$DOCKERARGS &"                                                                              >> $XINITRC
-        echo 'storepid $! '`echo $DOCKERARGS | awk '{print $1}'`                                          >> $XINITRC 
-        echo 'wait $!'                                                                                    >> $XINITRC
+        echo "$DOCKERARGS &"
+        echo 'storepid $! '`echo $DOCKERARGS | awk '{print $1}'`
+        echo 'wait $!'
         ;;
     onlyX) # wait for window manager to exit
-        echo 'wait $WINDOWMANAGERPID'                                                                     >> $XINITRC
-        echo '$WINDOWMANAGERPID=""'                                                                       >> $XINITRC
+        if [ "$(echo $WM_RECOMMENDED_NODESKTOP_LIGHT $WM_RECOMMENDED_NODESKTOP_HEAVY | grep $WM_NAME)" != "" ] ; then 
+            # Show warning, if window manager has no logout opion
+            echo $XTERM' -title "x11docker note" -e "echo'   " 'You can switch between your X Servers using <STRG><ALT><F7>...<F12>. 
+As your chosen window manager $WM_NAME seems to have no logout option, 
+you have no other way to leave this session. Maybe you want to choose
+another window manager with option --wm next time. 
+Recommended window managers with logout option are:
+$WM_RECOMMENDED_DESKTOP_LIGHT $WM_RECOMMENDED_DESKTOP_HEAVY' ; read" '"'
+        fi
+        echo 'wait $WINDOWMANAGERPID'
+        echo '$WINDOWMANAGERPID=""'
         ;;
-esac
-#
-# clean up background jobs
-# ($WINDOWMANAGERPID can already be empty, see case onlyX above. maybe window manager wasn't running at all)
-echo 'XINITJOBSTOKILL="$XINITJOBSTOKILL $WINDOWMANAGERPID"'                                               >> $XINITRC
-echo 'for ARGUMENT in $XINITJOBSTOKILL ; do kill $ARGUMENT ; done'                                        >> $XINITRC
-}
-{ ######################## part: create xtermrc (used by xinitrc to get password and run docker)
+  esac
+  #
+  # clean up background jobs
+  # ($WINDOWMANAGERPID can already be empty, see case onlyX above. maybe window manager wasn't running at all)
+  echo 'XINITJOBSTOKILL="$XINITJOBSTOKILL $WINDOWMANAGERPID"'
+  echo 'for ARGUMENT in $XINITJOBSTOKILL ; do kill $ARGUMENT ; done'
 
-if [ "$X11DOCKERMODE" = "run" ] ; then
-    echo "#! /bin/bash"                                                                          > $XTERMRC
+  # option '--pulseaudio'. remove custom tcp module
+#  if [ "$PULSEAUDIO" = "yes" ] ; then 
+#    echo 'pactl unload-module $PULSE_MODULE_ID'                  ### disabled because pulseaudio daemon stops after this for unknown reasons
+#  fi 
+    # set X variables to :0
+  echo "export DISPLAY=$STARTDISPLAY"
+  echo "export XAUTHORITY=$STARTXAUTHORITY"
+  if [ -n "$XHOST" ] ; then echo "xhost -" ; fi # developer option --xhost
+} > $XINITRC
+
+{ #### part: create xtermrc (used by xinitrc to get password and run docker)
+  if [ "$X11DOCKERMODE" = "run" ] ; then
+    { echo "#! /bin/bash"
     if [ "$WINDOWMANAGER" = "" ] && [ "$XSERVER" != "XPRA" ] ; then
-        echo "echo 'Please move mouse cursor into terminal area to get keyboard focus.'"         >> $XTERMRC
+        echo "echo 'Please move mouse cursor into terminal area to get keyboard focus.'"
     fi
-    echo "echo 'x11docker will start docker on display $NEWDISPLAY with command:'"               >> $XTERMRC
-    echo "echo $GETROOT '$COMMAND'"                                                              >> $XTERMRC
-    echo "echo 'Please type in your password:'"                                                  >> $XTERMRC 
-    echo "$GETROOT 'nohup $COMMAND > $DOCKERLOGFILE 2>&1 & echo "'$!'" > $DOCKERPIDFILE'"        >> $XTERMRC
-fi
-
+    echo "echo 'x11docker will start docker on display $NEWDISPLAY with command:'"
+    echo "echo $GETROOT '$COMMAND'"
+    echo "echo 'Please type in your password:'"
+    echo "$GETROOT 'nohup $COMMAND > $DOCKERLOGFILE 2>&1 & echo "'$!'" > $DOCKERPIDFILE'"
+#    echo "sudo -b $COMMAND > $DOCKERLOGFILE 2>&1 && echo "'$!'" > $DOCKERPIDFILE"
+    echo "sleep 2" # time to read error message
+#    echo "read" ### development: keep window
+    } > $XTERMRC
+  fi   
 }
-{ ######################## part:  options '-v, --verbose', '-V, --VERBOSE': be [very] verbose
 
-if [ -n "$VERBOSE" ] ; then
+{ #### part:  options '-v, --verbose', '-V, --VERBOSE': be [very] verbose
+  if [ "$VERBOSE" = "yes" ] ; then
     verbose "Found free display $NEWDISPLAY"
     verbose "As X server will be used: $XSERVER"
     verbose "IP of docker interface is $DOCKERIP 
@@ -975,8 +1359,6 @@ As display number for the container $TCPDISPLAY will be used."
 $COMMAND"
     verbose "Created X server command:
 $XCOMMAND" 
-    verbose "Will run xinit with command
-xinit $XINITRC -- $XCOMMAND > $XINITLOGFILE 2>&1"
     #
     # some infos about window manager
     #
@@ -986,14 +1368,14 @@ xinit $XINITRC -- $XCOMMAND > $XINITLOGFILE 2>&1"
   with command: 'apt-get install wmctrl'"
     fi
     #
-    verbose "found window manager $WINDOWMANAGER"
+    verbose "Found window manager: '$WINDOWMANAGER'"
     case $WM_NAME in
     cinnamon)
         warning "Found cinnamon as window manager. Please don't use shutdown
   option of cinnamon, because it would shut down your main session, too."
         ;;
     compiz)
-        verbose "compiz is a good choice for use as windowmanager in x11docker.
+        verbose "compiz is a good choice for using as windowmanager in x11docker.
   If not already present, x11docker creates a minimal basic configuration for
   compiz. Run x11docker with command 'x11docker --wm compiz --exe ccsm' to be
   able to enable more features of compiz. If not already done, install ccsm
@@ -1043,19 +1425,19 @@ $XINITLOGFILE
 $XPRASERVERLOGFILE
 $XTERMLOGFILE
 $DOCKERLOGFILE"
-fi
-# if very verbose, then show logfiles live on stdout
-if [ "$VERBOSE" = "VERBOSE" ] ; then
-    tail -F $XINITLOGFILE $XTERMLOGFILE $DOCKERLOGFILE $XPRALOGFILE 2> /dev/null &
-    PIDSTOKILL="$PIDSTOKILL $!"
-    storepid $! tail
-fi
+  fi
+  
+  # Show logfiles, tail -F follows them
+  tail --retry -n +1 -F $XTERMLOGFILE $DOCKERLOGFILE $XPRALOGFILE $XINITLOGFILE   2> /dev/null &
+  PIDSTOKILL="$PIDSTOKILL $!"
+  storepid $! tail
 }
-{ ######################## part: option '--starter': create desktop starter & exit
 
-if [ "$CREATEDESKTOPSTARTER" = "yes" ] ; then
+{ #### part: option '--starter': create desktop starter & exit
+  if [ "$CREATEDESKTOPSTARTER" = "yes" ] ; then
     X11DOCKERARGS=$(echo $X11DOCKERARGS | sed 's/--starter/ /')
     NAME="$(echo $IMAGENAME | tr / -) $(echo $IMAGECOMMAND | tr -cd '[:alpha:][:digit:][:blank:]-_.') x11docker"
+    read -re -p "Please choose a name for your desktop starter: " -i "$NAME" NAME
     echo "#!/usr/bin/xdg-open
 [Desktop Entry]
 Type=Application
@@ -1069,15 +1451,16 @@ TryExec=x11docker $X11DOCKERARGS
 " > "`xdg-user-dir DESKTOP`/$NAME.desktop"
     verbose "Created desktop icon `xdg-user-dir DESKTOP`/$NAME.desktop"
     exit 0
-fi
-
+  fi
 }
-{ ######################## Finally: run new X server
 
-# option '-l, --log': show logs in an xterm window on display :0
-if [ "$SHOWLOG" = "yes" ] ; then xterm -title "x11docker log $IMAGENAME $IMAGECOMMAND" -e "tail -F $XINITLOGFILE $XTERMLOGFILE $DOCKERLOGFILE $XPRALOGFILE 2> /dev/null" ; fi &
-
-xinit $XINITRC -- $XCOMMAND  > $XINITLOGFILE 2>&1
-exit 0         # trap EXIT will start finish()
-
+{ #### Finally: run new X server
+  # option '-l, --log': show logs in an xterm window on display :0
+  if [ "$SHOWLOG" = "yes" ] ; then $XTERM -title "x11docker xinit log $IMAGENAME $IMAGECOMMAND" -e "tail --retry -n +1 -F $XTERMLOGFILE $DOCKERLOGFILE $XPRALOGFILE $XINITLOGFILE 2> /dev/null" ; fi &
+#  case $XSERVER in
+#    XPRA)   $XCOMMAND --start-child="bash $XINITRC" > $XINITLOGFILE 2>&1 ;;
+#    *)      xinit $XINITRC -- $XCOMMAND  > $XINITLOGFILE 2>&1 ;;
+#  esac
+  xinit $XINITRC -- $XCOMMAND  > $XINITLOGFILE 2>&1
+  exit 0         # trap EXIT will start finish()
 }
