@@ -29,11 +29,20 @@ Software accelerated OpenGL is available in all provided X servers.
 
  
 #Dependencies
-Depending on choosed options, x11docker needs some packages to be installed.
-It will check for them on startup and show terminal messages if some are missing.
-List of possible needed packages:
+x11docker can run with standard system utilities without additional dependencies. As a core, it only needs X server and, of course, docker to run docker images on X. 
 
-xpra xephyr xvfb xclip kaptain wmctrl pulseaudio virtualgl docker.io xorg
+For some additional options, x11docker needs some packages to be installed.
+It will check for them on startup and show terminal messages if some are missing.
+
+List of optional needed packages: xpra xephyr xclip kaptain pulseaudio virtualgl 
+
+- xpra:  option --xpra, showing single applications on your host display
+- xephyr:  option --xephyr, showing desktops on your host display
+- xclip:  option --clipboard, sharing clipboard with Xephyr or cor X11
+- pulseaudio:  option --pulseaudio, sound/audio support
+- virtualgl:  option --virtualgl, hardware accelerated OpenGL in xpra and Xephyr
+- kaptain:  x11docker-gui
+
 
 #Explanations
 x11docker creates a new X server on a new X socket on a new display. Instead of using
