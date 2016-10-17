@@ -46,7 +46,7 @@ List of optional needed packages: xpra xephyr xclip kaptain pulseaudio virtualgl
 
 #Explanations
 x11docker creates a new X server on a new X socket on a new display. Instead of using
-display :0 (standard), docker images will run on display :1 or display :2 ...
+display :0 (standard), docker images will run on display :1 or display :2 ... (with exception from option --hostdisplay)
 
 To switch to between displays, press [STRG][ALT][F7] ... [STRG][ALT][F12]. Essentially it is the
 same as switching between virtual consoles (tty1 to tty6) with [STRG][ALT][F1]...[F6].
@@ -58,11 +58,11 @@ on your main display:
  - x11docker --xephyr --desktop x11docker/xfce
 
 #Security
- - Using a separate X server aka a new display for docker GUI applications avoids issues 
- concerning security leaks inside a running X server. There are some solutions in the web to run dockered GUI applications with X forwarding on display :0, but all of them share the problem of breaking isolation of docker containers and allowing them access to X resources like keylogging with 'xinput test'.
- - With x11docker, GUI applications in docker are isolated from main display :0
- - docker GUI clients connect to new X server over tcp. Authenthication is done with MIT-MAGIC-COOKIE, stored separate from ~/.Xauthority.  The new X server doesn't know cookies from the host X server on display :0.
+ - Using a separate X server aka a new display for docker GUI applications avoids issues concerning security leaks inside a running X server. Most solutions in the web to run dockered GUI applications share the problem of breaking container isolation and allowing access to X resources like keylogging with 'xinput test'.
+ - With x11docker, GUI applications in docker can be isolated from main display :0
+ - Authentication is done with MIT-MAGIC-COOKIE, stored separate from ~/.Xauthority.  The new X server doesn't know cookies from the host X server on display :0. (Exceptions possible with options --hostdisplay and --virtualgl)
  - With option --no-xhost x11docker checks for any access granted to host X server by xhost and disables it. Host applications then use ~.Xauthority only.
+![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true "Optional Title")
  
 #Usage in terminal
 To run a docker image with new X server:
