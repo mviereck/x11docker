@@ -15,14 +15,14 @@ There is a comfortable GUI for x11docker. To run x11docker-gui, you need to inst
 
 
 #Hardware accelerated OpenGL rendering
-Software accelerated OpenGL is available in all provided X servers. 
- The image needs an OpenGL implementation to profit from it.  The easiest way to achieve this is to install package \"mesa-utils\" in your image.
+Software accelerated OpenGL is available in all provided X servers. The image needs an OpenGL implementation to profit from it.  The easiest way to achieve this is to install package \"mesa-utils\" in your image.
  
  Usage of immediate GPU hardware acceleration for OpenGL/GLX with option --gpu is experimental/beta. You may encounter some
- bugs. For example, Xfce desktop will run fine using software rendering, but can
- have broken window decorations with hardware rendering.
+ bugs. For example, Xfce desktop will run fine using software rendering, but can have broken window decorations with hardware rendering. As for now, it works with options --X11 and --hostdisplay only.
  
- Mediate GPU hardware acceleration for OpenGL / GLX with option --virtualgl is possible with VirtualGL (http://www.virtualgl.org). Other than option --gpu, it works with xpra and Xephyr, too, but has the drawback to break container isolation from display :0. Use only with full trustet applications and images. Needs VirtualGL to be installed on host.
+ Mediate GPU hardware acceleration for OpenGL / GLX with option --virtualgl is possible with VirtualGL (http://www.virtualgl.org). Other than option --gpu, it works with xpra and Xephyr, too, but has the drawback to break container isolation from display :0. Use only with full trusted applications and images. Needs VirtualGL to be installed on host.
+ 
+ Using hardware acceleration can degrade or break container isolation. Look at table in section "Security". 
  
 #Pulseaudio sound support
  x11docker supports pulseaudio sound over tcp. For this to use, pulseaudio needs to be installed on host and in docker image.
@@ -44,18 +44,13 @@ List of optional needed packages: xpra xephyr xclip kaptain pulseaudio virtualgl
 - kaptain:  x11docker-gui
 
 
-#Explanations
-x11docker creates a new X server on a new X socket on a new display. Instead of using
-display :0 (standard), docker images will run on display :1 or display :2 ... (with exception from option --hostdisplay)
-
-To switch to between displays, press [STRG][ALT][F7] ... [STRG][ALT][F12]. Essentially it is the
-same as switching between virtual consoles (tty1 to tty6) with [STRG][ALT][F1]...[F6].
-
-A more comfortable way is to use Xpra and Xephyr. With Xpra and Xephyr dockered GUI applications will show up on your main display, and you don't need to switch between different tty's.
-
-Example: This will run an xfce desktop environment in docker, showing it in a Xephyr window 
-on your main display:
- - x11docker --xephyr --desktop x11docker/xfce
+#X servers to choose from
+x11docker creates a new X server on a new X socket. Instead of using display :0 from host, docker images will run on display :1 or display :2 ... (with exception from option --hostdisplay)
+ - xpra: A comfortable way to run single docker GUI applications visible on your host display is to use xpra. Needs package xpra to be installed.
+ - Xephyr: A comfortable way to run desktop environments from within docker images is to use Xephyr. Needs package xephyr to be installed. Also, you can choose option --xephyr together with option --wm and run single applications with a host window manager in Xephyr
+ - Core X11 server: To switch to between displays, press [STRG][ALT][F7] ... [STRG][ALT][F12]. Essentially it is the
+same as switching between virtual consoles (tty1 to tty6) with [STRG][ALT][F1]...[F6]. To be able to use this option, you have to execute "dpkg-reconfigure x11-common" first and choose option "anybody".
+ - Sharing host display: This option is least secure and has least overhead. Instead of running a second X server, your host X server on display :0 is shared.
 
 #Security
  - Using a separate X server aka a new display for docker GUI applications avoids issues concerning security leaks inside a running X server. Most solutions in the web to run dockered GUI applications share the problem of breaking container isolation and allowing access to X resources like keylogging with 'xinput test'.
