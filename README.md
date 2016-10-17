@@ -40,7 +40,7 @@ List of optional needed packages: xpra xephyr xclip kaptain pulseaudio virtualgl
 - xephyr:  option --xephyr, showing desktops on your host display
 - xclip:  option --clipboard, sharing clipboard with Xephyr or cor X11
 - pulseaudio:  option --pulseaudio, sound/audio support
-- virtualgl:  option --virtualgl, hardware accelerated OpenGL in xpra and Xephyr
+- virtualgl:  option --virtualgl, hardware accelerated OpenGL in xpra and Xephyr. http://www.virtualgl.org
 - kaptain:  x11docker-gui
 
 
