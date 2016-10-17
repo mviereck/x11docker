@@ -65,7 +65,7 @@ To run a docker image with new X server:
  -  x11docker [OPTIONS] -- [DOCKER_RUN_OPTIONS] IMAGE [COMMAND [ARG1 ARG2 ...]]
   
 To run a host application on a new X server:
- -  x11docker [OPTIONS] --exe -- COMMAND [ARG1 ARG2 ...]
+ -  x11docker [OPTIONS] --exe COMMAND [ARG1 ARG2 ...]
 
 To run only a new X server with window manager:
  -  x11docker [OPTIONS]
@@ -73,4 +73,13 @@ To run only a new X server with window manager:
 Have a look at 'x11docker --help' to see all options.
 
 Example: Run wine and playonlinux on xfce desktop in a sandbox in a Xephyr window, sharing a home folder to preserve settings and wine installations:
-   - x11docker -x --sudouser --home --desktop -- x11docker/xfce-wine-playonlinux start
+   - x11docker --xephyr --sudouser --home --desktop x11docker/xfce-wine-playonlinux start
+   
+Example: Run playonlinux in a sandbox in an xpra window, sharing a home folder to preserve settings and installations:
+   - x11docker --xpra --sudouser --home --desktop x11docker/xfce-wine-playonlinux playonlinux
+   
+ #ToDo
+  - improve --virtualgl performance
+  - improve --virtualgl security with --xpra and --xephyr
+  - use tcp instead of xsocket with option --gpu to avoid some rendering issues (does not work with docker recently)
+  - avoid xclip errors with empty clipboard
