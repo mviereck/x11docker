@@ -2,13 +2,11 @@
  - Useful to avoid security issues concerning X forwarding. Secure sandboxing of GUI applications.
  - Can either open a new X display, or can use xpra and Xephyr to show dockered GUI applications on your host X display.
  - Doesn't have any dependencies inside of docker images - can run any GUI applications in docker. 
- - Authentication via MIT-MAGIC-COOKIES. Separate Xauthority file, it is _not_  ~/.Xauthority from host.
  - Sound with pulseaudio is possible
  - Hardware accelerated OpenGL rendering is possible
 
 #GUI for x11docker
-There is a comfortable GUI for x11docker. To run x11docker-gui, you need to install 'kaptain'. 
-(debian link to kaptain: https://packages.debian.org/search?keywords=kaptain).
+There is a comfortable GUI for x11docker. To run x11docker-gui, you need to install package 'kaptain'.
 
 ![x11docker-gui screenshot](/../screenshots/x11docker-gui.png?raw=true "Optional Title")
 
@@ -54,7 +52,7 @@ same as switching between virtual consoles (tty1 to tty6) with [STRG][ALT][F1]..
 #Security
  - Using a separate X server aka a new display for docker GUI applications avoids issues concerning security leaks inside a running X server. Most solutions in the web to run dockered GUI applications share the problem of breaking container isolation and allowing access to X resources like keylogging with 'xinput test'.
  - With x11docker, GUI applications in docker can be isolated from main display :0
- - Authentication is done with MIT-MAGIC-COOKIE, stored separate from ~/.Xauthority.  The new X server doesn't know cookies from the host X server on display :0. (Exceptions possible with options --hostdisplay and --virtualgl)
+ - Authentication is done with MIT-MAGIC-COOKIE, stored separate from ~/.Xauthority.  The new X server doesn't know cookies from the host X server on display :0. (Except less secure options --hostdisplay and --virtualgl)
  - With option --no-xhost x11docker checks for any access granted to host X server by xhost and disables it. Host applications then use ~.Xauthority only.
 ![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true "Optional Title")
  
@@ -81,7 +79,7 @@ Run wine and playonlinux on xfce desktop in a sandbox in a Xephyr window, sharin
 Run playonlinux in a sandbox in an xpra window, sharing a home folder to preserve settings and installations, and with a container user similar to your host user:
    - x11docker --xpra --hostuser --home --desktop x11docker/xfce-wine-playonlinux playonlinux
    
- #ToDo
+#ToDo
   - improve --virtualgl performance
   - improve --virtualgl security with --xpra and --xephyr
   - use tcp instead of xsocket with option --gpu to avoid some rendering issues (does not work with docker recently)
