@@ -1,8 +1,7 @@
 # x11docker: Run GUI applications and desktop environments in docker on a distinct X server.
  - Useful to avoid security issues concerning X forwarding. Secure sandboxing of GUI applications.
  - Can either open a new X display, or can use xpra and Xephyr to show dockered GUI applications on your host X display.
- - Doesn't need VNC or SSH. docker applications can directly access the new X server.
- - Doesn't have dependencies inside the image - can run any GUI applications in docker. 
+ - Doesn't have any dependencies inside of docker images - can run any GUI applications in docker. 
  - Authentication via MIT-MAGIC-COOKIES. Separate Xauthority file, it is _not_  ~/.Xauthority from host.
  - Sound with pulseaudio is possible
  - Hardware accelerated OpenGL rendering is possible
