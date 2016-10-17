@@ -71,11 +71,11 @@ To run only a new X server with window manager:
 
 Have a look at 'x11docker --help' to see all options.
 
-Example: Run wine and playonlinux on xfce desktop in a sandbox in a Xephyr window, sharing a home folder to preserve settings and wine installations:
-   - x11docker --xephyr --sudouser --home --desktop x11docker/xfce-wine-playonlinux start
+Example: Run wine and playonlinux on xfce desktop in a sandbox in a Xephyr window, sharing a home folder to preserve settings and wine installations, and with a container user similar to your host user:
+   - x11docker --xephyr --hostuser --home --desktop x11docker/xfce-wine-playonlinux start
    
-Example: Run playonlinux in a sandbox in an xpra window, sharing a home folder to preserve settings and installations:
-   - x11docker --xpra --sudouser --home --desktop x11docker/xfce-wine-playonlinux playonlinux
+Example: Run playonlinux in a sandbox in an xpra window, sharing a home folder to preserve settings and installations, and with a container user similar to your host user:
+   - x11docker --xpra --hostuser --home --desktop x11docker/xfce-wine-playonlinux playonlinux
    
  #ToDo
   - improve --virtualgl performance
