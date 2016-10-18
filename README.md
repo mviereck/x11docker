@@ -1,20 +1,20 @@
-# x11docker: Run GUI applications and desktop environments in docker on a distinct X server.
+# x11docker: Run GUI applications and desktop environments in docker on a separate X server.
  - Useful to avoid security issues concerning X forwarding. Secure sandboxing of GUI applications.
- - Can either open a new X display, or can use xpra and Xephyr to show dockered GUI applications on your host X display.
+ - Can either open a new X display, or can use xpra and Xephyr to show dockered GUI applications on your host X display. (Can also share your host display to have least overhead, but that is not mentioned for secure sandboxing.)
  - Doesn't have any dependencies inside of docker images - can run any GUI applications in docker. 
- - Sound with pulseaudio is possible
- - Hardware accelerated OpenGL rendering is possible
+ - Sound with pulseaudio is possible.
+ - Hardware accelerated OpenGL rendering is possible.
 
 #GUI for x11docker
-There is a comfortable GUI for x11docker. To run x11docker-gui, you need to install package 'kaptain'.
+There is a comfortable GUI for x11docker. To use x11docker-gui, you need to install package 'kaptain'.
 
 ![x11docker-gui screenshot](/../screenshots/x11docker-gui.png?raw=true "Optional Title")
 
 
 #Hardware accelerated OpenGL rendering
-Software accelerated OpenGL is available in all provided X servers. The image needs an OpenGL implementation to profit from it.  The easiest way to achieve this is to install package \"mesa-utils\" in your image.
+Software accelerated OpenGL is available in all provided X servers. The image needs an OpenGL implementation to profit from it.  The easiest way to achieve this is to install package 'mesa-utils' in your image.
  
- Usage of immediate GPU hardware acceleration for OpenGL/GLX with option --gpu is experimental/beta. You may encounter some
+Immediate GPU hardware acceleration with option --gpu is experimental/beta. You may encounter some
  bugs. For example, Xfce desktop will run fine using software rendering, but can have broken window decorations with hardware rendering. As for now, it works with options --X11 and --hostdisplay only.
  
  Mediate GPU hardware acceleration for OpenGL / GLX with option --virtualgl is possible with VirtualGL (http://www.virtualgl.org). Other than option --gpu, it works with xpra and Xephyr, too, but has the drawback to break container isolation from display :0. Use only with full trusted applications and images. Needs VirtualGL to be installed on host.
@@ -35,7 +35,7 @@ List of optional needed packages: xpra xephyr xclip kaptain pulseaudio virtualgl
 
 - xpra:  option --xpra, showing single applications on your host display
 - xephyr:  option --xephyr, showing desktops on your host display
-- xclip:  option --clipboard, sharing clipboard with Xephyr or cor X11
+- xclip:  option --clipboard, sharing clipboard with Xephyr or core X11
 - pulseaudio:  option --pulseaudio, sound/audio support
 - virtualgl:  option --virtualgl, hardware accelerated OpenGL in xpra and Xephyr. http://www.virtualgl.org
 - kaptain:  x11docker-gui
@@ -45,7 +45,7 @@ List of optional needed packages: xpra xephyr xclip kaptain pulseaudio virtualgl
 x11docker creates a new X server on a new X socket. Instead of using display :0 from host, docker images will run on display :1 or display :2 ... (with exception from option --hostdisplay)
  - xpra: A comfortable way to run single docker GUI applications visible on your host display is to use xpra. Needs package xpra to be installed.
  - Xephyr: A comfortable way to run desktop environments from within docker images is to use Xephyr. Needs package xephyr to be installed. Also, you can choose option --xephyr together with option --wm and run single applications with a host window manager in Xephyr
- - Core X11 server: To switch to between displays, press [STRG][ALT][F7] ... [STRG][ALT][F12]. Essentially it is the
+ - Core X11 server: To switch between displays, press [STRG][ALT][F7] ... [STRG][ALT][F12]. Essentially it is the
 same as switching between virtual consoles (tty1 to tty6) with [STRG][ALT][F1]...[F6]. To be able to use this option, you have to execute "dpkg-reconfigure x11-common" first and choose option "anybody".
  - Sharing host display: This option is least secure and has least overhead. Instead of running a second X server, your host X server on display :0 is shared.
 
@@ -83,4 +83,3 @@ Run playonlinux in a sandbox in an xpra window, sharing a home folder to preserv
   - improve --virtualgl performance
   - improve --virtualgl security with --xpra and --xephyr
   - use tcp instead of xsocket with option --gpu to avoid some rendering issues (does not work with docker recently)
-  - avoid xclip errors with empty clipboard
