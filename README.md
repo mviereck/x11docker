@@ -55,6 +55,7 @@ same as switching between virtual consoles (tty1 to tty6) with [STRG][ALT][F1]..
  - Authentication is done with MIT-MAGIC-COOKIE, stored separate from ~/.Xauthority.  The new X server doesn't know cookies from the host X server on display :0. (Except less secure options --hostdisplay and --virtualgl)
  - With option --no-xhost x11docker checks for any access granted to host X server by xhost and disables it. Host applications then use ~.Xauthority only.
  - Special use cases of hardware acceleration and option --hostdisplay can degrade or break container isolation. Look at security table to see the differences:
+ 
 ![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true "Optional Title")
  
 #Usage in terminal
