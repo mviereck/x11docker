@@ -14,8 +14,7 @@ There is a comfortable GUI for x11docker. To use x11docker-gui, you need to inst
 #Hardware accelerated OpenGL rendering
 Software accelerated OpenGL is available in all provided X servers. The image needs an OpenGL implementation to profit from it.  The easiest way to achieve this is to install package 'mesa-utils' in your image.
  
-Immediate GPU hardware acceleration with option --gpu is experimental/beta. You may encounter some
- bugs. For example, Xfce desktop will run fine using software rendering, but can have broken window decorations with hardware rendering. As for now, it works with options --X11 and --hostdisplay only.
+Immediate GPU hardware acceleration with option --gpu is quite fast and secure to use with a core second X server. As for now, it works with options --X11 and --hostdisplay only. It can have some rendering glitches due to missing shared memory with the host. (This can be fixed with either option --ipc or --net, but has the drawback to break container isolation in this case).
  
  Mediate GPU hardware acceleration for OpenGL / GLX with option --virtualgl is possible with VirtualGL (http://www.virtualgl.org). Other than option --gpu, it works with xpra and Xephyr, too, but has the drawback to break container isolation from display :0. Use only with full trusted applications and images. Needs VirtualGL to be installed on host.
  
@@ -47,13 +46,15 @@ x11docker creates a new X server on a new X socket. Instead of using display :0 
  - Xephyr: A comfortable way to run desktop environments from within docker images is to use Xephyr. Needs package xephyr to be installed. Also, you can choose option --xephyr together with option --wm and run single applications with a host window manager in Xephyr
  - Core X11 server: To switch between displays, press [STRG][ALT][F7] ... [STRG][ALT][F12]. Essentially it is the
 same as switching between virtual consoles (tty1 to tty6) with [STRG][ALT][F1]...[F6]. To be able to use this option, you have to execute "dpkg-reconfigure x11-common" first and choose option "anybody".
- - Sharing host display: This option is least secure and has least overhead. Instead of running a second X server, your host X server on display :0 is shared.
+ - Sharing host display: This option is least secure and has least overhead. Instead of running a second X server, your host X server on display :0 is shared. Occuring rendering glitches can be fixed with insecure option --ipc.
 
-#Security
- - Using a separate X server aka a new display for docker GUI applications avoids issues concerning security leaks inside a running X server. Most solutions in the web to run dockered GUI applications share the problem of breaking container isolation and allowing access to X resources like keylogging with 'xinput test'.
- - With x11docker, GUI applications in docker can be isolated from main display :0
+#Security 
+ - Main goal of x11docker is to run dockered GUI applications preserving container isolation.
+ - GUI applications in docker are isolated from main display :0, avoiding X security leaks.
+ - Preserving container isolation is done using a segregated X server. (Most solutions in the web to run dockered GUI applications share the problem of breaking container isolation and allowing access to X resources like keylogging with 'xinput test').
  - Authentication is done with MIT-MAGIC-COOKIE, stored separate from ~/.Xauthority.  The new X server doesn't know cookies from the host X server on display :0. (Except less secure options --hostdisplay and --virtualgl)
  - With option --no-xhost x11docker checks for any access granted to host X server by xhost and disables it. Host applications then use ~.Xauthority only.
+ - Special use cases of hardware acceleration and option --hostdisplay can degrade or break container isolation. Look at security table to see the differences:
 ![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true "Optional Title")
  
 #Usage in terminal
