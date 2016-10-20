@@ -2,13 +2,17 @@
 
 # ToDo:
 # - work on immediate hardware acceleration: try get docker accelerated with X over tcp instead of shared X socket
+#        --sharegpu + --net works with tcp, don't need X socket
 # - shared X socket and xfce: GTK rendering issues. Workaround: remove xfwm4.xml in ~/.config. Find reason for issues
+#        --gpu + --ipc works, no more rendering glitches
 # - Immediate 3d acceleration with core X server should be possible with docker over tcp. Could solve xfce/GTK problem, too
-# - check pulseaudio: daemon on host seems to quit when image terminates. As workaround, tcp module is not disabled on exit for now
+# - check pulseaudio: daemon on host seems to quit when image terminates. As a workaround, tcp module is not disabled on exit for now
 # - improve usage informations in gui
-# - avoid xclip error with empty clipboard
 
 # x11docker changelog
+# 20.10.2016 V1.4.0   new options --net and --ipc: Security holes, can avoid rendering glitches with --gpu and allow GPU access over tcp
+# 19.10.2016          developer options --ipc --pid --net --uts
+# 18.10.2017          bugfix: set NEWDISPLAY to STARTDISPLAY with option --exe
 # 17.10.2017 V1.3.0   securitytable() shows table with grade of container isolation depending on choosed options
 #                     -x : autochoose xephyr instead of xpra if no image is given -> runs xephyr with windowmanager instead of empty useless xpra
 #                     bugfix: only be verbose on option --verbose
@@ -137,14 +141,16 @@ Options:
                        with created container.
  --pulseaudio          enable sound with pulseaudio over tcp. Needs
                        pulseaudio to be installed on host and in image
- --gpu                 use hardware accelerated OpenGL rendering. Needs
-                       mesa-utils in your image to be installed.
-                       Works only with --X11 and --hostdisplay. Experimental.
-                       Don't use with xpra or Xephyr -> security leak
-                       Fallback to shared X socket instead of X over tcp
  --virtualgl           hardware acceleration with VirtualGL. Needs virtualgl
                        to be installed on host. BREAKS CONTAINER ISOLATION
                        from display :0 if used with xpra or Xephyr.
+ --gpu                 use hardware accelerated OpenGL rendering. Needs
+                       mesa-utils in your image to be installed.
+                       Works only with --X11 and --hostdisplay. Can have
+                       rendering glitches, avoidable with --ipc or --net
+ --ipc                 SECURITY HOLE: gives container access to interprocess
+                       communication and shared memory from host.
+ --net                 SECURITY HOLE: Shares host network with container.
 Advanced options:
  -s, --sudo            use 'sudo' to run 'su -c docker ...' (Ubuntu special)
  --starter             create starter on desktop & exit
@@ -185,27 +191,29 @@ $WM_RECOMMENDED_NODESKTOP_HEAVY
 $WM_UGLY
           * Known not to work at all:
 $WM_BAD
-  "
-  securitytable
-}
-securitytable() { # show security table of combining X servers with --virtualgl or --gpu
-echo '
+
 ------------------------------------------------------------------------------
 Table to show grade of container isolation | software  | --virtualgl | --gpu
 depending on choosed options               | rendering |             |
 ------------------------------------------------------------------------------
---X11          = core X                    |  *****    |  ****       |  ****
---xpra         = xpra                      |  *****    |  *          |  -
---xephyr       = Xephyr                    |  *****    |  *          |  -
---hostdisplay  = share host display :0     |  *        |  *          |  *
+--X11          = core X                    |  +++++    |  ++++       |  ++++
+--xpra         = xpra                      |  +++++    |  +:0        |  -
+--xephyr       = Xephyr                    |  +++++    |  +:0        |  -
+--hostdisplay  = share host display :0     |  +:0      |  +:0        |  +:0
 ------------------------------------------------------------------------------
-***** high container isolation, secure to use.
-****  high container isolation, slightly degraded by container access to GPU.
-*     low container isolation due to X security leaks, insecure.
+--ipc = Breaks isolation, avoids rendering issues with --gpu and --hostdisplay
+        Allows container to host interprocess communication and shared memory
+        Allows fast hardware rendering with shared unix socket and MIT-SHM
+--net = Breaks isolation, avoids rendering issues with --gpu
+        Shares host network with container. Allows hardware rendering over tcp
+------------------------------------------------------------------------------
++++++ high container isolation, secure to use.
+++++  high container isolation, slightly degraded by container access to GPU.
++:0   low container isolation due to X security leaks, insecure.
       (full access to display:0 with host applications. For example, 
        keylogging is possible. Use only with trusted applications/images.)
 -     does not work + insecure.
-'
+"
 }
 license() {  # --license: show license (MIT)
 echo 'MIT License
@@ -420,7 +428,9 @@ killbgpids () { # kill background processes listet in $BGPIDFILE
             warning "docker didn't terminate as it should. Will not clean
   cache to avoid file permission problems. You should stop docker and remove
   the new container with command:
-docker stop `cat $CIDFILE` && docker rm `cat $CIDFILE`"
+docker stop `cat $CIDFILE` && docker rm `cat $CIDFILE`
+  or let x11docker do the work for you: 
+x11docker --orphaned"
             PRESERVECACHEFILES="yes"
         fi
     fi
@@ -487,7 +497,7 @@ xdparser() { # parse args for x11docker
     #
     SHORT="hw:dxXayrz:scuomfvVeplL"
     LONG="help,license,licence,wm:,desktop,command,x,X,xpra,Xpra,xephyr,Xephyr,X11,x11,hostdisplay,sudo,root,clipboard,hostuser,sudouser,home,fullscreen,pulseaudio,gpu,virtualgl,verbose,orphaned,exe,cid,cache,ps,resizeable,size:,glamor,starter,log,LOG,no-xhost"
-    LONG="$LONG,devel:,xhost,privileged,xsocket,sharegpu,sharenewxsocket" ### developer options, not for regular use
+    LONG="$LONG,devel:,xhost,privileged,xsocket,sharegpu,sharenewxsocket,ipc,pid,net,uts" ### developer options, not for regular use
     PARSED=`getopt --options $SHORT --longoptions $LONG --name "$0" -- "$@"`
     if [ "$?" != "0" ] ; then error "Error while parsing options. See 'x11docker --help' for vaild options." ; fi
     eval set -- "$PARSED"
@@ -528,7 +538,7 @@ xdparser() { # parse args for x11docker
             ;;
             --pulseaudio) PULSEAUDIO="yes"                  # enable pulseaudio connection / sound support over tcp
             ;;
-            --gpu) GPU="xsocket" ; XCONNECTION="xsocket"    # use hardware accelerated OpenGL, works only with core X
+            --gpu) GPU="immediate"                          # use immediate hardware acceleration, works only with -X11 or --hostdisplay
             ;;
             --virtualgl) GPU="virtualgl"                    # use hardware acceleration with VirtualGL
             ;;
@@ -566,14 +576,18 @@ xdparser() { # parse args for x11docker
             ;;
             --xhost) XHOST="+"                              # set 'xhost +' on both X servers
             ;;
-            --privileged) PRIVILEGED="yes"                  # run docker in privileged mode
-            ;;
             --xsocket) XCONNECTION="xsocket"                # Use shared X socket instead of default X over tcp
             ;;
             --sharegpu) if [ -z "$GPU" ] ; then GPU="sharegpu" ; fi   # share devices in /dev/dri
             ;;
             --sharenewxsocket) SHARENEWXSOCKET="yes"
             ;;
+            --privileged) PRIVILEGED="yes"                  # run docker in privileged mode
+            ;;
+            --ipc) SHAREIPC="yes";;                         # set docker option --ipc=host
+            --pid) SHAREPID="yes";;                         # set docker option --pid=host
+            --net) SHARENET="yes";;                         # set docker option --net=host
+            --uts) SHAREUTS="yes";;                         # set docker option --net=host
             --) shift                                       # arguments to submit to docker (or host executable)
                 if [ "$X11DOCKERMODE" != "exe" ] ; then X11DOCKERMODE="run" ; fi             # will run image, if not already changed to '--exe'
                 while [ -n "$1" ] ; do                                                       # get all options for docker after '--'
@@ -717,6 +731,13 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
     exit
   fi
   
+  ## option '--virtualgl': check if VirtualGL is installed
+  command -v "vglrun" >/dev/null 2>&1 || { warning "could not find VirtualGL.
+  It has to be installed on host to use option --virtualgl. 
+  You can get in here: http://www.virtualgl.org/
+  Disabling option --virtualgl" 
+    GPU="" ; }
+  
   ## option '--pulseaudio': find a free tcp port
   if [ "$PULSEAUDIO" = "yes" ] ; then
     read LOWERPORT UPPERPORT < /proc/sys/net/ipv4/ip_local_port_range
@@ -728,8 +749,8 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
 }
 
 { #### check X server
-  ## option '-x, --X': show on display :0 instead of switching to another tty
-  #  check if either xpra or Xephir should be used for this job
+
+  ## option '-x': Try to auto choose best matching and available X server
   #
   if [ "$AUTOCHOOSESERVER" = "yes" ] ; then
     if [ "$DESKTOPIMAGE" = "no" ] ; then
@@ -737,7 +758,7 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
     else
         XSERVER="XEPHYR"    # use Xephyr for desktop environments
     fi
-    if [ -z "$DOCKERARGS" ] ; then XSERVER="XEPHYR"  ; fi
+    if [ -z "$DOCKERARGS" ] ; then XSERVER="XEPHYR"  ; fi  # if no image or host executable is given, run Xephyr with window manager instead of empty xpra
   fi
 
   ## check if choosed X server is installed
@@ -923,78 +944,94 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
       esac
     ;;
     exe|onlyX) COMMAND="# dontrundocker"
+      case $XSERVER in
+        HOSTDISPLAY)
+          NEWDISPLAY="$STARTDISPLAY";;                      # not really new ...
+      esac
     ;;
   esac
-  
-  ## Use X over tcp (default) or shared X socket
-  case $XCONNECTION in
-    tcp)     # default
-      COMMAND="$COMMAND -e DISPLAY=$TCPDISPLAY"
-      ;;
-    xsocket) # options '--gpu' and '--xsocket'
-      COMMAND="$COMMAND -e DISPLAY=$NEWDISPLAY"
-      SHARENEWXSOCKET="yes"
-      ;;
-  esac
 
+  ### SECURITY HOLES: options --ipc and --net avoid rendring glitches with option --gpu
+  if [ -n "$SHARENET" ] ; then COMMAND="$COMMAND --net=host" ; fi
+  if [ -n "$SHAREIPC" ] ; then COMMAND="$COMMAND --ipc=host" ; fi
+
+  ### developer options ### SECURITY: breaks container isolation, testing purpuoses only
+  if [ -n "$PRIVILEGED" ] ; then COMMAND="$COMMAND --privileged" ; fi
+  if [ -n "$SHAREPID" ] ; then COMMAND="$COMMAND --pid=host" ; fi
+  if [ -n "$SHAREUTS" ] ; then COMMAND="$COMMAND --uts=host" ; fi
+  
+  # QT environment variables. May influence rendering problems in qt4
+  # COMMAND="$COMMAND -e QT_GRAPHICSSYSTEM=raster"                                # raster or native. 
+  # COMMAND="$COMMAND -e QT_X11_NO_MITSHM=1"
+  
+  ### test for alsa support, not working yet
+  if [ -n "$SND" ] ; then
+    while read -r FILE ; do
+      echo $FILE
+      COMMAND="$COMMAND --device=$FILE:$FILE:rw"
+    done < <(find /dev/snd/* -maxdepth 0 -type c)
+  fi
   
   ## option '--pulseaudio'
-  #
   if [ "$PULSEAUDIO" = "yes" ] ; then COMMAND="$COMMAND -e PULSE_SERVER=tcp:$DOCKERIP:$PULSE_PORT" ; fi # provide pulseaudio server
-
-  ### developer option '--privileged' ### SECURITY: breaks container isolation, testing purpuoses only
-  #
-  if [ -n "$PRIVILEGED" ] ; then COMMAND="$COMMAND --privileged" ; fi
-
-
-#  # QT environment variables
-#      COMMAND="$COMMAND -e QT_GRAPHICSSYSTEM=raster"                                # raster or native. Can influence rendering problems in qt4
-#      COMMAND="$COMMAND -e QT_X11_NO_MITSHM=1"
-
-  ## option '--virtualgl' : Provide hardware OpenGL acceleration with VirtualGL
-  #
-  if [ "$GPU" = "virtualgl" ] ; then
-    case $XSERVER in
-      XPRA|XEPHYR)
-        COMMAND="$COMMAND -v /tmp/.X11-unix/X0:/tmp/.X11-unix/X0:ro"            # share X socket from :0 ### SECURITY issue, breaks container isolation from display :0
-        COMMAND="$COMMAND -e VGL_DISPLAY=$STARTDISPLAY"
+  
+  ## hardware acceleration options --gpu and --virtualgl
+  case $GPU in
+    "immediate") ## option '--gpu': immediate hardware acceleration for options --X11 and --hostdisplay
+        case  "$SHARENET" in
+          "yes") XCONNECTION="tcp" ;;     # with --net=host to allow hardware acceleration over tcp 
+          *) XCONNECTION="xsocket" ;;     # either with --ipc=host or with glitched rendering
+        esac
+        if [ "$XSERVER" = "HOSTDISPLAY" ] ; then XCONNECTION="xsocket" ; fi  # overwrite above setting, tcp to host display is disabled by default with --nolisten tcp on display:0
         ;;
-      X11)
-        SHARENEWXSOCKET="yes"
-        COMMAND="$COMMAND -e VGL_DISPLAY=$NEWDISPLAY"
-        ;;        
-      HOSTDISPLAY)
+    "virtualgl") ## option '--virtualgl': mediate hardware OpenGL acceleration with VirtualGL
+        case $XSERVER in
+          XPRA|XEPHYR)
+            COMMAND="$COMMAND -v /tmp/.X11-unix/X0:/tmp/.X11-unix/X0:ro"            # share X socket from :0 ### SECURITY issue, breaks container isolation from display :0
+            COMMAND="$COMMAND -e VGL_DISPLAY=$STARTDISPLAY"
+            ;;
+          X11)
+            SHARENEWXSOCKET="yes"
+            COMMAND="$COMMAND -e VGL_DISPLAY=$NEWDISPLAY"
+            ;;        
+          HOSTDISPLAY)
+            ;;
+        esac
+        while read -r LINE ; do
+          COMMAND="$COMMAND -e $LINE"                                                # share environment variables created by vglrun
+        done < <(comm -1 -3 <(env | sort) <(vglrun -c 0 env | grep -v '^\[' | sort))
+        COMMAND="$COMMAND -v /usr/lib/libdlfaker.so:/usr/lib/libdlfaker.so:ro -v /usr/lib/libvglfaker.so:/usr/lib/libvglfaker.so:ro" 
+        #COMMAND="$COMMAND -e VGL_VERBOSE=1"                                         # Makes VirtualGL verbose
+        #COMMAND="$COMMAND -e VGL_LOGO=1"                                            # shows VGL logo in rendered images
         ;;
-    esac
-    while read -r LINE ; do
-      COMMAND="$COMMAND -e $LINE"                                                # share environment variables created by vglrun
-    done < <(comm -1 -3 <(env | sort) <(vglrun -c 0 env | grep -v '^\[' | sort))
-    COMMAND="$COMMAND -v /usr/lib/libdlfaker.so:/usr/lib/libdlfaker.so:ro -v /usr/lib/libvglfaker.so:/usr/lib/libvglfaker.so:ro" 
-#    COMMAND="$COMMAND -e VGL_VERBOSE=1"                                         # Makes VirtualGL verbose
-#    COMMAND="$COMMAND -e VGL_LOGO=1"                                            # shows VGL logo in rendered images
-  fi
+  esac
+  
+  # Use X over tcp (default in most cases) or shared X socket
+  case $XCONNECTION in
+    tcp)
+      COMMAND="$COMMAND -e DISPLAY=$TCPDISPLAY"  ;;
+    xsocket)
+      COMMAND="$COMMAND -e DISPLAY=$NEWDISPLAY"
+      SHARENEWXSOCKET="yes"  ;;
+  esac
   
   ## options --virtualgl, --xsocket, --sharenewxsocket
   if [ "$SHARENEWXSOCKET" = "yes" ] ; then
-    COMMAND="$COMMAND -v $NEWXSOCKET:$NEWXSOCKET:ro"    # share X socket from $NEWDISPLAY ### does not break isolation from display :0
+    COMMAND="$COMMAND -v $NEWXSOCKET:$NEWXSOCKET:ro"    # share X socket from $NEWDISPLAY ### does not break isolation from display :0 if not /tmp/.X11-unix/X0
   fi
   
-  ## options '--gpu', '--virtualgl': share graphic adapter device files ### SECURITY degrades container isolation
-  #
+  ## options '--gpu', '--virtualgl': share graphic adapter device files ### SECURITY slightly degrades container isolation
   if [ -n "$GPU" ] ; then
     while read -r FILE ; do
       echo $FILE
-#      if [ -c "$FILE" ] ; then COMMAND="$COMMAND --device=$FILE:$FILE:rw" ; fi
       COMMAND="$COMMAND --device=$FILE:$FILE:rw"
-    done < <(find /dev/dri/*)
-  fi
+    done < <(find /dev/dri/* -maxdepth 0 -type c)
+  fi  
 
   ## option '-p, --ps': preserve container yes/no
-  #
   if [ "$PRESERVECONTAINER" = "no" ] ; then COMMAND="$COMMAND --rm" ; fi
 
   ## option '--home': share folder ~/.local/share/x11docker/IMAGENAME with created container as its home directory
-  #
   if [ "$ADDUSERHOME" = "yes" ] ; then
     # define path to shared folder and remove '/' from image name
     ADDUSERHOMEFOLDER=$HOME/.local/share/x11docker/`echo $IMAGENAME | tr / -`
@@ -1034,9 +1071,6 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
       echo "chown $BENUTZER:$BENUTZER /home/$BENUTZER"
       echo "HOME=/home/$BENUTZER"
       
-      # Workaround to avoid GTK rendering errors in Xfce with shared X socket. Unclear reasons
-      # echo 'rm $HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml'
-      
       # option '--sudouser': add sudo permissions without password
       if [ "$ADDSUDOUSER" = "yes" ] ; then
           echo 'echo "%sudo ALL=(ALL) NOPASSWD:ALL"   >> /etc/sudoers'
@@ -1065,15 +1099,12 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
   fi
 
   # add custom docker commands 
-  #
   COMMAND="$COMMAND $DOCKERARGS"
 
   ## option '-c, --command': only show created docker command and exit
-  #
   if [ "$ONLYSHOWCOMMAND" = "yes" ] ; then echo $COMMAND && exit 0 ; fi
 
   ## option '--cid': show filename of file that will contain container id
-  #
   if [ "$SHOWCIDFILENAME" = "yes" ] ; then echo $CIDFILE ; fi
 }
 
@@ -1211,16 +1242,23 @@ done
   #
   # create Xcookie file
   echo ':> '$XCLIENTCOOKIE
+  #
   # cases to give docker access to display :0
-  if [ "$XSERVER" = "HOSTDISPLAY" ] || [ -n "$GPU" ] && [ "$XSERVER" != "X11" ] ; then       ## option '--virtualgl' or --hostdisplay
+  if [ "$XSERVER" = "HOSTDISPLAY" ] || [ "$GPU" = "xsocket" ] && [ "$XSERVER" != "X11" ] ; then :      ## option '--virtualgl' or --hostdisplay
     echo "xauth nlist :0 | sed -e 's/^..../ffff/' | xauth -f $XCLIENTCOOKIE nmerge -"        # extract access to display:0 from ~/.Xauthority
   fi 
+  if [ "$GPU" = "virtualgl" ] ; then
+    echo ":> $VGLCOOKIE"  ### test: VirtualGL may use different cookie than $XAUTHORITY
+    echo "xauth nlist :0 | sed -e 's/^..../ffff/' | xauth -f $VGLCOOKIE nmerge -"        # extract access to display:0 from ~/.Xauthority, used only if within xpra or Xephyr  ### test: VirtualGL may use different cookie than $XAUTHORITY
+    echo "xauth nlist :0 | sed -e 's/^..../ffff/' | xauth -f $XCLIENTCOOKIE nmerge -"        # extract access to display:0 from ~/.Xauthority
+  fi
   #
   ## things to be done on new display: 
   # set X variables to new display
   echo "export DISPLAY=$NEWDISPLAY"
   echo "export XAUTHORITY=$XCLIENTCOOKIE"
   #
+  # 
   case $XSERVER in
     X11|XPRA|XEPHYR)
       # create background color. #7F7F7F is color of xfwm4 background
@@ -1262,20 +1300,20 @@ done
 #    echo 'storepid $! vglclient'
 #    echo 'XINITJOBSTOKILL="$XINITJOBSTOKILL $!"'
 #  fi
-  if [ "$GPU" = "virtualgl" ] ; then
+  if [ "$GPU" = "virtualgl" ] ; then # Make VirtualGL working in new Display for host applications
     case $XSERVER in
-      XEPHYR)
-        echo "export VGL_DISPLAY=$STARTDISPLAY"
-        ;;
-      X11)
-        echo "export VGL_DISPLAY=$NEWDISPLAY"
-        ;;
+#      XEPHYR|HOSTDISPLAY)
+#        echo "export VGL_DISPLAY=$STARTDISPLAY"
+#        ;;
+#      X11)
+#        echo "export VGL_DISPLAY=$NEWDISPLAY"
+#        ;;
     esac
     case $XSERVER in
-      XEPHYR|X11|HOSTDISPLAY)
-        while read -r LINE ; do
-          echo "export $LINE"                                                       # share environment variables created by vglrun
-        done < <(comm -1 -3 <(env | sort) <(vglrun -c 0 env | grep -v '^\[' | sort))
+      XEPHYR|X11|HOSTDISPLAY)                
+    #    while read -r LINE ; do
+    #      echo "export $LINE"                                                       # share environment variables created by vglrun
+    #    done < <(comm -1 -3 <(env | sort) <(vglrun -c 0 env | grep -v '^\[' | sort))
 #        echo "export VGL_VERBOSE=1"                                         # Makes VirtualGL verbose
 #        echo "export VGL_LOGO=1"                                            # shows VGL logo in rendered images
         ;;
