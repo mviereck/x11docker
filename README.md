@@ -82,6 +82,4 @@ Run playonlinux in a sandbox in an xpra window, sharing a home folder to preserv
    - x11docker --xpra --hostuser --home --desktop x11docker/xfce-wine-playonlinux playonlinux
    
 #ToDo
-  - improve --virtualgl performance
-  - improve --virtualgl security with --xpra and --xephyr
-  - use tcp instead of xsocket with option --gpu to avoid some rendering issues (does not work with docker recently)
+  - Test with different graphic cards and drivers to check if GPU acceleration is working in different setups. Known to work with AMD and Intel onboard-chips using open source drivers. Further tests and reports are appreciated.
