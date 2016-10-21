@@ -83,4 +83,5 @@ Run playonlinux in a sandbox in an xpra window, sharing a home folder to preserv
    
 #ToDo
   - Test with different graphic cards and drivers to check if GPU acceleration is working in different setups. Known to work with AMD and Intel onboard-chips using open source drivers. Further tests and reports are appreciated.
-  - Find a more retricted solution to avoid rendering glitche with --gpu than isolation breaking options --ipc and --net
+  - Find a more retricted solution to avoid rendering glitches with --gpu than isolation breaking options --ipc and --net.   Maybe tcp connection only needs an additional tcp port or less restricted iptable rules, and -net=host won't be needed. --ipc could be dropped or used for --hostdisplay only.
+
