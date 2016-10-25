@@ -14,9 +14,9 @@ There is a comfortable GUI for x11docker. To use x11docker-gui, you need to inst
 #Hardware accelerated OpenGL rendering
 Software accelerated OpenGL is available in all provided X servers. The image needs an OpenGL implementation to profit from it.  The easiest way to achieve this is to install package 'mesa-utils' in your image.
  
-Immediate GPU hardware acceleration with option --gpu is quite fast and secure to use with a core second X server. As for now, it works with options --X11 and --hostdisplay only. It can have some rendering glitches due to missing shared memory with the host. (This can be fixed with either option --ipc or --net, but has the drawback to break container isolation in this case).
+Immediate GPU hardware acceleration with option --gpu is quite fast and secure to use with a core second X server. As for now, it works with options --X11 and --hostdisplay only. It can get additional speed-up with insecure option --ipc.
  
- Mediate GPU hardware acceleration for OpenGL / GLX with option --virtualgl is possible with VirtualGL (http://www.virtualgl.org). Other than option --gpu, it works with xpra and Xephyr, too, but has the drawback to break container isolation from display :0. Use only with full trusted applications and images. Needs VirtualGL to be installed on host.
+ Mediate GPU hardware acceleration for OpenGL / GLX with option --virtualgl is possible with VirtualGL (http://www.virtualgl.org). Other than option --gpu, it works with xpra and Xephyr, too, but has the drawback to break container isolation from display :0. Use only with trusted applications and images. Needs VirtualGL to be installed on host.
  
  Using hardware acceleration can degrade or break container isolation. Look at table in section "Security". 
  
@@ -84,5 +84,4 @@ Run playonlinux in a sandbox in an xpra window, sharing a home folder to preserv
    
 #ToDo
   - Test with different graphic cards and drivers to check if GPU acceleration is working in different setups. Known to work with AMD and Intel onboard-chips using open source drivers. Further tests and reports are appreciated.
-  - Find a more restricted solution to avoid rendering glitches with --gpu than isolation breaking options --ipc and --net.   Maybe tcp connection only needs an additional tcp port or less restricted iptable rules, and --net=host won't be needed. --ipc=host could be dropped or used for --hostdisplay only.
 
