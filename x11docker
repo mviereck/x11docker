@@ -1,15 +1,19 @@
 #!/bin/bash
 
 # ToDo:
-# - find better solutions than --ipc and --net to avoid rendering glitches with --gpu
-#   Maybe tcp connection only needs an additional tcp port or less restricted iptable rules
-# - test --gpu and --virtualgl with different setups of graphic cards and drivers. Known to work with Intel and AMD oboard chips with open source drivers.
+# - test --gpu and --virtualgl with different setups of graphic cards and drivers. Known to work with Intel and AMD onboard chips with open source drivers.
 # - check pulseaudio: daemon on host seems to quit when image terminates. As a workaround, tcp module is not disabled on exit for now
 # - improve usage informations in gui
 # - check if VT is unused with --X11
 # - kaptain sleeps a while until command is created. no cpu usage. why?
-VERSION="V 1.4.3"
+
+VERSION="V 1.5.0"
+
 # x11docker changelog
+# 25.10.2016 V1.5.0   solved problems with MIT-SHM, --ipc and --net. Extension MIT-SHM has to be explicitly disabled on new X servers!
+#                     (Still no way to disable MIT-SHM with option --hostdisplay except for QT applications)
+#                     using shared X socket instead of X over tcp as default now. '-nolisten tcp' on all X servers
+#                     option --net moved to developer options
 # 24.10.2016 V1.4.3   minor bugfix: show warning on --ipc or --net without --hostuser, not other way around
 # 24.10.2016 V1.4.2   show warning if --ipc or --net without --hostuser/--sudouser
 # 23.10.2016          some more code cleanup, especially parts "create docker command" and "create xinitrc"
@@ -154,12 +158,10 @@ Options:
                        from display :0 if used with xpra or Xephyr.
  --gpu                 use hardware accelerated OpenGL rendering. Needs
                        mesa-utils in your image to be installed.
-                       Works only with --X11 and --hostdisplay. Can have
-                       rendering glitches, avoidable with --ipc or --net
+                       Works only with --X11 and --hostdisplay. Can be
+                       speeded up qith option --ipc
  --ipc                 ISOLATION BREAKDOWN: gives container access to 
                        interprocess communication and shared memory from host.
-                       Use with --hostdisplay only to minimze risks.
- --net                 ISOLATION BREAKDOWN: Shares host network with container
                        Use with --hostdisplay only to minimze risks.
 Advanced options:
  -s, --sudo            use 'sudo' to run 'su -c docker ...' (Ubuntu special)
@@ -211,11 +213,10 @@ depending on choosed options               | rendering |             |
 --xephyr       = Xephyr                    |  +++++    |  +:0        |  -
 --hostdisplay  = share host display :0     |  +:0      |  +:0        |  +:0
 ------------------------------------------------------------------------------
---ipc = Breaks isolation, avoids rendering issues with --gpu and --hostdisplay
-        Allows container to host interprocess communication and shared memory
-        Allows fast hardware rendering with shared unix socket and MIT-SHM
---net = Breaks isolation, avoids rendering issues with --gpu
-        Shares host network with container. Allows hardware rendering over tcp
+--ipc = Breaks isolation, can speed up option --gpu and can avoid rendering 
+        glitches with option --hostdisplay. Use with --hostuser only.
+        Container access to host interprocess communication and shared memory.
+        Allows fast hardware rendering with shared unix socket and MIT-SHM.
 ------------------------------------------------------------------------------
 +++++ high container isolation, secure to use.
 ++++  high container isolation, slightly degraded by container access to GPU.
@@ -292,7 +293,7 @@ XCLIENTCOOKIE=Xclientcookie                     # file to store new X client coo
 #NEWXLOCK=""                                     # .Xn-lock - exists for running X server with socket n
 NEWXSOCKET=""                                   # New X socket
 NEWXVT=""                                       # Virtual console to use for core new X server (>7)
-XCONNECTION="tcp"                               # 'tcp' or 'xsocket'. default: tcp
+XCONNECTION="xsocket"                           # 'tcp' or 'xsocket'. default: xsocket. tcp is still possible, but no longer needed in any case
 SHARENEWXSOCKET=""                              # options --gpu, --sharenewxsocket, --xsocket, --hostdisplay. if yes, share new X socket
 
 # options for different X servers
@@ -510,12 +511,12 @@ orphaned() { # option --orphaned : check for non-removed containers and left cac
 }
 xdparser() { # parse args for x11docker
   SHORT="hw:dxXayrz:scuomfvVeplL"
-  LONG="wm:,desktop,x,X,xpra,Xpra,xephyr,Xephyr,X11,x11,hostdisplay,exe"         # X server and WM, exe instead of docker
-  LONG="$LONG,fullscreen,resizeable,size:,glamor"                                # Xephyr options
-  LONG="$LONG,clipboard,hostuser,sudouser,home,pulseaudio,gpu,virtualgl"         # comfort options
-  LONG="$LONG,sudo,root,ipc,net,ps,verbose,cid,cache,log,LOG,no-xhost"           # advanced options
-  LONG="$LONG,starter,orphaned,license,licence,command,help"                     # special options without starting X server
-  LONG="$LONG,devel:,xhost,privileged,xsocket,sharegpu,sharenewxsocket,pid,uts"  # developer options, not for regular use
+  LONG="wm:,desktop,x,X,xpra,Xpra,xephyr,Xephyr,X11,x11,hostdisplay,exe"             # X server and WM, exe instead of docker
+  LONG="$LONG,fullscreen,resizeable,size:,glamor"                                    # Xephyr options
+  LONG="$LONG,clipboard,hostuser,sudouser,home,pulseaudio,gpu,virtualgl"             # comfort options
+  LONG="$LONG,sudo,root,ipc,ps,verbose,cid,cache,log,LOG,no-xhost"                   # advanced options
+  LONG="$LONG,starter,orphaned,license,licence,command,help"                         # special options without starting X server
+  LONG="$LONG,devel:,xhost,privileged,xsocket,tcp,sharegpu,sharenewxsocket,pid,uts,net"  # developer options, not for regular use
   PARSED=`getopt --options $SHORT --longoptions $LONG --name "$0" -- "$@"`
   if [ "$?" != "0" ] ; then error "Error while parsing options. See 'x11docker --help' for vaild options." ; fi
   eval set -- "$PARSED"
@@ -557,16 +558,17 @@ xdparser() { # parse args for x11docker
       --orphaned) ORPHANEDCHECK="yes"  ;;               # check for orphaned containers and files owned by root, created by docker)
       --no-xhost) NO_XHOST="yes"  ;;                    # disable any access granted by xhost
       --ipc) SHAREIPC="yes";;                           # set docker option --ipc=host
-      --net) SHARENET="yes";;                           # set docker option --net=host
       #####some developer options, not for regular use, can change any time
       --devel) DEVMODE="$2" && shift  && echo "DEVMODE $DEVMODE" ;;  # non-documented developer option. effect can change at any time.
       --xhost) XHOST="+"  ;;                            # set 'xhost +' on both X servers
-      --xsocket) XCONNECTION="xsocket" ;;               # Use shared X socket instead of default X over tcp
+      --xsocket) XCONNECTION="xsocket" ;;               # Use shared X socket
+      --tcp) XCONNECTION="tcp";;
       --sharegpu) if [ -z "$GPU" ] ; then GPU="sharegpu" ; fi  ;; # share devices in /dev/dri
-      --sharenewxsocket) SHARENEWXSOCKET="yes" ;;
+      --sharenewxsocket) SHARENEWXSOCKET="yes" ; XCONNECTION="tcp" ;;
       --privileged) PRIVILEGED="yes"  ;;                # run docker in privileged mode
       --pid) SHAREPID="yes";;                           # set docker option --pid=host
       --uts) SHAREUTS="yes";;                           # set docker option --net=host
+      --net) SHARENET="yes";;                           # set docker option --net=host
       ##### docker options / image
       --) shift                                         # arguments to submit to docker (or host executable)
         if [ "$X11DOCKERMODE" != "exe" ] ; then X11DOCKERMODE="run" ; fi        # will run image, if not already changed to '--exe'
@@ -1055,21 +1057,28 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
       ## option '--pulseaudio': provide pulseaudio server
       if [ "$PULSEAUDIO" = "yes" ] ; then COMMAND="$COMMAND -e PULSE_SERVER=tcp:$DOCKERIP:$PULSE_PORT" ; fi
       
-      ### SECURITY leaks: options --ipc and --net avoid rendring glitches with option --gpu
+      ### SECURITY leaks: option --ipc speeds up --gpu and avoids rendering glitches with --hostdisplay
       if [ -n "$SHARENET" ] ; then COMMAND="$COMMAND --net=host" ; fi
-      if [ -n "$SHAREIPC" ] ; then COMMAND="$COMMAND --ipc=host" ; fi
 
       ### developer options ### SECURITY leaks: breaks container isolation, testing purpuoses only
       if [ -n "$PRIVILEGED" ] ; then COMMAND="$COMMAND --privileged" ; fi
       if [ -n "$SHAREPID" ] ; then COMMAND="$COMMAND --pid=host" ; fi
       if [ -n "$SHAREUTS" ] ; then COMMAND="$COMMAND --uts=host" ; fi
+      if [ -n "$SHAREIPC" ] ; then COMMAND="$COMMAND --ipc=host" ; fi
   
-      # QT environment variables. May influence rendering problems in qt4
-      # COMMAND="$COMMAND -e QT_GRAPHICSSYSTEM=raster"                                # raster, native or opengl. 
-      # COMMAND="$COMMAND -e QT_X11_NO_MITSHM=1"                                      # disables use of MIT-SHM in QT
+      # Enable or disable MIT-SHM and opengl in QT and GTK to avoid rendering glitches
+      if [ "$SHAPEIPC" = "yes" ] ; then
+        COMMAND="$COMMAND -e QT_GRAPHICSSYSTEM=opengl"    # raster, native or opengl. Setting it to opengl because plasma automatically shrinks down to render if gpu is missing, but does not "upgrade" to opengl if it is available.
+      else
+        COMMAND="$COMMAND -e QT_X11_NO_MITSHM=1"          # disables usage of MIT-SHM in QT
+        COMMAND="$COMMAND -e GDK_RENDERING=image"         # disables GTK OpenGL&MIT-SHM (yes, it's written GDK instead of GTK)
+        # disable MIT-SHM or OpenGL usage (seems not to work)
+        #COMMAND="$COMMAND -e _X11_NO_MITSHM=1"
+        #COMMAND="$COMMAND -e _MITSHM=0"
+      fi
   
       ### test for alsa support, not working yet
-      if [ -n "$SND" ] ; then
+      if [ -n "$ALSA" ] ; then
         while read -r FILE ; do
           echo $FILE
           COMMAND="$COMMAND --device=$FILE:$FILE:rw"
@@ -1092,23 +1101,26 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
   XEXTENSIONS=""
   XEXTENSIONS="$XEXTENSIONS +extension Composite +extension RANDR +extension RENDER +extension GLX +extension XVideo +extension DOUBLE-BUFFER +iglx"
   XEXTENSIONS="$XEXTENSIONS +extension X-Resource +extension SECURITY +extension DAMAGE"
-  XEXTENSIONS="$XEXTENSIONS -auth $XSERVERCOOKIE"    # cookie authentication
+  XEXTENSIONS="$XEXTENSIONS -auth $XSERVERCOOKIE"      # cookie authentication
+  if [ "$SHAREIPC" = "yes" ] ; then
+    XEXTENSIONS="$XEXTENSIONS +extension MIT-SHM"      # only usefull if sharing host IPC
+  else
+    XEXTENSIONS="$XEXTENSIONS -extension MIT-SHM"      # explicitly disable MIT-SHM to avoid rendering glitches, often enabled in X by default
+  fi
   # not in use: extension XTEST
   case $XCONNECTION in
     tcp) ;;
-    xsocket) XEXTENSIONS="$XEXTENSIONS -nolisten tcp" ;;  # disable tcp if connection with shared X socket is used instead
+    xsocket) XEXTENSIONS="$XEXTENSIONS -nolisten tcp" ;;  # disable tcp if connection with shared X socket is used 
   esac
   
   case $XSERVER in
     X11) 
          XEXTENSIONS="$XEXTENSIONS +extension XFree86-DRI +extension XFree86-DGA +extension XFree86-VidModeExtension"
-         XEXTENSIONS="$XEXTENSIONS +extension MIT-SHM"
          #XEXTENSIONS="$XEXTENSIONS +extension DRI +extension DRI2 +extension DRI3 +extension SGI-GLX +extension SHAPE"
          XCOMMAND="$(command -v X) $NEWDISPLAY $NEWXVT -retro $XEXTENSIONS"
     ;;
     XPRA) # To use Xpra, Xdummy will run first. Xpra server doesn't allow tcp connections, even if it is told to do it.
         XEXTENSIONS="$XEXTENSIONS +extension XFree86-DRI +extension XFree86-DGA +extension XFree86-VidModeExtension"
-        XEXTENSIONS="$XEXTENSIONS +extension MIT-SHM"
         case $SHARECLIPBOARD in                                                           # option '-c, --clipboard'
             yes) XPRAARGS="--clipboard"   ;;
             no)  XPRAARGS="--no-clipboard" ;; 
@@ -1551,6 +1563,7 @@ TryExec=x11docker $X11DOCKERARGS
 { #### Finally: run new X server
   # option '-l, --log': show logs in an xterm window on display :0
   if [ "$SHOWLOG" = "yes" ] ; then $XTERM -title "x11docker xinit log $IMAGENAME $IMAGECOMMAND" -e "tail --retry -n +1 -F $XTERMLOGFILE $DOCKERLOGFILE $XPRALOGFILE $XINITLOGFILE 2> /dev/null" ; fi &
+  
   case $XSERVER in
     X11|XPRA|XEPHYR)
       xinit $XINITRC -- $XCOMMAND  > $XINITLOGFILE 2>&1
