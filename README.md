@@ -70,7 +70,7 @@ To run a host application on a new X server:
 To run only a new X server with window manager:
  -  `x11docker [OPTIONS]`
 
-Have a look at 'x11docker --help' to see all options.
+Have a look at `x11docker --help` to see all options.
 
 #Examples
 Run xfce desktop in Xephyr:
