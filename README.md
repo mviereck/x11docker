@@ -45,7 +45,7 @@ List of optional needed packages: `xpra` `xephyr` `xclip` `kaptain` `pulseaudio`
 x11docker creates a new X server on a new X socket. Instead of using display :0 from host, docker images will run on segregated display :1 or display :2 ... (with exception from option `--hostdisplay`)
  - `--xpra`: A comfortable way to run single docker GUI applications visible on your host display is to use xpra. Needs package `xpra` to be installed.
  - `--xephyr`: A comfortable way to run desktop environments from within docker images is to use Xephyr. Needs package `xephyr` to be installed. Also, you can choose option `--xephyr` together with option `--wm` and run single applications with a host window manager in Xephyr
- - `--X11`: Core X11 server: To switch between displays, press [STRG][ALT][F7] ... [STRG][ALT][F12]. Essentially it is the same as switching between virtual consoles (tty1 to tty6) with [STRG][ALT][F1]...[F6]. To be able to use this option, you have to execute `dpkg-reconfigure x11-common` first and choose option `anybody`.
+ - `--X11`: Core X11 server: To switch between displays, press `[CTRL][ALT][F7] ... [F12]`. Essentially it is the same as switching between virtual consoles (tty1 to tty6) with `[CTRL][ALT][F1] ... [F6]`. To be able to use this option, you have to execute `dpkg-reconfigure x11-common` first and choose option `anybody`.
  - `--hostdisplay`: Sharing host display: This option is least secure and has least overhead. Instead of running a second X server, your host X server on display :0 is shared. Occuring rendering glitches can be fixed with insecure option `--ipc`.
 
 #Security 
