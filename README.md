@@ -11,7 +11,16 @@ There is a comfortable GUI for x11docker. To use x11docker-gui, you need to inst
 
 ![x11docker-gui screenshot](/../screenshots/x11docker-gui.png?raw=true "Optional Title")
 
-
+#Security 
+ - Main goal of x11docker is to run dockered GUI applications while preserving container isolation.
+ - GUI applications in docker are isolated from host display :0, avoiding X security leaks.
+ - Preserving container isolation is done using a segregated X server. (Most solutions in the web to run dockered GUI applications share the problem of breaking container isolation and allowing access to X resources like keylogging with `xinput test`).
+ - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.  The new X server doesn't know cookies from the host X server on display :0. (Except less secure options `--hostdisplay` and `--virtualgl`)
+ - With option `--no-xhost` x11docker checks for any access to host X server granted by xhost and disables it. Host applications then use `~/.Xauthority` only.
+ - Special use cases of hardware acceleration and option `--hostdisplay` can degrade or break container isolation. Look at security table to see the differences:
+ 
+![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true "Optional Title")
+ 
 #Hardware accelerated OpenGL rendering
 Software accelerated OpenGL is available in all provided X servers. The image needs an OpenGL implementation to profit from it.  The easiest way to achieve this is to install package `mesa-utils` in your image.
  
@@ -48,16 +57,6 @@ x11docker creates a new X server on a new X socket. Instead of using display :0 
  - `--X11`: Core X11 server: To switch between displays, press `[CTRL][ALT][F7] ... [F12]`. Essentially it is the same as switching between virtual consoles (tty1 to tty6) with `[CTRL][ALT][F1] ... [F6]`. To be able to use this option, you have to execute `dpkg-reconfigure x11-common` first and choose option `anybody`.
  - `--hostdisplay`: Sharing host display: This option is least secure and has least overhead. Instead of running a second X server, your host X server on display :0 is shared. Occuring rendering glitches can be fixed with insecure option `--ipc`.
 
-#Security 
- - Main goal of x11docker is to run dockered GUI applications while preserving container isolation.
- - GUI applications in docker are isolated from host display :0, avoiding X security leaks.
- - Preserving container isolation is done using a segregated X server. (Most solutions in the web to run dockered GUI applications share the problem of breaking container isolation and allowing access to X resources like keylogging with `xinput test`).
- - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.  The new X server doesn't know cookies from the host X server on display :0. (Except less secure options `--hostdisplay` and `--virtualgl`)
- - With option `--no-xhost` x11docker checks for any access to host X server granted by xhost and disables it. Host applications then use `~/.Xauthority` only.
- - Special use cases of hardware acceleration and option `--hostdisplay` can degrade or break container isolation. Look at security table to see the differences:
- 
-![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true "Optional Title")
- 
 #Usage in terminal
 To run a docker image with new X server:
  -  `x11docker [OPTIONS] IMAGE [COMMAND]`
