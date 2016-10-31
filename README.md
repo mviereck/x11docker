@@ -53,7 +53,7 @@ x11docker creates a new X server on a new X socket. Instead of using display :0 
  - GUI applications in docker are isolated from host display :0, avoiding X security leaks.
  - Preserving container isolation is done using a segregated X server. (Most solutions in the web to run dockered GUI applications share the problem of breaking container isolation and allowing access to X resources like keylogging with `xinput test`).
  - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.  The new X server doesn't know cookies from the host X server on display :0. (Except less secure options `--hostdisplay` and `--virtualgl`)
- - With option `--no-xhost` x11docker checks for any access granted to host X server by xhost and disables it. Host applications then use `~/.Xauthority` only.
+ - With option `--no-xhost` x11docker checks for any access to host X server granted by xhost and disables it. Host applications then use `~/.Xauthority` only.
  - Special use cases of hardware acceleration and option `--hostdisplay` can degrade or break container isolation. Look at security table to see the differences:
  
 ![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true "Optional Title")
@@ -73,15 +73,17 @@ To run only a new X server with window manager:
 Have a look at `x11docker --help` to see all options.
 
 #Examples
+Some example images can be found on docker hub: https://hub.docker.com/u/x11docker/
+
 Run xfce desktop in Xephyr:
    - `x11docker --xephyr --desktop x11docker/xfce`
    
 Run wine and playonlinux on xfce desktop in a sandbox in a Xephyr window, sharing a home folder to preserve settings and wine installations, and with a container user similar to your host user:
    - `x11docker --xephyr --hostuser --home --desktop x11docker/xfce-wine-playonlinux start`
    
-Run playonlinux in a sandbox in an xpra window, sharing a home folder to preserve settings and installations, and with a container user similar to your host user:
-   - `x11docker --xpra --hostuser --home --desktop x11docker/xfce-wine-playonlinux playonlinux`
+Run playonlinux in a sandbox in an xpra window, sharing a home folder to preserve settings and installations, sharing clipboard, enabling pulseaudio sound, and with a container user similar to your host user:
+   - `x11docker --xpra --hostuser --home --clipboard --pulseaudio x11docker/xfce-wine-playonlinux playonlinux`
    
 #ToDo
   - Test with different graphic cards and drivers to check if GPU acceleration is working in different setups. Known to work with AMD and Intel onboard-chips using open source drivers. Further tests and reports are appreciated.
-
+  - Improve check for free virtual terminals / VT that can be used for core X11.
