@@ -86,3 +86,10 @@ Run playonlinux in a sandbox in an xpra window, sharing a home folder to preserv
 #ToDo
   - Test with different graphic cards and drivers to check if GPU acceleration is working in different setups. Known to work with AMD and Intel onboard-chips using open source drivers. Further tests and reports are appreciated.
   - Improve check for free virtual terminals / VT that can be used for core X11.
+  
+# Screenshots
+Sample screenshots can be found in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
+
+x11docker/lxde running in a Xephyr window:
+
+![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxde.png "lxde desktop running in Xephyr window using x11docker")
