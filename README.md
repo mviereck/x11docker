@@ -7,7 +7,7 @@
  - Hardware accelerated OpenGL rendering is possible.
 
 #GUI for x11docker
-There is a comfortable GUI for x11docker. To use x11docker-gui, you need to install package `kaptain`.
+There is a comfortable GUI for x11docker. To use `x11docker-gui`, you need to install package `kaptain`. `x11docker-gui` looks for an executeable `./x11docker` first, then will look for it in `$PATH`, for example in `/usr/local/bin`.
 
 ![x11docker-gui screenshot](/../screenshots/x11docker-gui.png?raw=true "Optional Title")
 
