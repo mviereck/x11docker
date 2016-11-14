@@ -3,8 +3,8 @@
  - Much faster than widespread SSH and VNC solutions.
  - No dependencies inside of docker images.
  - Secure sandboxing of GUI applications.
- - Sound with pulseaudio is possible.
- - Hardware accelerated OpenGL rendering is possible.
+ - Pulseaudio sound support is possible.
+ - GPU hardware acceleration is possible.
 
 #GUI for x11docker
 There is a comfortable GUI for x11docker. To use `x11docker-gui`, you need to install package `kaptain`. `x11docker-gui` looks for an executeable `./x11docker` first, then will look for it in `$PATH`, for example in `/usr/local/bin`.
@@ -37,7 +37,7 @@ x11docker supports pulseaudio sound over tcp. For this to use, pulseaudio needs 
 #Dependencies
 x11docker can run with standard system utilities without additional dependencies. As a core, it only needs X server (package `xorg`)  and, of course, docker (package `docker.io`) to run docker images on X. 
 
-For some additional options, x11docker needs some packages to be installed.
+For some additional options, x11docker needs some packages to be installed on host.
 It will check for them on startup and show terminal messages if some are missing.
 
 List of optional needed packages: `xpra` `xephyr` `xclip` `kaptain` `pulseaudio` `virtualgl` 
