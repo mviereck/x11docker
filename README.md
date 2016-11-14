@@ -1,7 +1,7 @@
 # x11docker: Run X11 GUI applications and desktop environments in docker.
 
  - Much faster than widespread SSH and VNC solutions.
- - No dependencies inside of docker images - run any GUI applications in docker. 
+ - No dependencies inside of docker images.
  - Secure sandboxing of GUI applications.
  - Sound with pulseaudio is possible.
  - Hardware accelerated OpenGL rendering is possible.
