@@ -1,8 +1,8 @@
-# x11docker: Run X11 GUI applications and desktop environments in docker on a separate X server, preserving container isolation.
+# x11docker: Run X11 GUI applications and desktop environments in docker.
 
- - Useful to avoid security issues concerning X forwarding. Secure sandboxing of X11 GUI applications.
- - Can either open a new X display, or can use xpra and Xephyr to show dockered GUI applications on your host X display. (Can also share your host display to have least overhead, but that is not mentioned for secure sandboxing.)
- - Doesn't have any dependencies inside of docker images - can run any GUI applications in docker. 
+ - Much faster than widespread SSH and VNC solutions.
+ - No dependencies inside of docker images - run any GUI applications in docker. 
+ - Secure sandboxing of X11 GUI applications. Preserve container isolation using a separate X server. Avoids security issues concerning X forwarding. 
  - Sound with pulseaudio is possible.
  - Hardware accelerated OpenGL rendering is possible.
 
