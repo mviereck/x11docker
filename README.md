@@ -2,7 +2,7 @@
 
  - Much faster than widespread SSH and VNC solutions.
  - No dependencies inside of docker images - run any GUI applications in docker. 
- - Secure sandboxing of X11 GUI applications. Preserve container isolation using a separate X server. Avoids security issues concerning X forwarding. 
+ - Secure sandboxing of GUI applications.
  - Sound with pulseaudio is possible.
  - Hardware accelerated OpenGL rendering is possible.
 
