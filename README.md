@@ -29,6 +29,9 @@ Immediate GPU hardware acceleration with option `--gpu` is quite fast and secure
  Mediate GPU hardware acceleration for OpenGL / GLX with option `--virtualgl` is possible with VirtualGL. Other than option `--gpu`, it works with xpra and Xephyr, too, but has the drawback to break container isolation from display :0. For use with trusted images only. Needs VirtualGL to be installed on host.
  
 Using hardware acceleration can degrade or break container isolation. Look at table in section "Security". 
+
+Known to work with AMD and Intel onboard-chips using open source drivers. Reports of tests with different setups of graphics cards and drivers are appreciated.
+  
  
 #Pulseaudio sound support
 x11docker supports pulseaudio sound over tcp. For this to use, pulseaudio needs to be installed on host and in docker image.
@@ -83,10 +86,6 @@ Run wine and playonlinux on xfce desktop in a sandbox in a Xephyr window, sharin
 Run playonlinux in a sandbox in an xpra window, sharing a home folder to preserve settings and installations, sharing clipboard, enabling pulseaudio sound, and with a container user similar to your host user:
    - `x11docker --xpra --hostuser --home --clipboard --pulseaudio x11docker/xfce-wine-playonlinux playonlinux`
    
-#ToDo
-  - Test with different graphic cards and drivers to check if GPU acceleration is working in different setups. Known to work with AMD and Intel onboard-chips using open source drivers. Further tests and reports are appreciated.
-  - Improve check for free virtual terminals / VT that can be used for core X11.
-  
 # Screenshots
 Sample screenshots can be found in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
 
