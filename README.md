@@ -34,7 +34,7 @@ Known to work with AMD and Intel onboard-chips using open source drivers. Report
   
  
 #Pulseaudio sound support
-x11docker supports pulseaudio sound over tcp. For this to use, pulseaudio needs to be installed on host and in docker image.
+x11docker supports pulseaudio sound over tcp. For this to use, package `pulseaudio` needs to be installed on host and in docker image.
 
  
 #Dependencies
