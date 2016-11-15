@@ -22,7 +22,7 @@ There is a comfortable GUI for x11docker. To use `x11docker-gui`, you need to in
 ![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true "Optional Title")
  
 #Hardware accelerated OpenGL rendering
-Software accelerated OpenGL is available in all provided X servers. The image needs an OpenGL implementation to profit from it.  The easiest way to achieve this is to install package `mesa-utils` in your image.
+Software accelerated OpenGL is available in all provided X servers. The image needs an OpenGL implementation to profit from it.  The easiest way to achieve this is to install package `mesa-utils` in your image. Some applications need package `x11-utils` to be installed in image, too.
  
 Immediate GPU hardware acceleration with option `--gpu` is quite fast and secure to use with a core second X server. As for now, it works with options `--X11` and `--hostdisplay` only. It can get additional speed-up with insecure option `--ipc`.
  
