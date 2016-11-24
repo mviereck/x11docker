@@ -21,22 +21,6 @@ There is a comfortable GUI for x11docker. To use `x11docker-gui`, you need to in
  
 ![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true "Optional Title")
  
-#Hardware accelerated OpenGL rendering
-Software accelerated OpenGL is available in all provided X servers. The image needs an OpenGL implementation to profit from it.  The easiest way to achieve this is to install package `mesa-utils` in your image. Some applications need package `x11-utils` to be installed in image, too.
- 
-Immediate GPU hardware acceleration with option `--gpu` is quite fast and secure to use with a core second X server. As for now, it works with options `--X11` and `--hostdisplay` only. It can get additional speed-up with insecure option `--ipc`.
- 
- Mediate GPU hardware acceleration for OpenGL / GLX with option `--virtualgl` is possible with VirtualGL. Other than option `--gpu`, it works with xpra and Xephyr, too, but has the drawback to break container isolation from display :0. For use with trusted images only. Needs VirtualGL to be installed on host.
- 
-Using hardware acceleration can degrade or break container isolation. Look at table in section "Security". 
-
-Known to work with AMD and Intel onboard-chips using open source drivers. Reports of tests with different setups of graphics cards and drivers are appreciated.
-  
- 
-#Pulseaudio sound support
-x11docker supports pulseaudio sound over tcp. For this to use, package `pulseaudio` needs to be installed on host and in docker image.
-
- 
 #Dependencies
 x11docker can run with standard system utilities without additional dependencies. As a core, it only needs X server (package `xorg`)  and, of course, docker (package `docker.io`) to run docker images on X. 
 
@@ -52,13 +36,27 @@ List of optional needed packages: `xpra` `xephyr` `xclip` `kaptain` `pulseaudio`
 - `virtualgl`:  option `--virtualgl`, hardware accelerated OpenGL in xpra and Xephyr. (http://www.virtualgl.org)
 - `kaptain`:  x11docker-gui
 
-
 #X servers to choose from
 x11docker creates a new X server on a new X socket. Instead of using display :0 from host, docker images will run on segregated display :1 or display :2 ... (with exception from option `--hostdisplay`)
  - `--xpra`: A comfortable way to run single docker GUI applications visible on your host display is to use xpra.
  - `--xephyr`: A comfortable way to run desktop environments from within docker images is to use Xephyr. Also, you can choose this option together with option `--wm` and run single applications with a host window manager in Xephyr. The desktop will appear in a window on your host display.
  - `--X11`: Second core X server: To switch between displays, press `[CTRL][ALT][F7] ... [F12]`. Essentially it is the same as switching between virtual consoles (tty1 to tty6) with `[CTRL][ALT][F1] ... [F6]`. To be able to use this option, you have to execute `dpkg-reconfigure x11-common` first and choose option `anybody`.
  - `--hostdisplay`: Sharing host display: This option is least secure and has least overhead. Instead of running a second X server, your host X server on display :0 is shared. Occuring rendering glitches can be fixed with insecure option `--ipc`.
+ 
+ 
+#Hardware accelerated OpenGL rendering
+Software accelerated OpenGL is available in all provided X servers. The image needs an OpenGL implementation to profit from it.  The easiest way to achieve this is to install package `mesa-utils` in your image. Some applications need package `x11-utils` to be installed in image, too.
+ 
+Immediate GPU hardware acceleration with option `--gpu` is quite fast and secure to use with a core second X server. As for now, it works with options `--X11` and `--hostdisplay` only. It can get additional speed-up with insecure option `--ipc`.
+ 
+ Mediate GPU hardware acceleration for OpenGL / GLX with option `--virtualgl` is possible with VirtualGL. Other than option `--gpu`, it works with xpra and Xephyr, too, but has the drawback to break container isolation from display :0. For use with trusted images only. Needs VirtualGL to be installed on host.
+ 
+Using hardware acceleration can degrade or break container isolation. Look at table in section "Security". 
+
+Known to work with AMD and Intel onboard-chips using open source drivers. Reports of tests with different setups of graphics cards and drivers are appreciated.
+  
+#Pulseaudio sound support
+x11docker supports pulseaudio sound over tcp. For this to use, package `pulseaudio` needs to be installed on host and in docker image.
 
 #Usage in terminal
 To run a docker image with new X server:
