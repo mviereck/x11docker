@@ -1,4 +1,7 @@
-# Screenshots of GUI applications and desktop environments running with x11docker
+# Screenshots of GUI applications and desktop environments running with x11docker 
+
+![screenshot](x11docker_klein.jpeg "x11docker logo") 
+
 ![screenshot](screenshot-xpra-pstree.png "xterm showing pstree in xpra window using x11docker")
 
 ![screenshot](screenshot-xfce-wine-playonlinux.png "xfce-wine-playonlinux desktop running in Xephyr window using x11docker")
