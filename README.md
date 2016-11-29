@@ -53,7 +53,7 @@ Immediate GPU hardware acceleration with option `--gpu` is quite fast and secure
  
 Using hardware acceleration can degrade or break container isolation. Look at table in section "Security". 
 
-Known to work with AMD and Intel onboard-chips using open source drivers. Reports of tests with different setups of graphics cards and drivers are appreciated.
+Known to work with AMD and Intel onboard chips using open source drivers. Test reports with different setups of graphics cards and drivers are appreciated.
   
 #Pulseaudio sound support
 x11docker supports pulseaudio sound over tcp. For this to use, package `pulseaudio` needs to be installed on host and in docker image.
@@ -90,3 +90,6 @@ Sample screenshots can be found in [screenshot branch](https://github.com/mviere
 x11docker/lxde running in a Xephyr window:
 
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxde.png "lxde desktop running in Xephyr window using x11docker")
+
+# Questions?
+You can ask questions in [issues section](https://github.com/mviereck/x11docker/issues). Use it like a forum.
