@@ -56,7 +56,7 @@ Using hardware acceleration can degrade or break container isolation. Look at ta
 Known to work with AMD and Intel onboard chips using open source drivers. Test reports with different setups of graphics cards and drivers are appreciated.
   
 #Pulseaudio sound support
-x11docker supports pulseaudio sound over tcp. For this to use, package `pulseaudio` needs to be installed on host and in docker image.
+x11docker supports pulseaudio sound over tcp with option `--pulseaudio`. For this to use, package `pulseaudio` needs to be installed on host and in docker image.
 
 #Usage in terminal
 To run a docker image with new X server:
