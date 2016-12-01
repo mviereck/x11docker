@@ -77,14 +77,17 @@ Have a look at `x11docker --help` to see all options.
 #Examples
 Some example images can be found on docker hub: https://hub.docker.com/u/x11docker/
 
-Run xfce desktop in Xephyr:
-   - `x11docker --xephyr --desktop x11docker/xfce`
+   - Run xfce desktop in Xephyr:
    
-Run wine and playonlinux on xfce desktop in a sandbox in a Xephyr window, sharing a home folder to preserve settings and wine installations, and with a container user similar to your host user:
-   - `x11docker --xephyr --hostuser --home --desktop x11docker/xfce-wine-playonlinux start`
+`x11docker --xephyr --desktop x11docker/xfce`
    
-Run playonlinux in a sandbox in an xpra window, sharing a home folder to preserve settings and installations, sharing clipboard, enabling pulseaudio sound, and with a container user similar to your host user:
-   - `x11docker --xpra --hostuser --home --clipboard --pulseaudio x11docker/xfce-wine-playonlinux playonlinux`
+   - Run wine and playonlinux on xfce desktop in a sandbox in a Xephyr window, sharing a home folder to preserve settings and wine installations, and with a container user similar to your host user:
+
+`x11docker --xephyr --hostuser --home --desktop x11docker/xfce-wine-playonlinux start`
+   
+   - Run playonlinux in a sandbox in an xpra window, sharing a home folder to preserve settings and installations, sharing clipboard, enabling pulseaudio sound, and with a container user similar to your host user:
+
+`x11docker --xpra --hostuser --home --clipboard --pulseaudio x11docker/xfce-wine-playonlinux playonlinux`
    
 # Screenshots
 Sample screenshots can be found in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
