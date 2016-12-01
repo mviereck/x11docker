@@ -13,8 +13,8 @@ There is a comfortable GUI for x11docker. To use `x11docker-gui`, you need to in
 #Security 
  - Main purpose of x11docker is to run dockered GUI applications while preserving container isolation.
  - GUI applications in docker are isolated from host display :0, thus avoiding X security leaks.
- - Preserving container isolation is done using a segregated X server. (Most solutions in the web to run dockered GUI applications share the problem of breaking container isolation and allowing access to X resources like keylogging with `xinput test`).
- - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.  The new X server doesn't know cookies from the host X server on display :0. (Except less secure options `--hostdisplay` and `--virtualgl`)
+ - Preserving container isolation is done using a segregated X server. (Most solutions in the web to run dockered GUI applications share the problem of breaking container isolation and allowing access to host X resources like keylogging with `xinput test`).
+ - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.  Container and new X server don't know cookies from host X server on display :0. (Except less secure options `--hostdisplay` and `--virtualgl`)
  - With option `--no-xhost` x11docker checks for any access to host X server granted by xhost and disables it. Host applications then use `~/.Xauthority` only.
  - Special use cases of hardware acceleration and option `--hostdisplay` can degrade or break container isolation. Look at security table to see the differences:
  
