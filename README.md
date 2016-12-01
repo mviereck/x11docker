@@ -62,6 +62,8 @@ Known to work with AMD and Intel onboard chips using open source drivers. Test r
 x11docker supports pulseaudio sound over tcp with option `--pulseaudio`. For this to use, package `pulseaudio` needs to be installed on host and in docker image.
 
 #Usage in terminal
+x11docker askes for root password to run docker. On systems without a root password like Ubuntu or Sparky, use option `--sudo`, then x11docker uses `sudo` instead of `su` to run docker. x11docker itself should not run as root because X servers should run in userspace without root privileges.
+
 To run a docker image with new X server:
  -  `x11docker [OPTIONS] IMAGE [COMMAND]`
  -  `x11docker [OPTIONS] -- [DOCKER_RUN_OPTIONS] IMAGE [COMMAND [ARG1 ARG2 ...]]`
