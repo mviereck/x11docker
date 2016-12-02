@@ -20,12 +20,12 @@ There is a comfortable GUI for x11docker. To use `x11docker-gui`, you need to in
 ![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true "Optional Title")
  
 #Dependencies
-x11docker can run with standard system utilities without additional dependencies. As a core, it only needs X server (package `xorg`)  and, of course, docker (package `docker.io`) to run docker images on X. 
+x11docker can run with standard system utilities without additional dependencies on host or in image. As a core, it only needs X server (package `xorg`)  and, of course, docker (package `docker.io`) to run docker images on X. 
 
 For some additional options, x11docker needs some packages to be installed on host.
 It will check for them on startup and show terminal messages if some are missing.
 
-List of optional needed packages: `xpra` `xephyr` `xclip` `kaptain` `pulseaudio` `virtualgl` 
+List of optional needed packages on host: `xpra` `xephyr` `xclip` `kaptain` `pulseaudio` `virtualgl` 
 
 - `xpra`:  option `--xpra`, showing single applications on your host display
 - `xephyr`:  option `--xephyr`, showing desktops on your host display
@@ -33,6 +33,8 @@ List of optional needed packages: `xpra` `xephyr` `xclip` `kaptain` `pulseaudio`
 - `pulseaudio`:  option `--pulseaudio`, sound/audio support
 - `virtualgl`:  option `--virtualgl`, hardware accelerated OpenGL in xpra and Xephyr. (http://www.virtualgl.org)
 - `kaptain`:  x11docker-gui
+
+Pulseaudio sound (option `--pulseaudio`) and OpenGL hardware acceleration (options `--gpu` and `--virtualgl`) have dependencies in image, too. See below.
 
 #X servers to choose from
 x11docker creates a new X server on a new X socket. Instead of using display :0 from host, docker images will run on segregated display :1 or display :2 ... (with exception from option `--hostdisplay`)
