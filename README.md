@@ -55,7 +55,7 @@ Mediate GPU hardware acceleration for OpenGL / GLX with option `--virtualgl` is 
  
 Using hardware acceleration can degrade or break container isolation. Look at table in section "Security". 
 
-Known to work with AMD and Intel onboard chips using open source drivers. Test reports with different setups of graphics cards and drivers are appreciated. x11docker shares all files in `/dev/dri` with docker container. Different setups may need additional other files and maybe some graphics drivers to be installed in image, too.
+Known to work with AMD and Intel onboard chips using open source drivers. Test reports with different setups of graphics cards and drivers are appreciated. x11docker shares all files in `/dev/dri` with docker container. Different setups may need additional other files to be shared and maybe some graphics drivers to be installed in image, too.
   
 #Pulseaudio sound support
 x11docker supports pulseaudio sound over tcp with option `--pulseaudio`. For this to use, package `pulseaudio` needs to be installed on host and in docker image.
