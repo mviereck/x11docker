@@ -7,9 +7,12 @@
  - GPU hardware acceleration is possible.
 
 #GUI for x11docker ![x11docker logo](/../screenshots/x11docker_klein.jpeg?raw=true "Optional Title")
-There is a comfortable GUI for x11docker. To use `x11docker-gui`, you need to install package `kaptain`. 
-
-`x11docker-gui` looks for an executeable `./x11docker` first, then will look for it in `$PATH`, for example in `/usr/local/bin`. Some developer options become visible with `x11docker-gui -d`. For troubleshooting, run x11docker-gui in a terminal and activate option `--verbose`.
+There is a comfortable GUI for x11docker. 
+ - To use `x11docker-gui`, you need to install package `kaptain`. 
+ - `x11docker-gui` looks for an executeable `./x11docker` first, then will look for it in `$PATH`, for example in `/usr/local/bin`. 
+ - Some developer options become visible with `x11docker-gui -d`. 
+ - For troubleshooting, run x11docker-gui in a terminal and activate option `--verbose`.
+ - On systems without a root password like Ubuntu, use option `--sudo`.
 ![x11docker-gui screenshot](/../screenshots/x11docker-gui.png?raw=true "Optional Title")
 
 #Security 
