@@ -30,10 +30,10 @@ x11docker can run with standard system utilities without additional dependencies
 For some additional options, x11docker needs some packages to be installed on host.
 It will check for them on startup and show terminal messages if some are missing.
 
-List of optional needed packages on host: `xpra` `xephyr` `xclip` `kaptain` `pulseaudio` `virtualgl` 
+List of optional needed packages on host: `xpra` `xserver-xephyr` `xclip` `kaptain` `pulseaudio` `virtualgl` 
 
 - `xpra`:  option `--xpra`, showing single applications on your host display
-- `xephyr`:  option `--xephyr`, showing desktops on your host display
+- `xserver-xephyr`:  option `--xephyr`, showing desktops on your host display
 - `xclip`:  option `--clipboard`, sharing clipboard with Xephyr or core X11
 - `pulseaudio`:  option `--pulseaudio`, sound/audio support
 - `virtualgl`:  option `--virtualgl`, hardware accelerated OpenGL in xpra and Xephyr. (http://www.virtualgl.org)
@@ -44,7 +44,7 @@ Pulseaudio sound (option `--pulseaudio`) and OpenGL hardware acceleration (optio
 #X servers to choose from
 x11docker creates a new X server on a new X socket. Instead of using display :0 from host, docker images will run on segregated display :1 or display :2 ... (with exception from option `--hostdisplay`)
 
-If neither `xpra` nor `xephyr` are installed, and `x11-common` is not reconfigured (for use of option `--X11`, see below), only option `--hostdisplay` will work out of the box.
+If neither `xpra` nor `xserver-xephyr` are installed, and `x11-common` is not reconfigured (for use of option `--X11`, see below), only option `--hostdisplay` will work out of the box.
  - `--xpra`: A comfortable way to run single docker GUI applications visible on your host display is to use [xpra](http://xpra.org/).
  - `--xephyr`: A comfortable way to run desktop environments from within docker images is to use [Xephyr](https://www.freedesktop.org/wiki/Software/Xephyr/). Also, you can choose this option together with option `--wm` and run single applications with a host window manager in Xephyr. The desktop will appear in a window on your host display.
  - `--X11`: Second core X server: To switch between displays, press `[CTRL][ALT][F7] ... [F12]`. Essentially it is the same as switching between virtual consoles (tty1 to tty6) with `[CTRL][ALT][F1] ... [F6]`. To be able to use this option, you have to execute `dpkg-reconfigure x11-common` first and choose option `anybody`.
