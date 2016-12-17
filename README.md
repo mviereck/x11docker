@@ -31,6 +31,7 @@ For some additional options, x11docker needs some packages to be installed on ho
 It will check for them on startup and show terminal messages if some are missing.
 
 List of optional needed packages on host: `xpra` `xserver-xephyr` `xclip` `kaptain` `pulseaudio` `virtualgl` 
+(This for debian, other distros may have different package names).
 
 - `xpra`:  option `--xpra`, showing single applications on your host display
 - `xserver-xephyr`:  option `--xephyr`, showing desktops on your host display
