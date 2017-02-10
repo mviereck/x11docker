@@ -30,7 +30,7 @@ x11docker can run with standard system utilities without additional dependencies
 For some additional options, x11docker needs some packages to be installed on host.
 It will check for them on startup and show terminal messages if some are missing.
 
-List of optional needed packages on host: `xpra` `xserver-xephyr` `xclip` `kaptain` `pulseaudio` `virtualgl` 
+List of optional needed packages on host: `xpra` `xserver-xephyr` `xclip` `kaptain` `pulseaudio` `virtualgl` `xserver-xorg-legacy`
 (This for debian, other distros may have different package names).
 
 - `xpra`:  option `--xpra`, showing single applications on your host display
@@ -39,6 +39,7 @@ List of optional needed packages on host: `xpra` `xserver-xephyr` `xclip` `kapta
 - `pulseaudio`:  option `--pulseaudio`, sound/audio support
 - `virtualgl`:  option `--virtualgl`, hardware accelerated OpenGL in xpra and Xephyr. (http://www.virtualgl.org)
 - `kaptain`:  x11docker-gui
+- `xserver-xorg-legacy`: needed on Ubuntu 16.04 and higher for option `--X11`
 
 Pulseaudio sound (option `--pulseaudio`) and OpenGL hardware acceleration (options `--gpu` and `--virtualgl`) have dependencies in image, too. See below.
 
