@@ -107,5 +107,8 @@ x11docker/lxde running in a Xephyr window:
 
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxde.png "lxde desktop running in Xephyr window using x11docker")
 
+# Known issues
+Ubuntu 16.04 and 16.10 have a [bug](https://bugs.launchpad.net/ubuntu/+source/xinit/+bug/1562219) that can prevent xinit from starting a second core X server (option `-X11`). Possible workarounds are discussed in [issue #5](https://github.com/mviereck/x11docker/issues/5).
+
 # Questions?
 You can ask questions in [issues section](https://github.com/mviereck/x11docker/issues). Use it like a forum.
