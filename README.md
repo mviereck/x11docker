@@ -1,4 +1,4 @@
-# x11docker: Run X11 GUI applications and desktop environments in docker on a segregated Xserver.
+# x11docker: Run X11 GUI applications and desktop environments in docker on a segregated X server.
 
  - Much faster than SSH or VNC solutions.
  - No dependencies inside of docker images.
