@@ -109,8 +109,8 @@ x11docker/lxde running in a Xephyr window:
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxde.png "lxde desktop running in Xephyr window using x11docker")
 
 # Known issues
- - Ubuntu 16.04 and 16.10: x11docker won't start from console without setup of `xserver-xorg-legacy`. This is a bug in Ubuntu and won't be fixed.
- - debian 9: Cannot run a second core X server (option `-X11`) from within already running X without setup of `xserver-xorg-legacy`. This may be solved in future with a setup of a systemd service.
+ - Ubuntu 16.04: x11docker won't start from console without setup of `xserver-xorg-legacy`. This is a bug in Ubuntu and won't be fixed.
+ - debian 9 and Ubuntu 16.04: Cannot run a second core X server (option `-X11`) from within already running X without setup of `xserver-xorg-legacy`. This may be solved in future with a setup of a systemd service.
  
 # Questions?
 You can ask questions in [issues section](https://github.com/mviereck/x11docker/issues). Use it like a forum.
