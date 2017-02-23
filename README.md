@@ -109,9 +109,9 @@ x11docker/lxde running in a Xephyr window:
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxde.png "lxde desktop running in Xephyr window using x11docker")
 
 # Known issues
- - Ubuntu 16.04: x11docker won't start from console without setup of `xserver-xorg-legacy`. This is a bug in Ubuntu and won't be fixed.
+ - Ubuntu 16.04: x11docker won't start from console without setup of `xserver-xorg-legacy`. This is a [bug](https://bugs.launchpad.net/ubuntu/+source/xinit/+bug/1562219) in Ubuntu and won't be fixed.
  - debian 9 and Ubuntu 16.04: Cannot run a second core X server (option `-X11`) from within already running X without setup of `xserver-xorg-legacy`. This may be solved in future with a [setup of a systemd service for Xorg](http://unix.stackexchange.com/questions/346383/run-second-x-server-from-within-x-as-a-systemd-service).
- - Package `kaptain` is not available in repositories of debian 9 and Ubuntu 16.04. You can use [kaptain for debian jessie](https://packages.debian.org/jessie/kaptain) and [kaptain for Ubuntu 14.04](http://packages.ubuntu.com/trusty/kaptain) instead.
+ - Package `kaptain` is not available in repositories of debian 9 and Ubuntu 16.04. You can install [kaptain for debian jessie](https://packages.debian.org/jessie/kaptain) respective [kaptain for Ubuntu 14.04](http://packages.ubuntu.com/trusty/kaptain) instead.
  - x11docker-gui can look ugly on GTK based systems. x11docker-gui is managed by `kaptain` which uses QT4. You can use `qtconfig-qt4`, select GUI style GTK+ and save this setting with `[CTRL][S]`. 
  
 # Questions?
