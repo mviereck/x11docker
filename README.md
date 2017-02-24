@@ -8,7 +8,6 @@
 
 # GUI for x11docker ![x11docker logo](/../screenshots/x11docker_klein.jpeg?raw=true "Optional Title")
 To use `x11docker-gui`, you need to install package [kaptain](https://packages.debian.org/jessie/kaptain). 
- - `x11docker-gui` looks for an executeable `./x11docker` first, then will look for it in `$PATH`, for example in `/usr/local/bin`. 
  - On systems without a root password like Ubuntu, activate option `--sudo`.
  - For troubleshooting, run x11docker-gui in a terminal and activate option `--verbose`.
  - Some developer options become visible with `x11docker-gui -d`. 
@@ -17,10 +16,12 @@ To use `x11docker-gui`, you need to install package [kaptain](https://packages.d
 
 
 # Installation
-You don't need to install or change x11docker to be executeable, you can just run it as user with `bash x11docker`. As root, you can install, update and remove x11docker on your system:
- - `x11docker --install` : install x11docker and x11docker-gui. (Installs into `/usr/local/bin`. Creates an icon in `/usr/share/icons`. Creates an `x11docker.desktop` file in `/usr/share/applications`.)
+You don't need to install x11docker, you can just run it as user with `bash x11docker` respective `bash x11docker-gui`. As root, you can install, update and remove x11docker on your system:
+ - `x11docker --install` : install x11docker and x11docker-gui. 
  - `x11docker --update` : download and install latest version from github.
  - `x11docker --remove` : remove all files installed by x11docker.
+ 
+Installs into `/usr/local/bin`. Creates an icon in `/usr/share/icons`. Creates an `x11docker.desktop` file in `/usr/share/applications`.
  
  
 #Security 
