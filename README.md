@@ -20,6 +20,7 @@ To use `x11docker-gui`, you need to install package [kaptain](https://packages.d
  - Preserving container isolation is done using an additional X server separate from X on host display :0, thus avoiding X security leaks. (Most solutions in the web to run dockered GUI applications allow access to host X server, thus breaking container isolation and allowing access to host X resources like keylogging with `xinput test`).
  - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.  Container and new X server don't know cookies from host X server on display :0. (Except less secure options `--hostdisplay` and `--virtualgl`)
  - With option `--no-xhost` x11docker checks for any access to host X server granted by `xhost` and disables it. Host applications then use `~/.Xauthority` only.
+ - To avoid using any X server on host by docker container, you can use option `--xpra-attach`. Xpra server will run in image instead on host. Needs xpra to be installed in image, too.
  - Special use cases of hardware acceleration and option `--hostdisplay` can degrade or break container isolation. Look at security table to see the differences:
  
 ![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true "Optional Title")
@@ -41,7 +42,7 @@ List of optional needed packages on host: `xpra` `xserver-xephyr` `xclip` `kapta
 - `kaptain`:  x11docker-gui
 - `xserver-xorg-legacy`: needed on Ubuntu 16.04 and higher for option `--xorg`
 
-Pulseaudio sound (option `--pulseaudio`) and OpenGL hardware acceleration (options `--gpu` and `--virtualgl`) have dependencies in image, too. See below.
+Pulseaudio sound (option `--pulseaudio`) and OpenGL hardware acceleration (options `--gpu` and `--virtualgl`) have dependencies in image, too. See below. Option `--xpra-attach` needs xpra to be installed on host (at least v 0.17.6) and in image. 
 
 #X servers to choose from
 x11docker creates a new X server on a new X socket. Instead of using display :0 from host, docker images will run on segregated display :1 or display :2 ... (with exception from option `--hostdisplay`)
