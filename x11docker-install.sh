@@ -3,31 +3,26 @@
 # installation script for x11docker 
 # https://github.com/mviereck/x11docker
 #
-# - downloads x11docker-master from github
 # - copies x11docker and x11docker-gui to /usr/local/bin
 # - installs icon in /usr/share/icons
 # - creates x11docker.desktop file in /usr/share/applications
 
-echo "Installation of x11docker and x11docker-gui
-To uninstall x11docker, run 
-$0 --uninstall
+echo "Install, update or remove x11docker and x11docker-gui
+syntax:
+
+x11docker-install.sh [install]   Install x11docker on your system    
+x11docker-install.sh  update     Install latest version downloading from github
+x11docker-install.sh  remove     Remove installation
 "
 
 [ "0" = "$(id -u)" ] || {
-  echo "Error: Must run as root to install (or uninstall) x11docker. Exit."
+  echo "Must run as root to install, update or remove x11docker. Exit."
   exit 1
 }
 error() { echo "Error: Something went wrong, sorry. Exit." ; exit 1; }
 
 case $1 in
-  uninstall|--uninstall)   # Uninstall
-    echo "removing x11docker from your system"
-    rm -v /usr/local/bin/x11docker
-    rm -v /usr/local/bin/x11docker-gui
-    rm -v /usr/share/applications/x11docker.desktop
-    xdg-icon-resource uninstall --size 72 x11docker
-  ;;
-  "")                      # Install
+  update)
     installdir="/tmp/x11docker-install"
     mkdir $installdir
     cd $installdir
@@ -40,13 +35,28 @@ case $1 in
     echo "Unpacking archive"
     unzip master.zip
     [ $? ] || error
+  
+    cd $installdir/x11docker-master
+  ;;
+  ""|install) # install
+    installdir=$(dirname $0)
+  ;;
+esac
 
+case $1 in
+  remove)
+    echo "removing x11docker from your system"
+    rm -v /usr/local/bin/x11docker
+    rm -v /usr/local/bin/x11docker-gui
+    rm -v /usr/share/applications/x11docker.desktop
+    xdg-icon-resource uninstall --size 72 x11docker
+  ;;
+  ""|install|update)
     echo ""
     echo "Installing x11docker and x11docker-gui in /usr/local/bin"
-    cd x11docker-master
-    mv x11docker /usr/local/bin
+    cp x11docker /usr/local/bin/
     chmod +x /usr/local/bin/x11docker
-    mv x11docker-gui /usr/local/bin
+    cp x11docker-gui /usr/local/bin/
     chmod +x /usr/local/bin/x11docker-gui
 
     echo "Creating icon and application entry for x11docker"
@@ -70,8 +80,12 @@ Categories=System
   x11docker itself does not need it."
     }
 
-    cd ~
-    rm -R $installdir
+    if [ "$1" = "update" ] ; then
+      echo "Removing downloaded files"
+      cd ~
+      rm -R $installdir
+    fi
+    
     echo "Installation ready"
   ;;
   *) echo "Error: Unknown option $1. Exit." ; exit 1 ;;
