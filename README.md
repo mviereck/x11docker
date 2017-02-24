@@ -52,6 +52,7 @@ If neither `xpra` nor `xserver-xephyr` are installed, and `x11-common` is not re
  - `--xorg`: Second core X server: To switch between displays, press `[CTRL][ALT][F7] ... [F12]`. Essentially it is the same as switching between virtual consoles (tty1 to tty6) with `[CTRL][ALT][F1] ... [F6]`. To be able to use this option, you have to execute `dpkg-reconfigure x11-common` first and choose option `anybody`. 
  [If this command fails (known for debian 9 and Ubuntu 16.04), you need to install package `xserver-xorg-legacy` and to run `dpkg-reconfigure xserver-xorg-legacy` instead; then edit file `/etc/X11/Xwrapper.config` and add line `needs_root_rights=yes`.]
  - `--hostdisplay`: Sharing host display: This option is least secure and has least overhead. Instead of running a second X server, your host X server on display :0 is shared. Occuring rendering glitches can be fixed with insecure option `--ipc`.
+ - `--xpra-attach`: Special option: Use xpra server in image instead on host to avoid using any X server on host. Needs xpra to be installed on host and in image with xpra version 0.17.6 at least. 
  
 As default, connection to X server is done sharing the matching unix socket in `/tmp/.X11-unix`. Alternatively, connection over tcp is possible with developer option `--tcp` (except option `--hostdisplay`).
  
