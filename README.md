@@ -1,4 +1,4 @@
-# x11docker: Run X11 GUI applications and desktop environments in docker on a segregated X server.
+# x11docker: Run GUI applications and desktop environments in docker on a segregated X server.
 
  - Much faster than SSH or VNC solutions.
  - No dependencies inside of docker images.
@@ -39,18 +39,18 @@ List of optional needed packages on host: `xpra` `xserver-xephyr` `xclip` `kapta
 - `pulseaudio`:  option `--pulseaudio`, sound/audio support
 - `virtualgl`:  option `--virtualgl`, hardware accelerated OpenGL in xpra and Xephyr. (http://www.virtualgl.org)
 - `kaptain`:  x11docker-gui
-- `xserver-xorg-legacy`: needed on Ubuntu 16.04 and higher for option `--X11`
+- `xserver-xorg-legacy`: needed on Ubuntu 16.04 and higher for option `--xorg`
 
 Pulseaudio sound (option `--pulseaudio`) and OpenGL hardware acceleration (options `--gpu` and `--virtualgl`) have dependencies in image, too. See below.
 
 #X servers to choose from
 x11docker creates a new X server on a new X socket. Instead of using display :0 from host, docker images will run on segregated display :1 or display :2 ... (with exception from option `--hostdisplay`)
 
-If neither `xpra` nor `xserver-xephyr` are installed, and `x11-common` is not reconfigured (for use of option `--X11`, see below), only option `--hostdisplay` will work out of the box.
+If neither `xpra` nor `xserver-xephyr` are installed, and `x11-common` is not reconfigured (for use of option `--xorg`, see below), only option `--hostdisplay` will work out of the box.
  - `--xpra`: A comfortable way to run single docker GUI applications visible on your host display is to use [xpra](http://xpra.org/).
  - `--xephyr`: A comfortable way to run desktop environments from within docker images is to use [Xephyr](https://www.freedesktop.org/wiki/Software/Xephyr/). Also, you can choose this option together with option `--wm` and run single applications with a host window manager in Xephyr. The desktop will appear in a window on your host display.
- - `--X11`: Second core X server: To switch between displays, press `[CTRL][ALT][F7] ... [F12]`. Essentially it is the same as switching between virtual consoles (tty1 to tty6) with `[CTRL][ALT][F1] ... [F6]`. To be able to use this option, you have to execute `dpkg-reconfigure x11-common` first and choose option `anybody`. 
- [If this command fails (known for Ubuntu 16.04), you need to install package `xserver-xorg-legacy` and to run `dpkg-reconfigure xserver-xorg-legacy` instead; then edit file `/etc/X11/Xwrapper.config` and add line `needs_root_rights=yes`.]
+ - `--xorg`: Second core X server: To switch between displays, press `[CTRL][ALT][F7] ... [F12]`. Essentially it is the same as switching between virtual consoles (tty1 to tty6) with `[CTRL][ALT][F1] ... [F6]`. To be able to use this option, you have to execute `dpkg-reconfigure x11-common` first and choose option `anybody`. 
+ [If this command fails (known for debian 9 and Ubuntu 16.04), you need to install package `xserver-xorg-legacy` and to run `dpkg-reconfigure xserver-xorg-legacy` instead; then edit file `/etc/X11/Xwrapper.config` and add line `needs_root_rights=yes`.]
  - `--hostdisplay`: Sharing host display: This option is least secure and has least overhead. Instead of running a second X server, your host X server on display :0 is shared. Occuring rendering glitches can be fixed with insecure option `--ipc`.
  
 As default, connection to X server is done sharing the matching unix socket in `/tmp/.X11-unix`. Alternatively, connection over tcp is possible with developer option `--tcp` (except option `--hostdisplay`).
@@ -59,9 +59,9 @@ As default, connection to X server is done sharing the matching unix socket in `
 #Hardware accelerated OpenGL rendering
 Software accelerated OpenGL is available in all provided X servers. The image needs an OpenGL implementation to profit from it.  The easiest way to achieve this is to install package `mesa-utils` in your image. Some applications need package `x11-utils` to be installed in image, too. Media Players like VLC may also need package `libxv1`.
  
-Immediate GPU hardware acceleration with option `--gpu` is quite fast and secure to use with a core second X server. As for now, it works with options `--X11` and `--hostdisplay` only. It can get additional speed-up with insecure option `--ipc`.
+Immediate GPU hardware acceleration with option `--gpu` is quite fast and secure to use with option `--xorg`. As for now, it works with options `--xorg` and `--hostdisplay` only. It can get additional speed-up with insecure option `--ipc`.
  
-Mediate GPU hardware acceleration for OpenGL / GLX with option `--virtualgl` is possible with [VirtualGL](http://www.virtualgl.org/). Other than option `--gpu`, it works with xpra and Xephyr, too, but has the drawback to break container isolation from display :0. For use with trusted images only. Needs VirtualGL to be installed on host.
+Mediate GPU hardware acceleration for OpenGL / GLX with option `--virtualgl` is possible with [VirtualGL](http://www.virtualgl.org/). Other than option `--gpu`, it works with `--xpra` and `--xephyr`, too, but has the drawback to break container isolation from display :0. For use with trusted images only. Needs VirtualGL to be installed on host.
  
 Using hardware acceleration can degrade or break container isolation. Look at table in section "Security". 
 
@@ -110,7 +110,7 @@ x11docker/lxde running in a Xephyr window:
 
 # Known issues
  - Ubuntu 16.04: x11docker won't start from console without setup of `xserver-xorg-legacy`. This is a [bug](https://bugs.launchpad.net/ubuntu/+source/xinit/+bug/1562219) in Ubuntu and won't be fixed.
- - debian 9 and Ubuntu 16.04: Cannot run a second core X server (option `-X11`) from within already running X without setup of `xserver-xorg-legacy`. This may be solved in future with a [setup of a systemd service for Xorg](http://unix.stackexchange.com/questions/346383/run-second-x-server-from-within-x-as-a-systemd-service).
+ - debian 9 and Ubuntu 16.04: Cannot run a second core X server (option `--xorg`) from within already running X without setup of `xserver-xorg-legacy`. This may be solved in future with a [setup of a systemd service for Xorg](http://unix.stackexchange.com/questions/346383/run-second-x-server-from-within-x-as-a-systemd-service).
  - Package `kaptain` is not available in repositories of debian 9 and Ubuntu 16.04. You can install [kaptain for debian jessie](https://packages.debian.org/jessie/kaptain) respective [kaptain for Ubuntu 14.04](http://packages.ubuntu.com/trusty/kaptain) instead.
  - x11docker-gui can look ugly on GTK based systems. x11docker-gui is managed by `kaptain` which uses QT4. You can use `qtconfig`, select GUI style GTK+ and save this setting with `[CTRL][S]`. 
  
