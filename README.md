@@ -88,7 +88,7 @@ To run only a new X server with window manager:
 
 Have a look at `x11docker --help` to see all options.
 
-#Examples
+# Examples
 Some example images can be found on docker hub: https://hub.docker.com/u/x11docker/
 
    - Run xfce desktop in Xephyr:
@@ -102,7 +102,13 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
    - Run playonlinux in a sandbox in an xpra window, sharing a home folder to preserve settings and installations, sharing clipboard, enabling pulseaudio sound, and with a container user similar to your host user:
 
 `x11docker --xpra --hostuser --home --clipboard --pulseaudio x11docker/xfce-wine-playonlinux playonlinux`
-   
+
+# Installation
+You can install, update and remove x11docker. Needs root permissions.
+ - `x11docker --install` : install x11docker and x11docker-gui in `usr/local/bin`, create an icon and a desktop entry.
+ - `x11docker --update` : download and install latest version from github
+ - `x11docker --remove` : remove all files installed by x11docker
+ 
 # Screenshots
 Sample screenshots can be found in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
 
