@@ -23,9 +23,8 @@ error() { echo "Error: Something went wrong, sorry. Exit." ; exit 1; }
 
 case $1 in
   update)
-    installdir="/tmp/x11docker-install"
-    mkdir $installdir
-    cd $installdir
+    mkdir /tmp/x11docker-install
+    cd /tmp/x11docker-install
     [ $? ] || error
 
     echo "Downloading latest x11docker version from github"
@@ -36,24 +35,19 @@ case $1 in
     unzip master.zip
     [ $? ] || error
   
-    cd $installdir/x11docker-master
-  ;;
-  ""|install) # install
-    installdir=$(dirname $0)
+    cd /tmp/x11docker-install/x11docker-master
   ;;
 esac
 
 case $1 in
-  remove)
-    echo "removing x11docker from your system"
-    rm -v /usr/local/bin/x11docker
-    rm -v /usr/local/bin/x11docker-gui
-    rm -v /usr/share/applications/x11docker.desktop
-    xdg-icon-resource uninstall --size 72 x11docker
-  ;;
   ""|install|update)
     echo ""
     echo "Installing x11docker and x11docker-gui in /usr/local/bin"
+    [ -e "./x11docker" ] || {
+      echo "File x11docker not found in current folder.
+  try '$0 update' instead. Exit."
+      exit 1
+    }
     cp x11docker /usr/local/bin/
     chmod +x /usr/local/bin/x11docker
     cp x11docker-gui /usr/local/bin/
@@ -61,8 +55,8 @@ case $1 in
 
     echo "Creating icon and application entry for x11docker"
     x11docker-gui --icon
-    mv /tmp/x11docker.png ./
-    xdg-icon-resource install --context apps --novendor --size 72 x11docker.png x11docker
+    xdg-icon-resource install --context apps --novendor --size 72 /tmp/x11docker.png x11docker
+    rm /tmp/x11docker.png
     echo "[Desktop Entry]
 Version=1.0
 Type=Application
@@ -83,10 +77,17 @@ Categories=System
     if [ "$1" = "update" ] ; then
       echo "Removing downloaded files"
       cd ~
-      rm -R $installdir
+      rm -R /tmp/x11docker-install
     fi
     
     echo "Installation ready"
+  ;;
+  remove)
+    echo "removing x11docker from your system"
+    rm -v /usr/local/bin/x11docker
+    rm -v /usr/local/bin/x11docker-gui
+    rm -v /usr/share/applications/x11docker.desktop
+    xdg-icon-resource uninstall --size 72 x11docker
   ;;
   *) echo "Error: Unknown option $1. Exit." ; exit 1 ;;
 esac
