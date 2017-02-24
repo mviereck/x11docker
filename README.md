@@ -6,7 +6,7 @@
  - Pulseaudio sound support is possible.
  - GPU hardware acceleration is possible.
 
-#GUI for x11docker ![x11docker logo](/../screenshots/x11docker_klein.jpeg?raw=true "Optional Title")
+# GUI for x11docker ![x11docker logo](/../screenshots/x11docker_klein.jpeg?raw=true "Optional Title")
 To use `x11docker-gui`, you need to install package [kaptain](https://packages.debian.org/jessie/kaptain). 
  - `x11docker-gui` looks for an executeable `./x11docker` first, then will look for it in `$PATH`, for example in `/usr/local/bin`. 
  - On systems without a root password like Ubuntu, activate option `--sudo`.
@@ -15,6 +15,14 @@ To use `x11docker-gui`, you need to install package [kaptain](https://packages.d
 
 ![x11docker-gui screenshot](/../screenshots/x11docker-gui.png?raw=true "Optional Title")
 
+
+# Installation
+You don't need to install or change x11docker to be executeable, you can just run it as user with `bash x11docker`. As root, you can install, update and remove x11docker on your system:
+ - `x11docker --install` : install x11docker and x11docker-gui. (Installs into `/usr/local/bin`. Creates an icon in `/usr/share/icons`. Creates an `x11docker.desktop` file in `/usr/share/applications`.)
+ - `x11docker --update` : download and install latest version from github.
+ - `x11docker --remove` : remove all files installed by x11docker.
+ 
+ 
 #Security 
  - Main purpose of x11docker is to run dockered GUI applications while preserving container isolation.
  - Preserving container isolation is done using an additional X server separate from X on host display :0, thus avoiding X security leaks. (Most solutions in the web to run dockered GUI applications allow access to host X server, thus breaking container isolation and allowing access to host X resources like keylogging with `xinput test`).
@@ -102,12 +110,6 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
    - Run playonlinux in a sandbox in an xpra window, sharing a home folder to preserve settings and installations, sharing clipboard, enabling pulseaudio sound, and with a container user similar to your host user:
 
 `x11docker --xpra --hostuser --home --clipboard --pulseaudio x11docker/xfce-wine-playonlinux playonlinux`
-
-# Installation
-You can install, update and remove x11docker. Needs root permissions.
- - `x11docker --install` : install x11docker and x11docker-gui in `usr/local/bin`, create an icon and a desktop entry.
- - `x11docker --update` : download and install latest version from github
- - `x11docker --remove` : remove all files installed by x11docker
  
 # Screenshots
 Sample screenshots can be found in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
