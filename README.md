@@ -29,7 +29,7 @@ Installs into `/usr/local/bin`. Creates an icon in `/usr/share/icons`. Creates a
  - Preserving container isolation is done using an additional X server separate from X on host display :0, thus avoiding X security leaks. (Most solutions in the web to run dockered GUI applications allow access to host X server, thus breaking container isolation and allowing access to host X resources like keylogging with `xinput test`).
  - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.  Container and new X server don't know cookies from host X server on display :0. (Except less secure options `--hostdisplay` and `--virtualgl`)
  - With option `--no-xhost` x11docker checks for any access to host X server granted by `xhost` and disables it. Host applications then use `~/.Xauthority` only.
- - To avoid using any X server on host by docker container, you can use option `--xpra-attach`. Xpra server will run in image instead on host. Needs xpra to be installed in image, too.
+ - To avoid using any X server on host by docker container, you can use option `--xpra-attach`. Xpra server will run in container instead on host. Needs xpra to be installed in image, too.
  - Special use cases of hardware acceleration and option `--hostdisplay` can degrade or break container isolation. Look at security table to see the differences:
  
 ![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true "Optional Title")
@@ -62,7 +62,7 @@ If neither `xpra` nor `xserver-xephyr` are installed, and `x11-common` is not re
  - `--xorg`: Second core X server: To switch between displays, press `[CTRL][ALT][F7] ... [F12]`. Essentially it is the same as switching between virtual consoles (tty1 to tty6) with `[CTRL][ALT][F1] ... [F6]`. To be able to use this option, you have to execute `dpkg-reconfigure x11-common` first and choose option `anybody`. 
  [If this command fails (known for debian 9 and Ubuntu 16.04), you need to install package `xserver-xorg-legacy` and to run `dpkg-reconfigure xserver-xorg-legacy` instead; then edit file `/etc/X11/Xwrapper.config` and add line `needs_root_rights=yes`.]
  - `--hostdisplay`: Sharing host display: This option is least secure and has least overhead. Instead of running a second X server, your host X server on display :0 is shared. Occuring rendering glitches can be fixed with insecure option `--ipc`.
- - `--xpra-attach`: Special option: Use xpra server in image instead on host to avoid using any X server on host. Needs xpra to be installed on host and in image with xpra version 0.17.6 at least. 
+ - `--xpra-attach`: Special option: Use xpra server in container instead on host to avoid using any X server on host. Needs xpra to be installed on host and in image with xpra version 0.17.6 at least. 
  
 As default, connection to X server is done sharing the matching unix socket in `/tmp/.X11-unix`. Alternatively, connection over tcp is possible with developer option `--tcp` (except option `--hostdisplay`).
  
