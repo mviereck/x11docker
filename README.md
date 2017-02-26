@@ -111,6 +111,10 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
    - Run playonlinux in a sandbox in an xpra window, sharing a home folder to preserve settings and installations, sharing clipboard, enabling pulseaudio sound, and with a container user similar to your host user:
 
 `x11docker --xpra --hostuser --home --clipboard --pulseaudio x11docker/xfce-wine-playonlinux playonlinux`
+
+  - Run teamviewer
+  
+  `x11docker bbinet/teamviewer`
  
 # Screenshots
 Sample screenshots can be found in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
