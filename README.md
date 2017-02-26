@@ -9,7 +9,7 @@
 # GUI for x11docker ![x11docker logo](/../screenshots/x11docker_klein.jpeg?raw=true "Optional Title")
 To use `x11docker-gui`, you need to install package [kaptain](https://packages.debian.org/jessie/kaptain). 
  - On systems without a root password like Ubuntu, activate option `--sudo`.
- - For troubleshooting, run x11docker-gui in a terminal and activate option `--verbose`.
+ - For troubleshooting, run x11docker-gui in a terminal or use [Run in xterm]. Also you can activate option `--verbose`.
  - Some developer options become visible with `x11docker-gui -d`. 
 
 ![x11docker-gui screenshot](/../screenshots/x11docker-gui.png?raw=true "Optional Title")
