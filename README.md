@@ -43,7 +43,7 @@ It will check for them on startup and show terminal messages if some are missing
 List of optional needed packages on host: `xpra` `xserver-xephyr` `xclip` `kaptain` `pulseaudio` `virtualgl` `xserver-xorg-legacy`
 (This for debian, other distros may have different package names).
 
-- `xpra`:  option `--xpra`, showing single applications on your host display
+- `xpra`:  option `--xpra`, showing single applications on your host display. It is recommend to use latest version from https://www.xpra.org
 - `xserver-xephyr`:  option `--xephyr`, showing desktops on your host display
 - `xclip`:  option `--clipboard`, sharing clipboard with Xephyr or core X11
 - `pulseaudio`:  option `--pulseaudio`, sound/audio support
@@ -51,7 +51,7 @@ List of optional needed packages on host: `xpra` `xserver-xephyr` `xclip` `kapta
 - `kaptain`:  x11docker-gui
 - `xserver-xorg-legacy`: needed on Ubuntu 16.04 and higher for option `--xorg`
 
-Pulseaudio sound (option `--pulseaudio`) and OpenGL hardware acceleration (options `--gpu` and `--virtualgl`) have dependencies in image, too. See below. Option `--xpra-attach` needs xpra to be installed on host (at least v 0.17.6) and in image. 
+Pulseaudio sound (option `--pulseaudio`) and OpenGL hardware acceleration (options `--gpu` and `--virtualgl`) have dependencies in image, too. See below. Special options `--xpra-image`, `--xorg-image` and `--xdummy-image` need X or xpra to be installed in image. See below. 
 
 #X servers to choose from
 x11docker creates a new X server on a new X socket. Instead of using display :0 from host, docker images will run on segregated display :1 or display :2 ... (with exception from option `--hostdisplay`)
@@ -62,7 +62,14 @@ If neither `xpra` nor `xserver-xephyr` are installed, and `x11-common` is not re
  - `--xorg`: Second core X server: To switch between displays, press `[CTRL][ALT][F7] ... [F12]`. Essentially it is the same as switching between virtual consoles (tty1 to tty6) with `[CTRL][ALT][F1] ... [F6]`. To be able to use this option, you have to execute `dpkg-reconfigure x11-common` first and choose option `anybody`. 
  [If this command fails (known for debian 9 and Ubuntu 16.04), you need to install package `xserver-xorg-legacy` and to run `dpkg-reconfigure xserver-xorg-legacy` instead; then edit file `/etc/X11/Xwrapper.config` and add line `needs_root_rights=yes`.]
  - `--hostdisplay`: Sharing host display: This option is least secure and has least overhead. Instead of running a second X server, your host X server on display :0 is shared. Occuring rendering glitches can be fixed with insecure option `--ipc`.
- - `--xpra-attach`: Special option: Use xpra server in container instead on host to avoid using any X server on host. Needs xpra to be installed on host and in image with xpra version 0.17.6 at least. 
+ 
+Special X servers:
+ - `--xdummy`: Invisible X server. For custom setups of xpra, VNC and/or network access.
+ 
+X server installed in image:
+ - `--xpra-image`: Use xpra server in container instead on host to avoid using any X server on host. Needs xpra to be installed on host and in image with xpra version 0.17.6 at least. 
+ - `--xorg-image`: Use X server in image, show with xpra on host. Needs at least `xserver-xorg-core` and `xserver-xorg-video-dummy` in image.
+ - `--xdummy-image`: Use X server in image, invisible on host. Needs at least `xserver-xorg-core` and `xserver-org-video-dummy` in image. Does not need any X on host. For custom setups of xpra, VNC and/or network access.
  
 As default, connection to X server is done sharing the matching unix socket in `/tmp/.X11-unix`. Alternatively, connection over tcp is possible with developer option `--tcp` (except option `--hostdisplay`).
  
