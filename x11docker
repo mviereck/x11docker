@@ -6,13 +6,14 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="2.2.0"
+Version="2.2.1"
 # ToDo:
 # - set default for --glamor
+# - update verbose output
 # - check or dismiss developer option --tcp, seems to be broken
 # - check if X extension Security is critical and can be dismissed
 # - --xpra-image/--xorg-image/--xdummy-image check:
-#     --tcp, --exe, --LOG 
+#     --tcp, --exe, --LOG, --wm
 #     trusted cookie needed, why?
 # - --xpra/--xpra-image: check --mmap, check further options
 # - develop new options --xpra-proxy or --xorg-proxy ?
@@ -26,6 +27,9 @@ Version="2.2.0"
 # - try to integrate Alsa sound
 
 # x11docker changelog
+# 10.03.2017          bugfix: --xorg did not recognize already running X0
+# 09.03.2017          minor bugfix: create cache folder before creating xorg.conf 
+#                     new variable $Newxenv
 # 08.03.2017 V2.2.0   bugfix #8: change : to - in homefolder name (option --home)
 # 07.03.2017          show xmessage on errors if not running in terminal
 # 06.03.2017          --xdummy-image: new option, ivisible X server Xdummy in image
@@ -387,6 +391,7 @@ SOFTWARE.'
 }
 { #### part: variable descriptions and default settings
 Cachefolder=$HOME/.cache/x11docker              # define cache folder to store temporary files. Will be changed to path of subfolder
+mkdir -p $Cachefolder
 
 X11dockermode="Xonly"                           # can be either "Xonly", "run" or "exe", depends on options
 Dockerargs=""                                   # arguments to submit to docker
@@ -411,11 +416,12 @@ Cidfile=containerID                             # file to store container ID num
 Bgpidfile=backgroundpids                        # file to store PidS and names of background processes that shut be killed on exit
 
 Xserver=""                                      # X server to use ( one of Xorg | Xpra | Xephyr | Hostdisplay)
+Newxenv=""                                  # environment variables for new X server DISPLAY XAUTHORITY XSOCKET XPRA_XSHM
 Autochooseserver="yes"                          # option '-x': automated choosing server
 Xserveroptions=""                               # X extensions to enable and other X options
 Hostxauthority=$XAUTHORITY                      # store environment variable pointing to X authority cookies
 if [ -z "$Hostxauthority" ] ; then Hostxauthority=$HOME/.Xauthority ; fi  # for unknown reasons XAUTHORITY can be empty. Assuming this path as default
-Hostdisplay=$DISPLAY                            # store Environment variable containing name of current display
+Hostdisplay=$DISPLAY                            # store environment variable containing name of current display
 Hostxsocket="/tmp/.X11-unix/X$(echo $Hostdisplay | cut -d: -f2 | cut -d. -f1)"  # X socket from host, needed for --hostdisplay and --virtualgl
 Newdisplay=""                                   # new display for new X server
 Tcpdisplay=""                                   # option --tcp: X conected over tcp, Tcpdisplay= IP:Display
@@ -1139,7 +1145,7 @@ waitforxpraserver() { # wait for xpra server to be ready.
   case $Xserver in
     Xpra|Xpra-image|Xorg-image|Xdummy-image) [ "$X11dockermode" = "Xonly" ] && error "x11docker does not support running X server only for $Xserver yet, sorry" ;; 
   esac
-  case $Xserver in
+  case $Xserver in # in development, avoid for now
     Xpra-image|Xorg-image) [ "$X11dockermode" = "exe" ] && error "x11docker does not support running host applications on $Xserver yet, sorry" ;; 
   esac
   case $Xserver in
@@ -1207,13 +1213,9 @@ waitforxpraserver() { # wait for xpra server to be ready.
   fi
 }
 
-{ #### part: check free display, create cache folders and rename cache files
-  ## create main cache folder, if not already present
-  #
-  mkdir -p $Cachefolder
-
+{ #### part: check free display, create cache subfolder and rename cache files
+ 
   ## Look for next free display and change some display specific variables
-  #
   case $Xserver in                   # set initial value for searching
     Xorg) Newdisplaynumber="0" ;;          # low number for X displays
     Xpra) Newdisplaynumber="100" ;;        # high numbers fpr xpra displays
@@ -1225,7 +1227,7 @@ waitforxpraserver() { # wait for xpra server to be ready.
     Xdummy) Newdisplaynumber="700" ;;
   esac
   #
-  while [ -f "/tmp/.X11-unix/X$Newdisplaynumber" ] || [ -h "/tmp/.X11-unix/X$Newdisplaynumber" ]  || [ -d "$Cachefolder/X$Newdisplaynumber" ] ; do   # search unused X socket, passing already used cache numbers
+  while [ -e "/tmp/.X11-unix/X$Newdisplaynumber" ] || [ -h "/tmp/.X11-unix/X$Newdisplaynumber" ]  || [ -d "$Cachefolder/X$Newdisplaynumber" ] ; do   # search unused X socket, passing already used cache numbers
     Newdisplaynumber=$(($Newdisplaynumber + 1))
   done
   #
@@ -1383,13 +1385,26 @@ done
     Hostdisplay) # host display :0 is already running and cannot be reconfigured
     ;;
   esac
+  
+  Newxenv="DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie XSOCKET=$Newxsocket $Xprashm"
+  #   option '--env': show display infos on stdout
+  [ "$Showdisplayenvironment" = "yes" ] && echo $Newxenv
 }
 
 { #### part: create command to run docker
-
+  [ "$(echo $Xserver | grep image)" ] && case "$X11dockermode" in
+    exe) X11dockermode="runexe"
+      hostexe="$Imagecommand"
+      #Imagecommand="cat | ps | grep cat | cut -d ' ' -f1 > /x11docker/cat.pid"
+      Imagecommand="sleep 30"
+      ;;
+    Xonly) X11dockermode="runexe"
+      hostexe="$Windowmanager"
+      Imagecommand="cat | ps | grep cat | cut -d ' ' -f1 > /x11docker/cat.pid";;
+  esac 
   case $X11dockermode in
     exe|Xonly)  Dockercommand="# dontrundocker"  ;;
-    run) 
+    run|runexe) 
       Containername="x11docker_X$(echo $Newdisplay | cut -d: -f2)_$(mcookie | cut -c -6)"
       Dockercommand='docker run'
       Dockercommand="$Dockercommand --cidfile=$Cidfile"                                        # write container id in file $Cidfile
@@ -1763,7 +1778,7 @@ done
   #
   # choose apps to run and wait for them to exit
   case $X11dockermode in
-    run) 
+    run|runexe) 
       [ "$Xserver" = "Xdummy" ] && echo "export DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority"
       echo "# password for docker will be prompted in xterm"
       echo "xterm -l -lf $Xtermlogfile -title x11docker -e '/bin/bash $Xtermrc'"
@@ -1791,6 +1806,12 @@ done
           echo "  ln -s $Sharefolder/socket/X$Newdisplaynumber /tmp/.X11-unix/X$Newdisplaynumber # Create soft link for unix socket"
         ;;
       esac
+      [ "$X11dockermode" = "runexe" ] && {
+        echo '  # run host application on new X server'
+        echo "  $Newxenv $hostexe"
+        echo "  # terminate dummy docker process"
+        echo "  kill < $Sharefolder/cat.pid"
+      }
       echo '  # wait for docker until it terminates. bash builtin wait does not work in this case'
       echo '  while [ -n "$(pgrep docker | grep $Dockerpid)" ] ; do sleep 1 ; done'
       echo 'fi'
@@ -1799,7 +1820,7 @@ done
       esac
     ;;
     exe) 
-      echo "# run host application (window manager is already running)"
+      echo "# run host application"
       echo "$Dockerargs &"
       echo 'storepid $! '`echo $Dockerargs | awk '{print $1}'`
       echo 'wait $!'
@@ -1835,7 +1856,7 @@ $Wm_recommended_desktop_light $Wm_recommended_desktop_heavy' ; read" '"'
 } > $Xinitrc
 
 { #### part: create xtermrc (used by xinitrc to get password and run docker)
-  if [ "$X11dockermode" = "run" ] ; then
+  if [ "$X11dockermode" = "run" ] || [ "$X11dockermode" = "runexe" ] ; then
     { echo "#! /bin/bash"
     if [ "$Windowmanager" = "" ] && [ "$Xserver" != "Xpra" ] && [ "$Getroot" != "bash -c" ] ; then
       echo "echo 'Please move mouse cursor into terminal area to get keyboard focus.'"
@@ -1943,12 +1964,6 @@ Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' '
     verbose "Created desktop icon `xdg-user-dir DESKTOP`/$Name.desktop"
     exit 0
   fi
-}
-
-{ #### part: option '--env': show display infos on stdout
-  [ "$Showdisplayenvironment" = "yes" ] && {
-    echo "DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie XSOCKET=$Newxsocket $Xprashm"
-  }
 }
 
 { #### Finally: run new X server
