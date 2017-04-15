@@ -20,4 +20,8 @@
 
 ![screenshot](x11docker-security.png "x11docker GUI security")
 
+![screenshot](x11docker-server.png "x11docker GUI security")
+
+![screenshot](x11docker-dependencies.png "x11docker GUI security")
+
 ![screenshot](x11docker.jpeg "x11docker logo")
