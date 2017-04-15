@@ -15,12 +15,13 @@ error() {
 [ -n "$(command -v kaptain)" ] || error "Error: did not find executeable 'kaptain'. Please install package 'kaptain' and try again."
 
 # Try to find x11docker
-[ -n "$(echo $PATH | grep $(dirname $0) )" ] && X11DOCKER="x11docker"                          # if x11docker-gui is running in $PATH, x11docker will be there,too(I assume) 
+[ -n "$(echo $PATH | grep $(dirname $0) )" ] && X11DOCKER="x11docker"                          # if x11docker-gui is running in $PATH, x11docker will be there,too (I assume) 
 [ -z "$X11DOCKER" ]                          && X11DOCKER="$PWD/x11docker"                     # otherwise, look in current directory
 [ -e "$X11DOCKER" ] || error "Error: did not find x11docker, neither in \$PATH nor in current directory"
 [ -z "$(command -v $X11DOCKER)" ]            && X11DOCKER="bash $PWD/x11docker"                # if not marked as executeable, run with bash
 
 VERSION="$($X11DOCKER --version)"
+x11docker_logo="/tmp/x11docker.png"
 
 #####################
 # Preset some options you may want to be set as default
@@ -28,7 +29,7 @@ VERSION="$($X11DOCKER --version)"
 DOCKERIMAGE=""              # docker image [+ command]
 DOCKEROPTIONS=""            # additional docker options
 MYWM=""                     # host window manager
-XEPHYRSCREENSIZE="800x600"
+SCREENSIZE="800x600"
 
 # Checkboxes: "!" disables option, "" enables it
 HOSTUSER="!"
@@ -36,24 +37,435 @@ SUDOUSER="!"
 HOMEFOLDER="!"
 CLIPBOARD="!"
 PULSEAUDIO="!"
-VIRTUALGL="!"
 GPU="!"
 VERBOSE="!"
 NOXHOST="!"
 NOPWD="!"
-IPC="!"
 SUDO="!"
-XEPHYRFULLSCREEN="!"
 
-# other way around: "!" enables option, "" disables it
-XORG=""
-XEPHYR=""
-HOSTDISPLAY=""
-DESKTOP=""
+
+# these window managers are known to work well with x11docker (alphabetical order)(excluding $Wm_not_recommended and $Wm_ugly):
+Wm_good="amiwm blackbox cinnamon compiz ctwm enlightenment fluxbox flwm fvwm"
+Wm_good="$Wm_good jwm kwin lxsession mate-session mate-wm marco metacity muffin mutter notion olwm olvwm openbox ororobus pekwm"
+Wm_good="$Wm_good sawfish twm wmaker w9wm xfwm4"
+# these wm's are recommended, lightweight AND desktop independent. best first:
+Wm_recommended_desktop_light="flwm blackbox fluxbox jwm mwm wmaker afterstep amiwm fvwm ctwm pekwm olwm olvwm openbox lxsession" 
+# these wm's are recommended, heavy AND desktop independent. best first:
+Wm_recommended_desktop_heavy="mate-session p"
+# these wm's are recommended and lightweight, but cannot show desktop options. best first:
+Wm_recommended_nodesktop_light="sawfish xfwm4 metacity marco mate-wm "
+# these wm's are recommended and heavy, but cannot show desktop options (especially exiting themselves). best first:
+Wm_recommended_nodesktop_heavy="muffin mutter kwin kwin_x11 cinnamon gnome-shell compiz"
+# these wm's are not really useful (please don't hit me) (best first):
+Wm_not_recommended="awesome enlightenment evilwm herbstluftwm i3 lwm matchbox miwm plasmashell spectrwm subtle windowlab wmii wm2"
+# these wm's cannot be autodetected by wmctrl if they are already running
+Wm_nodetect="aewm aewm++ afterstep awesome ctwm mwm miwm olwm olvwm sapphire windowlab wm2 w9wm"
+# these wm's can cause problems (they can be beautiful, though):
+Wm_ugly="icewm sapphire aewm aewm++"
+# these wm's doesn't work:
+Wm_bad="clfswm tinywm tritium lxqt-session xfce4-session"
+# List of all working window managers, recommended first: (excluding $Wm_bad)
+Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recommended_desktop_heavy $Wm_recommended_nodesktop_heavy $Wm_good $Wm_ugly $Wm_not_recommended $Wm_nodetect"
+for wm in $Wm_all ; do
+  command -v $wm >/dev/null 2>&1 && [ -z "$(echo $HOSTWM | grep $wm)" ] && HOSTWM="$HOSTWM\"$wm\","
+done
+HOSTWM="$HOSTWM\"\","
+HOSTWM="$HOSTWM\"none\",\"auto\""
+[ $MYWM ] && HOSTWM="\"$MYWM\",$HOSTWM"
+
+kaptain_script='
+start "x11docker '$VERSION'" -> options buttons;
+  options:beside -> frameleft frameright;
+    frameleft:framed -> choose_image_framed choose_xserver sizefullscreen security;
+    frameright:framed -> options_all;
+    
+  choose_image_framed -> choose_image;
+  choose_image "Run GUI applications in docker images on X and Wayland" -> logo_imageorexe dockerimage dockeroptions ;
+    logo_imageorexe:beside  -> @icon("'$x11docker_logo'") imageorexe ;
+      imageorexe -> image | exe | xonly;
+        image:beside     "Run docker image in segregated X server" -> "-- " security_dialog;
+        exe              "--exe: Start host application in another X server" -> "--exe -- ";
+        xonly            "--xonly: Only create new empty X server" -> "--xonly -- "; 
+    dockerimage:beside   "docker image [and command] to run:" -> @string="'$DOCKERIMAGE'";
+    dockeroptions:beside "[Additional custom options for \"docker run\":]" ->  @string="'$DOCKEROPTIONS'" ;
+  
+  choose_xserver -> xserverbla xservercombo wm gpu;
+    xserverbla:beside "Choose X server to use" -> @fill xinfobutton xdependenciesbutton ;
+    xservercombo -> s/(:.*$)/ / @combo(
+        ": Automatically choose X server (regards option --wm)",
+        "--xpra: Show container application windows on your main desktop",
+        "--xephyr: Show container desktop in a window on your main desktop",
+        "--xpra-xwayland: Like --xpra, using Xwayland",
+        "--weston-xwayland: Like --xephyr, Weston window using Xwayland",
+        "--hostdisplay: Share host X display (quite bad container isolation!)",
+        "--xorg: Core Xorg server. (Switch with <CTRL><ALT><F1>...<F12>)",
+        "--xwayland: Core Xwayland",
+        "--hostwayland: Share host wayland display without X",
+        "--weston: Wayland in Weston without X"
+      );
+    gpu "--gpu: Hardware acceleration for OpenGL (degrades container isolation)"             ->  "--gpu " | '$GPU' "";
+    wm :beside "--wm: Host window manager to use"   ->  "--wm=\"" @combow('$HOSTWM') "\" " | ! "" ;
+        
+    sizefullscreen "Choose screen size for Xephyr, Weston, KWin or Xdummy" -> sizefullscreenline ;
+      sizefullscreenline:beside -> size fullscreen resizeable;
+      size:beside "--size: "                   -> "--size \"" @string="'$SCREENSIZE'" "\" "| !"" ;
+      fullscreen  "--fullscreen "              -> "--fullscreen " | ! "" ;
+      resizeable  "--resizeable (Xephyr only)" -> "--resizeable " | ! "" ;
+      
+  options_all "Options" -> choose_options choose_options_advanced develdialog;
+    
+    choose_options -> hostuser sudouser home clipboard pulseaudio;
+      hostuser         "--hostuser: Create container user \'$USER'\ similar to \n 
+                        your host user (same name, user id and group id) \n 
+                        (a docker image command must be given)\n
+                        Recommended for all use cases to improve security. "->  " --hostuser " | '$HOSTUSER' "";
+      sudouser         "--sudouser: Like --hostuser, but member of group sudo \n (Allows all commands using sudo without a password)" -> " --sudouser " | '$SUDOUSER' "";
+      home             "--home: Share a host folder in /home/'$USER'/x11docker \n as /home/'$USER' in container." -> "--home " | '$HOMEFOLDER' "";  
+      clipboard        "--clipboard: Enable clipboard sharing (best with xpra)" -> "--clipboard " | '$CLIPBOARD' "";
+      pulseaudio       "--pulseaudio: Sound with pulseaudio \n (needs pulseaudio on host and in image to be installed)" -> "--pulseaudio " | '$PULSEAUDIO' "";
+      
+    choose_options_advanced -> text_advanced verbose dbus waylandenv nopwd sudo;
+      text_advanced:beside    "Advanced options " -> "" develdialog;
+      verbose "--verbose: Be verbose (terminal output of logfiles)"       -> "--verbose " | '$VERBOSE' "";
+      dbus    "--dbus: Use dbus-launch to run image command"              -> "--dbus " | ! "";
+      nopwd   "--no-password: Do not ask for root password"               -> "--no-password " | '$NOPWD' "";
+      waylandenv      "--waylandenv: Set wayland environment variables \n for toolkits GTK3 \ QT5 \ Clutter \ SDL \ Elementary \ Evas " -> "--waylandenv " | ! "" ; 
+      sudo    "--sudo: Use sudo instead of su to run docker \n 
+           (for systems without a root password like Ubuntu)"             -> "--sudo " | '$SUDO' "";
+           
+   security "Improving X authentication security" -> untrusted noxhost;
+      noxhost   "--no-xhost: Disable any access to host X server permitted by xhost" -> "--no-xhost " | ! "" ;
+      untrusted "--untrusted: Create untrusted cookies restricting X access. Can avoid \n rendering issues with --hostdisplay and --kwin-native (MIT-SHM errors)." -> "--untrusted " | ! "" ;
+    
+ develdialog:dialog "Developer options" -> developeroptions @close=" close";
+  developeroptions:beside -> develleft develright;
+   develleft:framed -> devxserver devenvironment @fill ;
+   develright:framed ->  devsharehost devvtdisplay devauth devfiles devroot;
+    devxserver " Special X servers and Wayland compositors" -> devxserverlist;
+      devxserverlist -> devxauto | devxkwin | devxkwinxwayland | devxkwinnative | devxxdummy | devxnothing;
+        devxauto "Auto choose X server from main dialog" -> "" ;
+        devxxdummy "--xdummy: Invisible Xdummy server for custom access." -> "--xdummy ";
+        devxkwin "--kwin: Like --weston, pure Wayland environment using \n kwin_wayland"    -> "--kwin ";
+        devxkwinxwayland "--kwin-xwayland: Like --weston-xwayland using kwin_wayland"    -> "--kwin-xwayland " ;
+        devxkwinnative "--kwin-native: Like --kwin-xwayland, but using built-in \n
+                        seamless xwayland. Drawback: needs option --untrusted or \n
+                        insecure option --ipc to avoid MIT-SHM errors." -> "--kwin-native " ;
+        devxnothing "--nothing: Do not provide any X server or Wayland compositor"       -> "--nothing " ;
+    devauth "X authentication" -> devxhost devnoauth ; 
+      devxhost           "--xhost+ : Set \"xhost +\" on new X server. Every client can access new \n X server without restrictions. Testing purposes only." -> "--xhost+ " | ! "" ;
+      devnoauth          "--no-auth: Disable cookie authentication on new X server. \n Testing purposes only." -> "--no-auth " | ! "" ;
+    devenvironment "Environment" -> devshowenv setenvdialog devsharewayland;
+      devshowenv         "--showenv: Show DISPLAY and XAUTHORITY on stdout, \n further WAYLAND_DISPLAY and other environment variables \n depending on options. For custom access to new X server." -> "--showenv " | ! "" ;
+      devsharewayland    "--sharewayland: Share wayland socket and \$WAYLAND_DISPLAY\n (automatically done for --weston, --kwin and --hostwayland)" -> "--sharewayland " | ! "" ;
+    devalpha "in development, unstable, or deprecated" -> devalsa;
+      devalsa            "--alsa: enable ALSA sound (not working yet)" -> "--alsa " | ! "" ;
+    devfiles "File operations" -> devcache devps;
+      devps              "--ps: Keep created container" -> "--ps " | ! "" ;
+      devcache           "--cache: Keep cache files in ~/.cache/x11docker" -> "--cache " | ! "";
+    devvtdisplay "X display number and vt/tty" -> devvt devdisplay;
+      devvt :beside      "--vt: virtual terminal/tty to use: " -> "--vt " @string="8" " " | ! "";
+      devdisplay :beside "--display: display number to use: " -> "--display " @string="1000" " " | ! "";
+    devsharehost "Share host resources" -> devipc devnet;
+      devipc             "--ipc: Share host interprocess communication and shared memory. \n
+                          Breaks container isolation! Allows MIT-SHM extension, thus avoiding \n 
+                          rendering glitches and bad RAM access with --hostdisplay and --kwin-native." -> "--ipc " | ! "" ;
+      devnet             "--net: Share host network stack including dbus. Breaks container isolation!" -> "--net " | ! "" ;
+    devroot "root"       -> root;
+      root               "--root: Allow root to run x11docker (discouraged)"          -> "--root " | ! "";
+      
+    setenvdialog:beside "--env: Set custom environment " -> envdialog | ! "" ;
+      envdialog:dialog "Environment variables" -> envdialogwaylandinfo envXDG envGTK envQT envQTegl envClutter envSDL envElementary1 envElementary2 envEvas envdialogothers envKWin envCustom1 envCustom2 envCustom3 envCustom4 @close="close";
+        envdialogwaylandinfo      "This environment variables summon toolkits to use Wayland instead of X11" -> "";
+        envXDG:beside                       -> "--env=\""  @string="XDG_SESSION_TYPE=wayland"         "\" " | ! "" ;
+        envGTK:beside         "GTK"         -> "--env=\""  @string="GDK_BACKEND=wayland"              "\" " | ! "" ;
+        envQT:beside          "QT5"         -> "--env=\""  @string="QT_QPA_PLATFORM=wayland"          "\" " | ! "" ;
+        envQTegl:beside       "QT5"         -> "--env=\""  @string="QT_QPA_PLATFORM=wayland-egl"      "\" " | ! "" ;
+        envClutter:beside     "Clutter"     -> "--env=\""  @string="CLUTTER_BACKEND=wayland"          "\" " | ! "" ;
+        envSDL:beside         "SDL"         -> "--env=\""  @string="SDL_VIDEODRIVER=wayland"          "\" " | ! "" ;
+        envElementary1:beside "Elementary"  -> "--env=\""  @string="ELM_DISPLAY=wl"                   "\" " | ! "" ;
+        envElementary2:beside "Elementary"  -> "--env=\""  @string="ELM_ACCEL=opengl"                 "\" " | ! "" ;
+        envEvas:beside        "Ecore_Evas"  -> "--env=\""  @string="ECORE_EVAS_ENGINE=wayland_egl"    "\" " | ! "" ;
+        envdialogothers:beside    "Other environment variable settings"  -> "";
+        envKWin:beside        "KWin"        -> "--env=\""  @string="KWIN_COMPOSE=Q"                   "\" " | ! "" ;
+        envCustom1:beside     "QT"          -> "--env=\""  @string="QT_X11_NO_MITSHM=1"               "\" " | ! "" ;
+        envCustom2:beside     "Custom"      -> "--env=\""  @string=""                                 "\" " | ! "" ;
+        envCustom3:beside     "Custom"      -> "--env=\""  @string=""                                 "\" " | ! "" ;
+        envCustom4:beside     "Custom"      -> "--env=\""  @string=""                                 "\" " | ! "" ;
+    
+  xinfobutton:dialog "X server info" -> xinfo @close=" close";
+    xinfo:beside -> xinfo_option xinfotext xinfo_gpu;
+      xinfo_option -> xinfo_option_title        xinfo_option_auto 
+                      xinfo_option_xpra         xinfo_option_xephyr 
+                      xinfo_option_xpraxwayland xinfo_option_westonxwayland 
+                      xinfo_option_hostdisplay  xinfo_option_xorg 
+                      xinfo_option_xwayland     xinfo_option_xdummy
+                      xinfo_option_wayland      xinfo_option_kwin 
+                      xinfo_option_weston ;
+        xinfo_option_title ->           @text(" X server");
+        xinfo_option_auto ->            @text(" --auto\n
+                                          \n");
+        xinfo_option_xpra ->            @text(" --xpra\n");
+        xinfo_option_xephyr ->          @text(" --xephyr\n
+                                          \n
+                                          \n");
+        xinfo_option_xorg ->            @text(" --xorg\n
+                                          \n");
+        xinfo_option_hostdisplay ->     @text(" --hostdisplay\n
+                                          \n
+                                          \n
+                                          \n");
+        xinfo_option_xpraxwayland ->    @text(" --xpra-xwayland\n");
+        xinfo_option_westonxwayland ->  @text(" --weston-xwayland\n
+                                          \n");
+        xinfo_option_xwayland ->        @text(" --xwayland\n");
+        xinfo_option_xdummy ->          @text(" --xdummy\n");
+        xinfo_option_weston ->          @text(" --weston\n");
+        xinfo_option_kwin ->            @text(" --kwin\n");
+        xinfo_option_wayland ->         @text(" --hostwayland\n");
+      xinfotext -> xinfo_title        xinfo_auto 
+                   xinfo_xpra         xinfo_xephyr 
+                   xinfo_xpraxwayland xinfo_westonxwayland 
+                   xinfo_hostdisplay  xinfo_xorg 
+                   xinfo_xwayland     xinfo_xdummy
+                   xinfo_wayland      xinfo_kwin
+                   xinfo_weston ;
+        xinfo_title ->          @text(" ");
+        xinfo_auto ->           @text(" Chooses between --xpra, --xephyr, --weston-xwayland. --xorg and --hostdisplay, depending on installed \n
+                                        dependencies and whether --desktop is given or not. Searches itself for a window manager if needed.\n");
+        xinfo_xpra ->           @text(" Recommended to run single applications. Application windows appear on host display.\n");
+        xinfo_xephyr ->         @text(" Recommended to run desktop environments. Desktop appears in a window on host display. \n
+                                        Along with option --wm usefull for single applications, too. Low overhead.\n
+                                        GPU acceleration with --gpu is possible, but not very effective.");
+        xinfo_xorg ->           @text(" Core X server. Switch between displays with keys [CTRL][ALT][F1]...[F12].\n
+                                        Runs ootb from console. To run from within X see button [Dependencies] for setup.\n");
+        xinfo_hostdisplay ->    @text(" Share host display :0 instead of running second X server. Attention: Low security, quite bad container isolation!\n
+                                        Please look at button [Security info]. Use with trusted images and option --hostuser only. Least overhead. \n
+                                        Rendering issues are possible due to missing MIT-SHM and can be fixed with option --untrusted. \n 
+                                        Otherwise, and for use of option --gpu, you can avoid rendering issues with isolation breaking option --ipc. \n");
+        xinfo_xpraxwayland ->   @text(" Like --xpra, uses Xwayland in background.");
+        xinfo_westonxwayland -> @text(" Like --xephyr, Weston with Xwayland. \n
+                                        Can run on X or Wayland in a window, can also run on its own from tty / console.");
+        xinfo_xwayland ->       @text(" Xwayland needs a Wayland environment to run in. Appearing fullscreen display can be moved around.\n");
+        xinfo_xdummy ->         @text(" Invisible X server for custom access. Output of environment variables on stdout. \n");
+        xinfo_weston ->         @text(" Weston without X to run pure Wayland applications. Runs in X, in Wayland or from console");
+        xinfo_kwin ->           @text(" KWin_wayland without X to run pure Wayland applications. Runs in X, in Wayland or from console");
+        xinfo_wayland ->        @text(" Shares host wayland socket without X to run pure Wayland applications. Needs a running Wayland compositor.");
+      xinfo_gpu ->    xinfo_gpu_title        xinfo_gpu_auto 
+                      xinfo_gpu_xpra         xinfo_gpu_xephyr 
+                      xinfo_gpu_xpraxwayland xinfo_gpu_westonxwayland 
+                      xinfo_gpu_hostdisplay  xinfo_gpu_xorg 
+                      xinfo_gpu_xwayland     xinfo_gpu_xdummy
+                      xinfo_gpu_wayland      xinfo_gpu_kwin
+                      xinfo_gpu_weston ;
+        xinfo_gpu_title ->           @text(" --gpu ");
+        xinfo_gpu_auto ->            @text("\n
+                                          \n");
+        xinfo_gpu_xpra ->            @text(" no\n");
+        xinfo_gpu_xephyr ->          @text(" (yes)\n
+                                          \n
+                                          \n");
+        xinfo_gpu_xorg ->            @text(" yes\n
+                                          \n");
+        xinfo_gpu_hostdisplay ->     @text(" (yes)\n
+                                          \n
+                                          \n
+                                          \n");
+        xinfo_gpu_xpraxwayland ->    @text(" yes\n");
+        xinfo_gpu_westonxwayland ->  @text(" yes\n
+                                          \n");
+        xinfo_gpu_xwayland ->        @text(" yes\n");
+        xinfo_gpu_xdummy ->          @text(" no\n");
+        xinfo_gpu_weston ->          @text(" yes\n");
+        xinfo_gpu_kwin ->            @text(" yes\n");
+        xinfo_gpu_wayland ->         @text(" yes\n");
+         
+  xdependenciesbutton:dialog "Dependencies" -> xdependencies xdependencies2 @close=" close";
+    xdependencies:beside -> xdep_option xdep_host xdep_xrunning ;
+      xdep_option -> xdep_option_title  
+                     xdep_option_xpra         xdep_option_xephyr 
+                     xdep_option_xpraxwayland xdep_option_westonxwayland
+                     xdep_option_hostdisplay  xdep_option_xorg
+                     xdep_option_xwayland     xdep_option_xdummy
+                     xdep_option_wayland      xdep_option_kwin
+                     xdep_option_weston ;
+        xdep_option_title ->          @text(" X server");
+        xdep_option_xpra ->           @text(" --xpra");
+        xdep_option_xephyr ->         @text(" --xephyr");
+        xdep_option_xorg ->           @text(" --xorg");
+        xdep_option_hostdisplay ->    @text(" --hostdisplay");
+        xdep_option_xpraxwayland ->   @text(" --xpra-xwayland");
+        xdep_option_westonxwayland -> @text(" --weston-xwayland");
+        xdep_option_xwayland ->       @text(" --xwayland");
+        xdep_option_xdummy ->         @text(" --xdummy");
+        xdep_option_weston ->         @text(" --weston");
+        xdep_option_kwin ->           @text(" --kwin");
+        xdep_option_wayland ->        @text(" --hostwayland");
+      xdep_host -> xdep_host_title  
+                   xdep_host_xpra         xdep_host_xephyr
+                   xdep_host_xpraxwayland xdep_host_westonxwayland
+                   xdep_host_hostdisplay  xdep_host_xorg
+                   xdep_host_xwayland     xdep_host_xdummy
+                   xdep_host_wayland      xdep_host_kwin
+                   xdep_host_weston ;
+        xdep_host_title ->          @text(" Dependencies on host");
+        xdep_host_xpra ->           @text(" xpra");
+        xdep_host_xephyr ->         @text(" xserver-xephyr");
+        xdep_host_xorg:beside ->    @text(" - \ [ xerver-xorg-legacy ]") xdep_xorg_setupdialog;
+        xdep_host_hostdisplay ->    @text(" -");
+        xdep_host_xpraxwayland ->   @text(" xwayland \ xpra \ [on X also: \ weston \ xdotool ]");
+        xdep_host_westonxwayland -> @text(" xwayland \ weston");
+        xdep_host_xwayland ->       @text(" xwayland");
+        xdep_host_xdummy ->         @text(" xserver-xorg-core \ xserver-xorg-video-dummy");
+        xdep_host_weston ->         @text(" weston");
+        xdep_host_kwin ->           @text(" kwin");
+        xdep_host_wayland ->        @text(" -");
+      xdep_xrunning -> xdep_xrun_title  
+                       xdep_xrun_xpra         xdep_xrun_xephyr
+                       xdep_xrun_xpraxwayland xdep_xrun_westonxwayland
+                       xdep_xrun_hostdisplay  xdep_xrun_xorg
+                       xdep_xrun_xwayland     xdep_xrun_xdummy
+                       xdep_xrun_wayland      xdep_xrun_kwin
+                       xdep_xrun_weston ;
+        xdep_xrun_title ->          @text(" Needs running X or Wayland on host");
+        xdep_xrun_xpra ->           @text(" X \ (or Xwayland on Wayland)");
+        xdep_xrun_xephyr ->         @text(" X \ (or Xwayland on Wayland)");
+        xdep_xrun_xorg ->           @text(" -");
+        xdep_xrun_hostdisplay ->    @text(" X \ (or Xwayland on Wayland)");
+        xdep_xrun_xpraxwayland ->   @text(" X \ (or Xwayland on Wayland)");
+        xdep_xrun_westonxwayland -> @text(" -");
+        xdep_xrun_xwayland ->       @text(" Wayland");
+        xdep_xrun_xdummy ->         @text(" -");
+        xdep_xrun_weston ->         @text(" -");
+        xdep_xrun_kwin ->           @text(" -");
+        xdep_xrun_wayland ->        @text(" Wayland");
+    xdependencies2 -> xdep_other xdep_gpu xdep_xclip xdep_pulseaudio xdep_dbus ;
+      xdep_other             -> @text(" Other dependencies");
+      xdep_xclip:beside      -> @text("--clipboard")  @text("Needs package xclip on host (except for options --xpra and --xpra-xwayland).") ; 
+      xdep_pulseaudio:beside -> @text("--pulseaudio") @text("Needs package pulseaudio on host AND in image.") ;
+      xdep_dbus:beside       -> @text("--dbus")       @text("Needs package dbus-x11 in image.") ;
+      xdep_gpu:beside        -> @text("--gpu")        @text("Needs OpenGL dependencies to be installed in image. These are some or all of\n
+                                                             libgl1-mesa-glx  libglew2.0 libglu1-mesa libgl1-mesa-dri libxv1 libdrm2 libgles2-mesa libegl1-mesa\n
+                                                             Media players like VLC may also need libxv1.");
+    xdep_xorg_setupdialog:dialog "Setup" -> @text(" Option --xorg can be used out of the box on console tty1...tty6. \n
+                                                   \n
+                                                   To run a second Xorg server from within an already running X session, \n
+                                                   you have to edit file /etc/X11/Xwrapper.conf and replace line:\n
+                                                   \n
+                                                   \ \ allowed_users=console \n
+                                                   \n
+                                                   with lines:\n
+                                                   \n
+                                                   \ \ allowed_users=anybody \n
+                                                   \ \ needs_root_rights=yes \n
+                                                   \n
+                                                   On debian 9 and Ubuntu 16.04 you need to install package xserver-xorg-legacy.
+                                                   ") @close=" close";
+
+  help:dialog "Help" -> @text(
+  " x11docker allows you to run GUI applications and desktop environments from inside of docker images. \n
+    Its main purpose is to preserve container isolation while avoiding some X security leaks. \n
+    Core concept is to run a segregated second X server with its own authentication cookies. \n
+    \n
+    Depending on chosen options, you can have high or low container isolation. \n
+    Look at button [Security info] to see the differences. \n
+    \n
+    With most recommended options --xpra, --xephyr, --xpra-xwayland and weston-xwayland, \n
+    the dockered applications will appear on your already running X display. \n
+    You can also choose discouraged option --hostdisplay for this to have least overhead, \n
+    but then you have least container isolation, too. \n
+    \n
+    On systems without a root password like Ubuntu or Sparky, use option --sudo.\n
+    \n
+    For troubleshooting, activate option --verbose and use \"Run in xterm\" (or run x11docker-gui in a terminal).\n
+    Options --hostdisplay and --kwin-native can have rendering issues and RAM access errors. This can be avoided \n
+    with either option --untrusted or option --ipc. Regard security infos about this options.\n
+    \n
+    Wayland: \n
+    To test Wayland applications without an X environment, you can use options --weston and --hostwayland.\n
+    QT5 applications often (always?) need options --dbus and --waylandenv.\n 
+    \n
+    x11docker and x11docker-gui are published under MIT licence. \n
+    Have a look at github: https://github.com/mviereck/x11docker\n
+    Some example docker images can be found at https://hub.docker.com/u/x11docker
+    ") @close=" close";
+    
+    security_dialog:dialog " Security info " -> sec_info sec_degrading sec_hostdisplay sec_gpu sec_pulseaudio sec_ipc sec_net sec_improving sec_hostuser sec_untrusted sec_noxhost @close=" close";
+      sec_info -> @text(" Main goal of x11docker is to allow running GUI applications in docker on X11 or Wayland while preserving container isolation. \n
+                               Most important part is to avoid common X security leaks. \n
+                               This is given for alle provided X servers (and Wayland compositors) except option --hostdisplay (see below).\n
+                               Core concept is to run a segregated second X server with its own authentication cookies.
+                               ") ;
+      sec_degrading -> @text("\n Options degrading container isolation:");
+      sec_gpu:beside -> sec_gpu_opt sec_gpu_text;
+        sec_gpu_opt  -> @text(" --gpu ");
+        sec_gpu_text -> @text(" Option --gpu allows hardware acceleration for docker OpenGL applications. Access to GPU hardware can allow rootkits. \n
+                                     Example rootkit: https://github.com/x0r1/jellyfish\n
+                                     Although there is little known of real attacks, you should be aware of this. This risk affects X servers and Wayland compositors as well.");
+      sec_hostdisplay:beside  -> sec_hostdisplay_opt sec_hostdisplay_text;
+        sec_hostdisplay_opt   -> @text(" --hostdisplay ");
+        sec_hostdisplay_text  -> @text(" Quite bad container isolation, but least overhead of all X server options.\n
+                                              Instead of creating a new segregated X server to avoid X security leaks, option --hostdisplay shares your host X server with container. \n
+                                              Keylogging and other attacks are an easy task, it is enough to run xenv or xinput and send its output to internet.\n
+                                              Also, container applications can get control over host applications. \n
+                                              Use along with option --hostuser to reduce risks. Consider to use option --untrusted, too. Use with trusted images only.\n
+                                              If you do not care about container isolation at all, get a quite fast setup with \"x11docker --hostdisplay --ipc --gpu IMAGENAME\"");
+        sec_pulseaudio:beside -> sec_pulseaudio_opt sec_pulseaudio_text;
+          sec_pulseaudio_opt  -> @text(" --pulseaudio ");
+          sec_pulseaudio_text -> @text(" With pulseaudio enabled, container applications can get your audio output and also can hear everything you say if your computer\n
+                                              has microphones.");
+        sec_ipc:beside -> sec_ipc_opt sec_ipc_text;
+          sec_ipc_opt         -> @text(" --ipc ");
+          sec_ipc_text        -> @text("Isolation breakdown, use with care! Shares host interprocess communication and shared memory. Allows MIT-SHM extension.");
+        sec_net:beside -> sec_net_opt sec_net_text @fill @fill;
+          sec_net_opt         -> @text(" --net ");
+          sec_net_text        -> @text("Isolation breakdown, use with care! Shares host network stack. Allows dbus communication.");
+      sec_improving -> @text("\n Options improving container isolation:");
+        sec_hostuser:beside -> sec_hostuser_opt sec_hostuser_text;
+          sec_hostuser_opt  -> @text(" --hostuser ");
+          sec_hostuser_text -> @text("Always recommended! Working as unprivileged user in container avoids root permissions if an application breaks out of container.");
+        sec_noxhost:beside -> sec_noxhost_opt sec_noxhost_text;
+          sec_noxhost_opt  -> @text(" --no-xhost ");
+          sec_noxhost_text -> @text("Disables all network access to host X display possibly permitted by xhost. Host applications are forced to use ~./Xauthority instead");
+        sec_untrusted:beside -> sec_untrusted_opt sec_untrusted_text;
+          sec_untrusted_opt  -> @text(" --untrusted ");
+          sec_untrusted_text -> @text("Creates untrusted cookies to restrict access to X resources. Recommended for option --hostdisplay. Some applications may misbehave.\n");
+                       
+  MIT:dialog "MIT license" -> @text(
+               " MIT License\n
+                 \n
+                 Copyright (c) 2015,2016 Martin Viereck\n
+                 \n
+                 Permission is hereby granted, free of charge, to any person obtaining a copy\n
+                 of this software and associated documentation files (the \"Software\"), to deal\n
+                 in the Software without restriction, including without limitation the rights\n
+                 to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n
+                 copies of the Software, and to permit persons to whom the Software is\n
+                 furnished to do so, subject to the following conditions:\n
+                 \n
+                 The above copyright notice and this permission notice shall be included in all\n
+                 copies or substantial portions of the Software.\n
+                 \n
+                 THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n
+                 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\n
+                 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\n
+                 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\n
+                 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n
+                 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\n
+                 SOFTWARE.") @close="close";
+
+x11docker_options -> choose_xserver security sizefullscreen choose_options choose_options_advanced imageorexe "\"" dockeroptions " \" "  "\""dockerimage "\"" ;
+x11docker -> "'$X11DOCKER' " x11docker_options;
+
+buttons :horizontal ->  run runxterm preview desktop_starter orphanedcheck MIT help @close="Cancel";
+  run -> @fork(x11docker)=" Run";
+  preview -> @preview(x11docker,"monospace",900)="Preview command" ;
+  desktop_starter -> @dump("xterm -e '\''","'$X11DOCKER' --starter ",x11docker_options,"'\''")="Create desktop starter";
+  orphanedcheck -> @dump("xterm -hold -e '"'"''$X11DOCKER' ",sudo,nopwd,root," --orphaned '"'"'")="Check orphaned";
+  runxterm -> @dump("xterm -hold -e '"'"'",x11docker,"'"'"'")="Run in xterm";
+'
 
 
 # base64 coded image
-x11docker_logo="/tmp/x11docker.png"
 echo 'iVBORw0KGgoAAAANSUhEUgAAAEgAAABICAYAAABV7bNHAAAACXBIWXMAAC4jAAAuIwF4pT92AAAAHnpUWHRUaXRsZQAACJmrMDRMyU/OTi2KNzeqMDcCACm7BPwQXjsdAAAAGHpUWHRBdXRob3IAAAiZ
 80ksLU7OSC0CAA4MAzgnFwAHAAAatElEQVR42u1cZ2CUVdZ+7lumppAMCSChhNBEmrCAIiCs67pgRQR7WXR3YVWs2P38QFEU/BQXFQu7iGsFARFdwGVVqiAgUkV6DQnpyfR53/ude9+ZyUxIDIm4+oOL
 4zDztnufe85znnPuHYDT7XQ73U63X66xHzv47LPPckVRwFj1aZwbMM0wXcigqHr0FuLF5TvnHOPHj2e/xsEuXbqUr1mzBmJMooXDYUycOLHxfb300kt5dOQJr3TuzBjAba5etRyzXmef/Rv+awSoWbNm
@@ -116,440 +528,11 @@ bVzK/TvXQNuzDnrpPojNjnIrHpm5XFoSGx9UK3WRmw+iUVAsAoglJxYVpdaiuGktVzNLXggeNxS72HdH
 wkdzPsSwYT/uy8e++DvXDm2DUfgDUFUIFqJIYpJFCFkvf0bG5YC1qEo3tOoFAHFMVH6tvT9MAibAIOUK09mEkjUK283aYcXmEtw78Q0cKAzBFw4geQHHrLNvTZs2RVFR0U8H6KGHHhI/Z0z6TmiRhx9+
 uFHqr2zNHM4rD8HwliLiq4AtRLxCyaJJ0Ua6niBWYSW6kzjNJZZ2wdwZYKnZUFKzkNZl+AnPHXT+EL78qy8a3Jf+/ftj9erVjV8vWrRoEaesWv4gNvYaNWrUr/KfnSClze12+0m/HA4H1zSNP/HEE7/K
 8Zxup9vpdrqdbqfb6fazt/8HLN2eJzJBCT8AAAAASUVORK5CYII=' | base64 -d >  $x11docker_logo
+[ "$1" = "--icon" ] && echo $x11docker_logo && exit   # option --icon: only create icon file and exit. used by installer
 
-if [ "$1" = "--icon" ] ; then exit ; fi   # option --icon: only create icon file and exit. used by installer
-
-# these window managers are known to work well with x11docker (alphabetical order)(excluding $Wm_not_recommended and $Wm_ugly):
-Wm_good="amiwm blackbox cinnamon compiz ctwm enlightenment fluxbox flwm fvwm"
-Wm_good="$Wm_good jwm kwin lxsession mate-session mate-wm marco metacity muffin mutter notion olwm olvwm openbox ororobus pekwm"
-Wm_good="$Wm_good sawfish twm wmaker w9wm xfwm4"
-# these wm's are recommended, lightweight AND desktop independent. best first:
-Wm_recommended_desktop_light="flwm blackbox fluxbox jwm mwm wmaker afterstep amiwm fvwm ctwm pekwm olwm olvwm openbox lxsession" 
-# these wm's are recommended, heavy AND desktop independent. best first:
-Wm_recommended_desktop_heavy="lxsession mate-session"
-# these wm's are recommended and lightweight, but cannot show desktop options. best first:
-Wm_recommended_nodesktop_light="sawfish xfwm4 metacity marco mate-wm "
-# these wm's are recommended and heavy, but cannot show desktop options (especially exiting themselves). best first:
-Wm_recommended_nodesktop_heavy="muffin mutter kwin cinnamon gnome-shell compiz"
-# these wm's are not really useful (please don't hit me) (best first):
-Wm_not_recommended="awesome enlightenment evilwm herbstluftwm i3 lwm matchbox miwm spectrwm subtle windowlab wmii wm2"
-# these wm's cannot be autodetected by wmctrl if they are already running
-Wm_nodetect="aewm aewm++ afterstep awesome ctwm mwm miwm olwm olvwm sapphire windowlab wm2 w9wm"
-# these wm's can cause problems (they can be beautiful, though):
-Wm_ugly="icewm sapphire aewm aewm++"
-# these wm's doesn't work:
-Wm_bad="clfswm tinywm tritium"
-# List of all working window managers, recommended first: (excluding $Wm_bad)
-Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recommended_desktop_heavy $Wm_recommended_nodesktop_heavy $Wm_good $Wm_ugly $Wm_not_recommended $Wm_nodetect"
-for wm in $Wm_all ; do
-  command -v $wm >/dev/null 2>&1 && [ -z "$(echo $HOSTWM | grep $wm)" ] && HOSTWM="$HOSTWM\"$wm\","
-done
-HOSTWM="$HOSTWM\"\""
-[ $MYWM ] && HOSTWM="\"$MYWM\",$HOSTWM"
-
-
-kaptain_script='
-start "x11docker '$VERSION'" -> options buttons;
-  options:beside -> frameleft frameright;
-    frameleft:framed -> choose_image xserver choose_wmordesktop security;
-    frameright:framed -> choose_options choose_options_advanced develdialog;
-
-  choose_image "Run X11 GUI applications in docker images" -> logo_imageorexe dockeroptions  dockerimage  ;
-    logo_imageorexe:beside  -> @icon("'$x11docker_logo'") imageorexe ;
-      imageorexe -> image | exe | xonly;
-        image:beside "Run docker image in another X server" -> "-- " security_dialog;
-        exe "--exe: Start host application in another X server" -> "--exe -- ";
-        xonly "--xonly: Only create new empty X server" -> "--xonly -- "; 
-    dockerimage  :beside -> @text("docker image [and command] to run:") "\"" @string="'$DOCKERIMAGE'" "\"";
-    dockeroptions :beside -> @text("Additional custom options for \"docker run\":") "\"" @string="'$DOCKEROPTIONS'" " \" ";
-  
-  xserver "X server to use" -> choose_X;
-    choose_X -> autochoose | xpra | '$XEPHYR' xephyr | '$ORG' xorg | '$HOSTDISPLAY' hostdisplay ;
-      autochoose:beside "--auto: Auto choose X server (regards --wm or --desktop)" -> "--auto " xserverbutton;
-      xpra "--xpra: Show container application windows on your main desktop" -> "--xpra ";
-      xephyr "--xephyr: Show container desktop in a window on your main desktop" -> "--xephyr " xephyrspecials;
-        xephyrspecials ->  xephyrfullscreenandresizeable;
-          xephyrfullscreenandresizeable :beside -> xephyrfullscreen xephyrresizeable xephyrsize;
-            xephyrfullscreen "--fullscreen" -> " --fullscreen " | '$XEPHYRFULLSCREEN' "";
-            xephyrresizeable "--resizeable" -> "--resizeable " | ! "";
-          xephyrsize :beside "--size" -> "--size \"" @string="'$XEPHYRSCREENSIZE'" "\" " | ! "";
-          xephyrglamor "--glamor: Enable glamor 2D acceleration" -> "--glamor " | ! "";
-      xorg "--xorg: Use core Xorg server. (Switch with <CTRL><ALT><F7>...<F12>)" -> "--xorg ";
-      hostdisplay "--hostdisplay: Use host display with degraded container isolation" -> "--hostdisplay ";
-      xdummy "--xdummy: Invisible Xorg/Xdummy server on host" -> "--xdummy " ; 
-      xpraimage "--xpra-image: xpra server in image, xpra client on host" -> "--xpra-image " ; 
-      xorgimage "--xorg-image: Xorg/Xdummy server in image, xpra server+client on host" -> "--xorg-image " ; 
-      xdummyimage "--xdummy-image: Invisible Xorg/Xdummy server in image" -> "--xdummy-image " ; 
-
-   choose_wmordesktop "Choose window manager (--xpra and --hostdisplay will ignore this)" -> wm | '$DESKTOP' desktop;
-      wm :beside "--wm: Host window manager to use" ->  "--wm=\"" @combow('$HOSTWM') "\" " ;
-      desktop "--desktop: Image contains its own window manager" -> "--desktop ";  
-      
-   security "Improving authentication security" -> noxhost untrusted;
-      noxhost "--no-xhost: Disable any access to host X server permitted by xhost" -> "--no-xhost " | ! "" ;
-      untrusted "--untrusted: Create untrusted cookies restricting X access. Recommended \n for option --hostdisplay. Some applications will not work with this." -> "--untrusted " | ! "" ;
-      
-    choose_options "Options" -> hostuser sudouser home clipboard pulseaudio virtualgl gpu;
-      hostuser "--hostuser: Create container user \'$USER'\ similar to \n your host user (same name, user id and group id) \n (a docker image command must be given)"->  " --hostuser " | '$HOSTUSER' "";
-      sudouser "--sudouser: Like --hostuser, but member of group sudo \n (Allows all commands using sudo without a password)" -> " --sudouser " | '$SUDOUSER' "";
-      home "--home: Share a host folder in /home/'$USER'/x11docker \n as /home/'$USER' in container." -> "--home " | '$HOMEFOLDER' "";  
-      clipboard "--clipboard: Enable clipboard sharing (best with xpra)" -> "--clipboard " | '$CLIPBOARD' "";
-      pulseaudio "--pulseaudio: Sound with pulseaudio \n (needs pulseaudio on host and in image to be installed)" -> "--pulseaudio " | '$PULSEAUDIO' "";
-      virtualgl:beside "--virtualgl: Mediate GPU acceleration" -> "--virtualgl " | '$VIRTUALGL' "";
-      gpu:beside "--gpu: Immediate GPU acceleration" -> "--gpu " | '$GPU' "" gpu_info;
-      
-    choose_options_advanced "Advanced options" -> verbose ipc root nopwd sudo;
-      verbose "--verbose: Be verbose (terminal output of logfiles)" -> "--verbose " | '$VERBOSE' "";
-      ipc "--ipc: Share host interprocess communication and shared \n 
-           memory. Use with option --hostuser only to minmize risks. \n
-           Caution: breaks down container isolation." -> "--ipc " | '$IPC' "";
-      nopwd "--nopwd: Do not ask for root password" -> "--nopwd " | '$NOPWD' "";
-      root "--root: Allow root to run x11docker (discouraged)" -> "--root " | ! "";
-      sudo "--sudo: Use sudo instead of su to run docker \n (for systems without a root password like Ubuntu)" -> "--sudo " | '$SUDO' "";
-
- develdialog:dialog "Developer options" -> developeroptions @close=" close";
-  developeroptions:beside -> develleft develright;
-    develleft:framed -> devxserver devenvironment devvtdisplay;
-    develright:framed -> devconnect devauth devfiles @fill;
-    devxserver "X server to use" -> nochoose | xdummy | xpraimage | xorgimage | xdummyimage;
-      nochoose " (keep choice of main dialog)" -> "" ;
-    devauth "X authentication" -> devxhost devnoauth ; 
-      devxhost "--xhost: Set \"xhost +\" on both X servers. \n Every client can access both X servers without restrictions. \n Security loss, testing purposes only!" -> "--xhost " | ! "" ;
-      devnoauth "--no-auth: Disable cookie authentication on new X server. \n Security risk, testing purposes only." -> "--no-auth " | ! "" ;
-    devconnect "Connection to new X server" -> devtcp ;
-      devxsocket "--xsocket: Connect with shared X socket (default)" -> "--xsocket " | ! "";
-      devtcp "--tcp: Connect to X over TCP (instead of sharing new X socket)" -> "--tcp " | ! "";
-      devtcpxsocket "--tcpxsocket: Share new X socket, but connect over TCP" -> "--tcpxsocket " | ! "";
-    devenvironment "X environment" -> devenv devdockerenv;
-      devenv "--env: Show \$DISPLAY and \$XAUTHORITY on stdout, \n further \$XSOCKET pointing to new X socket \n and, if needed, \$XPRA_XSHM to disable MIT-SHM in xpra. \n For custom access to new X server." -> "--env " | ! "" ;
-      devdockerenv "--dockerenv: Show docker run options to access new X server. \n Can be used to attach further containers to new X server." -> "--dockerenv " | ! "" ;
-    devalpha "in development, unstable, or deprecated" -> devalsa;
-      devalsa "--alsa: enable ALSA sound (not working yet)" -> "--alsa " | ! "" ;
-    devfiles "file operations" -> devcache devps devsharegpu;
-      devps "--ps: Keep created container" -> "--ps " | ! "" ;
-      devcache "--cache: Keep cache files in ~/.cache/x11docker" -> "--cache " | ! "";
-      devsharegpu "--sharegpu: share device files in /dev/dri" -> "--sharegpu " | ! "";
-    devvtdisplay "Display number and vt/tty" -> devvt devdisplay;
-      devvt :beside "--vt: virtual terminal/tty to use: " -> "--vt " @string="8" " " | ! "";
-      devdisplay :beside "--display: display number to use: " -> "--display " @string="1000" " " | ! "";
-    
-  xserverbutton:dialog "X server info" -> xdependencies xexplanation @close=" close";
-    xdependencies:beside -> xdepoption xcomment xdephost xdepimage;
-      xdepoption -> xdepoptiontitle xdepoptionauto xdepoptionxpra xdepoptionxephyr xdepoptionxorg xdepoptionhostdisplay xdepoptionxdummy xdepoptionxpraimage xdepoptionxorgimage xdepoptionxdummyimage;
-        xdepoptiontitle -> @text(" X server");
-        xdepoptionauto -> @text("--auto\n
-                          \n
-                          \n");
-        xdepoptionxpra -> @text("--xpra (*)\n
-                          \n");
-        xdepoptionxephyr -> @text("--xephyr\n
-                          \n
-                          \n");
-        xdepoptionxorg -> @text("--xorg (**)\n
-                          \n");
-        xdepoptionhostdisplay -> @text("--hostdisplay\n
-                          \n
-                          \n
-                          \n");
-        xdepoptionxdummy -> @text("--xdummy (***)\n
-                          \n");
-        xdepoptionxpraimage -> @text(" --xpra-image (*)\n
-                          \n");
-        xdepoptionxorgimage -> @text(" --xorg-image (*)\n
-                          \n");
-        xdepoptionxdummyimage -> @text(" --xdummy-image (***)\n
-                          \n");
-      xdephost -> xdephosttitle xdephostauto xdephostxpra xdephostxephyr xdephostxorg xdephosthostdisplay xdephostxdummy xdephostxpraimage xdephostxorgimage xdephostxdummyimage;
-        xdephosttitle -> @text(" Dependencies on host");
-        xdephostauto -> @text(" (it depends ...)\n
-                          \n
-                          \n");
-        xdephostxpra -> @text(" xpra\n
-                          xorg\n");
-        xdephostxephyr -> @text(" xserver-xephyr\n
-                          xorg\n
-                          \n");
-        xdephostxorg -> @text("xorg\n
-                          \n");
-        xdephosthostdisplay -> @text(" xorg\n
-                          \n
-                          \n
-                          \n");
-        xdephostxdummy -> @text(" xserver-xorg-core\n
-                          xserver-xorg-video-dummy\n");
-        xdephostxpraimage -> @text(" xpra\n
-                          xorg\n");
-        xdephostxorgimage -> @text(" xpra\n
-                          xorg\n");
-        xdephostxdummyimage -> @text("-\n
-                          ");
-      xdepimage -> xdepimagetitle xdepimageauto xdepimagexpra xdepimagexephyr xdepimagexorg xdepimagehostdisplay xdepimagexdummy xdepimagexpraimage xdepimagexorgimage xdepimagexdummyimage;
-        xdepimagetitle -> @text(" Dependencies in image");
-        xdepimageauto -> @text("-\n
-                          \n
-                          \n");
-        xdepimagexpra -> @text("-\n
-                          \n");
-        xdepimagexephyr -> @text("-\n
-                          \n
-                          \n");
-        xdepimagexorg -> @text("-\n
-                          \n");
-        xdepimagehostdisplay -> @text("-\n
-                          \n
-                          \n
-                          \n");
-        xdepimagexdummy -> @text("-\n
-                          \n");
-        xdepimagexpraimage -> @text(" xpra\ \ \ \ xserver-xorg-core\n
-                          xserver-xorg-video-dummy\n");
-        xdepimagexorgimage -> @text(" xserver-xorg-core\n
-                          xserver-xorg-video-dummy\n");
-        xdepimagexdummyimage -> @text(" xserver-xorg-core\n
-                          xserver-xorg-video-dummy
-                          ");
-      xcomment -> xcommenttitle xcommentauto xcommentxpra xcommentxephyr xcommentxorg xcommenthostdisplay xcommentxdummy xcommentxpraimage xcommentxorgimage xcommentxdummyimage;
-        xcommenttitle -> @text(" ");
-        xcommentauto -> @text(" Chooses between --xpra, --xephyr, --xorg and --hostdisplay,\n
-                          depending on installed dependencies and whether --desktop \n
-                          is given or not. Searches itself for a window manager if needed.\n");
-        xcommentxpra -> @text(" Recommended to run single applications. \n
-                          Application windows appear on host display.\n");
-        xcommentxephyr -> @text(" Recommended to run desktop environments. \n
-                          Desktop appears in a window on host display. Low overhead.\n
-                          Along with option --wm usefull for single applications, too\n");
-        xcommentxorg -> @text(" Core X server. Switch between displays with keys \n
-                          [CTRL][ALT][F1]...[F12]. (Mostly [F7] for host and [F8].)\n");
-        xcommenthostdisplay -> @text(" Share host display :0 instead of running second X server. \n
-                          Least overhead, but least security, too.\n
-                          Use with trusted images and option --hostuser only.\n
-                          Security can be improved with option --untrusted.");
-        xcommentxdummy -> @text(" Invisible, for custom setups of xpra and/or network access. \n
-                          \n");
-        xcommentxpraimage -> @text(" xpra server in image, accessed and displayed by \n
-                          xpra client on host.\n");
-        xcommentxorgimage -> @text("Xorg server in image, accessed and displayed by \n
-                          xpra server and client on host. \n");
-        xcommentxdummyimage -> @text(" Xorg server in image, invisible on host. \n
-                          For custom setups of xpra and/or network access.
-                          ");
-    xexplanation:beside -> xexplstar1 xexplstar2 ;
-      xexplstar1 -> @text("
-         (*) It is recommended to install latest xpra: https://www.xpra.org \n
-         \n
-         (**) --xorg can be used out of the box on console tty1...tty6. \n
-         To run a second X server from within already running X session, \n
-         you need to edit /etc/X11/Xwrapper.conf and replace line:\n
-         \ \ allowed_users=console \n
-         with lines:\n
-         \ \ allowed_users=anybody \n
-         \ \ needs_root_rights=yes \n
-         On debian 9 and Ubuntu 16.04 you need to install package \n
-         xserver-xorg-legacy to have file /etc/X11/Xwrapper.conf.
-         ");
-     xexplstar2 -> @text("
-         (***) --xdummy and --xdummy-image provide X servers invisible on host. \n
-         They do not need a running X session on host.\n
-         This can be used for custom setups, for example for network access with xpra. \n
-         Output of needed environment variables on stdout (see option --env). \n
-         Example: \n
-         \ \ ~$ read xenv < <(x11docker --xdummy --env x11docker/lxde pcmanfm) \n 
-         \ \ ~$ eval \$xenv xpra start \$(echo \$xenv | cut -d \" \" -f1 | cut -d= -f2) --use-display \n
-         \ \ ~$ xpra attach \$(echo \$xenv | cut -d \" \" -f1 | cut -d= -f2) \n
-         Avoid to run \"xpra start\" before X server is ready (check \$XSOCKET), and \n
-         avoid to run \"xpra attach\" before xpra server is ready (check xpra server logfile).
-         ");
-    
-  help:dialog "Help" -> @text(
-  " x11docker allows you to run GUI applications and desktop environments from inside of docker images. \n
-    Its main purpose is to preserve container isolation. This is tricky due to some X security leaks. \n
-    x11docker runs a second X server to segregate docker applications from host applications. \n
-    Hardware acceleration and pulseaudio sound are supported, too. \n
-    \n
-    Depending on chosen options, you can have high or low container isolation. \n
-    Look at \"Security table\" to see the differences. \n
-    \n
-    Dependencies on host: \n
-    Depending on chosen options, x11docker needs some additional packages to be installed on host. \n
-    It will check for them on startup and show terminal messages if some are missing. \n
-    List of possibly needed packages:  xpra  xserver-xephyr  xclip  pulseaudio  virtualgl wmctrl xserver-xorg-legacy \n 
-    \n
-    Dependencies in image: \n
-    Most use cases does not have dependencies in image. \n
-    Have a look at button \"X server info\" for options --xpra-image, --xorg-image and --xdummy-image. \n 
-    For option --pulseaudio, package pulseaudio needs to be installed in image, too. \n
-    Hardware acceleration can have dependencies in image, too. Look at button \"GPU  info\".\n
-    \n
-    With most recommended options --xpra or --xephyr, the dockered applications will appear on your already running X display. \n
-    Docker applications will be segregated from your host display, and it is comfortable and secure to use. \n
-    You can also choose option --hostdisplay for this to have least overhead, but then you have least container isolation, too. \n
-    \n
-    If neither xpra nor Xephyr are installed, and Xwrapper.conf is not edited, \n
-    only less secure option --hostdisplay will work out of the box from within X.\n
-    \n
-    On systems without a root password like Ubuntu or Sparky, use option --sudo.\n
-    \n
-    For troubleshooting, activate option --verbose and use \"Run in xterm\" (or run x11docker-gui in a terminal).\n
-    To see all options and more informations, run <x11docker --help>.\n
-    \n
-    x11docker and x11docker-gui are published under MIT licence. \n
-    Have a look at github: https://github.com/mviereck/x11docker\n
-    Some example docker images can be found at https://hub.docker.com/u/x11docker
-    ") @close=" close";
-    
-  gpu_info:dialog "GPU info" -> @text(
-        " Software accelerated OpenGL is available in all provided X servers. \n
-          The image needs an OpenGL implementation to be able to use it. \n
-          The easiest way to achieve this is to install package mesa-utils in docker image. \n
-          Some applications need packages x11-utils and libxv1 to be installed in image, too. \n
-          \n
-          Hardware acceleration with option --gpu is fast and quite secure if used with option --xorg. \n
-          It can get a speed-up with insecure option --ipc to make MIT-SHM / shared memory possible. \n 
-          \n
-          Option --gpu works with option --hostdisplay, too, but this option leaks container isolation. \n
-          To avoid rendering glitches and to get a speed-up, insecure option --ipc can be used.\n
-          \n
-          Hardware accelerated OpenGL with option --virtualgl is slower than with option --gpu, \n
-          but works with options --xpra and --xephyr, too. Leaks isolation from X server on display :0. \n
-          Needs VirtualGL to be installed on host: http://www.virtualgl.org \n
-          \n
-          SECURITY: Using hardware acceleration with options --gpu or --virtualgl can degrade \n
-          container isolation. Option --ipc breaks down container isolation. \n
-          Look at button \"Security table\" to see the differences. \n
-          \n
-          To check if hardware acceleration is at work, you can run \"glxinfo | grep renderer\". \n
-          The OpenGL renderer string should contain the name of your graphic card. \n
-          If the OpenGL renderer string contains \"llvmpipe\", only software rendering is at work.\n
-          \n
-          Known to work with Intel and AMD onboard chips using open source drivers.\n
-          Test reports with different setups are appreciated. Magic is done sharing all files in /dev/dri \n
-          with docker container. Different setups may need additional other files to be shared \n
-          and maybe some graphics drivers to be installed in image, too. 
-          ") @close=" close"; 
-    
-  security_dialog:dialog "Security table" -> security_table security_info security_gpuinfo security_options @close=" close";
-    security_table:beside -> sec_server sec_soft sec_virtualgl sec_gpu;
-      sec_server -> @text(" Table to show grade of container isolation \n
-                       depending on chosen options\n
-                       \n
-                       --xpra         = xpra (uses Xdummy)\n
-                       --xephyr       = Xephyr (nested X server)\n
-                       --xorg         = second core X server\n
-                       --hostdisplay  = share host display :0 (\*\*) \n
-                       --xdummy       = invisible dummy X server \n
-                       --xpra-image   = connect to xpra server in image \n
-                       --xorg-image   = connect to X server in image, show with xpra \n
-                       --xpra-image   = connect to invisible X server in image ");
-      sec_soft -> @text(" software \n
-                       rendering \n
-                       \n
-                       ++++\n
-                       ++++\n
-                       ++++\n
-                       +:0\n
-                       ++++\n
-                       +++++\n
-                       +++++\n
-                       +++++ ");
-      sec_virtualgl -> @text(" --virtualgl \n
-                       \n
-                       \n
-                       +:0\n
-                       +:0\n
-                       +++\n
-                       +:0\n
-                       +:0\n
-                       +:0\n
-                       +:0\n
-                       +:0");
-      sec_gpu -> @text(" --gpu (\*)\n
-                       \n
-                       \n
-                       -\n
-                       -\n
-                       +++\n
-                       +:0\n
-                       -\n
-                       -\n
-                       -\n
-                       -");
-    security_info:beside -> sec_infograde sec_infotext;
-      sec_infograde -> @text(" +++++\n 
-                       ++++\n
-                       +++\n
-                       +:0\n
-                       \n
-                       \n
-                       \n
-                       -");
-      sec_infotext -> @text(" > Highest container isolation, does not use any X server on host \n
-                       > High container isolation, secure to use. \n
-                       > High container isolation, slightly degraded by container access to GPU. \n
-                       > Low container isolation due to X security leaks, considered insecure. \n
-                        Container gains access to X server on display :0 with host applications. \n 
-                        For example, keylogging is possible. For use with trusted images only. \n
-                        Option --untrusted avoids keylogging, but does not work with --virtualgl. \n
-                       > Does not work + slightly insecure.");
-    security_gpuinfo -> @text(" (\*) --gpu: To get additional speed-up, you can use isolation breaking option --ipc \n
-                       \ \ to make shared memory with X server possible (MIT-SHM extension) \n
-                       (\*\*) --hostdisplay works with shared host X socket and can have rendering glitches \n 
-                       \ \ due to missing shared memory. These glitches can be avoided with option --ipc.");
-    security_options:beside -> sec_opt sec_optinfo;
-      sec_opt -> @text (" --no-xhost \n
-                        --untrusted \n
-                        \n
-                        \n
-                        \n
-                        --ipc \n
-                        ") ;
-      sec_optinfo -> @text(" > Disable possible access to host display :0 granted by xhost (recommended) \n
-                       > Use cookies marked as \"untrusted\" to restrict application access to X server. \n
-                       \ \ Avoids keylogging and some other risks. Recommended for option --hostdisplay.\n
-                       \ \ Some applications will not work with this. More infos: \n
-                       \ \ https://www.x.org/releases/X11R7.6/doc/xextproto/security.html\n
-                       > Isolation breakdown. Use with option --hostuser only to minimize risks. \n
-                       \ \ Container access to host interprocess communication and shared memory.
-                       ");
-                       
-  MIT:dialog "MIT license" -> @text(
-               " MIT License\n
-                 \n
-                 Copyright (c) 2015,2016 Martin Viereck\n
-                 \n
-                 Permission is hereby granted, free of charge, to any person obtaining a copy\n
-                 of this software and associated documentation files (the \"Software\"), to deal\n
-                 in the Software without restriction, including without limitation the rights\n
-                 to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n
-                 copies of the Software, and to permit persons to whom the Software is\n
-                 furnished to do so, subject to the following conditions:\n
-                 \n
-                 The above copyright notice and this permission notice shall be included in all\n
-                 copies or substantial portions of the Software.\n
-                 \n
-                 THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n
-                 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\n
-                 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\n
-                 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\n
-                 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n
-                 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\n
-                 SOFTWARE.") @close="close";
-
-x11docker_options -> choose_X security choose_wmordesktop choose_options choose_options_advanced develdialog imageorexe dockeroptions  dockerimage;
-x11docker -> "'$X11DOCKER' " x11docker_options;
-
-buttons :horizontal ->  run runxterm preview desktop_starter orphanedcheck MIT help @close="Cancel";
-  run -> @dump(x11docker)=" Run";
-  preview -> @preview(x11docker,"monospace",900)="Preview command" ;
-  desktop_starter -> @dump("xterm -e '\''","'$X11DOCKER' --starter ",x11docker_options,"'\''")="Create desktop starter";
-  orphanedcheck -> @dump("xterm -hold -e '"'"''$X11DOCKER' ",sudo,nopwd,root," --orphaned '"'"'")="Check orphaned";
-  runxterm -> @dump("xterm -hold -e '"'"'",x11docker,"'"'"'")="Run in xterm";
-'
 
 x11docker_command="$(echo $kaptain_script | kaptain /dev/stdin 2>/dev/null)"
 rm $x11docker_logo
-[ "$(echo $x11docker_command | grep -E '(--xdummy|--xpra-image|--xorg-image|--xdummy-image)' )" ] && {
-  x11docker_command="$(echo "$x11docker_command" | sed -E "s/(--auto|--xpra|--xephyr|--xorg|--hostdisplay)//")"
-}
 echo $x11docker_command
 eval $x11docker_command
 
