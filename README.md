@@ -1,10 +1,11 @@
-# x11docker: Run X11 GUI applications and desktop environments in docker on a segregated X server.
+# x11docker: Run graphical GUI applications and desktop environments in docker on a segregated X server or Wayland compositor.
 
  - Much faster than SSH or VNC solutions.
  - No dependencies inside of docker images.
  - Secure sandboxing of GUI applications.
  - Pulseaudio sound support is possible.
  - GPU hardware acceleration is possible.
+ - Wayland and Xwayland support
 
 # GUI for x11docker ![x11docker logo](/../screenshots/x11docker_klein.jpeg?raw=true "Optional Title")
 To use `x11docker-gui`, you need to install package [kaptain](https://packages.debian.org/jessie/kaptain). 
@@ -27,65 +28,31 @@ Installs into `/usr/local/bin`. Creates an icon in `/usr/share/icons`. Creates a
  - Main purpose of x11docker is to run dockered GUI applications while preserving container isolation.
  - Preserving container isolation is done using an additional X server separate from X on host display :0, thus avoiding X security leaks. (Most solutions in the web to run dockered GUI applications allow access to host X server, thus breaking container isolation and allowing access to host X resources like keylogging with `xinput test`).
  - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.  Container and new X server don't know cookies from host X server on display :0. (Except less secure options `--hostdisplay` and `--virtualgl`)
- - With option `--no-xhost` x11docker checks for any access to host X server granted by `xhost` and disables it. Host applications then use `~/.Xauthority` only.
- - To avoid using any X server on host by docker container, you can use options `--xpra-image` or `--xorg-image`. Xpra server respective Xorg/Xdummy will run in container instead on host. Needs xpra respective Xorg/Xdummy to be installed in image, and xpra to be installed on host. Xpra on host shows applications running on xpra/Xorg server in image.
- - Special use cases of hardware acceleration and option `--hostdisplay` can degrade or break container isolation. Look at security table to see the differences:
- 
-![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true "Optional Title")
+ - Some options can degrade or break container isolation. Look at security info dialog to see the differences.
+  
+![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true)
  
 # Dependencies
 x11docker can run with standard system utilities without additional dependencies on host or in image. As a core, it only needs X server (package `xorg`)  and, of course, docker (package `docker.io`) to run docker images on X. 
 
 For some additional options, x11docker needs some packages to be installed on host.
 It will check for them on startup and show terminal messages if some are missing.
+Look at dependencies dialog in x11docker-gui. 
 
-List of optional needed packages on host: `xpra` `xserver-xephyr` `xclip` `kaptain` `pulseaudio` `virtualgl` `xserver-xorg-legacy`
-(This for debian, other distros may have different package names).
-
-- `xpra`:  option `--xpra`, showing single applications on your host display. It is recommend to use latest version from https://www.xpra.org
-- `xserver-xephyr`:  option `--xephyr`, showing desktops on your host display
-- `xclip`:  option `--clipboard`, sharing clipboard with Xephyr or core X11
-- `pulseaudio`:  option `--pulseaudio`, sound/audio support
-- `virtualgl`:  option `--virtualgl`, hardware accelerated OpenGL in xpra and Xephyr. (http://www.virtualgl.org)
-- `kaptain`:  x11docker-gui
-- `xserver-xorg-legacy`: needed on Ubuntu 16.04 and higher for option `--xorg`
-
-Pulseaudio sound (option `--pulseaudio`) and OpenGL hardware acceleration (options `--gpu` and `--virtualgl`) have dependencies in image, too. See below. Special options `--xpra-image`, `--xorg-image` and `--xdummy-image` need X or xpra to be installed in image. See below. 
+![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
 
 # X servers to choose from
 x11docker creates a new X server on a new X socket. Instead of using display :0 from host, docker images will run on segregated display :1 or display :2 ... (with exception from option `--hostdisplay`)
 
-If neither `xpra` nor `xserver-xephyr` are installed, and `x11-common` is not reconfigured (for use of option `--xorg`, see below), only option `--hostdisplay` will work out of the box.
- - `--xpra`: A comfortable way to run single docker GUI applications visible on your host display is to use [xpra](http://xpra.org/).
- - `--xephyr`: A comfortable way to run desktop environments from within docker images is to use [Xephyr](https://www.freedesktop.org/wiki/Software/Xephyr/). Also, you can choose this option together with option `--wm` and run single applications with a host window manager in Xephyr. The desktop will appear in a window on your host display.
- - `--xorg`: Second core X server: To switch between displays, press `[CTRL][ALT][F7] ... [F12]`. Essentially it is the same as switching between virtual consoles (tty1 to tty6) with `[CTRL][ALT][F1] ... [F6]`. To be able to use this option, you have to execute `dpkg-reconfigure x11-common` first and choose option `anybody`. 
- [If this command fails (known for debian 9 and Ubuntu 16.04), you need to install package `xserver-xorg-legacy` and to run `dpkg-reconfigure xserver-xorg-legacy` instead; then edit file `/etc/X11/Xwrapper.config` and add line `needs_root_rights=yes`.]
- - `--hostdisplay`: Sharing host display: This option is least secure and has least overhead. Instead of running a second X server, your host X server on display :0 is shared. Occuring rendering glitches can be fixed with insecure option `--ipc`.
+If no additional X server like  `xpra` or `xserver-xephyr` is installed, and `x11-common` is not reconfigured (for use of option `--xorg`), only option `--hostdisplay` will work out of the box.
  
-Special X servers:
- - `--xdummy`: Invisible X server. For custom setups of xpra, VNC and/or network access.
- 
-X server installed in image:
- - `--xpra-image`: Use xpra server in container instead on host to avoid using any X server on host. Needs xpra to be installed on host and in image with xpra version 0.17.6 at least. 
- - `--xorg-image`: Use X server in image, show with xpra on host. Needs at least `xserver-xorg-core` and `xserver-xorg-video-dummy` in image.
- - `--xdummy-image`: Use X server in image, invisible on host. Needs at least `xserver-xorg-core` and `xserver-org-video-dummy` in image. Does not need any X on host. For custom setups of xpra, VNC and/or network access.
- 
-As default, connection to X server is done sharing the matching unix socket in `/tmp/.X11-unix`. Alternatively, connection over tcp is possible with developer option `--tcp` (except option `--hostdisplay`).
- 
- 
-# Hardware accelerated OpenGL rendering
-Software accelerated OpenGL is available in all provided X servers. The image needs an OpenGL implementation to profit from it.  The easiest way to achieve this is to install package `mesa-utils` in your image. Some applications need package `x11-utils` to be installed in image, too. Media Players like VLC may also need package `libxv1`.
- 
-Immediate GPU hardware acceleration with option `--gpu` is quite fast and secure to use with option `--xorg`. As for now, it works with options `--xorg` and `--hostdisplay` only. It can get additional speed-up with insecure option `--ipc`.
- 
-Mediate GPU hardware acceleration for OpenGL / GLX with option `--virtualgl` is possible with [VirtualGL](http://www.virtualgl.org/). Other than option `--gpu`, it works with `--xpra` and `--xephyr`, too, but has the drawback to break container isolation from display :0. For use with trusted images only. Needs VirtualGL to be installed on host.
- 
-Using hardware acceleration can degrade or break container isolation. Look at table in section "Security". 
+![x11docker-gui server screenshot](/../screenshots/x11docker-server.png?raw=true)
 
-Known to work with AMD and Intel onboard chips using open source drivers. Test reports with different setups of graphic cards and drivers are appreciated. x11docker shares all files in `/dev/dri` with docker container. Different setups may need additional other files to be shared and maybe some graphics drivers to be installed in image, too.
-  
-# Pulseaudio sound support
-x11docker supports pulseaudio sound over tcp with option `--pulseaudio`. For this to use, package `pulseaudio` needs to be installed on host and in docker image.
+# Wayland
+Beside the X servers to chooe from there are options --weston, --kwin and --hostwayland to run pure Wayland applications without X. Option `--waylandenv` sets some environment variables to summon toolkits to use Wayland. QT5 applications need options `--dbus` and `--waylandenv` to use wayland intead of X.
+ - Example: Plasma shell in a pure Wayland environment with hardware acceleration:
+ 
+  `x11docker --kwin --waylandenv --dbus --gpu --hostuser -- kdeneon/plasma plasmashell`
 
 # Usage in terminal
 x11docker askes for root password to run docker. On systems without a root password like Ubuntu or Sparky, use option `--sudo`, then x11docker uses `sudo` instead of `su` to run docker. x11docker itself should not run as root because X servers should run in userspace without root privileges.
@@ -98,7 +65,7 @@ To run a host application on a new X server:
  -  `x11docker [OPTIONS] --exe COMMAND`
  -  `x11docker [OPTIONS] --exe -- COMMAND [ARG1 ARG2 ...]`
 
-To run only a new X server with window manager:
+To run only an empty new X server:
  -  `x11docker [OPTIONS]`
 
 Have a look at `x11docker --help` to see all options.
