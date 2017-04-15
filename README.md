@@ -31,6 +31,19 @@ Installs into `/usr/local/bin`. Creates an icon in `/usr/share/icons`. Creates a
  - Some options can degrade or break container isolation. Look at security info dialog to see the differences.
   
 ![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true)
+
+# X servers and Wayland compositors to choose from
+x11docker creates a new X server on a new X socket. Instead of using display :0 from host, docker images will run on segregated display :1 or display :2 ... (with exception from option `--hostdisplay`)
+
+If no additional X server like  `xpra` or `xserver-xephyr` is installed, and `x11-common` is not reconfigured (for use of option `--xorg`), only option `--hostdisplay` will work out of the box.
+ 
+![x11docker-gui server screenshot](/../screenshots/x11docker-server.png?raw=true)
+
+## Wayland
+Beside the X servers to choose from there are options --weston, --kwin and --hostwayland to run pure Wayland applications without X. Option `--waylandenv` sets some environment variables to summon toolkits GTK3, QT5, Clutter, SDL, Elementary and Evas to use Wayland. QT5 applications need options `--dbus` and `--waylandenv` to use wayland instead of X.
+ - Example: Plasma shell in a pure Wayland environment with hardware acceleration:
+ 
+  `x11docker --kwin --waylandenv --dbus --gpu --hostuser -- kdeneon/plasma plasmashell`
  
 # Dependencies
 x11docker can run with standard system utilities without additional dependencies on host or in image. As a core, it only needs X server (package `xorg`)  and, of course, docker (package `docker.io`) to run docker images on X. 
@@ -40,19 +53,6 @@ It will check for them on startup and show terminal messages if some are missing
 Look at dependencies dialog in x11docker-gui. 
 
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
-
-# X servers to choose from
-x11docker creates a new X server on a new X socket. Instead of using display :0 from host, docker images will run on segregated display :1 or display :2 ... (with exception from option `--hostdisplay`)
-
-If no additional X server like  `xpra` or `xserver-xephyr` is installed, and `x11-common` is not reconfigured (for use of option `--xorg`), only option `--hostdisplay` will work out of the box.
- 
-![x11docker-gui server screenshot](/../screenshots/x11docker-server.png?raw=true)
-
-# Wayland
-Beside the X servers to chooe from there are options --weston, --kwin and --hostwayland to run pure Wayland applications without X. Option `--waylandenv` sets some environment variables to summon toolkits to use Wayland. QT5 applications need options `--dbus` and `--waylandenv` to use wayland instead of X.
- - Example: Plasma shell in a pure Wayland environment with hardware acceleration:
- 
-  `x11docker --kwin --waylandenv --dbus --gpu --hostuser -- kdeneon/plasma plasmashell`
 
 # Usage in terminal
 x11docker askes for root password to run docker. On systems without a root password like Ubuntu or Sparky, use option `--sudo`, then x11docker uses `sudo` instead of `su` to run docker. x11docker itself should not run as root because X servers should run in userspace without root privileges.
