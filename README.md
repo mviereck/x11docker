@@ -46,7 +46,7 @@ Beside the X servers to choose from there are options --weston, --kwin and --hos
   `x11docker --kwin --waylandenv --dbus --gpu --hostuser -- kdeneon/plasma plasmashell`
 
 ## X server inside of image
-Version  2.5 of x11docker also provides some options to run X or xpra inside of docker images. This was removed in 3.0 to keep the code easier. Version 2.5 is still available in [x11docker 2.5 branch](https://github.com/mviereck/x11docker/tree/x11docker_2.5).
+Version  2.5 of x11docker also provides some options to run X or xpra inside of docker images. This was removed in 3.0 to keep the code easier. Version 2.5 is still available in [x11docker 2.5 branch](https://github.com/mviereck/x11docker/tree/x11docker_2.5) and can be used beneath actual x11docker versions.
  
 # Dependencies
 x11docker can run with standard system utilities without additional dependencies on host or in image. As a core, it only needs X server (package `xorg`)  and, of course, docker (package `docker.io`) to run docker images on X. 
