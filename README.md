@@ -127,6 +127,3 @@ x11docker/lxde running in a Xephyr window:
  - Package `kaptain` is not available in repositories of debian 9 and Ubuntu 16.04. You can install [kaptain for debian jessie](https://packages.debian.org/jessie/kaptain) respective [kaptain for Ubuntu 14.04](http://packages.ubuntu.com/trusty/kaptain) instead.
  - x11docker-gui can look ugly on GTK based systems. x11docker-gui is managed by `kaptain` which uses QT4. You can use `qtconfig`, select GUI style GTK+ and save this setting with `[CTRL][S]`. 
   - Option `--nxagent` only supports US keyboard layout.
- 
-# Questions?
-You can ask questions in [issues section](https://github.com/mviereck/x11docker/issues). Use it like a forum.
