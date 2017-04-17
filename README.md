@@ -78,7 +78,7 @@ Look at dependencies dialog in x11docker-gui.
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
 
 # Usage in terminal
-x11docker askes for root password to run docker. On systems without a root password like Ubuntu or Sparky, use option `--sudo`, then x11docker uses `sudo` instead of `su` to run docker. x11docker itself should not run as root because X servers should run in userspace without root privileges.
+x11docker askes for root password to run docker. On systems without a root password like Ubuntu or Sparky, use option `--sudo`, then x11docker uses `sudo` instead of `su` to run docker. x11docker itself should not run as root to avoid needless privileges.
 
 To run a docker image with new X server:
  -  `x11docker [OPTIONS] IMAGE [COMMAND]`
