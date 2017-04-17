@@ -8,9 +8,11 @@
  - Wayland and Xwayland support
 
 # GUI for x11docker ![x11docker logo](/../screenshots/x11docker_klein.jpeg?raw=true "Optional Title")
-To use `x11docker-gui`, you need to install package [kaptain](https://packages.debian.org/jessie/kaptain). 
+To use `x11docker-gui`, you need to install package `kaptain`. 
  - On systems without a root password like Ubuntu, activate option `--sudo`.
  - For troubleshooting, run x11docker-gui in a terminal or use [Run in xterm]. Also you can activate option `--verbose`.
+ - Package `kaptain` is not available in repositories of debian 9 and Ubuntu 16.04. You can install [kaptain for debian jessie](https://packages.debian.org/jessie/kaptain) respective [kaptain for Ubuntu 14.04](http://packages.ubuntu.com/trusty/kaptain) instead.
+ - x11docker-gui can look ugly on GTK based systems. As kaptain uses QT4, you can use `qtconfig`and select GUI style GTK+. 
 
 ![x11docker-gui screenshot](/../screenshots/x11docker-gui.png?raw=true "Optional Title")
 
@@ -124,6 +126,4 @@ x11docker/lxde running in a Xephyr window:
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxde.png "lxde desktop running in Xephyr window using x11docker")
 
 # Known issues
- - Package `kaptain` is not available in repositories of debian 9 and Ubuntu 16.04. You can install [kaptain for debian jessie](https://packages.debian.org/jessie/kaptain) respective [kaptain for Ubuntu 14.04](http://packages.ubuntu.com/trusty/kaptain) instead.
- - x11docker-gui can look ugly on GTK based systems. x11docker-gui is managed by `kaptain` which uses QT4. You can use `qtconfig`, select GUI style GTK+ and save this setting with `[CTRL][S]`. 
   - Option `--nxagent` only supports US keyboard layout.
