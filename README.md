@@ -47,11 +47,23 @@ Beside the X servers to choose from there are options `--weston`, `--kwin` and `
   
 This options are useful to test whether an application supports a pure Wayland environment. You can also test applications from host with option --exe. 
 
- - Example: gnome-calculator (GTK3) and neverball (SDL) from host in Weston without X
+ - Examples: gnome-calculator (GTK3) and neverball (SDL) from host in Weston without X
 
   `x11docker --weston --exe gnome-calculator`
   
   `x11docker --weston --exe neverball`
+## Setup for option --xorg
+Option `--xorg` runs ootb from console. To run a second core Xorg server from within an already running X session, you have to edit file `/etc/X11/Xwrapper.conf` and replace line:
+
+`allowed_users=console`
+
+with lines:
+
+`allowed_users=anybody`
+
+`needs_root_rights=yes`
+
+On debian 9 and Ubuntu 16.04 you need to install package `xserver-xorg-legacy`. 
 
 ## X server inside of image
 Version  2.5 of x11docker also provides some options to run X or xpra inside of docker images. This was removed in 3.0 to keep the code easier. Version 2.5 is still available in [x11docker 2.5 branch](https://github.com/mviereck/x11docker/tree/x11docker_2.5) and can be used beneath actual x11docker versions.
@@ -60,7 +72,7 @@ Version  2.5 of x11docker also provides some options to run X or xpra inside of 
 x11docker can run with standard system utilities without additional dependencies on host or in image. As a core, it only needs X server (package `xorg`)  and, of course, docker (package `docker.io`) to run docker images on X. 
 
 For some additional options, x11docker needs some packages to be installed on host.
-It will check for them on startup and show terminal messages if some are missing.
+It will check for them on startup and show terminal messages if some are missing. Options `--gpu`, `--pulseaudio` and `--dbus` have dependencies in image, too.
 Look at dependencies dialog in x11docker-gui. 
 
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
@@ -112,10 +124,9 @@ x11docker/lxde running in a Xephyr window:
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxde.png "lxde desktop running in Xephyr window using x11docker")
 
 # Known issues
- - Ubuntu 16.04: x11docker won't start from console without setup of `xserver-xorg-legacy`. This is a [bug](https://bugs.launchpad.net/ubuntu/+source/xinit/+bug/1562219) in Ubuntu and won't be fixed.
- - debian 9 and Ubuntu 16.04: Cannot run a second core X server (option `--xorg`) from within already running X without setup of `xserver-xorg-legacy`. This may be solved in future with a [setup of a systemd service for Xorg](http://unix.stackexchange.com/questions/346383/run-second-x-server-from-within-x-as-a-systemd-service).
  - Package `kaptain` is not available in repositories of debian 9 and Ubuntu 16.04. You can install [kaptain for debian jessie](https://packages.debian.org/jessie/kaptain) respective [kaptain for Ubuntu 14.04](http://packages.ubuntu.com/trusty/kaptain) instead.
  - x11docker-gui can look ugly on GTK based systems. x11docker-gui is managed by `kaptain` which uses QT4. You can use `qtconfig`, select GUI style GTK+ and save this setting with `[CTRL][S]`. 
+  - Option `--nxagent` only supports US keyboard layout.
  
 # Questions?
 You can ask questions in [issues section](https://github.com/mviereck/x11docker/issues). Use it like a forum.
