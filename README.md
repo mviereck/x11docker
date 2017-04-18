@@ -124,6 +124,3 @@ Sample screenshots can be found in [screenshot branch](https://github.com/mviere
 x11docker/lxde running in a Xephyr window:
 
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxde.png "lxde desktop running in Xephyr window using x11docker")
-
-# Known issues
-  - Option `--nxagent` only supports US keyboard layout.
