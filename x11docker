@@ -6,7 +6,7 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.1.2"
+Version="3.1.3"
 
 changelog() {
 # ToDo:
@@ -14,7 +14,10 @@ changelog() {
 # - check whether VT is not in use with --xorg
 
 # x11docker changelog
-# 18.04.2017 V3.1.2  --nxagent sets right keboard layout, thanks to Ulrich!
+# 18.04.2017 V3.1.3  --nxagent cookie workaround as it ignores XAUTHORITY on option -auth
+#                    --nxagent workaround to terminate on pressing window close button -> fake nxclient
+#                    bugfix typo in finish() looking for docker pid
+# 18.04.2017 V3.1.2  --nxagent sets right keyboard layout, thanks to Ulrich!
 # 18.04.2017 V3.1.1   --nxagent now supports --size, --fullscreen and --clipboard, thanks to Ulrich Sibiller from Arctica!
 # 17.04.2017          check dpi from host and set this to new X server
 #                     xpra xmessage to be patient
@@ -135,7 +138,6 @@ special X servers:
                        to avoid MIT-SHM errors. Experimental, testing purposes.
  -n, --nxagent         seamless like --xpra if --wm is empty or not given,
                        windowed like --xephyr if --wm is given or 'none'.
-                       experimental, quite fast. Clipboard always enabled.
                        Needs nxagent to be installed.
                        
 No X server at all:
@@ -163,8 +165,8 @@ User and homedir options:
                        with created container.
                        
 GPU, clipboard and sound options:
- -c, --clipboard       share clipboard between X servers (works best with --xpra
-                       Options --xorg and --xephyr: text clipboard only) 
+ -c, --clipboard       share clipboard between X servers (works best with xpra.
+                       Most other X servers need xclip to be installed) 
  -p, --pulseaudio      enable sound with pulseaudio over tcp. Needs
                        pulseaudio to be installed on host and in image
  -g, --gpu             Hardware accelerated OpenGL rendering. Shares files in
@@ -411,12 +413,12 @@ finish() {              # trap routine, clean up background processes and cache
   X session was not closed in a clean way. Can not send TERM signal because 
   docker runs as root. Will wait up to 10 seconds for docker to finish."
             Zeit=`date +%s`
-            while [ -n "$(ps -p $pid | grep docker)" ] ; do
+            while [ -n "$(ps -p $Pid | grep docker)" ] ; do
               echo "waiting for docker to terminate ..."
               sleep 0.5
               [ 10 -lt $(echo "`date +%s` - $Zeit" | bc) ] && break
             done
-            if [ -n "$(ps -p $pid | grep docker)" ] ; then
+            if [ -n "$(ps -p $Pid | grep docker)" ] ; then
               warning "docker didn't terminate as it should. Will not clean
   cache to avoid file permission problems. You should stop docker and remove
   the new container with command:
@@ -840,6 +842,10 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
     else
       [ -z "$Hostdisplay" ] && Xserver="Weston-Xwayland"
     fi
+    command -v "nxagent" >/dev/null && {
+      [ "$Xserver" = "Xpra" ]   && Xserver="Nxagent"
+      [ "$Xserver" = "Xephyr" ] && Xserver="Nxagent"
+    }
   fi
 
   ## check if chosen X server is installed
@@ -936,20 +942,17 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
   [ "$Xserver" = "Nxagent" ] && { 
     case $Windowmanager in
       "") Nxagentoptions="-R" ;; # rootless mode, similar to xpra
-      *)  Nxagentoptions="-D" ;; # desktopmode, similar to xephyr. including wm="none"
+      *)  Nxagentoptions="-D" ;; # desktop mode,  similar to xephyr. including wm="none"
     esac
+    [ "$Trusted" = "untrusted" ] && warning "Option --nxagent does not support untrusted cookies."
   }
   
   [ "$Gpu" = "yes" ] && { 
     warning "Option --gpu degrades container isolation.
   Container gains access to GPU hardware."
     case $Xserver in
-      Xpra|Xdummy|Nxagent) warning "$Xserver does not support 
-  hardware acceleration with --gpu."
-      ;;
-      Xephyr) warning "$Xserver has only limited support of hardware
-  acceleration (uses glamor)."
-      ;;
+      Xpra|Xdummy|Nxagent) warning "$Xserver does not support hardware acceleration." ;;
+      Xephyr) warning "$Xserver has only limited support of hardware acceleration."   ;;
     esac
   }
   
@@ -968,6 +971,15 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
   container isolation!"
   [ "$Sharenet" = "yes" ] && warning "SECURITY risk: Option --net breaks down
   container isolation!"
+  
+  case $Xserver in
+    Hostdisplay|Kwin-Native)
+      [ "$Trusted" = "trusted" ] && [ "$Shareipc" = "no" ] && [ "$X11dockermode" = "run" ] && warning "You may experience rendering issues and RAM access failures.
+  x11docker can not disable MIT-SHM extension with $Xserver. 
+  Use option --untrusted (secure, but some applications may fail) 
+  or use option --ipc (insecure, breaks container isolation)."
+    ;;
+  esac
 }
 
 { #### part: check screen size
@@ -1246,7 +1258,6 @@ done
   case $Xserver in
     Nxagent)
       [ "$Shareipc" = "yes" ] && Xserveroptions="$Xserveroptions -shmem -shpix" || Xserveroptions="$Xserveroptions -noshmem -noshpix"
-      Xserveroptions="$Xserveroptions -nopersistent -terminate"
     ;;
     *)
       Xserveroptions="$Xserveroptions +extension Composite +extension RANDR +extension RENDER +extension GLX +extension XVideo +extension DOUBLE-BUFFER +extension XINERAMA"
@@ -1339,7 +1350,6 @@ EndSection' > $Cachefolder/xorg.xdummy.conf
       Xcommand="$(command -v Xwayland) $Newdisplay -rootless $Xserveroptions +extension XTEST"
       [ "$WAYLAND_DISPLAY" = "" ] && { 
         Waylandsocket="wayland-$Newdisplaynumber"
-        # Westonoptions="$Westonoptions --fullscreen" # crashes, see http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=859063
         [ -n "$Hostdisplay" ] && command -v xdotool >/dev/null && { Westonoptions="$Westonoptions --fullscreen" ; Screensize="" ; }
         [ -n "$Screensize" ] && Westonoptions="$Westonoptions --width=$(echo $Screensize | cut -d x -f1) --height=$(echo $Screensize | cut -d x -f2)"
         echo "/bin/bash
@@ -1411,6 +1421,7 @@ locking=false
     ;;
     Nxagent)
       Xcommand="$(command -v nxagent) $Newdisplay $Xserveroptions $Nxagentoptions -options $Cachefolder/nxagentoptions"
+      
       # create file for additional nxagent options
       Nxagentoptions="nx/nx"
       [ "$Shareclipboard" = "yes" ] && Nxagentoptions="$Nxagentoptions,clipboard=both" || Nxagentoptions="$Nxagentoptions,clipboard=none"
@@ -1419,15 +1430,39 @@ locking=false
       }
       command -v setxkbmap >/dev/null && { # set keyboard layout
         Nxagentoptions="$Nxagentoptions,keyboard=$(setxkbmap -query | grep rules | rev | cut -d' ' -f1 | rev)/$(setxkbmap -query | grep layout | rev | cut -d' ' -f1 | rev)"
-#        Nxagentoptions="$Nxagentoptions,keyboard=query"
       } || warning "Could not check your keyboard layout due to tissing setxkbmap"
       Nxagentoptions="$Nxagentoptions$Newdisplay"
       echo $Nxagentoptions > "$Cachefolder/nxagentoptions"
+      
+      # workaround as nxagent ignores XAUTHORITY if option -auth is given
+      cp $XAUTHORITY $Xservercookie
+      xauth -f $Xclientcookie add   $Newdisplay . $(mcookie)
+      xauth -f $Xclientcookie nlist $Newdisplay | xauth -f $Xservercookie nmerge -
+      
+      echo '#! /bin/bash
+# helper script to terminate nxagent. 
+# nxagent runs program stored in NX_CLIENT if window close button is pressed.
+# (real nxclient does not exist)
+eval set -- $(getopt --longoptions "parent:,display:,dialog:,caption:,message:" -- "$@")
+touch '$Sharefolder/timetosaygoodbye'
+while [ -n "$1" ] ; do
+  case "$1" in
+    --dialog|--display|--caption|--message) shift ;;
+    --parent) kill $2 && shift ;;
+    --) ;;
+  esac
+  shift
+done
+' > $Cachefolder/nxkill
+      chmod +x $Cachefolder/nxkill
+      export NX_CLIENT=$Cachefolder/nxkill
     ;;
     Hostdisplay|Hostwayland|Nothing) # what do you expect here?
     ;;
   esac
-   
+}
+
+{ #### part: create $Newxenv
   case $Xserver in
     Xpra|Xephyr|Xpra-Xwayland|Weston-Xwayland|Hostdisplay|Xorg|Xdummy|Xwayland|Kwin-Xwayland|Kwin-Native|Nxagent)
       Newxenv="DISPLAY=unix$Newdisplay"
@@ -1450,7 +1485,6 @@ locking=false
   Newxenv="$Newxenv X11DOCKER_CACHE=$Cachefolder"
   for Line in $Customenvironment ; do Newxenv="$Newxenv $Line" ; done
 
-  
   #   option '--env': show display infos on stdout
   [ "$Showdisplayenvironment" = "yes" ] && echo $Newxenv
 }
@@ -1564,10 +1598,6 @@ locking=false
         *)  # store imagecommand in shared bash script to avoid issues with imagecommands containing && ; > and the like 
           { echo '#! /bin/bash'
             echo 'cd $HOME'
-            echo 'echo $DISPLAY $XAUTHORITY'
-            #            echo 'cat $XAUTHORITY'
-                        echo "xauth list"
-                        echo "xauth nlist"
             [ "$Dbuslaunch" = "yes" ] && echo 'command -v dbus-launch || echo "x11docker ERROR: image does not provide dbus-launch (--dbus) >&2 "'
             echo "command -v ps >/dev/null && {"
             echo "  $Imagecommand &"
@@ -1617,17 +1647,19 @@ locking=false
       
       [ "$Xauthentication" = "yes" ] && {
         echo "# create new XAUTHORITY cookies"
-        echo ':> '$Xclientcookie
         case $Xserver in
-          Nxagent) echo "XAUTHORITY='' xauth -f $Xclientcookie add      $Newdisplay . $(mcookie)" ;;
-          *)                     echo "xauth -f $Xclientcookie generate $Newdisplay . $Trusted"   ;;
+          Nxagent) ;; #cookie was created before calling $Xinitrc
+          *) 
+            echo ':> '$Xclientcookie
+            echo "xauth -f $Xclientcookie generate $Newdisplay . $Trusted"   
+          ;;
         esac
         echo "cp $Xclientcookie $Xservercookie"
         echo "# create prepared cookie with localhost identification disabled by ffff, needed if X socket is shared. ffff means 'familiy wild'"
         echo "Cookie=\$(xauth -f $Xclientcookie nlist $Newdisplay | sed -e 's/^..../ffff/' )"   
         echo 'echo $Cookie'"| xauth -f $Xclientcookie nmerge -"
         echo "export $Newxenv"
-        echo "xauth nlist"
+        echo "xauth list"
       }
   
       [ "$Xserver" = "Hostdisplay" ] || {
@@ -1670,15 +1702,10 @@ locking=false
       echo "# set keyboard layout in Xephyr to same as on host"
       echo "echo '$(setxkbmap -display $Hostdisplay -print)' | xkbcomp - $Newdisplay"
     ;;
-    Nxagent)
-    #  echo "# set keyboard layout in Xephyr to same as on host"
-    #  xmodmap -display $Hostdisplay -pke > $Cachefolder/xkbmap
-    #  echo "xmodmap $Cachefolder/xkbmap -display $Newdisplay"
-    ;;
   esac
   
   case $Xserver in
-    Weston|Weston-Xwayland|Kwin|Kwin-Xwayland|Kwin-Native|Nxagent)
+    Weston|Weston-Xwayland|Kwin|Kwin-Xwayland|Kwin-Native)
       echo "{  # catch closing compositor window"
       echo '  while ps -p $Compositorpid >/dev/null &&  [ ! -e "'$Sharefolder'/timetosaygoodbye" ]; do sleep 1 ; done'
       echo "  touch $Sharefolder/timetosaygoodbye"
@@ -1828,35 +1855,31 @@ Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' '
 
 { #### Finally: run new X server or/and Wayland Compositor
   case $Xserver in
-    Xorg|Xpra|Xephyr|Xdummy|Xwayland)    xinit $Xinitrc -- $Xcommand        > $Xinitlogfile  2>&1 ;;
-    Hostdisplay|Hostwayland|Kwin-Native) bash  $Xinitrc                     > $Xinitlogfile  2>&1 ;;
+    Xorg|Xpra|Xephyr|Xdummy|Xwayland|Nxagent) xinit $Xinitrc -- $Xcommand        > $Xinitlogfile  2>&1 ;;
+    Hostdisplay|Hostwayland|Kwin-Native)      bash  $Xinitrc                     > $Xinitlogfile  2>&1 ;;
     Xpra-Xwayland)
       [ "$WAYLAND_DISPLAY" = "" ] && {
         bash $Cachefolder/startweston                                                                     > $Compositorlogfile 2>&1 & storepid $! weston
         waitforfilecreation $Newxsocket
         export WAYLAND_DISPLAY=$Waylandsocket
       }
-                                         xinit $Xinitrc -- $Xcommand        > $Xinitlogfile  2>&1 ;;
+                                              xinit $Xinitrc -- $Xcommand        > $Xinitlogfile  2>&1 ;;
     Weston-Xwayland)
       weston --config=$Cachefolder/weston.ini --socket=$Waylandsocket $Westonoptions                      > $Compositorlogfile 2>&1 & storepid $! weston  && export Compositorpid=$!
       waitforfilecreation $Newxsocket
-      WAYLAND_DISPLAY=$Waylandsocket     xinit $Xinitrc -- $Xcommand        > $Xinitlogfile  2>&1 ;;
+      WAYLAND_DISPLAY=$Waylandsocket          xinit $Xinitrc -- $Xcommand        > $Xinitlogfile  2>&1 ;;
     Weston)
       weston --config=$Cachefolder/weston.ini --socket=$Waylandsocket $Westonoptions                      > $Compositorlogfile 2>&1 & storepid $! weston  && export Compositorpid=$!
       waitforfilecreation $XDG_RUNTIME_DIR/$Waylandsocket
-                                         bash  $Xinitrc                     > $Xinitlogfile  2>&1 ;;
+                                              bash  $Xinitrc                     > $Xinitlogfile  2>&1 ;;
     Kwin-Xwayland)
       kwin_wayland --xwayland --socket=$Waylandsocket $Kwinoptions --exit-with-session="$Waitforgoodbye"  > $Compositorlogfile 2>&1 & storepid $! kwin    && export Compositorpid=$!
       waitforfilecreation $Newxsocket
-      WAYLAND_DISPLAY=$Waylandsocket     xinit $Xinitrc -- $Xcommand        > $Xinitlogfile  2>&1 ;;
+      WAYLAND_DISPLAY=$Waylandsocket          xinit $Xinitrc -- $Xcommand        > $Xinitlogfile  2>&1 ;;
     Kwin)
       kwin_wayland --xwayland --socket=$Waylandsocket $Kwinoptions --exit-with-session="$Waitforgoodbye"  > $Compositorlogfile 2>&1 & storepid $! kwin    && export Compositorpid=$!
       waitforfilecreation $XDG_RUNTIME_DIR/$Waylandsocket
-                                         bash  $Xinitrc                     > $Xinitlogfile  2>&1 ;;
-    Nxagent)
-      $Xcommand                                                                                           > $Compositorlogfile 2>&1 & storepid $! nxagent && export Compositorpid=$!
-      waitforfilecreation $Newxsocket
-                                         bash  $Xinitrc                     > $Xinitlogfile  2>&1 ;;
-    Nothing)                             bash  $Xinitrc            2>&1 | tee $Xinitlogfile       ;;
+                                              bash  $Xinitrc                     > $Xinitlogfile  2>&1 ;;
+    Nothing)                                  bash  $Xinitrc            2>&1 | tee $Xinitlogfile       ;;
   esac
 }
