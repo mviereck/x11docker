@@ -42,7 +42,7 @@ If no additional X server like  `xpra` or `xserver-xephyr` is installed, and `x1
 ![x11docker-gui server screenshot](/../screenshots/x11docker-server.png?raw=true)
 
 ## Wayland
-Beside the X servers to choose from there are options `--weston`, `--kwin` and `--hostwayland` to run pure Wayland applications without X. Option `--waylandenv` sets some environment variables to summon toolkits GTK3, QT5, Clutter, SDL, Elementary and Evas to use Wayland. QT5 applications need options `--dbus` and `--waylandenv` to use wayland instead of X.
+Beside the X servers to choose from there are options `--weston`, `--kwin` and `--hostwayland` to run pure Wayland applications without X. QT5 applications also need options `--dbus` and `--waylandenv` to use Wayland instead of X. (Option `--waylandenv` sets some environment variables to summon toolkits GTK3, QT5, Clutter, SDL, Elementary and Evas to use Wayland.) 
  - Example: KDE plasma shell (QT5) in a pure Wayland environment with hardware acceleration:
  
   `x11docker --kwin --waylandenv --dbus --gpu --hostuser -- kdeneon/plasma:user-lts plasmashell`
