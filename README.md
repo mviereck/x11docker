@@ -2,10 +2,10 @@
 
  - Much faster than SSH or VNC solutions.
  - No dependencies inside of docker images.
- - Secure sandboxing of GUI applications.
+ - Avoids common X security leaks.
+ - Wayland and Xwayland support
  - Pulseaudio sound support is possible.
  - GPU hardware acceleration is possible.
- - Wayland and Xwayland support
 
 # GUI for x11docker ![x11docker logo](/../screenshots/x11docker_klein.jpeg?raw=true "Optional Title")
 To use `x11docker-gui`, you need to install package `kaptain`. 
