@@ -49,7 +49,7 @@ Beside the X servers to choose from there are options `--weston`, `--kwin` and `
   
 This options are useful to test whether an application supports a pure Wayland environment. You can also test applications from host with option --exe. 
 
- - Examples: gnome-calculator (GTK3) and neverball (SDL) from host in Weston without X
+ - Examples: gnome-calculator (GTK3) and neverball (SDL) from host in Weston without X:
 
   `x11docker --weston --exe gnome-calculator`
   
