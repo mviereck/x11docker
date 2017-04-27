@@ -113,7 +113,7 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
   
   `x11docker bbinet/teamviewer`
   
-# Screenshots
+## Screenshots
 Sample screenshots can be found in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
 
 x11docker/lxde running in a Xephyr window:
