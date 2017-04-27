@@ -1,9 +1,8 @@
 # x11docker: Run graphical GUI applications and desktop environments in docker on a segregated X server or Wayland compositor.
 
- - Much faster than SSH or VNC solutions.
- - No dependencies inside of docker images.
  - Avoids common X security leaks.
  - Wayland and Xwayland support
+ - No dependencies inside of docker images.
  - Pulseaudio sound support is possible.
  - GPU hardware acceleration is possible.
 
