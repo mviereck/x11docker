@@ -99,20 +99,16 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
 
  - Run xfce desktop in Xephyr:
    
-  `x11docker --xephyr --desktop x11docker/xfce`
+  `x11docker --xephyr  x11docker/xfce`
    
  - Run wine and playonlinux on xfce desktop in a sandbox in a Xephyr window, sharing a home folder to preserve settings and wine installations, and with a container user similar to your host user:
 
-  `x11docker --xephyr --hostuser --home --desktop x11docker/xfce-wine-playonlinux start`
+  `x11docker --xephyr --hostuser --home  x11docker/xfce-wine-playonlinux start`
    
  - Run playonlinux in a sandbox in an xpra window, sharing a home folder to preserve settings and installations, sharing clipboard, enabling pulseaudio sound, and with a container user similar to your host user:
 
   `x11docker --xpra --hostuser --home --clipboard --pulseaudio x11docker/xfce-wine-playonlinux playonlinux`
 
- - Share Download folder from host with r/w access. Simulate host user to avoid file permission confusion. Start xterm and pcmanfm together:
-   
-  `x11docker --hostuser  --  --volume=$HOME/Downloads:$HOME/Downloads:rw x11docker/lxde "pcmanfm & xterm"`
-  
  - Run teamviewer
   
   `x11docker bbinet/teamviewer`
