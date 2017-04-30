@@ -1,21 +1,24 @@
 #! /bin/bash
 
 # x11docker
-# Run GUI applications and desktop environments in docker on a separate X server.
-# Provides GPU acceleration and pulseaudio sound. Circumvents some X security leaks.
+# Run GUI applications and desktop environments in docker on a separate X server or Wayland compositor.
+# Provides GPU acceleration and pulseaudio sound. Circumvents common X security leaks.
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.1.12"
+Version="3.1.13"
 
 changelog() {
 # ToDo:
-# multimonitor: better check of screen size, dpyinfo and xwininfo not reliable present
-# Ubuntu+opensuse BUG: Ctrl-c: broken pipe in warnings (redirecting stderr) 
 # debian bugreport lightdm/sddm contra gdm, dm can crash on tty switch if multiple graphical sessions are running
 # check whether VT is not in use with --xorg
 
 # x11docker changelog
+# 30.04.2017 V3.1.13 Improved multimonitor support (still missing: multihead)
+#                    bugfix: redirection of stderr wihout cat, avoids broken pipe on ctrl-c in ubuntu and opensuse
+#                    bugfix: removed custom socket in xpra (failed in opensuse)
+#                    removed $Cidfile at all, cleanup hint in finish() with $Containername
+#                    avoid root ownership for $Dockerlogfile and $Dockerpidfile
 # 29.04.2017 V3.1.12 clean up confusion with x11docker.log
 #                    minor bugfix: include warning() in xinitrc
 #                    bugfix in xinitrc for --no-xhost
@@ -273,14 +276,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.'
 }
 error() {               # show error messages on stderr and exit
-  Message="x11docker ERROR: $* 
+  Message="$* 
   Type 'x11docker --help' for usage information
   For debugging, run x11docker in terminal and/or enable option '--verbose'
   and look at logfile $Cacherootfolder/x11docker.log"
-  echo "$(tput setaf 1)x11docker ERROR$(tput sgr0)" >&3
-  echo "$Message" >&3
-  [ -t 1 ] || echo "$Message" | xmessage -file - -default okay
-  [ -e $Logfile ] && echo "$Message" >> $Logfile
+  echo "
+  
+$(tput setaf 1)x11docker ERROR$(tput sgr0) $Message
+" >&3
+  [ -t 1 ] || echo "x11docker ERROR: $Message" | xmessage -file - -default okay
+  [ -e $Logfile ] && echo "x11docker ERROR: $Message" >> $Logfile
   exit 1
 }
 warning() {             # show warning message
@@ -450,15 +455,13 @@ finish() {              # trap routine, clean up background processes and cache
               [ 10 -lt $(echo "`date +%s` - $Zeit" | bc) ] && break
             done
             if [ -n "$(ps -p $Pid | grep docker)" ] ; then
-#              warning "docker didn't terminate as it should. Will not clean
-#  cache to avoid file permission problems. You should stop docker and remove
-#  the new container with command:
-#docker stop `cat $Cidfile` && docker rm `cat $Cidfile`
-#  or let x11docker do the work for you: 
-#x11docker --orphaned"
-              warning "docker didn't terminate as it should. Will not clean
-  cache to avoid file permission problems. You can remove unused cache files
-  and remaining containers with:
+              warning "docker didn't terminate as it should. 
+  Will not clean cache to avoid file permission problems. 
+  You can remove the new container with command:
+docker rm -f $Containername
+  Afterwards, remove cache files with:
+rm -R $Cachefolder
+  or let x11docker do the cleanup work for you: 
 x11docker --orphaned"
               Preservecachefiles="yes"
             else
@@ -542,7 +545,7 @@ askforimagecommand() {  # ask for password to extract image command if needed an
 
 { #### part: variables default settings
 
-exec 3> >(cat >&2)                              # second stderr to show x11docker warnings and errors from within redirected output (especially xinitrc and xtermrc)
+exec 3>&2                                       # second stderr to show x11docker warnings and errors from within redirected output (especially xinitrc and xtermrc)
 
 Cacherootfolder=$HOME/.cache/x11docker          # define cache folder to store temporary files
 Logfile="x11docker.log"                         # changes later to reside in $Sharefolder. On exit a copy of logfile will be placed here
@@ -568,7 +571,6 @@ Xtermrc=xtermrc                                 # file to store xtermrc commands
 Xtermlogfile=xterm.log                          # file to log output of xterm
 Dockerlogfile=docker.log                        # file to log output of docker
 Dockerpidfile=docker.pid                        # file to store process ID of docker
-#Cidfile=containerID                             # file to store container ID number
 Bgpidfile=backgroundpids                        # file to store PidS and names of background processes that shut be killed on exit
 Compositorlogfile=compositor.log                # file to log output of Weston or KWin 
 Xpraserverlogfile=xpraserver.log                # logfile for xpra server
@@ -612,7 +614,6 @@ Fullscreen="no"                                 # option '-f, --fullscreen': use
 
 # Wayland and Weston
 Waylandtoolkitenv=("XDG_SESSION_TYPE=wayland GDK_BACKEND=wayland QT_QPA_PLATFORM=wayland CLUTTER_BACKEND=wayland SDL_VIDEODRIVER=wayland ELM_DISPLAY=wl ELM_ACCEL=opengl ECORE_EVAS_ENGINE=wayland_egl")
-#Waylandtoolkitenv=("GDK_BACKEND=wayland QT_QPA_PLATFORM=wayland CLUTTER_BACKEND=wayland SDL_VIDEODRIVER=wayland ELM_DISPLAY=wl ELM_ACCEL=opengl ECORE_EVAS_ENGINE=wayland_egl")
 Sharewayland="no"                               # option --sharewayland: Share wayland socket and WAYLAND_DISPLAY
 Setwaylandenv="no"
 Compositorpid=""
@@ -1037,25 +1038,47 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
 }
 
 { #### part: check screen size
-  command -v xvidtune >/dev/null 2>&1 && [ -n "$Hostdisplay" ] && {
-    Modeline=$(echo $(xvidtune -show))
-    Xaxis=$(echo $Modeline | cut -d ' ' -f3)
-    Yaxis=$(echo $Modeline | cut -d ' ' -f7)
+  [ -n "$Hostdisplay" ] && {
+    command -v xwininfo      >/dev/null && {
+      Xaxis=$(xwininfo -root -stats | grep Width  | cut -d: -f2)
+      Yaxis=$(xwininfo -root -stats | grep Height | cut -d: -f2)
+    } || command -v xdpyinfo >/dev/null && {
+      Xaxis=$(xdpyinfo | grep dimensions | cut -dx -f1 | rev | cut -d ' ' -f1 | rev)
+      Yaxis=$(xdpyinfo | grep dimensions | cut -dx -f2 | cut -d ' ' -f1)
+    } || command -v xrandr   >/dev/null && {
+      Xaxis=$(xrandr | grep current | head -n1 | cut -d, -f2 | cut -d' ' -f3)
+      Yaxis=$(xrandr | grep current | head -n1 | cut -d, -f2 | cut -d' ' -f5)
+    } || {
+      Xaxis=4720
+      Yaxis=3840
+      warning "Could not determine your screen size. Will use arbitrary
+  virtual resolution 4720x3840 as hopefully big enough. Please improve this by
+  installing one of xwininfo, xdpyinfo or xrandr."
+    }
+    Modeline=$(cvt $Xaxis $Yaxis | tail -n1 | cut -d' ' -f2-)
   }
+  
   case $Xserver in
     Xephyr|Weston-Xwayland|Weston|Kwin|Kwin-Xwayland|Kwin-Native|Nxagent)
-      [ -z "$Screensize" ] && [ -n "$Modeline" ] && Screensize="$(($Xaxis-100))x$(($Yaxis-100))"  ;; # a roughly maximized window size is set here
+      #[ -z "$Screensize" ] && [ -n "$Modeline" ] && Screensize="$(($Xaxis-100))x$(($Yaxis-100))"  ;; # a roughly maximized window size is set here
+      command -v xrandr > /dev/null && { # reduce size to primar monitor for windowed desktop
+        Xaxis=$(xrandr | grep primary | cut -dx -f1 | rev | cut -d' ' -f1 | rev)
+        Yaxis=$(xrandr | grep primary | cut -dx -f2 | cut -d' ' -f1 | cut -d+ -f1)
+      }
+      [ -z "$Screensize" ] && [ -n "$Xaxis" ] && Screensize="$(($Xaxis-100))x$(($Yaxis-100))"  ;; # a roughly maximized window size is set here
     Xdummy|Xpra)
       [ -z "$Screensize" ] && [ -n "$Modeline" ] && Screensize=$Xaxis"x"$Yaxis
       [ -z "$Screensize" ] && [ -z "$Modeline" ] && {
         Modeline='"4720x3840" 227.86 4720 4752 5616 5648 3840 3933 3940 4033'
         Xaxis="4720"
         Yaxis="3840"
+        Screensize="${Xaxis}x${Yaxis}"
       }
       [ -n "$Screensize" ] && [ -z "$Modeline" ] && {
         Xaxis=$(echo $Screensize | cut -dx -f1)
         Yaxis=$(echo $Screensize | cut -dx -f2)
-        Modeline='"'$Xaxis'x'$Yaxis'" 227.86 $Xaxis $Xaxis $Xaxis $Xaxis $Yaxis $Yaxis $Yaxis $Yaxis'
+        Modeline=$(cvt $Xaxis $Yaxis | tail -n1 | cut -d' ' -f2-)
+        [ -z "$Modeline" ] && Modeline='"'$Xaxis'x'$Yaxis'" 227.86 $Xaxis $Xaxis $Xaxis $Xaxis $Yaxis $Yaxis $Yaxis $Yaxis'
       }
     ;;
   esac
@@ -1102,7 +1125,6 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
   Xclientcookie="$Sharefolder/$Xclientcookie"
   Xpraserverlogfile="$Cachefolder/$Xpraserverlogfile"
   Compositorlogfile="$Cachefolder/$Compositorlogfile"
-#  Cidfile="$Cachefolder/$Cidfile"
   Bgpidfile="$Cachefolder/$Bgpidfile"
   Createuserscript="$Sharefolder/$Createuserscript"
   Imagecommandscript="$Sharefolder/$Imagecommandscript"
@@ -1562,22 +1584,21 @@ esac
   case $X11dockermode in
     exe)  Dockercommand="# dontrundocker"  ;;
     run) 
-      Containername="x11docker_X${Newdisplaynumber}_$(mcookie | cut -c -6)"
+      Containername="x11docker_X${Newdisplaynumber}_$(mcookie | cut -c -6)_$Imagename"
       Dockercommand='docker run'
-#      Dockercommand="$Dockercommand --cidfile=$Cidfile"             # write container id in file $Cidfile
       Dockercommand="$Dockercommand --name=$Containername"          # give container a name that can be found by --orphaned
+      [ "$Preservecontainer" = "no" ] && Dockercommand="$Dockercommand --rm"
       Dockercommand="$Dockercommand -v $Sharefolder:$Cshare:rw"
-     
+    
       case $Xserver in
         Nothing|Weston|Hostwayland|Kwin) ;;
         *)
           #      share X socket from $Newdisplay
           Dockercommand="$Dockercommand -v $Newxsocket:$Newxsocket:ro"
-          #      XAUTHORITY
-#          [ "$Xauthentication" = "yes" ] && Dockercommand="$Dockercommand -v $Xclientcookie:$Cshare/Xclientcookie:rw -e XAUTHORITY=$Cshare/Xclientcookie"
-          [ "$Xauthentication" = "yes" ] && Dockercommand="$Dockercommand -e XAUTHORITY=$Cshare/Xclientcookie"
           #      DISPLAY
           Dockercommand="$Dockercommand -e DISPLAY=unix$Newdisplay"
+          #      XAUTHORITY
+          [ "$Xauthentication" = "yes" ] && Dockercommand="$Dockercommand -e XAUTHORITY=$Cshare/Xclientcookie"
         ;;
       esac
       #          WAYLAND_DISPLAY
@@ -1602,9 +1623,6 @@ esac
         Dockercommand="$Dockercommand --device=$FILE:$FILE:rw"
         done < <(find /dev/dri/* -maxdepth 0 -type c)
       }
-
-      ## option '-p, --ps': preserve container yes/no. default:no
-      [ "$Preservecontainer" = "no" ] && Dockercommand="$Dockercommand --rm"
 
       ## option '--home': share folder ~/.local/share/x11docker/Imagename with created container as its home directory
       [ "$Adduserhome" = "yes" ] && {
@@ -1764,12 +1782,12 @@ esac
   case $Xserver in # some server special settings
     Xpra|Xpra-Xwayland) 
       echo "## start xpra server on display $Newdisplay created by Xdummy"
-      echo "$Xprashm xpra start $Newdisplay --use-display --socket-dir=$Cachefolder \$Xprabind --no-daemon $Xpraoptions > $Xpraserverlogfile 2>&1 &"
+      echo "$Xprashm xpra start $Newdisplay --use-display --no-daemon $Xpraoptions > $Xpraserverlogfile 2>&1 &"
       echo 'storepid $! xpra'
       echo "waitforxpraserver $Xpraserverlogfile"
       echo "# start xpra viewer on host display"
       echo "export $Hostxenv"
-      echo "xpra attach socket:\$(find $Cachefolder | grep -e -$Newdisplaynumber ) $Xpraoptions  &"
+      echo "xpra attach $Newdisplay $Xpraoptions  &"
       echo "export $Newxenv"
     ;;
     Xephyr)
@@ -1838,7 +1856,9 @@ echo ''
 echo $Dockercommand
 echo ''"
       [ "$Getroot" = "bash -c" ] || echo "echo 'Please type in your password to run docker on display $Newdisplay:'"
-      echo "$Getroot 'nohup $Dockercommand > $Dockerlogfile 2>&1 & echo "'$!'" > $Dockerpidfile' "
+      echo ":> $Dockerlogfile"
+      echo ":> $Dockerpidfile"
+      echo "$Getroot 'nohup $Dockercommand >> $Dockerlogfile 2>&1 & echo "'$!'" >> $Dockerpidfile'"
       echo "sleep 3"
       echo '[ -e "'$Dockerpidfile'" ] && { ps -p $(cat '$Dockerpidfile') >/dev/null 2>&1 || error "Docker failed: '
       echo '  $(tail '$Dockerlogfile')"'
@@ -1853,7 +1873,8 @@ echo ''"
 
 { #### part:  some verbose output
     verbose "$(date) $(lsb_release -ds) $(Xorg -version 2>&1 | grep X.Org)
-  $0 $X11dockerargs"
+$(xrandr | grep Screen)
+Command: $0 $X11dockerargs"
     [ "$Xserver" != "Nothing" ] && {
       verbose "Found free display $Newdisplay"
       verbose "As X server will be used: $Xserver"
