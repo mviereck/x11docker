@@ -6,7 +6,7 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.1.13"
+Version="3.1.14"
 
 changelog() {
 # ToDo:
@@ -14,6 +14,9 @@ changelog() {
 # check whether VT is not in use with --xorg
 
 # x11docker changelog
+# 01.05.2017 V3.1.14 checkorphaned() uses container names instead of numbers
+#                    bugfix --exe: reliable kill $Hostexe, even with --weston* and --kwin*
+#                    bugfix: remove : and / from image name in $Containername
 # 30.04.2017 V3.1.13 Improved multimonitor support (still missing: multihead)
 #                    bugfix: redirection of stderr wihout cat, avoids broken pipe on ctrl-c in ubuntu and opensuse
 #                    bugfix: removed custom socket in xpra (failed in opensuse)
@@ -400,7 +403,7 @@ checkorphaned() {       # option --orphaned : check for non-removed containers a
   cd $Cacherootfolder
   [ $? ] && Orphanedfolders=$(echo $(find $Cacherootfolder -mindepth 1 -maxdepth 1 -type d))
   while read -r Line ; do
-    Orphanedcontainers="$Orphanedcontainers $(echo $Line | cut -d ' ' -f1)"
+    Orphanedcontainers="$Orphanedcontainers $(echo $Line | rev | cut -d ' ' -f1 | rev)"
   done < <($Getroot 'docker ps -a' | grep "x11docker_X")
   if [ -z "$Orphanedcontainers" ] && [ -z "$Orphanedfolders" ] ; then echo "No orphaned containers or cache files found. good luck!"
   else
@@ -469,8 +472,8 @@ x11docker --orphaned"
             fi
           ;;
           *) warning "Found remaining background process.
-  Will send signal KILL to process $Line"
-            kill -s KILL $Pid
+  Will send signal KILL to process tree of $Line"
+            pkill -KILL -P $Pid
           ;;
         esac
       fi
@@ -1584,7 +1587,7 @@ esac
   case $X11dockermode in
     exe)  Dockercommand="# dontrundocker"  ;;
     run) 
-      Containername="x11docker_X${Newdisplaynumber}_$(mcookie | cut -c -6)_$Imagename"
+      Containername="x11docker_X${Newdisplaynumber}_$(mcookie | cut -c -6)_$(echo $Imagename | tr / _ | tr : _ )"
       Dockercommand='docker run'
       Dockercommand="$Dockercommand --name=$Containername"          # give container a name that can be found by --orphaned
       [ "$Preservecontainer" = "no" ] && Dockercommand="$Dockercommand --rm"
@@ -1627,7 +1630,7 @@ esac
       ## option '--home': share folder ~/.local/share/x11docker/Imagename with created container as its home directory
       [ "$Adduserhome" = "yes" ] && {
         # define path to shared folder and remove '/' from image name
-        Adduserhomefolder=$HOME/.local/share/x11docker/`echo $Imagename | tr / - | tr : - `
+        Adduserhomefolder=$HOME/.local/share/x11docker/$(echo $Imagename | tr / - | tr : - )
         [ -e "$Adduserhomefolder" ] || {
           mkdir -p $Adduserhomefolder
           # create symbolic link in $HOME
@@ -1818,13 +1821,24 @@ esac
       echo "[ -e '$Dockerpidfile' ] && {"
       echo '  Dockerpid=`cat '$Dockerpidfile'` && storepid $Dockerpid docker'
       echo '  # wait for docker until it terminates. bash builtin wait does not work in this case'
-      echo '  while ps -p $Dockerpid >/dev/null 2>&1; do sleep 1 ; done'
+      case $Xserver in
+        Weston|Weston-Xwayland|Kwin|Kwin-Xwayland|Kwin-Native)
+          echo "  while ps -p \$Dockerpid >/dev/null 2>&1 && [ ! -e $Sharefolder/timetosaygoodbye ] && ps -p \$Compositorpid >/dev/null ; do sleep 1 ; done" ;;
+        *)
+          echo "  while ps -p \$Dockerpid >/dev/null 2>&1 && [ ! -e $Sharefolder/timetosaygoodbye ] ; do sleep 1 ; done" ;;
+      esac
       echo '}'
     ;;
     exe) # includes --xonly
       echo "# run host application"
-      echo "$Hostexe & Hostexepid=\$!"
-      echo "while [ ! -e $Sharefolder/timetosaygoodbye ] && ps -p \$Hostexepid >/dev/null; do sleep 1 ; done"
+      echo "echo '$Hostexe' > $Sharefolder/x11docker_CMD"
+      echo "bash $Sharefolder/x11docker_CMD & Hostexepid=\$! && storepid \$! bash"
+      case $Xserver in
+        Weston|Weston-Xwayland|Kwin|Kwin-Xwayland|Kwin-Native)
+          echo "while [ ! -e $Sharefolder/timetosaygoodbye ] && ps -p \$Hostexepid >/dev/null && ps -p \$Compositorpid >/dev/null; do sleep 1 ; done" ;;
+        *)
+          echo "while [ ! -e $Sharefolder/timetosaygoodbye ] && ps -p \$Hostexepid >/dev/null; do sleep 1 ; done" ;;
+      esac
     ;;
   esac
 
