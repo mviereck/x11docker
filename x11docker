@@ -6,14 +6,19 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.1.14"
+Version="3.1.15"
 
 changelog() {
 # ToDo:
+# check X security leaks. Avoid X if setuid?
 # debian bugreport lightdm/sddm contra gdm, dm can crash on tty switch if multiple graphical sessions are running
 # check whether VT is not in use with --xorg
 
 # x11docker changelog
+# 02.05.2017 V3.1.15 minor bugfix in choosing terminal, replace $Waylandterminal with $Terminal in re-check
+#                    minor bugfix xtermrc and xinitrc: check if $Dockerpidfile is not empty
+#                    faster startup for --xpra-xwayland, --weston-xwayland, --kwin and --kwin-xwayland
+#                    code cleanup
 # 01.05.2017 V3.1.14 checkorphaned() uses container names instead of numbers
 #                    bugfix --exe: reliable kill $Hostexe, even with --weston* and --kwin*
 #                    bugfix: remove : and / from image name in $Containername
@@ -442,8 +447,7 @@ finish() {              # trap routine, clean up background processes and cache
     while read Line ; do 
       Pid=$(echo $Line | awk '{print $1}')
       Name=$(echo $Line | awk '{print $2}')
-#      if [ -n "$(pgrep $Name | grep $Pid)" ] ; then
-      if [ -n "$(ps -p $Pid | grep $Name)" ] ; then
+      if [ -n "$Pid" ] && [ -n "$(ps -p $Pid | grep $Name)" ] ; then
         case $Name in
           weston) kill $Pid
           ;;
@@ -470,6 +474,9 @@ x11docker --orphaned"
             else
               echo "docker container terminated successfully"
             fi
+          ;;
+          bash) # from --exe for x11docker_CMD, see xinitrc
+            pkill -KILL -P $Pid
           ;;
           *) warning "Found remaining background process.
   Will send signal KILL to process tree of $Line"
@@ -501,22 +508,15 @@ waitforfilecreation() { # replacement for inotify-wait: wait up to 10s for a fil
   done
   return 0
 }
-waitforxpraserver() {   # wait for xpra server to be ready. 
-  # $1 points to logfile
-  # exit 1 on fail
+waitforlogentry() {     # wait for entry in logfile
+  # $1 is the application we are waiting for to be ready
+  # $2 points to logfile
+  # $3 keyword to wait for 
+  # terminate x11docker on fail
   Zeit=$(date +%s)
-  while [ -z "$(cat $1 | grep 'xpra is ready')" ] ; do
-    echo "waiting for xpra server to be ready..." >&2 && sleep 0.5
-    [ 15 -lt $(expr $(date +%s) - $Zeit) ] && { echo "x11docker: Timeout error: xpra server not ready after 15 seconds. Exiting."  >&2 ; exit 1 ; } 
-  done
-}
-waitforweston() {       # wait for weston to be ready. 
-  # $1 points to logfile
-  # exit on fail
-  Zeit=$(date +%s)
-  while [ -z "$(cat $1 | grep 'weston-desktop-shell')" ] ; do
-    echo "waiting for weston to be ready..." >&2 && sleep 0.5
-    [ 10 -lt $(expr $(date +%s) - $Zeit) ] && { error "x11docker: Timeout error: weston not ready after 10 seconds." ; } 
+  while [ -z "$(cat $2 | grep "$3")" ] ; do
+    echo "waiting for $1 to be ready..." >&2 && sleep 0.5
+    [ 10 -lt $(expr $(date +%s) - $Zeit) ] && { error "x11docker: Timeout error: $1 not ready after 10 seconds." ; } 
   done
 }
 no_xhost() {            # remove any access to X server granted by xhost
@@ -525,7 +525,7 @@ no_xhost() {            # remove any access to X server granted by xhost
     xhost -$Line                                         # disable every entry
   done
   xhost -                                                # enable access control
-  [ "$(xhost | wc -l)" = "1" ] || { warning "ALERT! Remaining xhost permissions found on display $DISPLAY!
+  [ "$(xhost | wc -l)" = "1" ] || { warning "Remaining xhost permissions found on display $DISPLAY!
 $(xhost)" 
   }
 }
@@ -651,7 +651,7 @@ Verbose="no"                                    # option '-v, --verbose': if "ye
 Preservecachefiles="no"                         # option '--cache': preserve cache files instead of removing them on exit
 Preservecontainer="no"                          # option '-p, --ps': if yes, preserve container instead of removing it with 'docker run --rm'
 Gpu="no"                                        # option '--gpu': Use hardware accelerated OpenGL, share files in /dev/dri
-Customenvironment=""                            # option '--env': set customenvironment variables 
+Customenvironment=""                            # option '--env': set custom environment variables 
 Dbuslaunch="no"                                 # option '--dbus': run image command with dbus-launch
 Shareipc="no"
 Sharenet="no"
@@ -697,12 +697,12 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
   Longoptions="$Longoptions,wm:,exe,xonly"
   Longoptions="$Longoptions,install,update,remove,version"
   Longoptions="$Longoptions,fullscreen,resizeable,size:,glamor"                                    # Xephyr options
-  Longoptions="$Longoptions,clipboard,hostuser,sudouser,home,pulseaudio,gpu,virtualgl"             # comfort options
+  Longoptions="$Longoptions,clipboard,hostuser,sudouser,home,pulseaudio,gpu"                       # comfort options
   Longoptions="$Longoptions,sudo,ps,verbose,cache,nopwd,no-password,no-xhost,untrusted,dbus"       # advanced options
   Longoptions="$Longoptions,starter,orphaned,license,licence,help"                                 # special options without starting X server
-  Longoptions="$Longoptions,xhost+,vt:,display:,no-auth,env:,showenv,sharewayland,waylandenv,root,ipc,net"  # developer option
+  Longoptions="$Longoptions,xhost+,vt:,display:,no-auth,env:,showenv,sharewayland,waylandenv,root,ipc,net"  # developer options
   Longoptions="$Longoptions,kwin,kwin-xwayland,kwin-native,nothing"                                # developer options - further X/Wayland servers
-  Longoptions="$Longoptions,desktop,+xsocket,tcpxsocket,virtualgl,glamor,xpra-image,xpra-attach,xorg-image,xdummy,xdummy-image,tcp"  # deprecated
+  Longoptions="$Longoptions,desktop,xsocket,tcpxsocket,virtualgl,glamor,xpra-image,xpra-attach,xorg-image,xdummy,xdummy-image,tcp"  # deprecated
   Parsedoptions="$(getopt --options $Shortoptions --longoptions $Longoptions --name "$0" -- "$@" 2>/tmp/x11docker_parsererror)"
   [ -e /tmp/x11docker_parsererror ] && Parsererror=$(cat /tmp/x11docker_parsererror) && rm /tmp/x11docker_parsererror
   [ -n "$Parsererror" ] && error "$Parsererror"
@@ -757,7 +757,7 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
       -m|--home)       Adduserhome="yes" ;;                # share folder ~/x11docker/Imagename with container
 
       -c|--clipboard)  Shareclipboard="yes"  ;;            # share host clipboard with dockered applications (xpra only)
-      -p|--pulseaudio) Pulseaudio="yes"  ;;                # enable pulseaudio connection / sound support over t
+      -p|--pulseaudio) Pulseaudio="yes"  ;;                # enable pulseaudio connection / sound support over tcp
 
       -v|--verbose)    Verbose="yes"  ;;                   # be verbose
          --root)       Allowroot="yes" ;;                  # allow x11docker to be run as root
@@ -791,7 +791,7 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
       ##### depracated or in development, don't rely on this
       --desktop)       Windowmanager="none"   &&                    warning "Option --desktop is deprecated. Use --wm=none instead" ;;
       --virtualgl|--tcpxsocket|--xsocket|--tcp)                     warning "Option $1 is deprecated and has no effect now." ;; 
-      --xpra-image|--xpra-attach|--xorg-image|--xdummy-image)         error "Option $1 no longer included. Please use x11docker version 2.5.0 instead." ;;
+      --xpra-image|--xpra-attach|--xorg-image|--xdummy-image)         error "Option $1 no longer included. Please use x11docker version 2.5 instead." ;;
 
       ##### docker options / image
       --) shift
@@ -995,6 +995,7 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
   [ "$Xserver" = "Xpra" ] || [ "$Xserver" = "Xpra-Xwayland" ] && xmessage -timeout 6 "Please be patient, xpra will start soon ..." -default okay &
  
   [ "$Xserver" = "Nxagent" ] && { 
+    [ -z "$Imagename" ] && [ -z "$Windowmanager" ] && [ "$Showdisplayenvironment" = "no" ] && Windowmanager="none"
     case $Windowmanager in
       "") Nxagentoptions="-R" ;; # rootless mode, similar to xpra
       *)  Nxagentoptions="-D" ;; # desktop mode,  similar to xephyr. including wm="none"
@@ -1041,6 +1042,7 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
 }
 
 { #### part: check screen size
+  ### FIXME: Does support multimonitor, but does not regard multihead setup
   [ -n "$Hostdisplay" ] && {
     command -v xwininfo      >/dev/null && {
       Xaxis=$(xwininfo -root -stats | grep Width  | cut -d: -f2)
@@ -1056,14 +1058,13 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
       Yaxis=3840
       warning "Could not determine your screen size. Will use arbitrary
   virtual resolution 4720x3840 as hopefully big enough. Please improve this by
-  installing one of xwininfo, xdpyinfo or xrandr."
+  installing one of xdpyinfo, xwininfo or xrandr."
     }
     Modeline=$(cvt $Xaxis $Yaxis | tail -n1 | cut -d' ' -f2-)
   }
   
   case $Xserver in
     Xephyr|Weston-Xwayland|Weston|Kwin|Kwin-Xwayland|Kwin-Native|Nxagent)
-      #[ -z "$Screensize" ] && [ -n "$Modeline" ] && Screensize="$(($Xaxis-100))x$(($Yaxis-100))"  ;; # a roughly maximized window size is set here
       command -v xrandr > /dev/null && { # reduce size to primar monitor for windowed desktop
         Xaxis=$(xrandr | grep primary | cut -dx -f1 | rev | cut -d' ' -f1 | rev)
         Yaxis=$(xrandr | grep primary | cut -dx -f2 | cut -d' ' -f1 | cut -d+ -f1)
@@ -1262,7 +1263,7 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
     esac
     # problems with gnome-terminal, sakura, lilyterm kterm mrxvt termit
     for Terminal in $Terminallist ; do command -v $Terminal >/dev/null && break ; done
-    [ "$Waylandterminal" = "NOLUCK" ] && { error "Can not find a terminal emulator that works in $Xserver.
+    [ "$Terminal" = "NOLUCK" ] && { error "Can not find a terminal emulator that works in $Xserver.
   Please install one of:
   ${Terminallist%"NOLUCK"}
   (gnome-terminal is not suitable.)" ; }
@@ -1333,7 +1334,8 @@ done
 }
 
 { #### part: create command to start X server
-  Xserveroptions=""
+  Xserveroptions="-nolisten tcp -dpms -audit 4"
+  [ "$Xauthentication" = "yes" ] && Xserveroptions="$Xserveroptions -auth $Xservercookie"
   case $Xserver in
     Nxagent)
       [ "$Shareipc" = "yes" ] && Xserveroptions="$Xserveroptions -shmem -shpix" || Xserveroptions="$Xserveroptions -noshmem -noshpix"
@@ -1350,12 +1352,11 @@ done
       }
     ;;
   esac
-  Xserveroptions="$Xserveroptions -nolisten tcp"
-  Xserveroptions="$Xserveroptions -dpms -audit 4"
-  xdpyinfo >/dev/null 2>&1 && Xserveroptions="$Xserveroptions -dpi $(xdpyinfo | grep dots | cut -dx -f2 | cut -d' ' -f1)"
-  [ "$Xauthentication" = "yes" ] && Xserveroptions="$Xserveroptions -auth $Xservercookie"
+  xdpyinfo >/dev/null 2>&1 && Xserveroptions="$Xserveroptions -dpi $(xdpyinfo | grep dots | cut -dx -f2 | cut -d' ' -f1)" || {
+    [ -n "$Hostdisplay" ] && [ -z "$(command -v xdpyinfo)" ] && warning "Could not determine dpi settings.
+  If you encounter too big or small fonts in $Xserver, please install xdpyinfo."
+  }
   
-#  Xpraoptions="$Xpraoptions -z0 --no-speaker --no-pulseaudio --desktop-scaling=no"
   Xpraoptions="$Xpraoptions -z0 --no-speaker --no-pulseaudio"
   Waitforgoodbye='bash -c "while [ ! -e '$Sharefolder'/timetosaygoodbye ] ; do sleep 1 ; done"' 
 
@@ -1408,8 +1409,8 @@ EndSection' > $Cachefolder/xorg.xdummy.conf
       Xserveroptions="$Xserveroptions -verbose"                  # make X verbose
       Xcommand="$(command -v X) $Newdisplay $Newxvt $Xserveroptions"
     ;;
-    Xpra|Xdummy) # To use xpra, Xdummy will run first. xpra server uses it later.
-      Xserveroptions="$Xserveroptions +extension XTEST"          # SECURITY Without XTEST keyboard and mouse are not recognized by xpra
+    Xpra|Xdummy) # To use xpra, Xdummy will run first. xpra server uses it later. Use Xvfb if available.
+      Xserveroptions="$Xserveroptions +extension XTEST"          # Without XTEST keyboard and mouse are not recognized by xpra
       command -v Xvfb >/dev/null && {
         Xcommand="$(command -v Xvfb) $Newdisplay $Xserveroptions -screen 0 ${Screensize}x24"
       } || {
@@ -1435,27 +1436,7 @@ EndSection' > $Cachefolder/xorg.xdummy.conf
         Waylandsocket="wayland-$Newdisplaynumber"
         [ -n "$Hostdisplay" ] && command -v xdotool >/dev/null && { Westonoptions="$Westonoptions --fullscreen" ; Screensize="" ; }
         [ -n "$Screensize" ] && Westonoptions="$Westonoptions --width=$(echo $Screensize | cut -d x -f1) --height=$(echo $Screensize | cut -d x -f2)"
-        echo "/bin/bash
-$(declare -f storepid)
-$(declare -f waitforweston)
-Bgpidfile=$Bgpidfile
-
-Winlistold=\"\$(xwininfo -root -all | grep Weston)\"
-Winlistold=(\$Winlistold)
-
-weston --socket=$Waylandsocket $Westonoptions & storepid $! weston
-waitforweston $Compositorlogfile
-
-Winlistnew=\"\$(xwininfo -root -all | grep Weston)\"
-Winlistnew=(\$Winlistnew)
-
-Westonwid=\$( sdiff  --suppress-common-lines <( printf \"%s\n\" \"\${Winlistnew[@]}\" ) <( printf \"%s\n\" \"\${Winlistold[@]}\" ) )
-Westonwid=\$( echo \$Westonwid | head -n1 | cut -d' ' -f1 )
-xdotool windowunmap \$Westonwid   # hide weston window
-" > $Cachefolder/startweston
-      } || { 
-        Hostwaylandsocket=$WAYLAND_DISPLAY
-      }
+      } || Waylandsocket=$WAYLAND_DISPLAY
     ;;
     Weston|Weston-Xwayland)
       [ "$Xserver" = "Weston-Xwayland" ] && Xcommand="$(command -v Xwayland) $Newdisplay $Xserveroptions"
@@ -1480,17 +1461,16 @@ locking=false
       Xcommand="$(command -v Xwayland) $Newdisplay $Xserveroptions"
       Waylandsocket="wayland-$Newdisplaynumber"
     ;;
-    Kwin-Native) # experimental, not nice implemented as I cannot tell KWin which display number to use. A clean workflow requires KWin to be started at end of script.
+    Kwin-Native) # experimental, hacky and not nice implemented as I cannot tell KWin which display number to use. A clean workflow requires KWin to be started at end of script.
       [ -n "$Screensize" ] && Kwinoptions="--width=$(echo $Screensize | cut -d x -f1) --height=$(echo $Screensize | cut -d x -f2)"
       Waylandsocket="wayland-$Newdisplaynumber"
       Kwinrc=$Cachefolder/kwinrc
-      #Dockeroptions="$Dockeroptions --env=QT_X11_NO_MITSHM=1" # QT5 seems to ignore this
       echo "#!/bin/bash
         echo \$DISPLAY >$Cachefolder/kwindisplay
         while [ ! -e $Sharefolder/timetosaygoodbye ] ; do sleep 1 ; done
       ">$Kwinrc
       kwin_wayland --xwayland --socket=$Waylandsocket $Kwinoptions --exit-with-session="bash $Kwinrc"          > $Compositorlogfile 2>&1 & storepid $! kwin && export Compositorpid=$!
-      waitforfilecreation $Cachefolder/kwindisplay
+      waitforlogentry   "kwin"   $Compositorlogfile "X-Server"
       bash -c "while ps -p $Compositorpid >/dev/null; do sleep 1 ; done ; touch $Sharefolder/timetosaygoodbye" &  #storepid $! bash
       Newdisplay=$(cat $Cachefolder/kwindisplay)
       Newdisplaynumber="$(echo $Newdisplay | cut -d: -f2 | cut -d. -f1)"
@@ -1503,19 +1483,18 @@ locking=false
     ;;
     Nxagent)
       Xcommand="$(command -v nxagent) $Newdisplay $Xserveroptions $Nxagentoptions -options $Cachefolder/nxagentoptions"
-      
       # create file for additional nxagent options
       Nxagentoptions="nx/nx"
       [ "$Shareclipboard" = "yes" ] && Nxagentoptions="$Nxagentoptions,clipboard=both" || Nxagentoptions="$Nxagentoptions,clipboard=none"
       [ "$Fullscreen" = "yes" ] && Nxagentoptions="$Nxagentoptions,fullscreen=1" || {
         [ -n "$Screensize" ] && Nxagentoptions="$Nxagentoptions,geometry=$Screensize" 
       }
-      command -v setxkbmap >/dev/null && { # set keyboard layout
+      # set keyboard layout
+      command -v setxkbmap >/dev/null && { 
         Nxagentoptions="$Nxagentoptions,keyboard=$(setxkbmap -query | grep rules | rev | cut -d' ' -f1 | rev)/$(setxkbmap -query | grep layout | rev | cut -d' ' -f1 | rev)"
       } || warning "Could not check your keyboard layout due to missing setxkbmap"
       Nxagentoptions="$Nxagentoptions$Newdisplay"
       echo $Nxagentoptions > "$Cachefolder/nxagentoptions"
-      
       # workaround as nxagent ignores XAUTHORITY if option -auth is given
       [ "$Xauthentication" = "yes" ] && {
         cp $XAUTHORITY $Xservercookie
@@ -1523,6 +1502,7 @@ locking=false
         xauth -f $Xclientcookie add   $Newdisplay . $(mcookie)
         xauth -f $Xclientcookie nlist $Newdisplay | xauth -f $Xservercookie nmerge -
       }
+      # fake NXclient
       echo '#! /bin/bash
 # helper script to terminate nxagent. 
 # nxagent runs program stored in NX_CLIENT if window close button is pressed.
@@ -1620,7 +1600,7 @@ esac
       #          --wayland-env: set environment variables to force toolkits using wayland
       [ "$Setwaylandenv" = "yes" ] && for Line in $Waylandtoolkitenv ; do Dockercommand="$Dockercommand -e $Line" ; done
 
-      ## option --gpu : share graphics adapter device files ### SECURITY slightly degrades container isolation
+      ## option --gpu : share graphics adapter device files ### SECURITY: degrades container isolation
       [ "$Gpu" = "yes" ] && {
         while read -r FILE ; do
         Dockercommand="$Dockercommand --device=$FILE:$FILE:rw"
@@ -1629,7 +1609,7 @@ esac
 
       ## option '--home': share folder ~/.local/share/x11docker/Imagename with created container as its home directory
       [ "$Adduserhome" = "yes" ] && {
-        # define path to shared folder and remove '/' from image name
+        # define path to shared folder and remove '/' and ':'from image name
         Adduserhomefolder=$HOME/.local/share/x11docker/$(echo $Imagename | tr / - | tr : - )
         [ -e "$Adduserhomefolder" ] || {
           mkdir -p $Adduserhomefolder
@@ -1710,8 +1690,9 @@ esac
   
   echo "Bgpidfile=$Bgpidfile"
   echo "Logfile=$Logfile"
-  declare -f storepid  # echoes storepid(), including it this way in xinitrc
-  declare -f waitforxpraserver
+  # declaring functions echoes them into xinitrc
+  declare -f storepid
+  declare -f waitforlogentry
   declare -f no_xhost 
   declare -f warning 
 
@@ -1787,7 +1768,8 @@ esac
       echo "## start xpra server on display $Newdisplay created by Xdummy"
       echo "$Xprashm xpra start $Newdisplay --use-display --no-daemon $Xpraoptions > $Xpraserverlogfile 2>&1 &"
       echo 'storepid $! xpra'
-      echo "waitforxpraserver $Xpraserverlogfile"
+      #echo "waitforxpraserver $Xpraserverlogfile"
+      echo  "waitforlogentry xpra $Xpraserverlogfile \"xpra is ready\""
       echo "# start xpra viewer on host display"
       echo "export $Hostxenv"
       echo "xpra attach $Newdisplay $Xpraoptions  &"
@@ -1818,27 +1800,17 @@ esac
       [ "$Xserver" = "Xdummy" ] && echo "export $Hostxenv"
       echo "# password for docker will be prompted in $Terminal"
       echo "$Terminal '/bin/bash $Xtermrc 2>&1 | tee $Xtermlogfile'"
-      echo "[ -e '$Dockerpidfile' ] && {"
+      echo "[ -s '$Dockerpidfile' ] && {"
       echo '  Dockerpid=`cat '$Dockerpidfile'` && storepid $Dockerpid docker'
       echo '  # wait for docker until it terminates. bash builtin wait does not work in this case'
-      case $Xserver in
-        Weston|Weston-Xwayland|Kwin|Kwin-Xwayland|Kwin-Native)
-          echo "  while ps -p \$Dockerpid >/dev/null 2>&1 && [ ! -e $Sharefolder/timetosaygoodbye ] && ps -p \$Compositorpid >/dev/null ; do sleep 1 ; done" ;;
-        *)
-          echo "  while ps -p \$Dockerpid >/dev/null 2>&1 && [ ! -e $Sharefolder/timetosaygoodbye ] ; do sleep 1 ; done" ;;
-      esac
+      echo "  while ps -p \$Dockerpid >/dev/null 2>&1 && [ ! -e $Sharefolder/timetosaygoodbye ] ; do sleep 1 ; done"
       echo '}'
     ;;
     exe) # includes --xonly
       echo "# run host application"
       echo "echo '$Hostexe' > $Sharefolder/x11docker_CMD"
       echo "bash $Sharefolder/x11docker_CMD & Hostexepid=\$! && storepid \$! bash"
-      case $Xserver in
-        Weston|Weston-Xwayland|Kwin|Kwin-Xwayland|Kwin-Native)
-          echo "while [ ! -e $Sharefolder/timetosaygoodbye ] && ps -p \$Hostexepid >/dev/null && ps -p \$Compositorpid >/dev/null; do sleep 1 ; done" ;;
-        *)
-          echo "while [ ! -e $Sharefolder/timetosaygoodbye ] && ps -p \$Hostexepid >/dev/null; do sleep 1 ; done" ;;
-      esac
+      echo "while [ ! -e $Sharefolder/timetosaygoodbye ] && ps -p \$Hostexepid >/dev/null; do sleep 1 ; done"
     ;;
   esac
 
@@ -1874,7 +1846,7 @@ echo ''"
       echo ":> $Dockerpidfile"
       echo "$Getroot 'nohup $Dockercommand >> $Dockerlogfile 2>&1 & echo "'$!'" >> $Dockerpidfile'"
       echo "sleep 3"
-      echo '[ -e "'$Dockerpidfile'" ] && { ps -p $(cat '$Dockerpidfile') >/dev/null 2>&1 || error "Docker failed: '
+      echo '[ -s "'$Dockerpidfile'" ] && { ps -p $(cat '$Dockerpidfile') >/dev/null 2>&1 || error "Docker failed: '
       echo '  $(tail '$Dockerlogfile')"'
       echo '} || { error "docker did not start successfully. '
       echo '  Maybe you mistyped your password?'
@@ -1965,32 +1937,33 @@ Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' '
 }
 
 { #### Finally: run new X server or/and Wayland Compositor
+  :> $Xinitlogfile
   case $Xserver in
-    Xorg|Xpra|Xephyr|Xdummy|Xwayland|Nxagent) xinit $Xinitrc -- $Xcommand        > $Xinitlogfile  2>&1 ;;
-    Hostdisplay|Hostwayland|Kwin-Native)      bash  $Xinitrc                     > $Xinitlogfile  2>&1 ;;
+    Xorg|Xpra|Xephyr|Xdummy|Xwayland|Nxagent) xinit $Xinitrc -- $Xcommand        >> $Xinitlogfile  2>&1 ;;
+    Hostdisplay|Hostwayland|Kwin-Native)      bash  $Xinitrc                     >> $Xinitlogfile  2>&1 ;;
     Xpra-Xwayland)
       [ "$WAYLAND_DISPLAY" = "" ] && {
-        bash $Cachefolder/startweston                                                                     > $Compositorlogfile 2>&1 & storepid $! weston
-        waitforfilecreation $Newxsocket
-        export WAYLAND_DISPLAY=$Waylandsocket
+        weston --socket=$Waylandsocket $Westonoptions                                                     > $Compositorlogfile 2>&1 & storepid $! weston
+        waitforlogentry "weston" $Compositorlogfile "weston-desktop-shell"       >> $Xinitlogfile  2>&1
+        xdotool windowunmap "0x$(printf '%x\n' $(cat $Compositorlogfile | grep 'window id' | rev | cut -d' ' -f1 | rev))"
       }
-                                              xinit $Xinitrc -- $Xcommand        > $Xinitlogfile  2>&1 ;;
+      WAYLAND_DISPLAY=$Waylandsocket          xinit $Xinitrc -- $Xcommand        >> $Xinitlogfile  2>&1 ;;
     Weston-Xwayland)
       weston --config=$Cachefolder/weston.ini --socket=$Waylandsocket $Westonoptions                      > $Compositorlogfile 2>&1 & storepid $! weston  && export Compositorpid=$!
-      waitforfilecreation $Newxsocket
-      WAYLAND_DISPLAY=$Waylandsocket          xinit $Xinitrc -- $Xcommand        > $Xinitlogfile  2>&1 ;;
+      waitforlogentry   "weston" $Compositorlogfile "weston-desktop-shell"       >> $Xinitlogfile  2>&1 
+      WAYLAND_DISPLAY=$Waylandsocket          xinit $Xinitrc -- $Xcommand        >> $Xinitlogfile  2>&1 ;;
     Weston)
       weston --config=$Cachefolder/weston.ini --socket=$Waylandsocket $Westonoptions                      > $Compositorlogfile 2>&1 & storepid $! weston  && export Compositorpid=$!
-      waitforfilecreation $XDG_RUNTIME_DIR/$Waylandsocket
-                                              bash  $Xinitrc                     > $Xinitlogfile  2>&1 ;;
+      waitforlogentry   "weston" $Compositorlogfile "weston-desktop-shell"       >> $Xinitlogfile  2>&1 
+                                              bash  $Xinitrc                     >> $Xinitlogfile  2>&1 ;;
     Kwin-Xwayland)
       kwin_wayland --xwayland --socket=$Waylandsocket $Kwinoptions --exit-with-session="$Waitforgoodbye"  > $Compositorlogfile 2>&1 & storepid $! kwin    && export Compositorpid=$!
-      waitforfilecreation $Newxsocket
-      WAYLAND_DISPLAY=$Waylandsocket          xinit $Xinitrc -- $Xcommand        > $Xinitlogfile  2>&1 ;;
+      waitforlogentry   "kwin"   $Compositorlogfile "X-Server"                   >> $Xinitlogfile  2>&1 
+      WAYLAND_DISPLAY=$Waylandsocket          xinit $Xinitrc -- $Xcommand        >> $Xinitlogfile  2>&1 ;;
     Kwin)
       kwin_wayland --xwayland --socket=$Waylandsocket $Kwinoptions --exit-with-session="$Waitforgoodbye"  > $Compositorlogfile 2>&1 & storepid $! kwin    && export Compositorpid=$!
-      waitforfilecreation $XDG_RUNTIME_DIR/$Waylandsocket
-                                              bash  $Xinitrc                     > $Xinitlogfile  2>&1 ;;
-    Nothing)                                  bash  $Xinitrc            2>&1 | tee $Xinitlogfile       ;;
+      waitforlogentry   "kwin"   $Compositorlogfile "X-Server"                   >> $Xinitlogfile  2>&1
+                                              bash  $Xinitrc                     >> $Xinitlogfile  2>&1 ;;
+    Nothing)                                  bash  $Xinitrc          2>&1 | tee -a $Xinitlogfile  2>&1 ;;
   esac
 }
