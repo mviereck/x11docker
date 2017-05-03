@@ -16,7 +16,9 @@
 
 # x11docker-gui
 
-![screenshot](x11docker-gui.png "x11docker GUI")
+![screenshot](x11docker-gui.png "x11docker GUI main")
+
+![screenshot](x11docker-developer.png "x11docker GUI developer options")
 
 ![screenshot](x11docker-security.png "x11docker GUI security")
 
