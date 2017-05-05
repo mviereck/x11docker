@@ -5,6 +5,7 @@
  - No dependencies inside of docker images.
  - Pulseaudio sound support is possible.
  - GPU hardware acceleration is possible.
+ - Scaling and Rotating output is possible.
 
 # GUI for x11docker ![x11docker logo](/../screenshots/x11docker_klein.jpeg?raw=true "Optional Title")
 To use `x11docker-gui`, you need to install package `kaptain`. 
