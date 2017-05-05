@@ -95,6 +95,11 @@ To run only an empty new X server:
 
 Have a look at `x11docker --help` to see all options.
 
+# Developer options
+Collection of rarer needed but sometimes useful options.
+
+![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/x11docker-developer.png "developer options")
+
 # Examples
 Some example images can be found on docker hub: https://hub.docker.com/u/x11docker/
 
