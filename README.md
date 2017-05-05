@@ -93,7 +93,7 @@ To run a host application on a new X server:
 To run only an empty new X server:
  -  `x11docker [OPTIONS]`
 
-Have a look at `x11docker --help` to see all options.
+Have a look at `x11docker --help` to see all options. Also the are visible in [x11docker wiki: x11docker options overview](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview).
 
 # Developer options
 Collection of rarer needed but sometimes useful options.
