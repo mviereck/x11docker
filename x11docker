@@ -6,15 +6,26 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.1.16"
+Version="3.2.0"
 
 changelog() {
 # ToDo:
+# BUG error() in xinitrc does not terminate --xpra
+# --kwin*: wrong fullscreen and crashes in gnome-wayland, strange in weston, WAYLAND_DISPLAY="" does not help, probably bug in kwin
+# check xpra version for --scale
+# scale>1 Xwayland in Weston is too large (Xwayland BUG), rendering issues on tty (scaled/unscaled Xwayland on keyboard/mouse events)
+# weston on tty: create modeline?
 # check X security leaks. Avoid X if setuid?
 # debian bugreport lightdm/sddm contra gdm, dm can crash on tty switch if multiple graphical sessions are running
 # check whether VT is not in use with --xorg
 
 # x11docker changelog
+# 04.05.2017 V3.2.0  --scale: new option for xpra and weston
+#                    --rotate: new option for weston
+#                    --dpi: new option for screen density
+#                    minor bugfix: checking screensize in Gnome-Wayland failed looking for primary display, window was not roughly maximized
+#                    bugfix: missing error() in xinitrc
+#                    allow MIT-SHM for --exe
 # 03.05.2017 V3.1.16 bugfix --xpra-wayland in check for WAYLAND_DISPLAY
 # 02.05.2017 V3.1.15 minor bugfix in choosing terminal, replace $Waylandterminal with $Terminal in re-check
 #                    minor bugfix xtermrc and xinitrc: check if $Dockerpidfile is not empty
@@ -37,9 +48,9 @@ changelog() {
 #                    use id -g instead of $Benutzer for group name
 #                    add lsb-release -ds to verbose output
 # 29.04.2017 V3.1.11 disabled $Cidfile as not important and due to #10
-# 28.04.2017 V3.1.10  minor bugfix: check for xenial instead of 16.04/xvfb
-#                     regression fix: set XPRA_XSHM=0 on Shareipc=no
-# 27.04.2017          disable --desktop-scaling in xpra, not supported before xpra v1.x
+# 28.04.2017 V3.1.10 minor bugfix: check for xenial instead of 16.04/xvfb
+#                    regression fix: set XPRA_XSHM=0 on Shareipc=no
+# 27.04.2017         disable --desktop-scaling in xpra, not supported before xpra v1.x
 # 27.04.2017 V3.1.9  don't create Cacherootfolder in variable definitions
 # 26.04.2017         check for Xvfb on Ubuntu 16.04
 # 25.04.2017 V3.1.8  Add advice for --xorg how to setup xserver-xorg-legacy
@@ -196,7 +207,14 @@ Screensize options:
      --size XxY        set Xephyr, Weston or KWin screen size (f.e. 800x600)
  -r, --resizeable      make Xephyr window resizeable (Note: some window
                        managers/desktops won't like this and may misbehave)
-                       
+ -l, --scale N         scale factor N for xpra or weston. 
+                       Allowed for --xpra and --xpra-xwayland: 0.25 ... 8.0
+                       Allowed for --weston and --weston-xwayland: 1...9
+     --rotate N        Rotate display (--weston and --weston-xwayland only)
+                       Allowed values: 0, 90, 180, 270, flipped, flipped-90,
+                       flipped-180, flipped-270  (flipped = mirrored)
+     --dpi N           dpi value (dots per inch) to submit to clients
+
 User and homedir options:
  -u, --hostuser        create a user in container similar to host user
                        (same UID, same GID, same name)
@@ -316,23 +334,22 @@ installer() {           # options --install, --update, --remove: Installer for x
   #   - download and install latest version from github
   # --remove
   #   - remove installed files
+
   # Prepairing
-  echo $1
   case $1 in
     --install)
-      [ $(command -v x11docker) ] &&   { error "x11docker seems to be installed already.
+      command -v x11docker > /dev/null && { error "x11docker seems to be installed already.
   Try 'x11docker --update' instead." ; }
-      [ -f "./x11docker" ] ||          { error "File x11docker not found in current folder.
+      [ -f "./x11docker" ]             || { error "File x11docker not found in current folder.
   Try 'x11docker --update' instead." ; }
-      [ `command -v kaptain` ] ||      { warning "x11docker-gui needs package kaptain
+      command -v kaptain > /dev/null   || { warning "x11docker-gui needs package kaptain
   to provide a GUI, but could not find kaptain on your system. 
   Please install package kaptain if you want to use x11docker-gui.
-  x11docker itself does not need it." ; }
+  x11docker itself does not need it, though." ; }
     ;;
     --update)
       mkdir /tmp/x11docker-install
-      cd /tmp/x11docker-install
-      [ $? ] || error "Could not create or cd to /tmp/x11docker-install"
+      cd /tmp/x11docker-install || error "Could not create or cd to /tmp/x11docker-install"
 
       echo "Downloading latest x11docker version from github"
       wget https://github.com/mviereck/x11docker/archive/master.zip
@@ -343,7 +360,7 @@ installer() {           # options --install, --update, --remove: Installer for x
       [ $? ] || error "Could not unzip archive"
   
       echo ""
-      cd /tmp/x11docker-install/x11docker-master
+      cd /tmp/x11docker-install/x11docker-master || error "could not cd to /tmp/x11docker-install/x11docker-master"
     ;;
   esac
 
@@ -445,7 +462,7 @@ finish() {              # trap routine, clean up background processes and cache
   [ -s "$Bgpidfile" ] && {
     # check for possible remaining background processes stored in $Bgpidfile
     # double check with Pid and name; kill if process is still running
-    while read Line ; do 
+    while read -r Line ; do 
       Pid=$(echo $Line | awk '{print $1}')
       Name=$(echo $Line | awk '{print $2}')
       if [ -n "$Pid" ] && [ -n "$(ps -p $Pid | grep $Name)" ] ; then
@@ -456,11 +473,11 @@ finish() {              # trap routine, clean up background processes and cache
             warning "Found remaining docker process. Most probably the
   X session was not closed in a clean way. Can not send TERM signal because 
   docker runs as root. Will wait up to 10 seconds for docker to finish."
-            Zeit=`date +%s`
+            Zeit=$(date +%s)
             while [ -n "$(ps -p $Pid | grep docker)" ] ; do
               echo "waiting for docker to terminate ..."
-              sleep 0.5
-              [ 10 -lt $(echo "`date +%s` - $Zeit" | bc) ] && break
+              sleep 1
+              [ 10 -lt $(echo "$(date +%s) - $Zeit" | bc) ] && break
             done
             if [ -n "$(ps -p $Pid | grep docker)" ] ; then
               warning "docker didn't terminate as it should. 
@@ -494,10 +511,14 @@ x11docker --orphaned"
   esac
 }
 verlte() {              # version number checker $1 less than or equal $2 
-  [  "$1" = "`echo -e "$1\n$2" | sort -V | head -n1`" ]
+  [  "$1" = "$(echo -e "$1\n$2" | sort -V | head -n1)" ]
 }
 verlt() {               # version number checker $1 less than $2 
   [ "$1" = "$2" ] && return 1 || verlte $1 $2
+}
+isnum() {
+  # check if $1 is a number
+  [ "1" = "$(awk -v a="$1" 'BEGIN {print (a == a + 0)}')" ]
 }
 waitforfilecreation() { # replacement for inotify-wait: wait up to 10s for a file to be created
   # return 1 on timeout
@@ -516,13 +537,13 @@ waitforlogentry() {     # wait for entry in logfile
   # terminate x11docker on fail
   Zeit=$(date +%s)
   while [ -z "$(cat $2 | grep "$3")" ] ; do
-    echo "waiting for $1 to be ready..." >&2 && sleep 0.5
-    [ 10 -lt $(expr $(date +%s) - $Zeit) ] && { error "x11docker: Timeout error: $1 not ready after 10 seconds." ; } 
+    echo "waiting since $(expr $(date +%s) - $Zeit)s for $1 to be ready..." >&2 && sleep 1
+    [ 15 -lt $(expr $(date +%s) - $Zeit) ] && error "x11docker: Timeout error: $1 not ready after 15 seconds."
   done
 }
 no_xhost() {            # remove any access to X server granted by xhost
   xhost
-  xhost | tail -n +2  /dev/stdin | while read Line ; do  # read all but the first line (header)
+  xhost | tail -n +2  /dev/stdin | while read -r Line ; do  # read all but the first line (header)
     xhost -$Line                                         # disable every entry
   done
   xhost -                                                # enable access control
@@ -537,10 +558,9 @@ askforimagecommand() {  # ask for password to extract image command if needed an
   warning "No command for image specified. Need to look for
   CMD command of docker image. Please type in your password to run 
   $Getroot 'docker inspect --format='{{.Config.Cmd}}' $Imagename'"
-  Imagecommand=`$Getroot "docker inspect --format='{{.Config.Cmd}}' $Imagename"`
+  Imagecommand=$($Getroot "docker inspect --format='{{.Config.Cmd}}' $Imagename")
   Imagecommand=$(echo "$Imagecommand" | tr -d [])
   Imagecommand=$(echo "$Imagecommand" | sed 's/\/bin\/sh -c//')
-  Originalimagecommand="$Imagecommand"
   warning "To avoid this password prompt, you can start x11docker
   next time with command:
     x11docker $X11dockerargs $Imagecommand"
@@ -558,7 +578,7 @@ Cshare="/x11docker"                             # mountpoint of $Sharefolder in 
 
 X11dockermode="run"                             # can be either "xonly", "run" or "exe", depends on options. while parsing, xonly changes to run or exe
 Dockeroptions=""                                # options for docker without image name/image args
-X11dockerargs="$@"                              # arguments for x11docker
+X11dockerargs="$*"                              # arguments for x11docker
 Imagename=""                                    # name of image to run
 Imagecommand=""                                 # name of image [+ command+args]
 Hostexe=""                                      # can contain host executable
@@ -597,7 +617,6 @@ Xservercookie=Xservercookie                     # file to store new X server coo
 Xclientcookie=Xclientcookie                     # file to store new X client cookies
 #Newxlock=""                                     # .Xn-lock - exists for running X server with socket n
 Newxvt=""                                       # Virtual console to use for core new X server (>7)
-Timetosaygoodbye=""                             # command loop to prevent X from terminating if no image ommand or host exeutable is in use
 
 # options for different X servers
 Xpraoptions=""
@@ -608,6 +627,9 @@ Xephyrresize="no"                               # option '--resizeable': make Xe
 Westonoptions=""
 Waylandsocket=""                                # Wayland socket for Xwayland in weston
 Kwinoptions=""
+Scaling="1"                                     # option --scale: Scaling factor for xpra and weston
+Rotation="0"                                    # option --rotate: Rotation for --weston and --weston-xwayland 0/90/180/270/flipped/flipped-90/..
+Dpi=""                                          # option --dpi: dots per inch to tell the clients.
 
 # Screensize for windowed servers and for --xdummy
 Screensize=""                                   # option --size  XxY
@@ -662,7 +684,6 @@ Noxhost="no"                                    # option '--no-xhost': if yes, d
 Xhost=""                                        # option '--xhost': xhost + on new X server
 
 # some temporary or loop variables
-Argument=""
 Pid=""
 Name=""
 Zeit=""
@@ -693,11 +714,11 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
 }
 
 { #### part: parsing cli options
-  Shortoptions="hw:dayxXWMKcfSGeuomprsnvgNPH0UANYtE"
+  Shortoptions="hw:dayxXWMKcfSGeuomprsnvgNPH0UANYtEl"
   Longoptions="auto,x,X,xpra,xephyr,x11,xorg,hostdisplay,xwayland,weston,weston-xwayland,xpra-xwayland,hostwayland,nxagent"  # X servers
   Longoptions="$Longoptions,wm:,exe,xonly"
   Longoptions="$Longoptions,install,update,remove,version"
-  Longoptions="$Longoptions,fullscreen,resizeable,size:,glamor"                                    # Xephyr options
+  Longoptions="$Longoptions,fullscreen,resizeable,size:,glamor,scale:,rotate:,dpi:"
   Longoptions="$Longoptions,clipboard,hostuser,sudouser,home,pulseaudio,gpu"                       # comfort options
   Longoptions="$Longoptions,sudo,ps,verbose,cache,nopwd,no-password,no-xhost,untrusted,dbus"       # advanced options
   Longoptions="$Longoptions,starter,orphaned,license,licence,help"                                 # special options without starting X server
@@ -745,9 +766,12 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
                        [ -z "$Windowmanager" ]    && Windowmanager="none"
                        [ "$Windowmanager" = "m" ] && Windowmanager="auto" ;;
        
-      -f|--fullscreen) Fullscreen="yes"  ;;                # fullscreen mode for Xephyr
-         --size)       Screensize="$2" ;  shift ;;         # set screen size for Xephyr
+      -f|--fullscreen) Fullscreen="yes"  ;;                # fullscreen mode for Xephyr and Weston
+         --size)       Screensize="$2" ;  shift ;;         # set screen size for Xephyr, Xdummy and Weston
       -r|--resizeable) Xephyrresize="yes"  ;;              # make Xephyr window resizeable
+      -l|--scale)      Scaling=$2 ; shift ;;
+         --rotate)     Rotation=$2 ; shift ;;
+         --dpi)        Dpi=$2 ; shift ;;
 
       -o|--no-xhost)   Noxhost="yes"  ;;                   # disable any access granted by xhost
       -t|--untrusted)  Trusted="untrusted"  ;;             # create untrusted cookies
@@ -802,7 +826,6 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
           [ -n "$Imagecommand" ] && Imagecommand="$Imagecommand $1"     && Imagecommand="${Imagecommand## }"
           shift
         done
-        Originalimagecommand="$Imagecommand"
         Imagename=$(echo $Imagecommand | cut -d ' ' -f1)
         Imagecommand=$(echo $Imagecommand | cut -s -d ' ' -f2-)
       ;;
@@ -843,9 +866,9 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
   
   # option '--pulseaudio': find a free tcp port
   [ "$Pulseaudio" = "yes" ] && {
-    read Lowerport Upperport < /proc/sys/net/ipv4/ip_local_port_range
+    read -r Lowerport Upperport < /proc/sys/net/ipv4/ip_local_port_range
     while : ; do
-      Pulseaudiotcpport="`shuf -i $Lowerport-$Upperport -n 1`"
+      Pulseaudiotcpport="$(shuf -i $Lowerport-$Upperport -n 1)"
       ss -lpn | grep -q ":$Pulseaudiotcpport " || break
     done
   }
@@ -878,7 +901,7 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
     [ "$Xserver" = "Xephyr" ] && { command -v "Xephyr" >/dev/null 2>&1 || Xserver="Weston-Xwayland" ; } # try weston if Xephyr is missing
     [ "$Gpu" = "yes" ] && [ "$Xserver" = "Xephyr" ]  && Xserver="Weston-Xwayland"
 
-    if [ -n "$(tty | grep tty)" ] ; then
+    if tty | grep -q tty ; then
       Xserver="Weston-Xwayland"
       command -v "Weston-Xwayland" >/dev/null 2>&1 || Xserver="Xorg"  # if running on tty1-tty6, only weston or core X will work
     else
@@ -915,13 +938,18 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
     }
   }
   case $Xserver in
-    Xpra|Xpra-Xwayland)  # check xpra
+    Xpra|Xpra-Xwayland)
+      verlt "$(xpra --version | cut -d' ' -f2)" "v1.0" && {
+        warning "Your xpra version is out of date. It is recommended to install
+  a recent version from www.xpra.org, but at least xpra v1.0."
+      }
       command -v "xpra" >/dev/null 2>&1 || { warning "could not find executable 'xpra'. 
   Try 'apt-get install xpra' to install xpra.
   Fallback: x11docker will try to use Xephyr (option --xephyr)"
-      Xserver="Xephyr" 
-      Windowmanager="auto"
-      } ;;
+        Xserver="Xephyr" 
+        Windowmanager="auto"
+      } 
+    ;;
   esac
   case $Xserver in 
     Xpra|Xdummy)
@@ -973,7 +1001,7 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
     }
     # if x11docker is running from within an X server, check if user is allowed to run a new core X server
     if [ -z "$Newxvt" ] ; then
-      if [ ! -e "/etc/X11/Xwrapper.config" ] || [ -z "`grep "allowed_users=anybody" </etc/X11/Xwrapper.config`" ] ; then
+      if [ ! -e "/etc/X11/Xwrapper.config" ] || [ -z "$(grep "allowed_users=anybody" </etc/X11/Xwrapper.config)" ] ; then
         warning "You are not allowed to start a second X server. As a default 
   configuration of X, only root or console users can start a second X server.
   
@@ -993,7 +1021,7 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
     Xpra|Xephyr|Hostdisplay|Xpra-Xwayland|Nxagent) [ -z "$Hostdisplay" ] && error "You only can run $Xserver within an already running X server."  ;;
   esac
   
-  [ "$Xserver" = "Xpra" ] || [ "$Xserver" = "Xpra-Xwayland" ] && xmessage -timeout 6 "Please be patient, xpra will start soon ..." -default okay &
+  [ "$Xserver" = "Xpra" ] || [ "$Xserver" = "Xpra-Xwayland" ] && xmessage -timeout 5 "Please be patient, xpra will start soon ..." -default okay &
  
   [ "$Xserver" = "Nxagent" ] && { 
     [ -z "$Imagename" ] && [ -z "$Windowmanager" ] && [ "$Showdisplayenvironment" = "no" ] && Windowmanager="none"
@@ -1040,6 +1068,59 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
   or use option --ipc (insecure, breaks container isolation)."
     ;;
   esac
+  
+  [ "$Scaling" != "1" ] && {
+    case $Xserver in
+      Weston|Weston-Xwayland)
+        [[ $Scaling =~ ^[1-9]$ ]] || {
+          warning "The scale factor for $Xserver must be one of 1 2 3 4 5 6 7 8 9
+  Fallback: setting option --scale=1"
+          Scaling="1"
+        }
+      ;;
+      Xpra|Xpra-Xwayland)
+        isnum $Scaling || {
+          warning "Option --scale needs a number. '$Scaling' is not allowed.
+  Fallback: setting option --scale=1"
+          Scaling="1"
+        }
+        verlt "$(xpra --version | cut -d' ' -f2)" "v0.16" && {
+          warning "Your xpra version is too old and does not support --scale.
+  You need at least xpra version 0.16"
+          Scaling="1"
+        }
+      ;;
+      *) warning "$Xserver does not support option --scale" ; Scaling="1" ;;
+    esac
+    case $Xserver in
+      Weston-Xwayland) warning "Weston does not work well with Xwayland in scaled mode.
+  In summary, Xwayland does not get the right screen resolution from Weston.
+  Try out if it works for you." 
+      ;;
+      Xpra-Xwayland)
+        [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] && {
+          command -v weston >/dev/null || { 
+            warning "$Xserver needs weston for scale factor smaller than 1.
+  Fallback: setting --scale=1"
+            Scaling="1"
+          }
+        }
+      ;;
+    esac
+  }
+  
+  [ "$Rotation" != "0" ] && {
+    case $Xserver in
+      Weston|Weston-Xwayland)
+        echo "0 90 180 270 flipped flipped-90 flipped-180 flipped-270" | grep -q "$Rotation" || {
+          warning "Unsupported value '$Rotation' for option --rotate. 
+  Must be one of 0 90 180 270 flipped flipped-90 flipped-180 flipped-270"
+          Rotation="0"
+        }
+      ;;
+      *) warning "$Xserver does not support option --rotate" ; Rotation="0" ;;
+    esac
+  }
 }
 
 { #### part: check screen size
@@ -1063,14 +1144,27 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
     }
     Modeline=$(cvt $Xaxis $Yaxis | tail -n1 | cut -d' ' -f2-)
   }
-  
+  # Screen 0: minimum 320 x 200, current 1920 x 1080, maximum 8192 x 8192
+
   case $Xserver in
     Xephyr|Weston-Xwayland|Weston|Kwin|Kwin-Xwayland|Kwin-Native|Nxagent)
-      command -v xrandr > /dev/null && { # reduce size to primar monitor for windowed desktop
-        Xaxis=$(xrandr | grep primary | cut -dx -f1 | rev | cut -d' ' -f1 | rev)
-        Yaxis=$(xrandr | grep primary | cut -dx -f2 | cut -d' ' -f1 | cut -d+ -f1)
+      tty | grep -q tty && {
+        : # nothing to do on tty; maybe should check --size=$Screensize
+      } || {
+        command -v xrandr > /dev/null && [ -n "$(xrandr | grep primary)" ] && { # reduce size to primar monitor for windowed desktop
+          Xaxis=$(xrandr | grep primary | head -n1 | cut -dx -f1 | rev | cut -d' ' -f1 | rev)
+          Yaxis=$(xrandr | grep primary | head -n1 | cut -dx -f2 | cut -d' ' -f1 | cut -d+ -f1)
+        }
+        [ -z "$Screensize" ] && [ -n "$Xaxis" ] && {
+          Screensize="$(($Xaxis-100))x$(($Yaxis-100))" # a roughly maximized window size is set here
+          [ "$Scaling" != "1" ] && case $Xserver in
+            Weston|Weston-Xwayland)
+              Screensize="$(expr $(($Xaxis-100)) / $Scaling)x$(expr $(($Yaxis-100)) / $Scaling)"  
+            ;;
+          esac
+        }
       }
-      [ -z "$Screensize" ] && [ -n "$Xaxis" ] && Screensize="$(($Xaxis-100))x$(($Yaxis-100))"  ;; # a roughly maximized window size is set here
+    ;;
     Xdummy|Xpra)
       [ -z "$Screensize" ] && [ -n "$Modeline" ] && Screensize=$Xaxis"x"$Yaxis
       [ -z "$Screensize" ] && [ -z "$Modeline" ] && {
@@ -1085,6 +1179,16 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
         Modeline=$(cvt $Xaxis $Yaxis | tail -n1 | cut -d' ' -f2-)
         [ -z "$Modeline" ] && Modeline='"'$Xaxis'x'$Yaxis'" 227.86 $Xaxis $Xaxis $Xaxis $Xaxis $Yaxis $Yaxis $Yaxis $Yaxis'
       }
+    ;;
+  esac
+  case $Xserver in
+    Xpra|Xpra-Xwayland)
+      Xaxis=$(awk -v a=$Xaxis -v b=$Scaling 'BEGIN {print (a / b)}')
+      Xaxis=${Xaxis%.*}
+      Yaxis=$(awk -v a=$Yaxis -v b=$Scaling 'BEGIN {print (a / b)}')
+      Yaxis=${Yaxis%.*}
+      Modeline=$(cvt $Xaxis $Yaxis | tail -n1 | cut -d' ' -f2-)
+      Screensize="${Xaxis}x${Yaxis}"
     ;;
   esac
 }
@@ -1148,8 +1252,8 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
   esac
  
   ## Get inet Adress of docker0 interface
-  Dockeriprange=`ip -4 -o a | grep docker0 | awk '{print $4}'`
-  Dockerip=`echo $Dockeriprange | cut -d/ -f1`
+  Dockeriprange=$(ip -4 -o a | grep docker0 | awk '{print $4}')
+  Dockerip=$(echo $Dockeriprange | cut -d/ -f1)
    
   ## create display specific cache subfolder
   #
@@ -1171,12 +1275,12 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
       # try to find out current window manager to use it for x11docker (i.e. run a new instance of it)
       [ -z "$Windowmanager" ] && Windowmanager=$(command -v $(ls -l /etc/alternatives/x-window-manager | cut -d ">" -f2))
       # try with wmctrl
-      if [ -z "$Windowmanager" ] && [ -n "$(command -v 'wmctrl')" ]  ; then        # option '-w, --wm': maybe a window manager is already set
-        Windowmanager=`wmctrl -m | grep "PID" | awk '{print $2}' `                 # wmtrl, if installed, can find already running wm. at first get pid
+      if [ -z "$Windowmanager" ] && [ -n "$(command -v wmctrl)" ]  ; then        # option '-w, --wm': maybe a window manager is already set
+        Windowmanager=$(wmctrl -m | grep "PID" | awk '{print $2}')                 # wmtrl, if installed, can find already running wm. at first get pid
         if [ -e "/proc/$Windowmanager" ] ; then                                    # check if pid is valid
-          Windowmanager=`ls -l "/proc/$Windowmanager/exe" | awk '{print $11}'`     # if yes, then get /path/executable
+          Windowmanager=$(ls -l "/proc/$Windowmanager/exe" | awk '{print $11}')     # if yes, then get /path/executable
         else                                                                       # otherwise, try insecure way over name
-          Windowmanager=`wmctrl -m | grep "Name" | awk '{print $2}' | tr '[:upper:]' '[:lower:]'`              #| awk '{print $1}'`
+          Windowmanager=$(wmctrl -m | grep "Name" | awk '{print $2}' | tr '[:upper:]' '[:lower:]')              #| awk '{print $1}'`
         fi
       fi
       #
@@ -1339,13 +1443,13 @@ done
   [ "$Xauthentication" = "yes" ] && Xserveroptions="$Xserveroptions -auth $Xservercookie"
   case $Xserver in
     Nxagent)
-      [ "$Shareipc" = "yes" ] && Xserveroptions="$Xserveroptions -shmem -shpix" || Xserveroptions="$Xserveroptions -noshmem -noshpix"
+      { [ "$Shareipc" = "yes" ] || [ "$X11dockermode" = "exe" ] ; } && Xserveroptions="$Xserveroptions -shmem -shpix" || Xserveroptions="$Xserveroptions -noshmem -noshpix"
     ;;
     *)
       Xserveroptions="$Xserveroptions +extension Composite +extension RANDR +extension RENDER +extension GLX +extension XVideo +extension DOUBLE-BUFFER +extension XINERAMA"
       Xserveroptions="$Xserveroptions +extension X-Resource +extension SECURITY +extension DAMAGE"
       Xserveroptions="$Xserveroptions -retro +iglx"
-      [ "$Shareipc" = "yes" ] && {
+      { [ "$Shareipc" = "yes" ] || [ "$X11dockermode" = "exe" ] ; } && {
         Xserveroptions="$Xserveroptions +extension MIT-SHM"
       } || { 
         Xserveroptions="$Xserveroptions -extension MIT-SHM"
@@ -1353,14 +1457,26 @@ done
       }
     ;;
   esac
-  xdpyinfo >/dev/null 2>&1 && Xserveroptions="$Xserveroptions -dpi $(xdpyinfo | grep dots | cut -dx -f2 | cut -d' ' -f1)" || {
-    [ -n "$Hostdisplay" ] && [ -z "$(command -v xdpyinfo)" ] && warning "Could not determine dpi settings.
-  If you encounter too big or small fonts in $Xserver, please install xdpyinfo."
+  [ -z "$Dpi" ] && {
+    xdpyinfo >/dev/null 2>&1 && {
+      Dpi="$(xdpyinfo | grep dots | cut -dx -f2 | cut -d' ' -f1)"
+      Dpi=$(awk -v a=$Scaling -v b=$Dpi 'BEGIN {print (b * a * a)}')
+      Dpi=${Dpi%.*}
+    } || {
+      [ -n "$Hostdisplay" ] && [ -z "$(command -v xdpyinfo)" ] && warning "Could not determine dpi settings. If you encounter too
+    big or small fonts in $Xserver, please install xdpyinfo or use option --dpi."
+    }
+  }
+  [ -n "$Dpi" ] && { 
+    Xserveroptions="$Xserveroptions -dpi $Dpi"
+    Xpraoptions="$Xpraoptions --dpi $Dpi"
   }
   
-  Xpraoptions="$Xpraoptions -z0 --no-speaker --no-pulseaudio"
   Waitforgoodbye='bash -c "while [ ! -e '$Sharefolder'/timetosaygoodbye ] ; do sleep 1 ; done"' 
 
+  Xpraoptions="$Xpraoptions -z0 --no-speaker --no-pulseaudio"
+  [ "$Scaling" != "1" ] && Xpraoptions="$Xpraoptions --desktop-scaling=$Scaling"
+  
   case $Xserver in
     Xpra|Xdummy)
       echo '# This xorg configuration file is forked and changed from xpra to start a dummy X11 server.
@@ -1402,6 +1518,32 @@ Section "ServerLayout"
   Screen       "dummy_screen"
 EndSection' > $Cachefolder/xorg.xdummy.conf
     ;;
+    Weston|Weston-Xwayland|Xpra-Xwayland)
+      echo "
+[core]
+shell=desktop-shell.so
+idle-time=0
+[shell]
+#background-color=0xff002244
+panel-location=none
+locking=false
+[output]
+" > $Cachefolder/weston.ini
+      [ -n "$WAYLAND_DISPLAY" ] && {
+        echo "name=WL1" >> $Cachefolder/weston.ini
+      } || {
+        [ -n "$Hostdisplay" ] && echo "name=X1" >> $Cachefolder/weston.ini
+      }
+      [ "$Xserver" = "Xpra-Xwayland" ] && echo -e "[output]\nname=X1" >> $Cachefolder/weston.ini # must run with X backend to use xdotool
+      tty | grep -q tty && {
+        [ -n "$Screensize" ] || [ "$Scaling" != "1" ] || [ "$Rotation" != "0" ] && {
+          weston --no-config > $Compositorlogfile 2>&1 &
+          waitforlogentry weston $Compositorlogfile connector
+          echo "name=$(cat $Compositorlogfile | grep Output | grep connector | head -n1 | cut -d ' ' -f3 | rev | cut -c2- | rev)" >> $Cachefolder/weston.ini
+          kill $!
+        }
+      }
+    ;;
   esac
 
   case $Xserver in
@@ -1433,35 +1575,29 @@ EndSection' > $Cachefolder/xorg.xdummy.conf
     ;;
     Xpra-Xwayland)
       Xcommand="$(command -v Xwayland) $Newdisplay -rootless $Xserveroptions +extension XTEST"
-      [ "$WAYLAND_DISPLAY" = "" ] && { 
-        Waylandsocket="wayland-$Newdisplaynumber"
-        [ -n "$Hostdisplay" ] && command -v xdotool >/dev/null && { Westonoptions="$Westonoptions --fullscreen" ; Screensize="" ; }
-        [ -n "$Screensize" ] && Westonoptions="$Westonoptions --width=$(echo $Screensize | cut -d x -f1) --height=$(echo $Screensize | cut -d x -f2)"
-      } 
-      [ -n "$WAYLAND_DISPLAY" ] && Waylandsocket=$WAYLAND_DISPLAY
+      [ -z "$WAYLAND_DISPLAY" ] && Waylandsocket="wayland-$Newdisplaynumber" || { 
+        [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] && Waylandsocket="wayland-$Newdisplaynumber" || Waylandsocket=$WAYLAND_DISPLAY 
+      }
+      echo "mode=$Screensize" >> $Cachefolder/weston.ini
+      Compositorcommand="weston --config=$Cachefolder/weston.ini --socket=$Waylandsocket --backend=x11-backend.so"
     ;;
     Weston|Weston-Xwayland)
       [ "$Xserver" = "Weston-Xwayland" ] && Xcommand="$(command -v Xwayland) $Newdisplay $Xserveroptions"
       [ "$Xserver" = "Weston" ]          && Sharewayland="yes"
-      case $Fullscreen in
-        "yes") Westonoptions="$Westonoptions --fullscreen";;
-        "no")  [ -n "$Screensize" ] && Westonoptions="$Westonoptions --width=$(echo $Screensize | cut -d x -f1) --height=$(echo $Screensize | cut -d x -f2)" ;;
-      esac
-      echo "
-[core]
-shell=desktop-shell.so
-idle-time=0
-[shell]
-panel-location=none
-locking=false
-" > $Cachefolder/weston.ini
-      [ -n "$(tty | grep tty)" ] && Westonoptions=""
       Waylandsocket="wayland-$Newdisplaynumber"
+      Compositorcommand="weston --config=$Cachefolder/weston.ini --socket=$Waylandsocket"
+      case $Fullscreen in
+        "yes") Compositorcommand="$Compositorcommand --fullscreen";;
+        "no")  [ -n "$Screensize" ] && echo "mode=$Screensize" >> $Cachefolder/weston.ini ;;
+      esac
+      [ "$Scaling"  != "1" ] && echo "scale=$Scaling"          >> $Cachefolder/weston.ini
+      [ "$Rotation" != "0" ] && echo "transform=$Rotation"     >> $Cachefolder/weston.ini
     ;;
     Kwin-Xwayland)
       [ -n "$Screensize" ] && Kwinoptions="--width=$(echo $Screensize | cut -d x -f1) --height=$(echo $Screensize | cut -d x -f2)"
       Xcommand="$(command -v Xwayland) $Newdisplay $Xserveroptions"
       Waylandsocket="wayland-$Newdisplaynumber"
+      Compositorcommand="kwin_wayland --xwayland --socket=$Waylandsocket $Kwinoptions" 
     ;;
     Kwin-Native) # experimental, hacky and not nice implemented as I cannot tell KWin which display number to use. A clean workflow requires KWin to be started at end of script.
       [ -n "$Screensize" ] && Kwinoptions="--width=$(echo $Screensize | cut -d x -f1) --height=$(echo $Screensize | cut -d x -f2)"
@@ -1471,7 +1607,9 @@ locking=false
         echo \$DISPLAY >$Cachefolder/kwindisplay
         while [ ! -e $Sharefolder/timetosaygoodbye ] ; do sleep 1 ; done
       ">$Kwinrc
+      #Compositorcommand="kwin_wayland --xwayland --socket=$Waylandsocket $Kwinoptions --exit-with-session='bash $Kwinrc'"
       kwin_wayland --xwayland --socket=$Waylandsocket $Kwinoptions --exit-with-session="bash $Kwinrc"          > $Compositorlogfile 2>&1 & storepid $! kwin && export Compositorpid=$!
+      #$Compositorcommand       > $Compositorlogfile 2>&1 & storepid $! kwin && export Compositorpid=$!
       waitforlogentry   "kwin"   $Compositorlogfile "X-Server"
       bash -c "while ps -p $Compositorpid >/dev/null; do sleep 1 ; done ; touch $Sharefolder/timetosaygoodbye" &  #storepid $! bash
       Newdisplay=$(cat $Cachefolder/kwindisplay)
@@ -1482,6 +1620,7 @@ locking=false
       [ -n "$Screensize" ] && Kwinoptions="--width=$(echo $Screensize | cut -d x -f1) --height=$(echo $Screensize | cut -d x -f2)"
       Waylandsocket="wayland-$Newdisplaynumber"
       Sharewayland="yes"
+      Compositorcommand="kwin_wayland --xwayland --socket=$Waylandsocket $Kwinoptions" 
     ;;
     Nxagent)
       Xcommand="$(command -v nxagent) $Newdisplay $Xserveroptions $Nxagentoptions -options $Cachefolder/nxagentoptions"
@@ -1628,13 +1767,13 @@ esac
         # create script createuser. It will also start the image with given (or extracted) command
         { echo "#! /bin/bash"
           # create user
-          echo "if [ -z \"\$(id -u `id -u` 2>/dev/null)\" ] ; then"
+          echo "if [ -z \"\$(id -u $(id -u) 2>/dev/null)\" ] ; then"
           echo "  Benutzer=$(id -un)"
-          echo "  addgroup --force-badname --gid `id -g` \$Benutzer"
-          echo "  useradd -l --password '' --uid `id -u` --gid `id -g` --create-home --home-dir /home/\$Benutzer \$Benutzer"
+          echo "  addgroup --force-badname --gid $(id -g) \$Benutzer"
+          echo "  useradd -l --password '' --uid $(id -u) --gid $(id -g) --create-home --home-dir /home/\$Benutzer \$Benutzer"
           echo "  chown \$Benutzer:$(id -g) /home/\$Benutzer"
           echo "else" 
-          echo "  Benutzer=\$(id -un `id -u`)"
+          echo "  Benutzer=\$(id -un $(id -u))"
           echo "fi"
           echo "export HOME=/home/\$Benutzer"
           echo "cd \$HOME"
@@ -1697,6 +1836,7 @@ esac
   declare -f waitforlogentry
   declare -f no_xhost 
   declare -f warning 
+  declare -f error
 
   [ "$Pulseaudio" = "yes" ] && {
     echo "# option '--pulseaudio': enable pulseaudio sound over tcp"
@@ -1884,8 +2024,10 @@ Command: $0 $X11dockerargs"
     esac
     [ -n "$Hostexe" ] && verbose "Running host application: $Hostexe"
     [ "$Adduserhome" = "yes" ] && verbose "Sharing directory $Adduserhomefolder with container as its home directory /home/$Benutzer"
-    [ "$Xserver" != "Nothing" ] && verbose "Created X server command:
+    [ -n "$Xcommand" ] && verbose "Created X server command:
   $Xcommand" 
+    [ -n "$Compositorcommand" ] && verbose "Created compositor command:
+  $Compositorcommand"
     verbose "Created docker command:
   $Dockercommand"
     [ -e "$Sharefolder/x11docker_CMD" ] && verbose "Created x11docker_CMD script:
@@ -1932,8 +2074,8 @@ Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' '
       "")echo "TryExec=$0 $X11dockerargs" ;;
       *) echo "TryExec=x11docker $X11dockerargs" ;;
     esac
-    } > "`xdg-user-dir DESKTOP`/$Name.desktop"
-    verbose "Created desktop icon `xdg-user-dir DESKTOP`/$Name.desktop"
+    } > "$(xdg-user-dir DESKTOP)/$Name.desktop"
+    verbose "Created desktop icon $(xdg-user-dir DESKTOP)/$Name.desktop"
     exit 0
   fi
 }
@@ -1944,27 +2086,31 @@ Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' '
     Xorg|Xpra|Xephyr|Xdummy|Xwayland|Nxagent) xinit $Xinitrc -- $Xcommand        >> $Xinitlogfile  2>&1 ;;
     Hostdisplay|Hostwayland|Kwin-Native)      bash  $Xinitrc                     >> $Xinitlogfile  2>&1 ;;
     Xpra-Xwayland)
-    echo SOCK$Waylandsocket
-      [ "$WAYLAND_DISPLAY" = "" ] && {
-        weston --socket=$Waylandsocket $Westonoptions                                                     > $Compositorlogfile 2>&1 & storepid $! weston
+      [ "$WAYLAND_DISPLAY" = "" ] || [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] && {
+        WAYLAND_DISPLAY=""  $Compositorcommand                                   > $Compositorlogfile 2>&1 & storepid $! weston
         waitforlogentry "weston" $Compositorlogfile "weston-desktop-shell"       >> $Xinitlogfile  2>&1
         xdotool windowunmap "0x$(printf '%x\n' $(cat $Compositorlogfile | grep 'window id' | rev | cut -d' ' -f1 | rev))"
       }
       WAYLAND_DISPLAY=$Waylandsocket          xinit $Xinitrc -- $Xcommand        >> $Xinitlogfile  2>&1 ;;
     Weston-Xwayland)
-      weston --config=$Cachefolder/weston.ini --socket=$Waylandsocket $Westonoptions                      > $Compositorlogfile 2>&1 & storepid $! weston  && export Compositorpid=$!
+      [ -n "$WAYLAND_DISPLAY" ] && export DISPLAY=""
+      $Compositorcommand                                                         > $Compositorlogfile 2>&1 & storepid $! weston  && export Compositorpid=$!
       waitforlogentry   "weston" $Compositorlogfile "weston-desktop-shell"       >> $Xinitlogfile  2>&1 
       WAYLAND_DISPLAY=$Waylandsocket          xinit $Xinitrc -- $Xcommand        >> $Xinitlogfile  2>&1 ;;
     Weston)
-      weston --config=$Cachefolder/weston.ini --socket=$Waylandsocket $Westonoptions                      > $Compositorlogfile 2>&1 & storepid $! weston  && export Compositorpid=$!
+      [ -n "$WAYLAND_DISPLAY" ] && export DISPLAY=""
+      $Compositorcommand                                                         > $Compositorlogfile 2>&1 & storepid $! weston  && export Compositorpid=$!
       waitforlogentry   "weston" $Compositorlogfile "weston-desktop-shell"       >> $Xinitlogfile  2>&1 
                                               bash  $Xinitrc                     >> $Xinitlogfile  2>&1 ;;
     Kwin-Xwayland)
-      kwin_wayland --xwayland --socket=$Waylandsocket $Kwinoptions --exit-with-session="$Waitforgoodbye"  > $Compositorlogfile 2>&1 & storepid $! kwin    && export Compositorpid=$!
+      #kwin_wayland --xwayland --socket=$Waylandsocket $Kwinoptions --exit-with-session="$Waitforgoodbye"  > $Compositorlogfile 2>&1 & storepid $! kwin    && export Compositorpid=$!
+      $Compositorcommand --exit-with-session="$Waitforgoodbye"                   > $Compositorlogfile 2>&1 & storepid $! kwin    && export Compositorpid=$!
       waitforlogentry   "kwin"   $Compositorlogfile "X-Server"                   >> $Xinitlogfile  2>&1 
       WAYLAND_DISPLAY=$Waylandsocket          xinit $Xinitrc -- $Xcommand        >> $Xinitlogfile  2>&1 ;;
     Kwin)
-      kwin_wayland --xwayland --socket=$Waylandsocket $Kwinoptions --exit-with-session="$Waitforgoodbye"  > $Compositorlogfile 2>&1 & storepid $! kwin    && export Compositorpid=$!
+      #kwin_wayland --xwayland --socket=$Waylandsocket $Kwinoptions --exit-with-session="$Waitforgoodbye"  > $Compositorlogfile 2>&1 & storepid $! kwin    && export Compositorpid=$!
+      #[ -n "$Hostdisplay" ] && export WAYLAND_DISPLAY=""
+      $Compositorcommand --exit-with-session="$Waitforgoodbye"                   > $Compositorlogfile 2>&1 & storepid $! kwin    && export Compositorpid=$!
       waitforlogentry   "kwin"   $Compositorlogfile "X-Server"                   >> $Xinitlogfile  2>&1
                                               bash  $Xinitrc                     >> $Xinitlogfile  2>&1 ;;
     Nothing)                                  bash  $Xinitrc          2>&1 | tee -a $Xinitlogfile  2>&1 ;;
