@@ -6,14 +6,12 @@
  - No dependencies inside of docker images.
  - Pulseaudio sound support is possible.
  - GPU hardware acceleration is possible.
- - Scaling and rotating output is possible.
 
 # GUI for x11docker ![x11docker logo](/../screenshots/x11docker_klein.jpeg?raw=true "Optional Title")
 To use `x11docker-gui`, you need to install package `kaptain`. 
  - On systems without a root password like Ubuntu, activate option `--sudo`.
  - For troubleshooting, run x11docker-gui in a terminal or use [Run in xterm]. Also you can activate option `--verbose`.
  - Package `kaptain` is not available in repositories of debian 9 and Ubuntu 16.04. You can install [kaptain for debian jessie](https://packages.debian.org/jessie/kaptain) respective [kaptain for Ubuntu 14.04](http://packages.ubuntu.com/trusty/kaptain) instead.
- - x11docker-gui can look ugly on GTK based systems. As kaptain uses QT4, you can use `qtconfig`and select GUI style GTK+. 
 
 ![x11docker-gui screenshot](/../screenshots/x11docker-gui.png?raw=true "Optional Title")
 
@@ -28,13 +26,14 @@ Installs into `/usr/local/bin`. Creates an icon in `/usr/share/icons`. Creates a
  
  
 # Security 
- - Main purpose of x11docker is to run dockered GUI applications while preserving container isolation.
- - Core concept is.
+ Main purpose of x11docker is to run dockered GUI applications while preserving container isolation.
+ Core concept is:
    - Run a second X server to avoid X security leaks
-   - Create container user similar to host user (no root in container)
-   - Reduce container privileges to bare minimum (docker run option `--cap-drop=all`)
- - Avoiding X security leaks is done using an additional X server separate from X on host display :0. (Most solutions in the web to run dockered GUI applications allow access to host X server, thus breaking container isolation and allowing access to host X resources like keylogging with `xinput test`).
- - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.  Container and new X server don't know cookies from host X server on display :0. (Except less secure option `--hostdisplay`)
+   - Create container user similar to host user -> no root in container
+   - Reduce container privileges to bare minimum (docker run option `--cap-drop=ALL`)
+
+Avoiding X security leaks is done using an additional X server separate from X on host display :0. (Most solutions in the web to run dockered GUI applications allow access to host X server, thus breaking container isolation and allowing access to host X resources like keylogging with `xinput test`). Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.  Container and new X server don't know cookies from host X server on display :0. (Except less secure option `--hostdisplay`)
+
  - Some options can degrade or break container isolation. Look at security info dialog to see the differences.
   
 ![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true)
@@ -50,7 +49,7 @@ If no additional X server like  `xpra` or `xserver-xephyr` is installed, and `x1
 Beside the X servers to choose from there are options `--weston`, `--kwin` and `--hostwayland` to run pure Wayland applications without X. QT5 applications also need options `--dbus` and `--waylandenv` to use Wayland instead of X. (Option `--waylandenv` sets some environment variables to summon toolkits GTK3, QT5, Clutter, SDL, Elementary and Evas to use Wayland.) 
  - Example: KDE plasma shell (QT5) in a pure Wayland environment with hardware acceleration:
  
-  `x11docker --kwin --waylandenv --dbus --gpu --hostuser -- kdeneon/plasma:user-lts plasmashell`
+  `x11docker --kwin --waylandenv --dbus --gpu -- kdeneon/plasma:user-lts plasmashell`
   
 This options are useful to test whether an application supports a pure Wayland environment. You can also test applications from host with option `--exe`. 
 
@@ -71,9 +70,6 @@ with lines:
 `needs_root_rights=yes`
 
 On debian 9 and Ubuntu 16.04 you need to install package `xserver-xorg-legacy`. 
-
-## X server inside of image
-Version  2.5 of x11docker also provides some options to run X or xpra inside of docker images. This was removed in 3.0 to keep the code easier. Version 2.5 is still available in [x11docker 2.5 branch](https://github.com/mviereck/x11docker/tree/x11docker_2.5) and can be used beneath actual x11docker versions.
  
 # Dependencies
 x11docker can run with standard system utilities without additional dependencies on host or in image. As a core, it only needs X server (package `xorg`)  and, of course, docker (package `docker.io`) to run docker images on X. 
@@ -112,13 +108,13 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
    
   `x11docker --xephyr  x11docker/xfce`
    
- - Run wine and playonlinux on xfce desktop in a sandbox in a Xephyr window, sharing a home folder to preserve settings and wine installations, and with a container user similar to your host user:
+ - Run wine and playonlinux on xfce desktop in a Xephyr window, sharing a home folder to preserve settings and wine installations:
 
-  `x11docker --xephyr --hostuser --home  x11docker/xfce-wine-playonlinux start`
+  `x11docker --xephyr --home  x11docker/xfce-wine-playonlinux
    
- - Run playonlinux in a sandbox in an xpra window, sharing a home folder to preserve settings and installations, sharing clipboard, enabling pulseaudio sound, and with a container user similar to your host user:
+ - Run playonlinux in an xpra window, sharing a home folder to preserve settings and installations, sharing clipboard, enabling pulseaudio sound and GPU acceleration:
 
-  `x11docker --xpra --hostuser --home --clipboard --pulseaudio x11docker/xfce-wine-playonlinux playonlinux`
+  `x11docker --xpra --home --clipboard --pulseaudio --gpu x11docker/xfce-wine-playonlinux playonlinux`
   
 ## Screenshots
 Sample screenshots can be found in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
