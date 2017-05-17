@@ -1,6 +1,7 @@
 # x11docker: Run graphical GUI applications and desktop environments in docker on a segregated X server or Wayland compositor.
 
  - Avoids common X security leaks.
+ - Reduces container privileges to bare minimum
  - Wayland and Xwayland support
  - No dependencies inside of docker images.
  - Pulseaudio sound support is possible.
@@ -28,7 +29,11 @@ Installs into `/usr/local/bin`. Creates an icon in `/usr/share/icons`. Creates a
  
 # Security 
  - Main purpose of x11docker is to run dockered GUI applications while preserving container isolation.
- - Preserving container isolation is done using an additional X server separate from X on host display :0, thus avoiding X security leaks. (Most solutions in the web to run dockered GUI applications allow access to host X server, thus breaking container isolation and allowing access to host X resources like keylogging with `xinput test`).
+ - Core concept is.
+   - Run a second X server to avoid X security leaks
+   - Create container user similar to host user (no root in container)
+   - Reduce container privileges to bare minimum (docker run option `--cap-drop=all`)
+ - Avoiding X security leaks is done using an additional X server separate from X on host display :0. (Most solutions in the web to run dockered GUI applications allow access to host X server, thus breaking container isolation and allowing access to host X resources like keylogging with `xinput test`).
  - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.  Container and new X server don't know cookies from host X server on display :0. (Except less secure option `--hostdisplay`)
  - Some options can degrade or break container isolation. Look at security info dialog to see the differences.
   
