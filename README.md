@@ -136,9 +136,9 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
 
   `x11docker --xephyr --home  x11docker/xfce-wine-playonlinux`
    
- - Run playonlinux in an xpra window, sharing a home folder to preserve settings and installations, sharing clipboard, enabling pulseaudio sound and GPU acceleration:
+ - Run playonlinux in an xpra-xwayland window, sharing a home folder to preserve settings and installations, sharing clipboard, enabling pulseaudio sound and GPU acceleration:
 
-  `x11docker --xpra --home --clipboard --pulseaudio --gpu x11docker/xfce-wine-playonlinux playonlinux`
+  `x11docker --xpra-xwayland --home --clipboard --pulseaudio --gpu x11docker/xfce-wine-playonlinux playonlinux`
   
 ## Screenshots
 Sample screenshots can be found in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
