@@ -32,7 +32,7 @@ Installs into `/usr/local/bin`. Creates an icon in `/usr/share/icons`. Creates a
    - Create container user similar to host user -> no root in container
    - Reduce container privileges to bare minimum (docker run option `--cap-drop=ALL`)
 
-Avoiding X security leaks is done using an additional X server separate from X on host display :0. (Most solutions in the web to run dockered GUI applications allow access to host X server, thus breaking container isolation and allowing access to host X resources like keylogging with `xinput test`). Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.  Container and new X server don't know cookies from host X server on display :0. (Except less secure option `--hostdisplay`)
+Avoiding X security leaks is done using an additional X server separate from X on host display :0. Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.  (This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control). x11docker provides this  possibility with discouraged and insecure option `--hostdisplay`.
 
  - Some options can degrade or break container isolation. Look at security info dialog to see the differences.
   
