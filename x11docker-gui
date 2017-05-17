@@ -1,7 +1,7 @@
 #! /bin/bash
 #########################################
 ## GUI for x11docker
-## MIT licence 2016, Martin Viereck
+## Published under MIT licence
 ## Uses 'kaptain' to provide a GUI
 # https://github.com/mviereck/x11docker
 #########################################
@@ -25,14 +25,14 @@ x11docker_logo="/tmp/x11docker.png"
 #####################
 # Preset some options you may want to be set as default
 #
-DOCKERIMAGE=""              # docker image [+ command]
+CONTAINERUSER="$(id -un):$(id -g)"
+CONTAINERUSERHOME="$(getent passwd $(id -u) | cut -d: -f6)"
 DOCKEROPTIONS=""            # additional docker options
-MYWM=""                     # host window manager
-SCREENSIZE="800x600"
+MYWM=""                     # preferred host window manager
+IMAGELIST='"","x11docker/xfce ","x11docker/lxde "'
+
 # Checkboxes: "!" disables option, "" enables it
-HOSTUSER="!"
-SUDOUSER="!"
-HOMEFOLDER="!"
+SHAREHOMEFOLDER="!"
 CLIPBOARD="!"
 PULSEAUDIO="!"
 GPU="!"
@@ -40,6 +40,10 @@ VERBOSE="!"
 NOXHOST="!"
 NOPWD="!"
 SUDO="!"
+
+
+#CONTAINERUSER="\\\$USER"
+#CONTAINERUSERHOME="/home/\\\$USER"
 
 
 # these window managers are known to work well with x11docker (alphabetical order)(excluding $Wm_not_recommended and $Wm_ugly):
@@ -67,118 +71,134 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
 for wm in $Wm_all ; do
   command -v $wm >/dev/null 2>&1 && [ -z "$(echo $HOSTWM | grep $wm)" ] && HOSTWM="$HOSTWM\"$wm\","
 done
-HOSTWM="$HOSTWM\"\","
-HOSTWM="$HOSTWM\"none\",\"auto\""
+HOSTWM="\"none\",\"auto\",$HOSTWM"
+HOSTWM="$HOSTWM\"\""
 [ $MYWM ] && HOSTWM="\"$MYWM\",$HOSTWM"
 
+# if docker can run without password prompt, create list of available named images
+id | grep -q '(docker)' || [ "$(ls -l /usr/bin/docker | cut -c4)" = "s" ] || [ "$(ls -l /usr/bin/docker | cut -c7)" = "s" ] && {
+  while read -r image ; do
+    image="$(echo $image | cut -d' ' -f1):$(echo $image | cut -d' ' -f2)"
+    case $image in
+      "REPOSITORY:TAG"|"<none>:<none>")     ;;
+      *) IMAGELIST="$IMAGELIST,\"$image \"" ;;
+    esac
+  done < <(docker images)
+}
+[ "$(echo $IMAGELIST | cut -c1)" = "," ] && IMAGELIST="\"\"$IMAGELIST"
+
 kaptain_script='
-start "x11docker '$VERSION'" -> options buttons;
-  options:beside -> frameleft frameright;
-    frameleft:framed -> choose_image_framed choose_xserver sizefullscreen security;
-    frameright:framed -> options_all;
+start "x11docker '$VERSION'"  -> options buttons;
+  options:beside              -> frameleft frameright;
+    frameleft:framed          -> choose_image_framed choose_xserver sizefullscreen;
+    frameright                -> choose_options develdialog @fill;
     
   choose_image_framed -> choose_image;
-  choose_image "Run GUI applications in docker images on X and Wayland" -> logo_imageorexe dockerimage dockeroptions ;
-    logo_imageorexe:beside  -> @icon("'$x11docker_logo'") imageorexe ;
-      imageorexe -> image | exe | xonly;
-        image:beside     "Run docker image in segregated X server" -> "-- " security_dialog;
-        exe              "--exe: Start host application in another X server" -> "--exe -- ";
-        xonly            "--xonly: Only create new empty X server" -> "--xonly -- "; 
-    dockerimage:beside   "docker image [and command] to run:" -> @string="'$DOCKERIMAGE'";
-    dockeroptions:beside "[Additional custom options for \"docker run\":]" ->  @string="'$DOCKEROPTIONS'" ;
+  choose_image "Run GUI applications in docker images on X and Wayland"       -> logo_imageorexe dockerimage ;
+    logo_imageorexe:beside                                                    -> @icon("'$x11docker_logo'") imageorexe ;
+      imageorexe                                                              -> image | exe | xonly;
+        image:beside     "Run docker image in segregated X server"            -> "-- " security_dialog;
+        exe              "--exe: Start host application in another X server"  -> "--exe -- ";
+        xonly            "--xonly: Only create new empty X server"            -> "--xonly -- "; 
+    dockerimage          "docker image [and command] to run:"                 -> @combow('$IMAGELIST');
   
   choose_xserver -> xserverbla xservercombo wm gpu;
     xserverbla:beside "Choose X server to use" -> @fill xinfobutton xdependenciesbutton ;
     xservercombo -> s/(:.*$)/ / @combo(
         ": Automatically choose X server (regards options --wm and --gpu)",
-        "--xpra: Show container application windows on your main desktop",
-        "--xephyr: Show container desktop in a window on your main desktop",
-        "--xpra-xwayland: Like --xpra, using Xwayland",
-        "--weston-xwayland: Like --xephyr, Weston window using Xwayland",
-        "--hostdisplay: Share host X display (quite bad container isolation!)",
-        "--xorg: Core Xorg server. (Switch with <CTRL><ALT><F1>...<F12>)",
-        "--xwayland: Core Xwayland",
-        "--hostwayland: Share host wayland display without X",
-        "--weston: Wayland in Weston without X"
+        "--xpra:             Show container application windows on your main desktop",
+        "--xephyr:           Show container desktop in a window on your main desktop",
+        "--xpra-xwayland:    Like --xpra, using Xwayland",
+        "--weston-xwayland:  Like --xephyr, Weston window using Xwayland",
+        "--hostdisplay:      Share host X display (quite bad container isolation!)",
+        "--xorg:             Core Xorg server. (Switch with <CTRL><ALT><F1>...<F12>)",
+        "--nxagent:          Like --xpra; with --wm=\"\" like Xephyr. Experimental.",
+        "--xwayland:         Core Xwayland",
+        "--xdummy:           Invisible X server",
+        "--kwin-xwayland:    Like --weston-xwayland",
+        "--kwin-native:      Seamless Xwayland in KWin. Experimental.",
+        "--kwin:             Wayland in KWin without X",
+        "--weston:           Wayland in Weston without X",
+        "--hostwayland:      Share host Wayland display without X",
+        "--nothing:          No X and no Wayland"
       );
-    gpu "--gpu: Hardware acceleration for OpenGL (degrades container isolation)"             ->  "--gpu " | '$GPU' "";
-    wm :beside "--wm: Host window manager to use"   ->  "--wm=\"" @combow('$HOSTWM') "\" " | ! "" ;
+    gpu "--gpu: Hardware acceleration for OpenGL (degrades container isolation)"         ->  "--gpu "                                  | '$GPU' "";
+    wm :beside "--wm: Host window manager to use"                                        ->  "--wm=\"" @combow('$HOSTWM')        "\" " | ! "" ;
         
-    sizefullscreen "Choose screen size for Xephyr, Weston, KWin or Xdummy" -> sizefullscreenline scalerotateline;
+    sizefullscreen "Change desktop-window size and count, scaling and rotation, dpi" -> sizefullscreenline scalerotateline dpicountline;
       sizefullscreenline:beside -> size fullscreen resizeable;
-        size:beside "--size "                    -> "--size \"" @string="'$SCREENSIZE'" "\" "| !"" ;
-        fullscreen  "--fullscreen "              -> "--fullscreen " | ! "" ;
-        resizeable  "--resizeable (Xephyr only)" -> "--resizeable " | ! "" ;
+        size:beside         "--size "                                -> "--size \""  @combow("640x480","800x600","1024x768","1280x800","1280x1024","1400x1050","1680x1200","1920x1080")  "\" "| !"" ;
+        fullscreen          "--fullscreen "                          -> "--fullscreen "                      | ! "" ;
+        resizeable          "--resizeable (Xephyr only)"             -> "--resizeable "                      | ! "" ;
       scalerotateline:beside -> scale rotate;
-        scale:beside "--scale (Xpra, Weston)"    -> "--scale=\""  @combow("1","2","3","4","5","0.25","0.5","0.75","1.5","2.5") "\" " | ! "" ;
-        rotate:beside "--rotate (Weston)"        -> "--rotate=\"" @combo("0","90","180","270","flipped","flipped-90","flipped-180","flipped-270") "\" " | ! "" ;
-      
-  options_all "Options" -> choose_options choose_options_advanced develdialog;
+        scale:beside        "--scale (Xpra, Weston)"                 -> "--scale=\""         @combow("1","2","3","4","5","0.25","0.5","0.75","1.5","2.5")                    "\" "  | ! "" ;
+        rotate:beside       "--rotate (Weston)"                      -> "--rotate=\""        @combo("0","90","180","270","flipped","flipped-90","flipped-180","flipped-270") "\" "  | ! "" ;
+      dpicountline:beside -> dpi outputcount;
+        dpi:beside          "--dpi"                                  -> "--dpi=\""           @combow("36","48","60","72","84","96","120","150","256","300")                  "\" "  | ! "" ;
+        outputcount:beside  "--output-count (Weston, KWin, Xephyr)"  -> "--output-count=\""  @combow("1","2","3","4")                                                        "\" "  | ! "" ;
     
-    choose_options -> hostuser sudouser home clipboard pulseaudio;
-      hostuser         "--hostuser: Create container user \'$USER'\ similar to \n 
-                        your host user (same name, user id and group id) \n 
-                        (a docker image command must be given)\n
-                        Recommended for all use cases to improve security. "->  " --hostuser " | '$HOSTUSER' "";
-      sudouser         "--sudouser: Like --hostuser, but member of group sudo \n (Allows all commands using sudo without a password)" -> " --sudouser " | '$SUDOUSER' "";
-      home             "--home: Share a host folder in /home/'$USER'/x11docker \n as /home/'$USER' in container." -> "--home " | '$HOMEFOLDER' "";  
-      clipboard        "--clipboard: Enable clipboard sharing (best with xpra)" -> "--clipboard " | '$CLIPBOARD' "";
-      pulseaudio       "--pulseaudio: Sound with pulseaudio \n (needs pulseaudio on host and in image to be installed)" -> "--pulseaudio " | '$PULSEAUDIO' "";
-      
-    choose_options_advanced -> text_advanced verbose dbus waylandenv nopwd sudo;
-      text_advanced:beside    "Advanced options " -> "" develdialog;
-      verbose "--verbose: Be verbose (terminal output of logfiles)"       -> "--verbose " | '$VERBOSE' "";
-      dbus    "--dbus: Use dbus-launch to run image command"              -> "--dbus " | ! "";
-      nopwd   "--no-password: Do not ask for root password"               -> "--no-password " | '$NOPWD' "";
-      waylandenv      "--waylandenv: Set wayland environment variables \n for toolkits GTK3 \ QT5 \ Clutter \ SDL \ Elementary \ Evas " -> "--waylandenv " | ! "" ; 
-      sudo    "--sudo: Use sudo instead of su to run docker \n 
-           (for systems without a root password like Ubuntu)"             -> "--sudo " | '$SUDO' "";
-           
-   security "Improving X authentication security" -> untrusted noxhost;
-      noxhost   "--no-xhost: Disable any access to host X server permitted by xhost" -> "--no-xhost " | ! "" ;
-      untrusted "--untrusted: Create untrusted cookies restricting X access. Can avoid \n rendering issues with --hostdisplay and --kwin-native (MIT-SHM errors)." -> "--untrusted " | ! "" ;
-    
+    choose_options:framed -> choose_options_normal choose_options_advanced;
+    choose_options_normal "Options"  -> home clipboard pulseaudio;
+      home             "--home: Share a host folder in '$CONTAINERUSERHOME'/x11docker \n
+                        as '$CONTAINERUSERHOME' in container."                           -> "--home "        | '$SHAREHOMEFOLDER' "";  
+      clipboard        "--clipboard: Enable clipboard sharing (best with xpra)"          -> "--clipboard "   | '$CLIPBOARD' "";
+      pulseaudio       "--pulseaudio: Sound with pulseaudio \n 
+                        (needs pulseaudio on host and in image to be installed)"         -> "--pulseaudio "  | '$PULSEAUDIO' "";
+
+    choose_options_advanced "Advanced options"-> verbose noxhost dbus waylandenv nopwd sudo;
+      verbose     "--verbose: Be verbose (terminal output of logfiles)"                  -> "--verbose "     | '$VERBOSE' "";
+      noxhost   "--no-xhost: Disable any \"xhost +...\" access to host X server"         -> "--no-xhost "    | ! "" ;
+      dbus        "--dbus: Use dbus-launch to run image command"                         -> "--dbus "        | ! "";
+      nopwd       "--no-password: Do not ask for root password"                          -> "--no-password " | '$NOPWD' "";
+      waylandenv  "--waylandenv: Set wayland environment variables \n 
+                  for toolkits GTK3 \ QT5 \ Clutter \ SDL \ Elementary \ Evas "          -> "--waylandenv "  | ! "" ; 
+      sudo        "--sudo: Use sudo instead of su to run docker \n 
+           (for systems without a root password like Ubuntu)"                            -> "--sudo "        | '$SUDO' "";
+                   
+ choose_options_developer "Developer options" -> develdialog;
  develdialog:dialog "Developer options" -> developeroptions @close=" close";
+ develcollect -> develleft devuserframe devsharehost devmisc capdefault;
   developeroptions:beside -> develleft develright;
-   develleft:framed -> devxserver devenvironment ;
-   develright:framed ->  devsharehost devvtdisplay devauth devfiles devroot;
-    devxserver " Special X servers and Wayland compositors" -> devxserverlist;
-      devxserverlist -> devxauto | devnxagent | devxkwin | devxkwinxwayland | devxkwinnative | devxxdummy | devxnothing;
-        devxauto         "Auto choose X server from main dialog"                                    -> "" ;
-        devnxagent       "--nxagent: like --xpra if no --wm is given, like --xephyr if --wm \n
-                          is not empty (can be \"none\", though)."                                  -> "--nxagent ";
-        devxxdummy       "--xdummy: Invisible Xdummy server for custom access."                     -> "--xdummy ";
-        devxkwin         "--kwin: Like --weston, pure Wayland environment using \n kwin_wayland"    -> "--kwin ";
-        devxkwinxwayland "--kwin-xwayland: Like --weston-xwayland using kwin_wayland"               -> "--kwin-xwayland " ;
-        devxkwinnative   "--kwin-native: Like --kwin-xwayland, but using built-in \n
-                          seamless xwayland. Drawback: needs option --untrusted or \n
-                          insecure option --ipc to avoid MIT-SHM errors. Experimental."             -> "--kwin-native " ;
-        devxnothing "--nothing: Do not provide any X server or Wayland compositor"                  -> "--nothing " ;
-    devauth "X authentication" -> devxhost devnoauth ; 
-      devxhost           "--xhost+ : Set \"xhost +\" on new X server. Every client can access new \n X server without restrictions. Testing purposes only." -> "--xhost+ " | ! "" ;
-      devnoauth          "--no-auth: Disable cookie authentication on new X server. \n Testing purposes only." -> "--no-auth " | ! "" ;
-    devenvironment "Environment" -> devshowenv setenvdialog devsharewayland devdpi;
-      devshowenv         "--showenv: Show DISPLAY and XAUTHORITY on stdout, \n further WAYLAND_DISPLAY and other environment variables \n depending on options. For custom access to new X server." -> "--showenv " | ! "" ;
-      devsharewayland    "--sharewayland: Share wayland socket and \$WAYLAND_DISPLAY\n (automatically done for --weston, --kwin and --hostwayland)" -> "--sharewayland " | ! "" ;
-      devdpi:beside "--dpi: dots per inch / screen density"    -> "--dpi=\""  @combow("36","48","60","72","84","96","120","150","256","300") "\" " | ! "" ;
-    devalpha "in development, unstable, or deprecated" -> devalsa;
-      devalsa            "--alsa: enable ALSA sound (not working yet)" -> "--alsa " | ! "" ;
-    devfiles "File operations" -> devcache devps;
-      devps              "--ps: Keep created container" -> "--ps " | ! "" ;
-      devcache           "--cache: Keep cache files in ~/.cache/x11docker" -> "--cache " | ! "";
-    devvtdisplay "X display number and vt/tty" -> devvt devdisplay;
-      devvt :beside      "--vt: virtual terminal/tty to use: \n (influences --xorg, --xpra, --xdummy)" -> "--vt " @string="8" " " | ! "";
-      devdisplay :beside "--display: display number to use: " -> "--display " @string="1000" " " | ! "";
-    devsharehost "Share host resources" -> devipc devnet;
-      devipc             "--ipc: Share host interprocess communication and shared memory. \n
-                          Breaks container isolation! Allows MIT-SHM extension, thus avoiding \n 
-                          rendering glitches and bad RAM access with --hostdisplay and --kwin-native." -> "--ipc " | ! "" ;
-      devnet             "--net: Share host network stack including dbus. Breaks container isolation!" -> "--net " | ! "" ;
-    devroot "root"       -> root;
-      root               "--root: Allow root to run x11docker (discouraged)"          -> "--root " | ! "";
+   develleft:framed -> devenvironment devauth devvtdisplay devconfigfile;
+   develright:framed ->  devuserframe setcapsdialogframe devsharehost devmisc;
+    devuserframe "Container user, shared home folder, cache folder" -> user homedir cachedir;
+      user               "--user: Container user (name or uid). Rreal or non-existing uids are possible.\n
+                          You can specify a group after \":\". Default: container user is same as host user."  -> "--user=\""     @string="'$CONTAINERUSER'" "\" " | ! "" ;
+      homedir            "--homedir: Host directory to use as container home: "                                -> "--homedir=\""  @string=""  "\" " | ! "" ;
+      cachedir           "--cachedir: Host directory to store cache files: "                                   -> "--cachedir=\"" @string=""  "\" " | ! "" ;
+    devsharehost "Share host resources" -> ipc net ;
+      ipc                "--ipc: Share host interprocess communication and shared memory. \n
+                          Breaks container isolation! Allows MIT-SHM extension."                               -> "--ipc "          | ! "" ;
+      net                "--net: Share host network stack including dbus. \n
+                          Breaks container isolation!"                                                         -> "--net "          | ! "" ;
+    devmisc "Miscellaneous" -> rootps;
+      rootps:beside -> root ps;
+        root               "--root: Allow root to run x11docker"                                               -> "--root "         | ! "";
+        ps                 "--ps: Keep created container"                                                      -> "--ps "           | ! "" ;
+    devauth "X authentication" -> untrusted trusted xhost noauth ; 
+      untrusted          "--untrusted: Create untrusted cookies restricting X access. \n 
+                           Default for --hostdisplay and --kwin-native."                                       -> "--untrusted "    | ! "" ;
+      trusted             "--trusted: Enforce trusted cookies for --hostdisplay and --kwin-native.\n
+                           Default for option --gpu."                                                          -> "--trusted "      | ! "" ;
+      xhost              "--xhost+ : Set \"xhost +\" on new X server. Every client can access new \n 
+                          X server without restrictions. Testing purposes only."                               -> "--xhost+ "       | ! "" ;
+      noauth             "--no-auth: Disable cookie authentication on new X server. \n 
+                          Testing purposes only."                                                              -> "--no-auth "      | ! "" ;
+    devenvironment "Environment" -> showenv sharewayland setenvdialog;
+      showenv            "--showenv: Show DISPLAY and XAUTHORITY on stdout, \n 
+                          further WAYLAND_DISPLAY and other environment variables \n 
+                          depending on options. For custom access to new X server."                            -> "--showenv "      | ! "" ;
+      sharewayland       "--sharewayland: Share wayland socket and \$WAYLAND_DISPLAY\n 
+                          (automatically done for --weston, --kwin and --hostwayland)"                         -> "--sharewayland " | ! "" ;
+    devvtdisplay "X display number and vt/tty" -> vt display;
+      vt :beside         "--vt: virtual terminal/tty to use: \n 
+                          (influences --xorg, --xpra, --xdummy)"                                               -> "--vt=\""        @string="8"     "\" " | ! "";
+      display :beside    "--display: display number to use: "                                                  -> "--display=\""   @string="1000"  "\" " | ! "";
+    devconfigfile "Custom weston.ini (see \"man weston.ini\")" -> westonini ;
+      westonini:beside   "--westonini "                                                                        -> "--westonini=\"" @string=""      "\" " | ! "";
       
-    setenvdialog:beside "--env: Set custom environment " -> envdialog | ! "" ;
-      envdialog:dialog "Environment variables" -> envdialogwaylandinfo envXDG envGTK envQT envQTegl envClutter envSDL envElementary1 envElementary2 envEvas envdialogothers envKWin envCustom1 envCustom2 envCustom3 envCustom4 @close="close";
+    setenvdialog:beside "--env: Set custom environment " -> envdialog ;
+      envdialog:dialog "Environment variables" -> envdialogwaylandinfo envXDG envGTK envQT envQTegl envClutter envSDL envElementary1 envElementary2 envEvas envdialogothers envKWin envCustom1 envCustom2 envCustom3 envCustom4 envCustom5 envCustom6 @close="close";
         envdialogwaylandinfo      "This environment variables summon toolkits to use Wayland instead of X11" -> "";
         envXDG:beside                       -> "--env=\""  @string="XDG_SESSION_TYPE=wayland"               "\" " | ! "" ;
         envGTK:beside         "GTK"         -> "--env=\""  @string="GDK_BACKEND=wayland"                    "\" " | ! "" ;
@@ -195,6 +215,67 @@ start "x11docker '$VERSION'" -> options buttons;
         envCustom2:beside     "QT5"         -> "--env=\""  @string="QT_WAYLAND_DISABLE_WINDOWDECORATION=1"  "\" " | ! "" ;
         envCustom3:beside     "Custom"      -> "--env=\""  @string=""                                       "\" " | ! "" ;
         envCustom4:beside     "Custom"      -> "--env=\""  @string=""                                       "\" " | ! "" ;
+        envCustom5:beside     "Custom"      -> "--env=\""  @string=""                                       "\" " | ! "" ;
+        envCustom6:beside     "Custom"      -> "--env=\""  @string=""                                       "\" " | ! "" ;
+        
+  setcapsdialogframe "docker options" -> dockeroptions setcapsdialog capdefault ;
+    capdefault "--cap-default: allow default container capabilities (no \"--cap-drop=ALL\")"  -> "--cap-default " | ! "" ;
+    dockeroptions:beside "Custom options for \"docker run\":"                                 ->  @string="'$DOCKEROPTIONS'" ;
+    setcapsdialog:beside "Customize container capabilities "                                  ->  capsdialog ;
+      capsdialog:dialog "docker capabilities and privileges"  -> capsreference capstable @close="close";
+        capsreference " Add container capabilities degrading container isolation if needed.\n
+                        x11docker disables all this capabilities per default. \n
+                        Left column (SETPCAP till SETFCAP) contains capabilities normally enabled by docker per default.\n
+                        Middle and right column (SYS_MODULE till BLOCK_SUSPEND) contain capabilities disabled by docker per default.\n
+                        See \"man capabilities\" and docker run reference: https://docs.docker.com/engine/reference/run/ " -> "" ;
+                       
+    capstable:framed:beside -> capsleft capsmiddle capsright;
+      capsleft -> drop_1 drop_2 drop_3 drop_4 drop_5 drop_6 drop_7 drop_8 drop_9 drop_10 drop_11 drop_12 drop_13 drop_14 ;
+        drop_1:beside  "--cap-add"  -> "--cap-add="   @string="SETPCAP"           " " | ! "" ;
+        drop_2:beside  "--cap-add"  -> "--cap-add="   @string="MKNOD"             " " | ! "" ;
+        drop_3:beside  "--cap-add"  -> "--cap-add="   @string="AUDIT_WRITE"       " " | ! "" ;
+        drop_4:beside  "--cap-add"  -> "--cap-add="   @string="CHOWN"             " " | ! "" ;
+        drop_5:beside  "--cap-add"  -> "--cap-add="   @string="NET_RAW"           " " | ! "" ;
+        drop_6:beside  "--cap-add"  -> "--cap-add="   @string="DAC_OVERRIDE"      " " | ! "" ;
+        drop_7:beside  "--cap-add"  -> "--cap-add="   @string="FOWNER"            " " | ! "" ;
+        drop_8:beside  "--cap-add"  -> "--cap-add="   @string="FSETID"            " " | ! "" ;
+        drop_9:beside  "--cap-add"  -> "--cap-add="   @string="KILL"              " " | ! "" ;
+        drop_10:beside "--cap-add"  -> "--cap-add="   @string="SETGID"            " " | ! "" ;
+        drop_11:beside "--cap-add"  -> "--cap-add="   @string="SETUID"            " " | ! "" ;
+        drop_12:beside "--cap-add"  -> "--cap-add="   @string="NET_BIND_SERVICE"  " " | ! "" ;
+        drop_13:beside "--cap-add"  -> "--cap-add="   @string="SYS_CHROOT"        " " | ! "" ;
+        drop_14:beside "--cap-add"  -> "--cap-add="   @string="SETFCAP"           " " | ! "" ;
+      capsmiddle -> add_1 add_2 add_3 add_4 add_5 add_6 add_7 add_8 add_9 add_10 add_11 add_12 add_13 add_14 ;
+        add_1:beside   "--cap-add"  -> "--cap-add="   @string="SYS_MODULE"        " " | ! "" ;
+        add_2:beside   "--cap-add"  -> "--cap-add="   @string="SYS_RAWIO"         " " | ! "" ;
+        add_3:beside   "--cap-add"  -> "--cap-add="   @string="SYS_PACCT"         " " | ! "" ;
+        add_4:beside   "--cap-add"  -> "--cap-add="   @string="SYS_ADMIN"         " " | ! "" ;
+        add_5:beside   "--cap-add"  -> "--cap-add="   @string="SYS_NICE"          " " | ! "" ;
+        add_6:beside   "--cap-add"  -> "--cap-add="   @string="SYS_RESOURCE"      " " | ! "" ;
+        add_7:beside   "--cap-add"  -> "--cap-add="   @string="SYS_TIME"          " " | ! "" ;
+        add_8:beside   "--cap-add"  -> "--cap-add="   @string="SYS_TTY_CONFIG"    " " | ! "" ;
+        add_9:beside   "--cap-add"  -> "--cap-add="   @string="AUDIT_CONTROL"     " " | ! "" ;
+        add_10:beside  "--cap-add"  -> "--cap-add="   @string="MAC_OVERRIDE"      " " | ! "" ;
+        add_11:beside  "--cap-add"  -> "--cap-add="   @string="MAC_ADMIN"         " " | ! "" ;
+        add_12:beside  "--cap-add"  -> "--cap-add="   @string="NET_ADMIN"         " " | ! "" ;
+        add_13:beside  "--cap-add"  -> "--cap-add="   @string="SYSLOG"            " " | ! "" ;
+        add_14:beside  "--cap-add"  -> "--cap-add="   @string="DAC_READ_SEARCH"   " " | ! "" ;
+      capsright -> add_15 add_16 add_17 add_18 add_19 add_20 add_21 add_22 add_23 @fill device_1 device_2 device_3 device_4 @fill privileged;
+        add_15:beside  "--cap-add"  -> "--cap-add="   @string="LINUX_IMMUTABLE"   " " | ! "" ;
+        add_16:beside  "--cap-add"  -> "--cap-add="   @string="NED_BROADCAST"     " " | ! "" ;
+        add_17:beside  "--cap-add"  -> "--cap-add="   @string="IPC_LOCK"          " " | ! "" ;
+        add_18:beside  "--cap-add"  -> "--cap-add="   @string="IPC_OWNER"         " " | ! "" ;
+        add_19:beside  "--cap-add"  -> "--cap-add="   @string="SYS_PTRACE"        " " | ! "" ;
+        add_20:beside  "--cap-add"  -> "--cap-add="   @string="SYS_BOOT"          " " | ! "" ;
+        add_21:beside  "--cap-add"  -> "--cap-add="   @string="LEASE"             " " | ! "" ;
+        add_22:beside  "--cap-add"  -> "--cap-add="   @string="WAKE_ALARM"        " " | ! "" ;
+        add_23:beside  "--cap-add"  -> "--cap-add="   @string="BLOCK_SUSPEND"     " " | ! "" ;
+        device_1:beside"--device"   -> "--device="    @string=""                  " " | ! "" ;
+        device_2:beside"--device"   -> "--device="    @string=""                  " " | ! "" ;
+        device_3:beside"--device"   -> "--device="    @string=""                  " " | ! "" ;
+        device_4:beside"--device"   -> "--device="    @string=""                  " " | ! "" ;
+        privileged      "--privileged" -> "--privileged "                             | ! "" ;
+
     
   xinfobutton:dialog "X server info" -> xinfo @close=" close";
     xinfo:beside -> xinfo_option xinfotext xinfo_gpu;
@@ -218,7 +299,7 @@ start "x11docker '$VERSION'" -> options buttons;
         xinfo_option_xwayland ->        @text(" --xwayland\n");
         xinfo_option_xdummy ->          @text(" --xdummy\n");
         xinfo_option_kwinxwayland ->    @text(" --kwin-xwayland\n");
-        xinfo_option_kwinnative ->      @text(" --kwin-native\n");
+        xinfo_option_kwinnative ->      @text(" --kwin-native\n\n");
         xinfo_option_weston ->          @text(" --weston\n");
         xinfo_option_kwin ->            @text(" --kwin\n");
         xinfo_option_wayland ->         @text(" --hostwayland\n");
@@ -234,22 +315,23 @@ start "x11docker '$VERSION'" -> options buttons;
         xinfo_auto ->           @text(" Chooses an X server depending on installed dependencies and on given or missing options --wm and --gpu.\n");
         xinfo_xpra ->           @text(" Recommended to run single applications. Application windows appear on host display. \n
                                         Best --clipboard support, picture clips are possible. Seamless scaling (0,5x, 1.5x, 3x ...) with option --scale is possible");
-        xinfo_xephyr ->         @text(" Recommended to run desktop environments. Desktop appears in a window on host display. Along with option --wm usefull \n
-                                        for single applications, too. Low overhead. GPU acceleration with --gpu is possible, but not very effective.");
+        xinfo_xephyr ->         @text(" Recommended to run desktop environments. Desktop appears in a window on host display. Low overhead, very fast. \n
+                                        Along with option --wm usefull for single applications, too.");
         xinfo_xorg ->           @text(" Core X server. Switch between displays with keys [CTRL][ALT][F1]...[F12]. Runs ootb from console.");
-        xinfo_hostdisplay ->    @text(" Share host display :0 instead of running second X server. Attention: Low security, quite bad container isolation! Least overhead.\n
-                                        Please look at button [Security info]. Use with trusted images and option --hostuser only. Rendering issues are possible due to \n
-                                        missing MIT-SHM and can be fixed with option --untrusted, or with isolation breaking option --ipc, especially for--gpu. \n");
+        xinfo_hostdisplay ->    @text(" Share host display :0 instead of running second X server. Attention: Low security, quite bad container isolation!\n
+                                        Please look at button [Security info]. Use with trusted images only. To reduce risks and to avoid bad RAM access, \n
+                                        untrusted cookies restricting X access are used. (Some applications will not work in untrusted mode). Least overhead.\n");
         xinfo_xpraxwayland ->   @text(" Like --xpra, uses Xwayland in background. GPU acceleration, graphical clipboard and seamless scaling are possible.");
         xinfo_westonxwayland -> @text(" Like --xephyr, Weston with Xwayland. Can run on X or Wayland in a window and on its own from console. \n
                                         GPU acceleration, full integer scaling (2x, 3x, 4x ...) and display rotation (0°, 90°, 180°, 270°, flipped, flipped-90°, ...) are possible.");
         xinfo_nxagent ->        @text(" Like --xpra, but faster startup. (but no graphical clipboard and no scaling).\n
                                         Along with option --wm like --xephyr, but better resizeable. Toggle fullscreen in desktop mode with [CTRL][ALT][SHIFT][F].");
-        xinfo_xwayland ->       @text(" Core Xwayland needs a Wayland environment to run in. Appearing fullscreen display can be moved around.\n");
+        xinfo_xwayland ->       @text(" Core Xwayland needs a Wayland environment to run in. Appearing fullscreen display can be moved around with [META][LMB].\n");
         xinfo_xdummy ->         @text(" Invisible X server for custom access. Output of environment variables on stdout. \n");
         xinfo_weston ->         @text(" Weston without X to run pure Wayland applications. Runs in X, in Wayland or from console. Scaling and rotation is possible.");
         xinfo_kwinxwayland ->   @text(" Like --weston-xwayland, but using Kwin instead of Weston. Runs in X, in Wayland or from console.");
-        xinfo_kwinnative ->     @text(" Uses rootless Xwayland in Kwin. Along with --waylandenv --dbus --sharewayland combined use of seamless X and Wayland apps.");
+        xinfo_kwinnative ->     @text(" Seamless Xwayland in Kwin. Along with --waylandenv --dbus --sharewayland combined use of seamless X and Wayland apps.\n
+                                        Uses restricted untrusted cookies to avoid bad RAM access. Use insecure option --ipc to abrogate restrictions. Experimental.");
         xinfo_kwin ->           @text(" kwin_wayland without X to run pure Wayland applications. Runs in X, in Wayland or from console.");
         xinfo_wayland ->        @text(" Shares host wayland socket without X to run pure Wayland applications. Needs a running Wayland compositor.");
       xinfo_gpu ->    xinfo_gpu_title        xinfo_gpu_auto 
@@ -263,9 +345,9 @@ start "x11docker '$VERSION'" -> options buttons;
         xinfo_gpu_title ->           @text(" --gpu ");
         xinfo_gpu_auto ->            @text(" \n");
         xinfo_gpu_xpra ->            @text(" no\n\n");
-        xinfo_gpu_xephyr ->          @text(" (yes)\n\n");
+        xinfo_gpu_xephyr ->          @text(" no\n\n");
         xinfo_gpu_xorg ->            @text(" yes\n");
-        xinfo_gpu_hostdisplay ->     @text(" (yes)\n\n\n");
+        xinfo_gpu_hostdisplay ->     @text(" yes\n\n\n");
         xinfo_gpu_xpraxwayland ->    @text(" yes\n");
         xinfo_gpu_westonxwayland ->  @text(" yes\n\n");
         xinfo_gpu_nxagent ->         @text(" no\n\n");
@@ -273,11 +355,11 @@ start "x11docker '$VERSION'" -> options buttons;
         xinfo_gpu_xdummy ->          @text(" no\n");
         xinfo_gpu_weston ->          @text(" yes\n");
         xinfo_gpu_kwinxwayland ->    @text(" yes\n");
-        xinfo_gpu_kwinnative ->      @text(" yes\n");
+        xinfo_gpu_kwinnative ->      @text(" yes\n\n");
         xinfo_gpu_kwin ->            @text(" yes\n");
         xinfo_gpu_wayland ->         @text(" yes\n");
          
-  xdependenciesbutton:dialog "Dependencies" -> xdependencies xdependencies2 @close=" close";
+  xdependenciesbutton:dialog "Dependencies" -> xdependencies @text(" Other dependencies, some in image, too") xdependencies2 @close=" close";
     xdependencies:beside -> xdep_option xdep_host xdep_xrunning ;
       xdep_option -> xdep_option_title  
                      xdep_option_xpra         xdep_option_xephyr 
@@ -317,7 +399,7 @@ start "x11docker '$VERSION'" -> options buttons;
         xdep_host_westonxwayland -> @text(" xwayland \ weston");
         xdep_host_nxagent ->        @text(" nxagent");
         xdep_host_xwayland ->       @text(" xwayland");
-        xdep_host_xdummy ->         @text(" xserver-xorg-core \ xserver-xorg-video-dummy");
+        xdep_host_xdummy ->         @text(" xserver-xorg-core \ xserver-xorg-video-dummy (or xvfb)");
         xdep_host_weston ->         @text(" weston");
         xdep_host_kwin ->           @text(" kwin xwayland");
         xdep_host_wayland ->        @text(" -");
@@ -342,13 +424,18 @@ start "x11docker '$VERSION'" -> options buttons;
         xdep_xrun_weston ->         @text(" -");
         xdep_xrun_kwin ->           @text(" -");
         xdep_xrun_wayland ->        @text(" Wayland");
-    xdependencies2 -> xdep_other xdep_gpu xdep_xclip xdep_pulseaudio xdep_dbus ;
-      xdep_other             -> @text(" Other dependencies");
-      xdep_xclip:beside      -> @text("--clipboard")  @text("Needs package xclip on host (except for options --xpra and --xpra-xwayland).") ; 
-      xdep_pulseaudio:beside -> @text("--pulseaudio") @text("Needs package pulseaudio on host AND in image.") ;
-      xdep_dbus:beside       -> @text("--dbus")       @text("Needs package dbus-x11 in image.") ;
-      xdep_gpu:beside        -> @text("--gpu")        @text("Needs OpenGL dependencies to be installed in image. These are some or all of\n
-                                                             libgl1-mesa-glx  libglew2.0 libglu1-mesa libgl1-mesa-dri libdrm2 libgles2-mesa libegl1-mesa\n
+    xdependencies2:beside -> xdep_options xdep_text ;
+      xdep_options -> xdep_gpu      xdep_xclip      xdep_pulseaudio      xdep_dbus;
+      xdep_text    -> xdep_gpu_text xdep_xclip_text xdep_pulseaudio_text xdep_dbus_text;
+      xdep_xclip           -> @text("--clipboard") ;
+      xdep_xclip_text      -> @text("Needs package xclip on host (except for options --xpra, --xpra-xwayland and --nxagent).") ; 
+      xdep_pulseaudio      -> @text("--pulseaudio") ;
+      xdep_pulseaudio_text -> @text("Needs package pulseaudio on host AND in image.") ;
+      xdep_dbus            -> @text("--dbus") ;
+      xdep_dbus_text       -> @text("Needs package dbus-x11 in image.") ;
+      xdep_gpu             -> @text("--gpu\n\n\n") ;
+      xdep_gpu_text        -> @text("Needs OpenGL dependencies to be installed in image. These are some or all of\n
+                                                             libgl1-mesa-glx \ libglew2.0 \ libglu1-mesa \ libgl1-mesa-dri \ libdrm2 \ libgles2-mesa \ libegl1-mesa\n
                                                              Media players like VLC may also need libxv1.");
     xdep_xorg_setupdialog:dialog "Setup" -> @text(" Option --xorg can be used out of the box on console tty1...tty6. \n
                                                    \n
@@ -368,12 +455,12 @@ start "x11docker '$VERSION'" -> options buttons;
   help:dialog "Help" -> @text(
   " x11docker allows you to run GUI applications and desktop environments from inside of docker images. \n
     Its main purpose is to preserve container isolation while avoiding some X security leaks. \n
-    Core concept is to run a segregated second X server with its own authentication cookies. \n
+    Core concept is to run a segregated second X server and to reduce container privileges.\n
     \n
     Depending on chosen options, you can have high or low container isolation. \n
     Look at button [Security info] to see the differences. \n
     \n
-    With most recommended options --xpra, --xephyr, --xpra-xwayland and weston-xwayland, \n
+    With most recommended options --xpra, --xephyr, --xpra-xwayland, --weston-xwayland and --nxagent, \n
     the dockered applications will appear on your already running X display. \n
     You can also choose discouraged option --hostdisplay for this to have least overhead, \n
     but then you have least container isolation, too. \n
@@ -381,63 +468,91 @@ start "x11docker '$VERSION'" -> options buttons;
     On systems without a root password like Ubuntu or Sparky, use option --sudo.\n
     \n
     For troubleshooting, activate option --verbose and use \"Run in xterm\" (or run x11docker-gui in a terminal).\n
-    Options --hostdisplay and --kwin-native can have rendering issues and RAM access errors. This can be avoided \n
-    with either option --untrusted or option --ipc. Regard security infos about this options.\n
+    Some applications may not work with --hostdisplay or --kwin-native as the use untrusted cookies to avoid \n
+    RAM access failures. Also, some keys like AltGr may not work. To remove restrictions, you can break container \n
+    isolation with options --trusted and --ipc. Or even better, choose another X server option.\n
     \n
     Wayland: \n
-    To test Wayland applications without an X environment, you can use options --weston and --hostwayland.\n
+    To test Wayland applications without X, you can use options --weston, --kwin and --hostwayland.\n
     QT5 applications often (always?) need options --dbus and --waylandenv.\n 
     \n
     x11docker and x11docker-gui are published under MIT licence. \n
-    Have a look at github: https://github.com/mviereck/x11docker\n
+    Please report issues at github: https://github.com/mviereck/x11docker\n
     Some example docker images can be found at https://hub.docker.com/u/x11docker
-    ") @close=" close";
+    ") helpbuttons;
+  helpbuttons:beside -> MIT @close=" close" ;
     
-    security_dialog:dialog " Security info " -> sec_info sec_degrading sec_hostdisplay sec_gpu sec_pulseaudio sec_ipc sec_net sec_improving sec_hostuser sec_untrusted sec_noxhost @close=" close";
-      sec_info -> @text(" Main goal of x11docker is to allow running GUI applications in docker on X11 or Wayland while preserving container isolation. \n
-                               Most important part is to avoid common X security leaks. \n
-                               This is given for alle provided X servers (and Wayland compositors) except option --hostdisplay (see below).\n
-                               Core concept is to run a segregated second X server with its own authentication cookies.
-                               ") ;
-      sec_degrading -> @text("\n Options degrading container isolation:");
-      sec_gpu:beside -> sec_gpu_opt sec_gpu_text;
-        sec_gpu_opt  -> @text(" --gpu ");
-        sec_gpu_text -> @text(" Option --gpu allows hardware acceleration for docker OpenGL applications. Access to GPU hardware can allow rootkits. \n
-                                     Example rootkit: https://github.com/x0r1/jellyfish\n
-                                     Although there is little known of real attacks, you should be aware of this. This risk affects X servers and Wayland compositors as well.");
-      sec_hostdisplay:beside  -> sec_hostdisplay_opt sec_hostdisplay_text;
-        sec_hostdisplay_opt   -> @text(" --hostdisplay ");
-        sec_hostdisplay_text  -> @text(" Quite bad container isolation, but least overhead of all X server options.\n
-                                              Instead of creating a new segregated X server to avoid X security leaks, option --hostdisplay shares your host X server with container. \n
-                                              Keylogging and other attacks are an easy task, it is enough to run xenv or xinput and send its output to internet.\n
-                                              Also, container applications can get control over host applications. \n
-                                              Use along with option --hostuser to reduce risks. Consider to use option --untrusted, too. Use with trusted images only.\n
-                                              If you do not care about container isolation at all, get a quite fast setup with \"x11docker --hostdisplay --ipc --gpu IMAGENAME\"");
-        sec_pulseaudio:beside -> sec_pulseaudio_opt sec_pulseaudio_text;
-          sec_pulseaudio_opt  -> @text(" --pulseaudio ");
-          sec_pulseaudio_text -> @text(" With pulseaudio enabled, container applications can get your audio output and also can hear everything you say if your computer\n
-                                              has microphones.");
-        sec_ipc:beside -> sec_ipc_opt sec_ipc_text;
-          sec_ipc_opt         -> @text(" --ipc ");
-          sec_ipc_text        -> @text("Isolation breakdown, use with care! Shares host interprocess communication and shared memory. Allows MIT-SHM extension.");
-        sec_net:beside -> sec_net_opt sec_net_text @fill @fill;
-          sec_net_opt         -> @text(" --net ");
-          sec_net_text        -> @text("Isolation breakdown, use with care! Shares host network stack. Allows dbus communication.");
-      sec_improving -> @text("\n Options improving container isolation:");
-        sec_hostuser:beside -> sec_hostuser_opt sec_hostuser_text;
-          sec_hostuser_opt  -> @text(" --hostuser ");
-          sec_hostuser_text -> @text("Always recommended! Working as unprivileged user in container avoids root permissions if an application breaks out of container.");
-        sec_noxhost:beside -> sec_noxhost_opt sec_noxhost_text;
-          sec_noxhost_opt  -> @text(" --no-xhost ");
-          sec_noxhost_text -> @text("Disables all network access to host X display possibly permitted by xhost. Host applications are forced to use ~./Xauthority instead");
-        sec_untrusted:beside -> sec_untrusted_opt sec_untrusted_text;
-          sec_untrusted_opt  -> @text(" --untrusted ");
-          sec_untrusted_text -> @text("Creates untrusted cookies to restrict access to X resources. Recommended for option --hostdisplay. Some applications may misbehave.\n");
+    sec_nopassword:dialog "Avoiding password prompt" -> @text("There is no way to start naked docker in a secure way without a password.\n
+                                                           \n
+                                                           As long as you can share host system files as docker volumes, \n
+                                                           it is possible to manipulate root files from within a docker container.\n
+                                                           User namespace mapping does not help, as it can be disabled with docker run option --userns=host.\n
+                                                           \n
+                                                           There are suggestions to become member of group docker. That is comfortable, but if anyone gets access \n
+                                                           to your user account, he can change your system without restrictions, and you would not notice.\n
+                                                           \n
+                                                           One possibility working for docker as well as  for x11docker is to create a setgid wrapper for often used commands. \n
+                                                           Example:\n
+                                                           \n
+                                                            \* Create a starter script, I call it xd_pcmanfm:\n
+                                                           #! /bin/bash\n
+                                                           x11docker --no-password \ x11docker/lxde \ pcmanfm\n
+                                                           \n
+                                                            \* Save this script as root in /usr/local/bin/ \n
+                                                            \n
+                                                            \* Make script executeable: \n
+                                                           chmod \ +x \ /usr/local/bin/xd_pcmanfm \n
+                                                           \n
+                                                            \* Change group of script file to group docker: \n
+                                                           chgrp \ docker \ /usr/local/bin/xd_pcmanfm\n
+                                                           \n
+                                                            \* Set setgid bit to execute script with docker group privileges: \n
+                                                           chmod \ g+s \ /usr/local/bin/xd_pcmanfm\n
+                                                           \n
+                                                           Now you can execute xd_pcmanfm without a password promp!\n
+                                                           Be aware that this script may be exploited somehow, though x11docker has some basic exploit checks.
+                                                           ") @close=" close";
+    
+    security_dialog:dialog " Security info " -> sec_info sec_degrading_title sec_degrading sec_doesntmatter sec_buttons;
+      sec_info               -> @text(" Main goal of x11docker is to allow running GUI applications in docker on X11 or Wayland while preserving container isolation. \n\n
+                                        Most important part is to avoid common X security leaks, making keylogging and remote controlling of host applications impossible. \n
+                                        This is given for alle provided X servers (and Wayland compositors) except option --hostdisplay (see below).\n
+                                        Core concept is to run a segregated second X server with its own authentication cookies.\n\n
+                                        Default user in container is same as host user to avoid root running GUI applications.\n
+                                        All default docker container capabilities like user switching, chroot and setuid/setgid are disabled.\n
+                                        User namespace remapping currently has limited support and is disabled for options --home and --homedir.
+                                        ") ;
+      sec_degrading_title    -> @text("\n Options degrading container isolation:");
+      sec_degrading:beside   -> sec_deg_opt sec_deg_text;
+        sec_deg_opt          -> sec_hostdisplay_opt  sec_gpu_opt sec_pulseaudio_opt sec_trusted_opt sec_ipc_opt  sec_net_opt sec_capdefault_opt ;
+        sec_deg_text         -> sec_hostdisplay_text sec_gpu_text sec_pulseaudio_text sec_trusted_text sec_ipc_text sec_net_text sec_capdefault_text;
+          sec_gpu_opt          -> @text(" --gpu \n\n\n\n");
+          sec_gpu_text         -> @text(" Option --gpu allows hardware acceleration for docker OpenGL applications. Access to GPU hardware can allow rootkits. \n
+                                          Example rootkit: https://github.com/x0r1/jellyfish\n
+                                          Although there is little known of real attacks, you should be aware of this. This risk affects X servers and Wayland compositors as well. \n
+                                          Attention: Enables insecure option --ipc and --trusted for --hostdisplay and --kwin-native. Allows keylogging with --hostdisplay.");
+          sec_hostdisplay_opt  -> @text(" --hostdisplay \n\n\n");
+          sec_hostdisplay_text -> @text(" Quite bad container isolation, but least overhead of all X server options. Use with trusted images only.\n
+                                          Instead of creating a new segregated X server to avoid X security leaks, your host X server is shared with container. \n
+                                          x11docker avoids keylogging and other attacks using untrusted cookies, but do not rely on this. \n");
+          sec_pulseaudio_opt   -> @text(" --pulseaudio \n\n");
+          sec_pulseaudio_text  -> @text(" With pulseaudio enabled, container applications can catch your audio output and also can hear everything you say \n
+                                          if your computer has microphones.");
+          sec_ipc_opt          -> @text(" --ipc ");
+          sec_ipc_text         -> @text(" Isolation breakdown, use with care! Shares host interprocess communication and shared memory. Allows MIT-SHM extension.");
+          sec_net_opt          -> @text(" --net ");
+          sec_net_text         -> @text(" Isolation breakdown, use with care! Shares host network stack. Allows dbus communication.");
+          sec_trusted_opt      -> @text(" --trusted ");
+          sec_trusted_text     -> @text(" Enforces trusted cookies for options --hostdisplay and --kwin-native. Allows keylogging and other evil things for --hostdisplay.");
+          sec_capdefault_opt   -> @text(" --cap-default ");
+          sec_capdefault_text  -> @text(" Allows default docker container capabilities like user switching and chroot not needed by x11docker, but reducing security. ");
+          sec_doesntmatter     -> @text(" \n If you do not care about container isolation at all, get a quite fast setup with \"x11docker --hostdisplay --gpu IMAGENAME\" ");
+      sec_buttons:beside     -> sec_nopassword @close=" close" ;
                        
   MIT:dialog "MIT license" -> @text(
                " MIT License\n
                  \n
-                 Copyright (c) 2015,2016 Martin Viereck\n
+                 Copyright (c) 2015,2016,2017 Martin Viereck\n
                  \n
                  Permission is hereby granted, free of charge, to any person obtaining a copy\n
                  of this software and associated documentation files (the \"Software\"), to deal\n
@@ -457,10 +572,10 @@ start "x11docker '$VERSION'" -> options buttons;
                  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\n
                  SOFTWARE.") @close="close";
 
-x11docker_options -> choose_xserver security sizefullscreen choose_options choose_options_advanced imageorexe "\"" dockeroptions " \" "  "\""dockerimage "\"" ;
+x11docker_options -> choose_xserver sizefullscreen choose_options_normal choose_options_advanced develcollect imageorexe "\"" setcapsdialog dockeroptions " \" "  "\""dockerimage "\"" ;
 x11docker -> "'$X11DOCKER' " x11docker_options;
 
-buttons :horizontal ->  run runxterm preview desktop_starter orphanedcheck MIT help @close="Cancel";
+buttons :horizontal ->  run runxterm preview desktop_starter orphanedcheck help @close="Cancel";
   run -> @fork(x11docker)=" Run";
   preview -> @preview(x11docker,"monospace",900)="Preview command" ;
   desktop_starter -> @dump("xterm -e '\''","'$X11DOCKER' --starter ",x11docker_options,"'\''")="Create desktop starter";
