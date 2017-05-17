@@ -96,6 +96,30 @@ To run only an empty new X server:
 
 Have a look at `x11docker --help` to see all options. Also the are visible in [x11docker wiki: x11docker options overview](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview).
 
+## Avoiding password prompt
+There is no way to start naked docker in a secure way without a password.                                                          As long as you can share host system files as docker volumes, it is possible to manipulate root files from within a docker container. User namespace mapping does not help, as it can be disabled with docker run option `--userns=host`.
+There are suggestions to become member of group docker. That is comfortable, but if anyone gets access to your user account, he can change your system without restrictions, and you would not notice.
+
+One possibility working for docker as well as  for x11docker is to create a setgid wrapper for often used commands. Example:
+- Create a starter script, I call it `xd_pcmanfm`:
+```
+#! /bin/bash
+x11docker --no-password x11docker/lxde pcmanfm
+```
+- Save this script as root in `/usr/local/bin/` and make script executeable:
+```
+chmod +x /usr/local/bin/xd_pcmanfm
+```
+- Change group of script file to group docker:
+```
+chgrp docker /usr/local/bin/xd_pcmanfm
+```
+- Set setgid bit to execute script with docker group privileges:
+```
+chmod g+s /usr/local/bin/xd_pcmanfm
+```
+Now you can execute `xd_pcmanfm` without a password prompt. Be aware that this script may be exploited somehow, though x11docker has some basic exploit checks.
+
 # Developer options
 Collection of rarer needed but sometimes useful options.
 
