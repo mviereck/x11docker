@@ -134,7 +134,7 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
    
  - Run wine and playonlinux on xfce desktop in a Xephyr window, sharing a home folder to preserve settings and wine installations:
 
-  `x11docker --xephyr --home  x11docker/xfce-wine-playonlinux
+  `x11docker --xephyr --home  x11docker/xfce-wine-playonlinux`
    
  - Run playonlinux in an xpra window, sharing a home folder to preserve settings and installations, sharing clipboard, enabling pulseaudio sound and GPU acceleration:
 
