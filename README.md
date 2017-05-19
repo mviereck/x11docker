@@ -93,7 +93,7 @@ To run a host application on a new X server:
 To run only an empty new X server:
  -  `x11docker [OPTIONS]`
 
-Have a look at `x11docker --help` to see all options. Also they are visible in xdocker wiki: [x11docker options overview](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview).
+Have a look at `x11docker --help` to see all options. Also they are visible in x11docker wiki: [x11docker options overview](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview).
 
 ## Avoiding password prompt
 There is no way to start naked docker in a secure way without a password.                                                          As long as you can share host system files as docker volumes, it is possible to manipulate root files from within a docker container. User namespace mapping does not help, as it can be disabled with docker run option `--userns=host`.
