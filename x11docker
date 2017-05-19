@@ -1,4 +1,4 @@
-#! /bin/bash
+#! /bin/bash -eu
 # x11docker
 # Run GUI applications and desktop environments in docker on a separate X server or Wayland compositor.
 # Provides GPU acceleration and pulseaudio sound. Circumvents common X security leaks.
@@ -6,10 +6,14 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.5.0"
+Version="3.5.1"
 
 changelog() {
 ### ToDo:
+# kdeneon/all:user-lts plasmashell: no kwin?
+# check --user root
+# handle group similar to uid (check name for gid etc)
+# sharing fake /tmp/.X11-unix is not nice, sort of breaking isolation
 # check all code pathes (*cough*) with set -eu 
 # call error() if $Hostdisplay is set, but not accessable
 # do not terminate x11docker-gui on --orphaned or run-in-terminal
@@ -26,6 +30,7 @@ changelog() {
 # BUG error() in xinitrc does not terminate --xpra
 # BUG check whether VT is not in use with --xorg, bug if accidently using vt that is already in use
 ### BUG collection: non x11docker bugs
+# BUG Xwayland does not allow xhost -SI:localuser:$USER
 # BUG nxagent with x11docker/lxde: segmentation fault of lxpanel with --userns-remap. bug in nxagent?
 # BUG --kwin*: wrong fullscreen and crashes in gnome-wayland, strange in weston, WAYLAND_DISPLAY="" does not help, probably bug in kwin
 # BUG -- output-count: sometimes multiple windows dont close although x11docker is finished. high cpu load, probably Weston bug
@@ -34,6 +39,8 @@ changelog() {
 # BUG debian bug report lightdm/sddm contra gdm, dm can crash on tty switch if multiple graphical sessions are running
 
 # x11docker changelog
+# 19.05.2017 V3.5.1  user creation with '--addgroup video' to support pre-systemd and kdeneon gpu support
+#                    create /tmp/.X11-unix with 1777
 # 17.05.2017 V3.5.0  avoid Terminal window with --no-password
 # 15.05.2017         --env: regard whitespaces, use \n to divide entrys
 #                    set mode=preferred for Weston on tty, ignore $Screensize
@@ -109,46 +116,7 @@ changelog() {
 #                     xpra xmessage to be patient
 #                     disabled keyboard adjusting for --nxagent
 # 16.04.2017 V3.1.0   --nxagent: new X server option
-# 15.04.2017 V3.0.0   Wayland support ready.
-# 14.04.2017          code cleanup
-#                     second stderr &3 to show warnings and errors also from within xinitrc and xtermrc
-#                     error messages on docker startup failure in xtermrc
-# 10.04.2017          --xhost changed to --xhost+, affects new X server only
-# 08.04.2017          --kwin und --kwin-wayland: new X server / wayland options
-#                     xdummy.conf or --xpra: custom modeline setting fittung to actual resolution
-#                     --xdummy regards --size
-# 07.04.2017          x11docker_CMD checks if ps is available
-# 06.04.2017          --wm changed, autochoosing no longer default
-#                     --desktop dismissed
-# 05.04.2017          old --env now is called --showenv
-#                     --env: new option: set custom envionment variables
-#                     --dbus: new option, run image command with dbus-launch 
-# 04.04.2017          chmod 1777 /tmp/X11-unix to allow creation of X sockets in container
-#                     --verbose output much more reliebalenow, tail improved
-# 03.04.2017          use prefix unix for DISPLAY to disable MIT_SHM instead using other environment variables
-# 02.04.2017          --virtualgl dismissed
-#                     --dockerenv dismissed
-#                     --xpra-image --xorg-image --xdummy-image dismissed
-#                     --tcp --tcpxsocket --xsocket dismissed
-# 01.04.2017          --weston, --wayland: new options for pure Wayland applications
-# 31.03.2017          --xpra-xwayland: new X server option
-#                     create dektop starter with basename instead of $0
-#                     createuser: start with --user=0 to allow useradd and su
-#                     --setwaylandenv: new option setting environment variables for toolkits like QT and GTK to use wayland
-# 28.03.2017          dismissed --glamor, now always enabled.
-#                     dismissed --sharegpu: same is done with --gpu
-#                     --nothing: Provide no X or Wayland server
-#                     --sharewayland: Share host wayland socket and set WAYLAND_DISPLAY
-#                     reverse order of killing of bgpids in finish(),last one first, to catch possible further output with tail -F
-#                     Newdisplaynumber for xorg starts with 8, Newxvt not added 7
-#                     xinitrc: XPRA_OPENGL_DOUBLE_BUFFERED=1 to avoid xpra bug 1469
-# 26.03.2017          check and set $XDG_RUNTIME_DIR for weston and Xwayland
-#                     --weston-xwayland and --xwayland: new X server options
-# 25.03.2017  V3.beta start with eperimental Wayland support
-# 10.04.2017  V2.5    Stable release, last one including --xpra-image, --xorg-image, --xdummy-image
-#                     Still available on https://github.com/mviereck/x11docker/tree/x11docker_2.5
-# 24.02.2017  V2.0
-# 16.10.2015  V1.0
+# 15.04.2017 V3.0.0   Wayland support 
   : 
 }
 usage() {               # --help: show usage information
@@ -814,7 +782,6 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
 }
 
 { #### part: parsing cli options
-  #Shortoptions="hw:dayxXWMKcfSGeuomprsnvgNPH0UANYtEl:"
   Shortoptions="aAcdeEfgGhHKml:MnNoOpPrsSutUvw:WxXyY"
   Longoptions="auto,x,X,xpra,xephyr,x11,xorg,hostdisplay,xwayland,weston-xwayland,xpra-xwayland,nxagent"                   # X servers
   Longoptions="$Longoptions,weston,hostwayland,kwin,kwin-xwayland,kwin-native,xdummy,nothing"                              # more X/Wayland servers
@@ -907,7 +874,7 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
       
          --ipc)        Shareipc="yes" ;;                   # docker run option --ipc=host
          --net)        Sharenet="yes" ;;                   # docker run option --net=host
-         --cap-default)Capdropall="no" ;;                  # don't use --cap-drop=ALL
+         --cap-default) Capdropall="no" ;;                 # don't use --cap-drop=ALL
          
          --user)       Benutzer="${2:-}"  ; shift ;;       # set container user instead of host user
          --homedir)    Adduserhomefolder="${2:-}" ; Adduserhome="yes" ; shift ;; # set host folder to share as home folder instead of ~/x11docker/NAME
@@ -1922,7 +1889,7 @@ esac
   
 }
 
-{ #### part: check container user, create shared home folder
+{ #### part: check container user and shared home folder
 
   Containername="x11docker_X${Newdisplaynumber}_$(mcookie | cut -c -6)_$(echo $Imagename | tr / _ | tr : _ )"
 
@@ -1958,10 +1925,6 @@ esac
     [ "$(echo $Line | cut -c1)" = "=" ] && Line="$(echo $Line | cut -c2-)"
     Line="$(echo $Line | cut -d' ' -f1)"
     nsBenutzeruid="$(cat /etc/subuid | grep "$Line:" | cut -d: -f2)" # can be wrong, cannot predict or preset mapped uid for sure.
-#    warning "docker is configured with --userns-remap=$Line.
-#  x11docker currently does not support user namespace remapping.
-#  Fallback: using docker run option --userns=host to disable --userns-remap."
-#    Dockeroptions="$Dockeroptions --userns=host"
   }
   
   ## option '--home':    share folder ~/.local/share/x11docker/imagename with created container as its home directory
@@ -2035,7 +1998,7 @@ esac
       Dockercommand="$Dockercommand --name=$Containername"
       
       # Create container user and /etc/passwd
-      Dockercommand="$Dockercommand --user $Benutzeruid:$Benutzergid --env USER=$Benutzer"
+      Dockercommand="$Dockercommand --user $Benutzeruid:$Benutzergid --group-add video --env USER=$Benutzer"
       [ "$Benutzeruid" = "0" ] || Dockercommand="$Dockercommand -v $Etcpasswd:/etc/passwd:ro"
       
       Dockercommand="$Dockercommand -v $Sharefolder:$Cshare:rw"
@@ -2050,6 +2013,8 @@ esac
           #      XAUTHORITY
           [ "$Xauthentication" = "yes" ] && Dockercommand="$Dockercommand -e XAUTHORITY=$Cshare/Xclientcookie"
           #      X socket
+          mkdir $Cachefolder/X11-unix && chmod 1777 $Cachefolder/X11-unix
+          Dockercommand="$Dockercommand -v $Cachefolder/X11-unix:/tmp/.X11-unix:rw"
           Dockercommand="$Dockercommand -v $Newxsocket:$Newxsocket:ro"
         ;;
       esac
@@ -2065,10 +2030,8 @@ esac
       [ "$Setwaylandenv" = "yes" ] && for Line in $Waylandtoolkitenv ; do Dockercommand="$Dockercommand -e $Line" ; done
 
       ## option --env
-      #for Line in $Customenvironment ; do Dockercommand="$Dockercommand -e \"$Line\"" ; done
       while read -r Line; do [ -z "$Line" ] || Dockercommand="$Dockercommand --env=\"$Line\"" ; done < <(echo -e $Customenvironment)
 
-     
       ## option --gpu : share graphics adapter device files ### SECURITY: degrades container isolation
       [ "$Gpu" = "yes" ] && Dockercommand="$Dockercommand --device=/dev/dri"
       
