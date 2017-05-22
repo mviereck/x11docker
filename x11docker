@@ -1,4 +1,4 @@
-#! /bin/bash -eu
+#! /bin/bash
 # x11docker
 # Run GUI applications and desktop environments in docker on a separate X server or Wayland compositor.
 # Provides GPU acceleration and pulseaudio sound. Circumvents common X security leaks.
@@ -6,20 +6,19 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.5.1"
+Version="3.5.2"
 
 changelog() {
 ### ToDo:
+# check file permission issuance - maybe giving too much for different --user on --homedir?
 # kdeneon/all:user-lts plasmashell: no kwin?
 # check --user root
-# handle group similar to uid (check name for gid etc)
-# sharing fake /tmp/.X11-unix is not nice, sort of breaking isolation
 # check all code pathes (*cough*) with set -eu 
 # call error() if $Hostdisplay is set, but not accessable
 # do not terminate x11docker-gui on --orphaned or run-in-terminal
 # further checks with and without --userns=host while user namespacing is enabled
 # support user namespacing with --home and --homedir. Missing key: how to set or predict subuid in use?
-# check setfacl and gefacl with non-acl file systems and wih acl not installed
+# check setfacl and gefacl with non-acl file systems and with acl not installed
 # --keep-passwd?
 # --xorg: check custom systemd start of X #7
 # check X in container #7
@@ -30,6 +29,7 @@ changelog() {
 # BUG error() in xinitrc does not terminate --xpra
 # BUG check whether VT is not in use with --xorg, bug if accidently using vt that is already in use
 ### BUG collection: non x11docker bugs
+# bugreport docker: container user does NOT have same groups as host user - just wrong doku?
 # BUG Xwayland does not allow xhost -SI:localuser:$USER
 # BUG nxagent with x11docker/lxde: segmentation fault of lxpanel with --userns-remap. bug in nxagent?
 # BUG --kwin*: wrong fullscreen and crashes in gnome-wayland, strange in weston, WAYLAND_DISPLAY="" does not help, probably bug in kwin
@@ -39,6 +39,7 @@ changelog() {
 # BUG debian bug report lightdm/sddm contra gdm, dm can crash on tty switch if multiple graphical sessions are running
 
 # x11docker changelog
+# 22.05.2017 V3.5.2  --volume: new option to share host folders
 # 19.05.2017 V3.5.1  user creation with '--addgroup video' to support pre-systemd and kdeneon gpu support
 #                    create /tmp/.X11-unix with 1777
 # 17.05.2017 V3.5.0  avoid Terminal window with --no-password
@@ -725,6 +726,7 @@ Benutzerpasswdentry=""                          # entry in /etc/passwd of contai
 Etcpasswd=passwd                                # created /etc/passwd for container
 #Etcgroup=group
 Capdropall="yes"                                # option --cap-default: (don't) drop all container capabilities
+Sharevolumes=""                                 # option --volume: host folders to share
 
 Pulseaudiotcpport=""                            # option '--pulseaudio': pulseaudio tcp port to use
 Pulseaudio="no"                                 #   "                    use pulseaudio yes/no
@@ -787,11 +789,11 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
   Longoptions="$Longoptions,weston,hostwayland,kwin,kwin-xwayland,kwin-native,xdummy,nothing"                              # more X/Wayland servers
   Longoptions="$Longoptions,wm:,exe,xonly"
   Longoptions="$Longoptions,fullscreen,resizeable,size:,glamor,scale:,rotate:,dpi:,output-count:,gpu"                      # screen options
-  Longoptions="$Longoptions,home,clipboard,pulseaudio"                                                                     # comfort options
+  Longoptions="$Longoptions,user:,home,clipboard,pulseaudio"                                                               # comfort options
   Longoptions="$Longoptions,sudo,verbose,nopwd,no-password,no-xhost,trusted,untrusted,dbus,waylandenv"                     # advanced options
   Longoptions="$Longoptions,starter,orphaned,license,licence,help,version,install,update,remove"                           # special options without starting X server
   Longoptions="$Longoptions,xhost+,no-auth,vt:,display:,env:,showenv,sharewayland,root,ipc,net,ps,cache,cap-default"       # developer options
-  Longoptions="$Longoptions,user:,cachedir:,homedir:,westonini:"                                                           # developer options
+  Longoptions="$Longoptions,cachedir:,homedir:,westonini:,volume:"                                                         # developer options
   Longoptions="$Longoptions,hostuser,sudouser,desktop,xsocket,tcp,tcpxsocket,virtualgl,glamor,xpra-image,xpra-attach,xorg-image,xdummy-image"  # deprecated
   Parsedoptions="$(getopt --options $Shortoptions --longoptions $Longoptions --name "$0" -- "$@" 2>/tmp/x11docker_parsererror)"
   [ -e /tmp/x11docker_parsererror ] && Parsererror=$(cat /tmp/x11docker_parsererror) && rm /tmp/x11docker_parsererror
@@ -847,6 +849,7 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
          --trusted)    Forcetrusted="yes"  ;;              # force trusted cookies for --hostdisplay and --kwin-native
       -t|--untrusted)  Trusted="no"  ;;                    # create untrusted cookies
 
+         --user)       Benutzer="${2:-}"  ; shift ;;       # set container user instead of host user
       -m|--home)       Adduserhome="yes" ;;                # share folder ~/x11docker/Imagename with container
       -c|--clipboard)  Shareclipboard="yes"  ;;            # share host clipboard with dockered applications (xpra only)
       -p|--pulseaudio) Pulseaudio="yes"  ;;                # enable pulseaudio connection / sound support over tcp
@@ -876,9 +879,9 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
          --net)        Sharenet="yes" ;;                   # docker run option --net=host
          --cap-default) Capdropall="no" ;;                 # don't use --cap-drop=ALL
          
-         --user)       Benutzer="${2:-}"  ; shift ;;       # set container user instead of host user
          --homedir)    Adduserhomefolder="${2:-}" ; Adduserhome="yes" ; shift ;; # set host folder to share as home folder instead of ~/x11docker/NAME
          --cachedir)   Cacherootfolder="${2:-}" ; shift ;; # set cache folder instead of default $Cacherootfolder
+         --volume)     Sharevolumes="$Sharevolumes\n${2:-}" ; shift ;; 
          
          --westonini)  Customwestonini="${2:-}" ; shift ;; # custom weston.ini
 
@@ -2013,8 +2016,8 @@ esac
           #      XAUTHORITY
           [ "$Xauthentication" = "yes" ] && Dockercommand="$Dockercommand -e XAUTHORITY=$Cshare/Xclientcookie"
           #      X socket
-          mkdir $Cachefolder/X11-unix && chmod 1777 $Cachefolder/X11-unix
-          Dockercommand="$Dockercommand -v $Cachefolder/X11-unix:/tmp/.X11-unix:rw"
+          mkdir $Sharefolder/X11-unix && chmod 1777 $Sharefolder/X11-unix
+          Dockercommand="$Dockercommand -v $Sharefolder/X11-unix:/tmp/.X11-unix:rw"
           Dockercommand="$Dockercommand -v $Newxsocket:$Newxsocket:ro"
         ;;
       esac
@@ -2031,6 +2034,14 @@ esac
 
       ## option --env
       while read -r Line; do [ -z "$Line" ] || Dockercommand="$Dockercommand --env=\"$Line\"" ; done < <(echo -e $Customenvironment)
+      
+      ## option --volume
+      while read -r Line; do 
+        [ -n "$Line" ] && { 
+          [ -e "$Line" ] && Dockercommand="$Dockercommand --volume=\"$Line:$Line:rw\"" || warning "Directory to share not found (option --volume):
+  $Line"
+        }
+      done < <(echo -e $Sharevolumes)
 
       ## option --gpu : share graphics adapter device files ### SECURITY: degrades container isolation
       [ "$Gpu" = "yes" ] && Dockercommand="$Dockercommand --device=/dev/dri"
