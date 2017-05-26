@@ -40,7 +40,7 @@ Avoiding X security leaks is done using an additional X server separate from X o
 # X servers and Wayland compositors to choose from
 x11docker creates a new X server on a new X socket. Instead of using display :0 from host, docker images will run on segregated display :1 or display :2 ... (with exception from option `--hostdisplay`)
 
-If no additional X server like  `xpra` or `xserver-xephyr` is installed, and `x11-common` is not reconfigured (for use of option `--xorg`), only option `--hostdisplay` will work out of the box.
+If no additional X server is installed, only less isolated option `--hostdisplay` will work out of the box, and option `--xorg` from console. As a minimal lightweight, convenient and secure X server it is recommended to install `xephyr`. Furthermore, `xpra` and `nxagent` are recommended. 
  
 ![x11docker-gui server screenshot](/../screenshots/x11docker-server.png?raw=true)
 
