@@ -27,11 +27,11 @@ Installs into `/usr/local/bin`. Creates an icon in `/usr/share/icons`. Creates a
 # Security 
  Main purpose of x11docker is to run dockered GUI applications while preserving container isolation.
  Core concept is:
-   - Run a second X server to avoid X security leaks
-   - Create container user similar to host user -> no root in container
-   - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum (docker run option `--cap-drop=ALL`)
+   - Run a second X server to avoid X security leaks.
+   - Create container user similar to host user to avoid root in container.
+   - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum (docker run option `--cap-drop=ALL`).
 
-Avoiding X security leaks is done using an additional X server separate from X on host display :0. Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.  (This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control). x11docker provides this  possibility with discouraged and insecure option `--hostdisplay`.
+Avoiding X security leaks is done using an additional X server separate from X on host display :0. Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.  (This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control. x11docker provides this  possibility with discouraged and insecure option `--hostdisplay`.)
 
  - Some options can degrade or break container isolation. Look at security info dialog to see the differences.
   
