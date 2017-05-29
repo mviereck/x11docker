@@ -1,4 +1,5 @@
 #! /bin/bash
+
 # x11docker
 # Run GUI applications and desktop environments in docker on a separate X server or Wayland compositor.
 # Provides GPU acceleration and pulseaudio sound. Circumvents common X security leaks.
@@ -6,10 +7,11 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.5.2"
+Version="3.5.3"
 
 changelog() {
 ### ToDo:
+# check docker run --read-only: missing /tmp
 # check file permission issuance - maybe giving too much for different --user on --homedir?
 # kdeneon/all:user-lts plasmashell: no kwin?
 # check --user root
@@ -39,6 +41,13 @@ changelog() {
 # BUG debian bug report lightdm/sddm contra gdm, dm can crash on tty switch if multiple graphical sessions are running
 
 # x11docker changelog
+# 29.05.2017 V3.5.3  --pulseaudio: get and use IP of container instead of docker0 IP range (#11), disabling TCP module on exit
+# 27.05.2017         changed --volume to --sharedir to avoid confusion
+# 24.05.2017         update usage()
+#                    mount $Sharefolder and its content read-only
+#                    remove X11-unix from $Sharefolder
+#                    set read-only for /dev/dri on --gpu
+#                    --security-opt=no-new-privileges added to docker run
 # 22.05.2017 V3.5.2  --volume: new option to share host folders
 # 19.05.2017 V3.5.1  user creation with '--addgroup video' to support pre-systemd and kdeneon gpu support
 #                    create /tmp/.X11-unix with 1777
@@ -163,6 +172,8 @@ Options:
  
 X server options: 
      --auto            auto choose X server for docker applications (default)
+                       (regards options --wm and --gpu. If --wm=none, a desktop
+                       environment in container is assumed.)
  -a, --xpra            use xpra to show application windows on host display
                        (needs package 'xpra' to be installed.
                        On Ubuntu 16.04 also package 'xvfb')
@@ -209,7 +220,7 @@ No X server at all:
      --nothing         Do not provide any X or wayland server
      
 Window manager:
- -w, --wm COMMAND      host window manager to use. Default: 'none'.
+ -w, --wm COMMAND      host window manager to use.
                        If COMMAND='auto' or 'm', autodetect a host wm.
                        Usefull f.e to run single applications in Xephyr.
 
@@ -230,10 +241,15 @@ Screensize and related options:
                        Simulates multiple monitors. (experimental)
 
 Shared home, GPU, clipboard and sound options:
+     --user N          Create container user N (N=name or N=uid). Default: 
+                       same as host user. N can also be an unknown user id.
+                       You can specify a group id with N being 'user:gid'.
  -m, --home            share folder ~/x11docker/imagename in host home folder
                        with created container. (docker user namespaces will
                        be disabled if configured, currently not supported.)
-     --homedir         specify custom host folder for option --home.
+     --homedir DIR     specify custom host folder DIR for option --home.
+     --sharedir DIR    share host folder DIR with r/w access at same location.
+                       (can be specified multiple times for multiple folders).
  -c, --clipboard       share clipboard between X servers (works best with xpra.
                        Most other X servers need xclip to be installed).
  -p, --pulseaudio      enable sound with pulseaudio over tcp. Needs
@@ -242,7 +258,7 @@ Shared home, GPU, clipboard and sound options:
                        /dev/dri. Works with all X and Wayland options except
                        --xpra --xephyr, --nxagent and --xdummy.
                        Needs MESA/OpenGL to be installed in image.
-                       Degrades container isolation, container access to GPU.
+                       Degrades container isolation. Container access to GPU.
                        
 Advanced options:
  -s, --sudo            use 'sudo' to run 'su -c docker ...' (Ubuntu special)
@@ -254,16 +270,13 @@ Advanced options:
                        for QT5 applications running on Wayland)
                        (needs dbus-x11 to be installed in image)
      --env VAR=value   set custom environment variable VAR=value
-     --cachedir DIR    custom cache folder. (Default: \$HOME/.cache/x11docker)
-     --user N          instead of host user, share user N (N=name or N=uid)
-                       with container. N can be an unknown user id, too.
-                       You can specify a group id with N being 'user:gid'.
  -v, --verbose         be verbose
 
 Developer options:
      --showenv         echo \$DISPLAY, \$XAUTHORITY and \$WAYLAND_DISPLAY.
  -S, --sharewayland    share Wayland socket and WAYLAND_DISPLAY.
      --westonini FILE  custom weston.ini for --weston and --weston-xwayland.
+     --cachedir DIR    custom cache folder. (Default: \$HOME/.cache/x11docker)
      --xhost+          set \"xhost +\" on new X server (testing purposes only)
      --no-auth         disable cookie authentication (testing purposes only)
      --trusted         Use trusted cookies for --hostdisplay and --kwin-native
@@ -483,7 +496,7 @@ checkorphaned() {       # option --orphaned : check for non-removed containers a
 }
 storepid () {           # store pids and names in file $Bgpidfile
   # store Pid and process name of background processes in file
-  # ${1:-} should be Pid, ${2:-} should be name of process
+  # $1 should be Pid, $2 should be name of process
   # for use on exit / with trap to clean up with background processes
   # this subroutine has a twin in xinitrc
   echo ${1:-} ${2:-} >> $Bgpidfile
@@ -543,16 +556,16 @@ x11docker --orphaned"
   
   exit $Exitcode
 }
-verlte() {              # version number checker ${1:-} less than or equal ${2:-} 
+verlte() {              # version number checker $1 less than or equal $2
   [  "${1:-}" = "$(echo -e "${1:-}\n${2:-}" | sort -V | head -n1)" ] && return 0 || return 1
 }
-verlt() {               # version number checker ${1:-} less than ${2:-} 
+verlt() {               # version number checker $1 less than $2 
   [ "${1:-}" = "${2:-}" ] && return 1 || { verlte ${1:-} ${2:-} && return 0 || return 1 ; }
 }
-isnum() {               # check if ${1:-} is a number
+isnum() {               # check if $1 is a number
   [ "1" = "$(awk -v a="${1:-}" 'BEGIN {print (a == a + 0)}')" ]
 }
-writeaccess() {         # check if useruid ${1:-} has write access to folder ${2:-}
+writeaccess() {         # check if useruid $1 has write access to folder $2
   if read -a dirVals < <(stat -Lc "%U %G %A" ${2:-}) && (
     ( [ "$(id -u $dirVals)" == "${1:-}" ] && [ "${dirVals[2]:2:1}" == "w" ] ) ||
     ( [ "${dirVals[2]:8:1}" == "w" ] ) ||
@@ -564,12 +577,11 @@ writeaccess() {         # check if useruid ${1:-} has write access to folder ${2
     return 0
   else
     [ "w" = "$(getfacl -pn "${2:-}" | grep user:${1:-}: | rev | cut -c2)" ] && return 0 || return 1   # should check for gid, too. Im too lazy.
-    #return 1
   fi 
 }
 waitforfilecreation() { # similar to inotify-wait: wait up to 10s for a file to be created
   # return 1 on timeout
-  # ${1:-} file to wait for
+  # $1 file to wait for
   Zeit=$(date +%s)
   while [ ! "$(find  ${1:-} 2>/dev/null)" ] ; do
     sleep 0.2
@@ -577,10 +589,19 @@ waitforfilecreation() { # similar to inotify-wait: wait up to 10s for a file to 
   done
   return 0
 }
+waitforfilecontent() {
+  # $1 file to wait for to have some content
+  Zeit=$(date +%s)
+  while [ ! -s "$1" ] ; do
+    sleep 0.1
+    [ 5 -lt $(expr $(date +%s) - $Zeit) ] && return 1
+  done
+  return 0
+}
 waitforlogentry() {     # wait for entry in logfile
-  # ${1:-} is the application we are waiting for to be ready
-  # ${2:-} points to logfile
-  # ${3:-} keyword to wait for 
+  # $1 is the application we are waiting for to be ready
+  # $2 points to logfile
+  # $3 keyword to wait for 
   # terminate x11docker on fail
   Zeit=$(date +%s)
   while [ -z "$(cat ${2:-} | grep "${3:-}")" ] ; do
@@ -642,6 +663,7 @@ Containername=""                                # name of container set by x11do
 Dockerip=""                                     # IP adress of docker interface
 Dockeriprange=""                                # IP adress of docker interface including suffix /16
 Dockerpid=""                                    # process ID of docker container
+Containerip="IP"                                # IP adress of container
 
 Imagecommandscript=x11docker_CMD                # name of shared script containing imagecommand
 Xinitrc=xinitrc                                 # file to store xinitrc commands
@@ -793,8 +815,8 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
   Longoptions="$Longoptions,sudo,verbose,nopwd,no-password,no-xhost,trusted,untrusted,dbus,waylandenv"                     # advanced options
   Longoptions="$Longoptions,starter,orphaned,license,licence,help,version,install,update,remove"                           # special options without starting X server
   Longoptions="$Longoptions,xhost+,no-auth,vt:,display:,env:,showenv,sharewayland,root,ipc,net,ps,cache,cap-default"       # developer options
-  Longoptions="$Longoptions,cachedir:,homedir:,westonini:,volume:"                                                         # developer options
-  Longoptions="$Longoptions,hostuser,sudouser,desktop,xsocket,tcp,tcpxsocket,virtualgl,glamor,xpra-image,xpra-attach,xorg-image,xdummy-image"  # deprecated
+  Longoptions="$Longoptions,cachedir:,homedir:,westonini:,sharedir:"                                                       # developer options
+  Longoptions="$Longoptions,hostuser,sudouser,desktop,xsocket,tcp,tcpxsocket,virtualgl,glamor,xpra-image,xpra-attach,xorg-image,xdummy-image,volume:"  # deprecated
   Parsedoptions="$(getopt --options $Shortoptions --longoptions $Longoptions --name "$0" -- "$@" 2>/tmp/x11docker_parsererror)"
   [ -e /tmp/x11docker_parsererror ] && Parsererror=$(cat /tmp/x11docker_parsererror) && rm /tmp/x11docker_parsererror
   [ -n "$Parsererror" ] && error "$Parsererror"
@@ -881,7 +903,7 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
          
          --homedir)    Adduserhomefolder="${2:-}" ; Adduserhome="yes" ; shift ;; # set host folder to share as home folder instead of ~/x11docker/NAME
          --cachedir)   Cacherootfolder="${2:-}" ; shift ;; # set cache folder instead of default $Cacherootfolder
-         --volume)     Sharevolumes="$Sharevolumes\n${2:-}" ; shift ;; 
+         --sharedir)   Sharevolumes="$Sharevolumes\n${2:-}" ; shift ;; # share host folder at same location with rw access
          
          --westonini)  Customwestonini="${2:-}" ; shift ;; # custom weston.ini
 
@@ -904,6 +926,9 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
   To run as root in container, use option --user=root.
   You may also need option --cap-default.
   Instead, it is better to adjust your Dockerfile and build again."  ;;
+      --volume)     Sharevolumes="$Sharevolumes\n${2:-}" ; shift ;  warning "Option --volume is now called --sharedir
+  to avoid confusion with divergent docker run option --volume.
+  Please use --sharedir instead." ;;
 
       ##### docker options / image
       --) shift
@@ -1393,6 +1418,7 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
   Xtermlogfile="$Cachefolder/$Xtermlogfile"
   Dockerlogfile="$Cachefolder/$Dockerlogfile"
   Dockerpidfile="$Cachefolder/$Dockerpidfile"
+  Containerip="$Cachefolder/$Containerip"
   Xservercookie="$Cachefolder/$Xservercookie"
   Xclientcookie="$Sharefolder/$Xclientcookie"
   Xpraserverlogfile="$Cachefolder/$Xpraserverlogfile"
@@ -1885,9 +1911,10 @@ esac
   [ "$Setwaylandenv" = "yes" ] && for Line in $Waylandtoolkitenv ; do Newxenv="$Newxenv $Line" ; done
   Newxenv="$Newxenv X11DOCKER_CACHE=$Cachefolder"
   #for Line in $Customenvironment ; do Newxenv="$Newxenv $Line" ; done
-  while read -r Line; do Newxenv="$Newxenv $Line" ; done < <(echo -e $Customenvironment)
+  while read -r Line; do Newxenv="$Newxenv $Line" ;   done < <(echo -e $Customenvironment)
+  while read -r Line; do Hostxenv="$Hostxenv $Line" ; done < <(echo -e $Customenvironment)
 
-  #   option '--env': show display infos on stdout
+  #   option '--showenv': show display infos on stdout
   [ "$Showdisplayenvironment" = "yes" ] && echo $Newxenv
   
 }
@@ -2004,9 +2031,17 @@ esac
       Dockercommand="$Dockercommand --user $Benutzeruid:$Benutzergid --group-add video --env USER=$Benutzer"
       [ "$Benutzeruid" = "0" ] || Dockercommand="$Dockercommand -v $Etcpasswd:/etc/passwd:ro"
       
-      Dockercommand="$Dockercommand -v $Sharefolder:$Cshare:rw"
+      Dockercommand="$Dockercommand -v $Sharefolder:$Cshare:ro"
       [ "$Adduserhome" = "yes" ] && [ -n "$Adduserhomefolder" ] && Dockercommand="$Dockercommand -v $Adduserhomefolder:$Benutzerhome"
       Dockercommand="$Dockercommand -e HOME=$Benutzerhome -w $Benutzerhome"
+
+      Dockercommand="$Dockercommand --security-opt=no-new-privileges"
+      
+#      for i in $(seq 1 254); do 
+#        Containerip="172.17.0.$i"
+#        grep -q "Unreachable" <<<"$(ping -c1 "$Containerip")" && break
+#      done
+#      Dockercommand="$Dockercommand --ip $Containerip"
       
       case $Xserver in
         Nothing|Weston|Hostwayland|Kwin) ;;
@@ -2016,8 +2051,6 @@ esac
           #      XAUTHORITY
           [ "$Xauthentication" = "yes" ] && Dockercommand="$Dockercommand -e XAUTHORITY=$Cshare/Xclientcookie"
           #      X socket
-          mkdir $Sharefolder/X11-unix && chmod 1777 $Sharefolder/X11-unix
-          Dockercommand="$Dockercommand -v $Sharefolder/X11-unix:/tmp/.X11-unix:rw"
           Dockercommand="$Dockercommand -v $Newxsocket:$Newxsocket:ro"
         ;;
       esac
@@ -2035,16 +2068,16 @@ esac
       ## option --env
       while read -r Line; do [ -z "$Line" ] || Dockercommand="$Dockercommand --env=\"$Line\"" ; done < <(echo -e $Customenvironment)
       
-      ## option --volume
+      ## option --sharedir
       while read -r Line; do 
         [ -n "$Line" ] && { 
-          [ -e "$Line" ] && Dockercommand="$Dockercommand --volume=\"$Line:$Line:rw\"" || warning "Directory to share not found (option --volume):
+          [ -e "$Line" ] && Dockercommand="$Dockercommand --volume=\"$Line:$Line:rw\"" || warning "Directory to share not found (option --sharedir):
   $Line"
         }
       done < <(echo -e $Sharevolumes)
 
       ## option --gpu : share graphics adapter device files ### SECURITY: degrades container isolation
-      [ "$Gpu" = "yes" ] && Dockercommand="$Dockercommand --device=/dev/dri"
+      [ "$Gpu" = "yes" ] && Dockercommand="$Dockercommand --device=/dev/dri:/dev/dri:r"
       
       ## option '--pulseaudio': provide pulseaudio server
       [ "$Pulseaudio" = "yes" ] && Dockercommand="$Dockercommand -e PULSE_SERVER=tcp:$Dockerip:$Pulseaudiotcpport"
@@ -2064,15 +2097,15 @@ esac
           { echo '#! /bin/bash'
             echo 'cd $HOME'
             [ "$Dbuslaunch" = "yes" ] && echo 'command -v dbus-launch || echo "x11docker ERROR: image does not provide dbus-launch (--dbus) >&2 "'
-            echo "[ \"\$HOME\" = \"/tmp\" ] && export HOME=/tmp/fakehome && mkdir -p \$HOME && cd \$HOME"
+            echo "[ \"\$HOME\" = \"/tmp\" ] && mkdir -p \$HOME/fakehome && export HOME=/tmp/fakehome && cd \$HOME"
             echo "command -v ps >/dev/null && {"
             echo "  $Imagecommand &"
             echo '  Imagecommandpid=$!'
             echo "  while ps -p \$Imagecommandpid >/dev/null && [ ! -e $Cshare/timetosaygoodbye ] ; do sleep 1 ; done "
             echo "} || $Imagecommand"
-            echo "touch $Cshare/timetosaygoodbye && chmod 666 $Cshare/timetosaygoodbye"
+            #echo "touch $Cshare/timetosaygoodbye && chmod 666 $Cshare/timetosaygoodbye"
           } > $Imagecommandscript
-          Dockercommand="$Dockercommand -v $Imagecommandscript:$Cshare/x11docker_CMD"
+          Dockercommand="$Dockercommand -v $Imagecommandscript:$Cshare/x11docker_CMD:ro"
           Dockercommand="$Dockercommand -- $Imagename /bin/bash $Cshare/x11docker_CMD"
         ;;
       esac
@@ -2088,15 +2121,10 @@ esac
   # declaring functions echoes them into xinitrc
   declare -f storepid
   declare -f waitforlogentry
+  declare -f waitforfilecontent
   declare -f no_xhost 
   declare -f warning 
   declare -f error
-  
-  [ "$Pulseaudio" = "yes" ] && {
-    echo "# option '--pulseaudio': enable pulseaudio sound over tcp"
-    echo "# load pulseaudio tcp module, authenticated to docker ip on specified port"
-    echo 'Pulseaudiomoduleid=$(pactl load-module module-native-protocol-tcp port='$Pulseaudiotcpport' auth-ip-acl='$Dockeriprange')'
-  }
   
   [ "$Noxhost" = "yes" ] && [ -n "$Hostdisplay" ] && {  
     echo "## option --no-xhost: disable any access to host display granted by xhost"
@@ -2105,8 +2133,8 @@ esac
   }
 
   # avoid exploit of --env with  --nothing
-#  echo "export $Newxenv || error 'Invalid environment variables
-#  $Newxenv'"
+  echo "export $Newxenv || error 'Invalid environment variables
+  $Newxenv'"
   
   case $Xserver in
     Weston|Kwin|Hostwayland) ;;
@@ -2166,7 +2194,6 @@ esac
   echo "export $Newxenv"
   [ "$Setwaylandenv" = "yes" ] && for Line in $Waylandtoolkitenv ; do echo "export $Line" ;  done
   [ "$Sharewayland"  = "yes" ] &&       [ -n "$Waylandsocket" ]    && echo "export WAYLAND_DISPLAY=$Waylandsocket"
-  #[ -n "$Customenvironment" ]  && for Line in $Customenvironment ; do echo "export $Line" ; done
   
   case $Xserver in # some server special settings
     Xpra|Xpra-Xwayland) 
@@ -2207,6 +2234,11 @@ esac
       echo "$Terminal '/bin/bash $Xtermrc 2>&1 | tee $Xtermlogfile'"
       echo "[ -s '$Dockerpidfile' ] && {"
       echo '  Dockerpid=`cat '$Dockerpidfile'` && storepid $Dockerpid docker'
+      [ "$Pulseaudio" = "yes" ] && {
+        echo "  # option '--pulseaudio': enable pulseaudio sound over tcp"
+        echo "  # load pulseaudio tcp module, authenticated to container ip on specified port"
+        echo "  waitforfilecontent $Containerip  && Pulseaudiomoduleid=\$(pactl load-module module-native-protocol-tcp port=$Pulseaudiotcpport auth-ip-acl=\$(cat $Containerip))"
+      }
       echo '  # wait for docker until it terminates. bash builtin wait does not work in this case'
       echo "  while ps -p \$Dockerpid >/dev/null 2>&1 && [ ! -e $Sharefolder/timetosaygoodbye ] ; do sleep 1 ; done"
       echo '}'
@@ -2218,11 +2250,10 @@ esac
       echo "while [ ! -e $Sharefolder/timetosaygoodbye ] && ps -p \$Hostexepid >/dev/null; do sleep 1 ; done"
     ;;
   esac
+  echo "touch $Sharefolder/timetosaygoodbye"
 
-  ## option '--pulseaudio'. remove custom tcp module
-  #  [ "$Pulseaudio" = "yes" ] && { 
-  #    echo 'pactl unload-module $Pulseaudiomoduleid'   ### FIXME: disabled because host pulseaudio daemon stops after this for unknown reasons. Bug in pulseaudio?
-  #  }
+  # option '--pulseaudio'. remove custom tcp module
+  [ "$Pulseaudio" = "yes" ] && echo '[ -n "$Pulseaudiomoduleid" ] && pactl unload-module $Pulseaudiomoduleid'
   
   case $Xserver in
     Xpra|Xpra-Xwayland) echo "[ -e "$HOME/.:$Newdisplaynumber-fakexinerama" ] && rm $HOME/.:$Newdisplaynumber-fakexinerama   # clean up behind xpra"  ;;
@@ -2249,7 +2280,7 @@ echo ''"
       [ "$Getroot" = "bash -c" ] || echo "echo 'Please type in your password to run docker on display $Newdisplay:'"
       echo ":> $Dockerlogfile"
       echo ":> $Dockerpidfile"
-      echo "$Getroot 'nohup $Dockercommand >> $Dockerlogfile 2>&1 & echo "'$!'" >> $Dockerpidfile'"
+      echo "$Getroot 'nohup $Dockercommand >> $Dockerlogfile 2>&1 & echo "'$!'" >> $Dockerpidfile && sleep 1 && docker inspect --format \"{{ .NetworkSettings.IPAddress }}\" $Containername' > $Containerip"
       echo "sleep 3"
       echo '[ -s "'$Dockerpidfile'" ] && { ps -p $(cat '$Dockerpidfile') >/dev/null 2>&1 || error "Docker startup failed! Last lines of docker.log: '
       echo '  $(tail '$Dockerlogfile')"'
@@ -2299,7 +2330,7 @@ $(cat $Westonini | nl)"
 $(cat $Sharefolder/x11docker_CMD | nl)" 
     verbose "Created xinitrc:
 $(cat $Xinitrc | nl)"
-    verbose "Created xtermrc:
+    [ -e "$Xtermrc" ] && verbose "Created xtermrc:
 $(cat $Xtermrc | nl)"
     verbose "Logfiles are:
   $Xinitlogfile
