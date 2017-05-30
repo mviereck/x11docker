@@ -54,7 +54,7 @@ Beside the X servers to choose from there are options `--weston`, `--kwin` and `
  
   `x11docker --kwin --waylandenv --dbus --gpu -- kdeneon/plasma:user-lts plasmashell`
   
-This options are useful to test whether an application supports a pure Wayland environment. You can also test applications from host with option `--exe`. 
+These options are useful to test whether an application supports a pure Wayland environment. You can also test applications from host with option `--exe`. 
 
  - Examples: gnome-calculator (GTK3) and neverball (SDL) from host in Weston without X:
 
@@ -98,7 +98,7 @@ One possibility working for docker as well as  for x11docker is to create a setg
 #! /bin/bash
 x11docker --no-password x11docker/lxde pcmanfm
 ```
-- Save this script as root in `/usr/local/bin/` and make script executeable:
+- Save this script as root in `/usr/local/bin/` and make it executeable:
 ```
 chmod +x /usr/local/bin/xd_pcmanfm
 ```
