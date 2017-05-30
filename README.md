@@ -88,30 +88,6 @@ You don't need to install x11docker, you can just run it as user with `bash x11d
  
 Installs into `/usr/local/bin`. Creates an icon in `/usr/share/icons`. Creates an `x11docker.desktop` file in `/usr/share/applications`. Copies `README.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
 
-# Avoiding password prompt
-There is no way to start naked docker in a secure way without a password.                                                          As long as you can share host system files as docker volumes, it is possible to manipulate root files from within a docker container. User namespace mapping does not help, as it can be disabled with docker run option `--userns=host`.
-There are suggestions to become member of group docker. That is comfortable, but if anyone gets access to your user account, he can change your system without restrictions, and you would not notice.
-
-One possibility working for docker as well as  for x11docker is to create a setgid wrapper for often used commands. Example:
-- Create a starter script, I call it `xd_pcmanfm`:
-```
-#! /bin/bash
-x11docker --no-password x11docker/lxde pcmanfm
-```
-- Save this script as root in `/usr/local/bin/` and make it executeable:
-```
-chmod +x /usr/local/bin/xd_pcmanfm
-```
-- Change group of script file to group docker:
-```
-chgrp docker /usr/local/bin/xd_pcmanfm
-```
-- Set setgid bit to execute script with docker group privileges:
-```
-chmod g+s /usr/local/bin/xd_pcmanfm
-```
-Now you can execute `xd_pcmanfm` without a password prompt. Be aware that this script may be exploited somehow, though x11docker has some basic exploit checks.
-
 # Examples
 Some example images can be found on docker hub: https://hub.docker.com/u/x11docker/
 
