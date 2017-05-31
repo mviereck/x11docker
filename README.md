@@ -44,7 +44,10 @@ Look at dependencies dialog in x11docker-gui.
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
 
 # X servers and Wayland compositors to choose from
-If no X server option is specified, x11docker automatically chooses one depending on installed dependencies and on given or missing options `--wm` and `--gpu`. If `--wm=none`, x11docker assumes a window manager or desktop environment in image and prefers `--xephyr`. Otherwise, it assumes a single application and prefers `--xpra`. If option `--gpu` is given, it prefers `--xpra-xwayland` or `--weston-xwayland`.
+If no X server option is specified, x11docker automatically chooses one depending on installed dependencies and on given or missing options `--wm` and `--gpu`. 
+For single applications, x11docker prefers `--xpra`.
+If `--wm=none`, x11docker assumes a window manager or desktop environment in image and prefers `--xephyr`. 
+If option `--gpu` is given, it prefers `--xpra-xwayland` or `--weston-xwayland`.
  
 ![x11docker-gui server screenshot](/../screenshots/x11docker-server.png?raw=true)
 
