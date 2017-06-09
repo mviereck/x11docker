@@ -7,15 +7,14 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.5.4"
+Version="3.5.5"
 
 changelog() {
 ### ToDo:
+# include xpra tcp+html in browser?
 # check docker run --read-only: missing /tmp
 # check file permission issuance - maybe giving too much for different --user on --homedir?
 # kdeneon/all:user-lts plasmashell: no kwin?
-# check --user root
-# check all code pathes (*cough*) with set -eu 
 # call error() if $Hostdisplay is set, but not accessable
 # do not terminate x11docker-gui on --orphaned or run-in-terminal
 # further checks with and without --userns=host while user namespacing is enabled
@@ -28,7 +27,6 @@ changelog() {
 ### SECURITY improvements
 # check X security leaks. Avoid X/--xorg if setuid, or show warning at least?
 ### BUG collection: x11docker bugs:
-# BUG error() in xinitrc does not terminate --xpra
 # BUG check whether VT is not in use with --xorg/--xpra/--xdummy, bug if accidently using vt that is already in use
 ### BUG collection: non x11docker bugs
 # bugreport docker: container user does NOT have same groups as host user - just wrong doku?
@@ -42,6 +40,11 @@ changelog() {
 # BUG debian bug report lightdm/sddm contra gdm, dm can crash on tty switch if multiple graphical sessions are running
 
 # x11docker changelog
+# 09.06.2017 V3.5.5  autochoose xpra-desktop if xephyr is missing
+# 06.06.2017         improved part: check virtual screen size
+# 05.06.2017         changed dpi calculation depending on xpra mode
+# 03.06.2017         desktop mode for xpra if --wm is given
+# 02.06.2017         always set XDG_RUNTIME_DIR=/tmp as some apps may expect it
 # 02.06.2017 V3.5.4  set rw access for /dev/dri (#12)
 # 31.05.2017         disable extension XTEST if using wm from host (to avoid abuse of context menu of openbox and the like)
 # 29.05.2017 V3.5.3  --pulseaudio: get and use IP of container instead of docker0 IP range (#11), disabling TCP module on exit
@@ -224,8 +227,10 @@ No X server at all:
      
 Window manager:
  -w, --wm COMMAND      host window manager to use.
-                       If COMMAND='auto' or 'm', autodetect a host wm.
+                       If COMMAND=auto or 'm', autodetect a host wm.
                        Usefull f.e to run single applications in Xephyr.
+                       If COMMAND=none or 'n', don't use a host wm, but assume
+                       a desktop environment in image (influences --auto).
 
 Screensize and related options:
  -f, --fullscreen      run Xephyr, nxagent or Weston in fullscreen mode.
@@ -347,9 +352,9 @@ error() {               # show error messages on stderr and exit
   If you think this is a bug in x11docker, 
   please report at https://github.com/mviereck/x11docker"
   echo "
-  
 $(tput setaf 1)x11docker ERROR$(tput sgr0) $Message
 " >&3
+  export $Hostxenv
   [ -t 1 ] || echo "x11docker ERROR: $Message" | xmessage -file - -default okay
   [ -e $Logfile ] && echo "x11docker ERROR: $Message" >> $Logfile
   Exitcode=1
@@ -707,12 +712,12 @@ Newxvt=""                                       # Virtual console to use for cor
 Xserveroptions=""                               # options for new X server
 Xpraoptions=""                                  # options for xpra server and client
 Xprashm=""                                      # content XPRA_XSHM=0 disables usage of MIT-SHM in xpra
+Xpramode="start"                                # "start" = single applications, "start-desktop" = desktop mode like Xephyr
 Nxagentoptions=""                               # options for nxagent
 Xephyroptions=""                                # options for Xephyr
 Xephyrglamor="yes"                              # former option '--glamor': enable Xephyr glamor 2D acceleration (deprecated, now always yes)
 Xephyrresize="no"                               # option '--resizeable': make Xephyr window resizeable
 Westonoptions=""                                # options for Weston
-Kwinoptions=""                                  # options for Kwin
 Scaling="1"                                     # option --scale: Scaling factor for xpra and weston
 Rotation="0"                                    # option --rotate: Rotation for --weston and --weston-xwayland 0/90/180/270/flipped/flipped-90/..
 Dpi=""                                          # option --dpi: dots per inch to tell the clients.
@@ -720,8 +725,8 @@ Outputcount="1"                                 # option --output-count, quantum
 
 # Screensize for windowed servers and for --xdummy
 Screensize=""                                   # option --size  XxY
-Xaxis=""                                        # screen width
-Yaxis=""                                        # screen height
+Xaxis=""                                        # virtual screen width
+Yaxis=""                                        # virtual screen height
 Modeline=""                                     # screen modeline, see "man cvt"
 Fullscreen="no"                                 # option '-f, --fullscreen': use fullscreen mode (Xephyr only)
 
@@ -859,9 +864,12 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
       -g|--gpu)        Gpu="yes" ;;                        # share files in /dev/dri
       -E|--waylandenv) Setwaylandenv="yes" ;;              # set environment variables forcing toolkits like QTK and QT to use wayland
 
-      -w|--wm)         Windowmanager=${2:-} ; shift        # Window manager to  use.
-                       [ -z "$Windowmanager" ]    && Windowmanager="none"
-                       [ "$Windowmanager" = "m" ] && Windowmanager="auto" ;;
+      -w|--wm)         case ${2:-} in
+                         "","n","none") Windowmanager="none" ;;
+                         "m","auto")    Windowmanager="auto" ;;
+                         *)             Windowmanager=${2:-} ;;
+                       esac
+                       shift ;;
        
       -f|--fullscreen) Fullscreen="yes"  ;;                # fullscreen mode for Xephyr and Weston
          --size)       Screensize="${2:-}" ;  shift ;;     # set screen size for Xephyr, Xdummy and Weston
@@ -1033,7 +1041,10 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
     #    Xpra|Xephyr) Xserver="Nxagent" ;;
     #  esac
     #} || {
-      [ -z "$Windowmanager" ] && Windowmanager="auto"
+      case $Xserver in
+        Xpra|Xpra-Xwayland) ;;
+        *) [ -z "$Windowmanager" ] && Windowmanager="auto" ;;
+      esac
     #}
   fi
 
@@ -1112,10 +1123,16 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
   [ "$Xserver" = "Xephyr" ] && {
     command -v "Xephyr" >/dev/null 2>&1 || { warning "could not find executable 'Xephyr'. 
   Try 'apt-get install xserver-xephyr' to install Xephyr.
-  Fallback: x11docker will try to use core X (option --xorg)"
-    Xserver="Xorg"
+  Fallback: x11docker will try to use xpra in desktop mode (--xpra with --wm)"
+    [ -z "$Windowmanager" ] && Windowmanager="none"
+    Xserver="Xpra"
     }
   }
+  [ "$Xserver" = "Xpra" ] && command -v "xpra" >/dev/null 2>&1 || { warning "could not find executable 'xpra'. 
+  Try 'apt-get install xpra' to install xpra.
+  Fallback: x11docker will try to use core X (option --xorg)"
+    Xserver="Xorg"
+  } 
   [ "$Xserver" = "Xorg" ] && {
     command -v "X" >/dev/null 2>&1 || { error "Could not find executable 'X'. 
   Try 'apt-get install xorg' to install X server." 
@@ -1144,10 +1161,15 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
     Xpra|Xephyr|Hostdisplay|Xpra-Xwayland|Nxagent) [ -z "$Hostdisplay" ] && error "You only can run $Xserver within an already running X server."  ;;
   esac
   
-  [ "$Xserver" = "Xpra" ] || [ "$Xserver" = "Xpra-Xwayland" ] && xmessage -timeout 5 "Please be patient, xpra will start soon ..." -default okay &
+  [ "$Xserver" = "Xpra" ] || [ "$Xserver" = "Xpra-Xwayland" ] && {
+    xmessage -timeout 5 "Please be patient, xpra will start soon ..." -default okay &
+    case $Windowmanager in
+      "") Xpramode="start" ;;
+      *)  Xpramode="start-desktop" ;;
+    esac
+  }
  
   [ "$Xserver" = "Nxagent" ] && { 
-    [ -z "$Imagename" ] && [ -z "$Windowmanager" ] && [ "$Showdisplayenvironment" = "no" ] && Windowmanager="none"
     case $Windowmanager in
       "") Nxagentoptions="-R" ;; # rootless mode, similar to xpra
       *)  Nxagentoptions="-D" ;; # desktop mode,  similar to xephyr. including wm="none"
@@ -1312,8 +1334,9 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
   }
 }
 
-{ #### part: check screen size
-  ### FIXME: Does support multimonitor, but does not regard multihead setup
+{ #### part: check virtual screen size
+
+  # check whole display size, can include multiple monitors
   [ -n "$Hostdisplay" ] && {
     command -v xwininfo      >/dev/null && {
       Xaxis=$(xwininfo -root -stats | grep Width  | cut -d: -f2)
@@ -1325,60 +1348,52 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
       Xaxis=$(xrandr | grep current | head -n1 | cut -d, -f2 | cut -d' ' -f3)
       Yaxis=$(xrandr | grep current | head -n1 | cut -d, -f2 | cut -d' ' -f5)
     } || {
-      Xaxis=4720
-      Yaxis=3840
       warning "Could not determine your screen size. Will use arbitrary
   virtual resolution 4720x3840 as hopefully big enough. Please improve this by
-  installing one of xdpyinfo, xwininfo or xrandr."
+  installing one of xdpyinfo, xwininfo or xrandr. Or use option --size=XxY."
     }
-    Modeline=$(cvt $Xaxis $Yaxis | tail -n1 | cut -d' ' -f2-)
   }
-  # Screen 0: minimum 320 x 200, current 1920 x 1080, maximum 8192 x 8192
-
+  
+  # size for windowed desktops, roughly maximized relative to primary monitor
+  [ "$Xpramode" = "start-desktop" ] && Xserver="${Xserver}-Desktop"
   case $Xserver in
-    Xephyr|Weston-Xwayland|Weston|Kwin|Kwin-Xwayland|Kwin-Native|Nxagent)
+    Xephyr|Weston-Xwayland|Weston|Kwin|Kwin-Xwayland|Kwin-Native|Nxagent|Xpra-Desktop|Xpra-Xwayland-Desktop)
       tty | grep -q tty && {
         : # nothing to do on tty; maybe should check --size=$Screensize
       } || {
-        command -v xrandr > /dev/null && [ -n "$(xrandr | grep primary)" ] && { # reduce size to primar monitor for windowed desktop
+        command -v xrandr > /dev/null && [ -n "$(xrandr | grep primary)" ] && { # reduce size to primary monitor for windowed desktop
           Xaxis=$(xrandr | grep primary | head -n1 | cut -dx -f1 | rev | cut -d' ' -f1 | rev)
           Yaxis=$(xrandr | grep primary | head -n1 | cut -dx -f2 | cut -d' ' -f1 | cut -d+ -f1)
-        }
-        [ -z "$Screensize" ] && [ -n "$Xaxis" ] && {
-          Screensize="$(($Xaxis-100))x$(($Yaxis-100))" # a roughly maximized window size is set here
-          [ "$Scaling" != "1" ] && case $Xserver in
-            Weston|Weston-Xwayland)
-              Screensize="$(expr $(($Xaxis-100)) / $Scaling)x$(expr $(($Yaxis-100)) / $Scaling)"  
-            ;;
-          esac
-        }
-      }
-    ;;
-    Xdummy|Xpra)
-      [ -z "$Screensize" ] && [ -n "$Modeline" ] && Screensize=$Xaxis"x"$Yaxis
-      [ -z "$Screensize" ] && [ -z "$Modeline" ] && {
-        Modeline='"4720x3840" 227.86 4720 4752 5616 5648 3840 3933 3940 4033'
-        Xaxis="4720"
-        Yaxis="3840"
-        Screensize="${Xaxis}x${Yaxis}"
-      }
-      [ -n "$Screensize" ] && [ -z "$Modeline" ] && {
-        Xaxis=$(echo $Screensize | cut -dx -f1)
-        Yaxis=$(echo $Screensize | cut -dx -f2)
-        Modeline=$(cvt $Xaxis $Yaxis | tail -n1 | cut -d' ' -f2-)
-        [ -z "$Modeline" ] && Modeline='"'$Xaxis'x'$Yaxis'" 227.86 $Xaxis $Xaxis $Xaxis $Xaxis $Yaxis $Yaxis $Yaxis $Yaxis'
+        } || warning "Could not determine size of your primary display to
+  create a roughly maximized window for $Xserver. Please install xrandr
+  or use option --size=XxY."
+        Xaxis=$(($Xaxis-100))
+        Yaxis=$(($Yaxis-100))
       }
     ;;
   esac
+  Xserver=${Xserver%-Desktop}
+  
+  # regard scaling (option --scale)
+  Xaxis=$(awk -v a=$Xaxis -v b=$Scaling 'BEGIN {print (a / b)}')
+  Xaxis=${Xaxis%.*}
+  Yaxis=$(awk -v a=$Yaxis -v b=$Scaling 'BEGIN {print (a / b)}')
+  Yaxis=${Yaxis%.*}
+
+  [ -n "$Screensize" ] && {
+    Xaxis=${Screensize%x*}
+    Yaxis=${Screensize#*x}
+  }
+  
+  [ -z "$Xaxis" ] && {
+    Xaxis="4720"
+    Yaxis="3840"
+  }
+  
+  Screensize="${Xaxis}x${Yaxis}"
+
   case $Xserver in
-    Xpra|Xpra-Xwayland)
-      Xaxis=$(awk -v a=$Xaxis -v b=$Scaling 'BEGIN {print (a / b)}')
-      Xaxis=${Xaxis%.*}
-      Yaxis=$(awk -v a=$Yaxis -v b=$Scaling 'BEGIN {print (a / b)}')
-      Yaxis=${Yaxis%.*}
-      Modeline=$(cvt $Xaxis $Yaxis | tail -n1 | cut -d' ' -f2-)
-      Screensize="${Xaxis}x${Yaxis}"
-    ;;
+    Xpra|Xdummy) Modeline=$(cvt $Xaxis $Yaxis | tail -n1 | cut -d' ' -f2-) ;;
   esac
 }
 
@@ -1464,10 +1479,11 @@ Wm_all="$Wm_recommended_desktop_light $Wm_recommended_nodesktop_light $Wm_recomm
   *)
     [ "$Windowmanager" = "auto" ] && Windowmanager=""
     case $Xserver in
-    Xpra|Hostdisplay|Xpra-Xwayland|Nothing|Hostwayland) # disable window manager if xpra (or host display)(or wayland compositor) does this job
+      Hostdisplay|Nothing|Hostwayland) # disable window manager if xpra (or host display)(or wayland compositor) does this job
+#    Xpra|Hostdisplay|Xpra-Xwayland|Nothing|Hostwayland) # disable window manager if xpra (or host display)(or wayland compositor) does this job
       Windowmanager="" 
       ;; 
-    Xephyr|Xorg|Xdummy|Xwayland|Weston-Xwayland|Nxagent)
+    Xephyr|Xorg|Xdummy|Xwayland|Weston-Xwayland|Nxagent|Xpra|Xpra-Xwayland)
       # try to find out current window manager to use it for x11docker (i.e. run a new instance of it)
       [ -z "$Windowmanager" ] && Windowmanager=$(command -v $(ls -l /etc/alternatives/x-window-manager | cut -d ">" -f2))
       # try with wmctrl
@@ -1651,19 +1667,33 @@ done
     ;;
   esac
   
-  [ -n "$Windowmanager" ] && Xserveroptions="$Xserveroptions -tst -extension XTEST"  # disable XTEST to avoid abuse with host wm like openbox (context menu could be remotly controlled)
+  [ -n "$Windowmanager" ] && 
+    [ "$Xpramode" = "start" ] && {
+      Xserveroptions="$Xserveroptions -tst -extension XTEST"  # disable XTEST to avoid abuse with host wm like openbox (context menu could be remotly controlled)
+    } || {
+      warning "Can not disable XTEST on new X server as Xpra needs it.
+  If your host window manager $Windowmanager can start applications
+  on its own (for example, with a context menu), container applications
+  could abuse this to run and remotly control host applications."
+  }
 
   [ -z "$Dpi" ] && {
     xdpyinfo >/dev/null 2>&1 && {
       Dpi="$(xdpyinfo | grep dots | cut -dx -f2 | cut -d' ' -f1)"
-      Dpi=$(awk -v a="$Scaling" -v b="$Dpi" 'BEGIN {print (b * a * a)}')
-      Dpi=${Dpi%.*}
     } || {
       [ -n "$Hostdisplay" ] && [ -z "$(command -v xdpyinfo)" ] && warning "Could not determine dpi settings. If you encounter too
-    big or small fonts in $Xserver, please install xdpyinfo or use option --dpi."
+  big or small fonts in $Xserver, please install xdpyinfo or use option --dpi."
     }
+    case $Xserver in
+      Xpra|Xpra-Xwayland)
+        [ "$Xpramode" = "start" ] && {
+          Dpi=$(awk -v a="$Scaling" -v b="$Dpi" 'BEGIN {print (b * a * a)}')
+          Dpi=${Dpi%.*}
+        }
+      ;;
+    esac
   }
-  [ -n "$Dpi" ] && { 
+  [ -n "$Dpi" ] && { :
     Xserveroptions="$Xserveroptions -dpi $Dpi"
     Xpraoptions="$Xpraoptions --dpi $Dpi"
   }
@@ -1754,13 +1784,12 @@ locking=false
       }
     ;;
     Xephyr)
-      Xaxis=$(echo $Screensize | cut -dx -f1)
       case $Fullscreen in
         yes) Xephyroptions="$Xephyroptions -fullscreen" ;;
         no)  for Count in $(seq 1 $Outputcount) ; do Xephyroptions="$Xephyroptions -screen $Screensize" ; done ;;
       esac
       [ "$Xephyrresize" = "yes" ] && Xephyroptions="$Xephyroptions -resizeable"  # option '--resizeable'
-      [ "$Xephyrglamor" = "yes" ] && Xephyroptions="$Xephyroptions -glamor"      # option '--resizeable'
+      [ "$Xephyrglamor" = "yes" ] && Xephyroptions="$Xephyroptions -glamor"      # deprecated option '--glamor'
       Xcommand="$(command -v Xephyr) $Newdisplay $Xserveroptions $Xephyroptions"
     ;;
     Xwayland) 
@@ -1768,7 +1797,8 @@ locking=false
       Waylandsocket=$WAYLAND_DISPLAY
     ;;
     Xpra-Xwayland)
-      Xcommand="$(command -v Xwayland) $Newdisplay -rootless $Xserveroptions"
+      [ "$Xpramode" = "start" ] && Xephyroptions="$Xephyroptions -rootless" 
+      Xcommand="$(command -v Xwayland) $Newdisplay $Xserveroptions"
       [ -z "$WAYLAND_DISPLAY" ] && Waylandsocket="wayland-$Newdisplaynumber" || { 
         [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] && Waylandsocket="wayland-$Newdisplaynumber" || Waylandsocket=$WAYLAND_DISPLAY 
       }
@@ -1801,21 +1831,19 @@ transform=$Rotation
       done
     ;;
     Kwin-Xwayland)
-      [ -n "$Screensize" ] && Kwinoptions="--width=$(echo $Screensize | cut -d x -f1) --height=$(echo $Screensize | cut -d x -f2)"
       Xcommand="$(command -v Xwayland) $Newdisplay $Xserveroptions"
       Waylandsocket="wayland-$Newdisplaynumber"
-      Compositorcommand="kwin_wayland --xwayland --socket=$Waylandsocket $Kwinoptions --output-count=$Outputcount" 
+      Compositorcommand="kwin_wayland --xwayland --socket=$Waylandsocket --width=$Xaxis --height=$Yaxis --output-count=$Outputcount" 
     ;;
     Kwin-Native) # experimental, hacky and not nice implemented as I cannot tell KWin which display number to use. A clean workflow requires KWin to be started at end of script.
-      [ -n "$Screensize" ] && Kwinoptions="--width=$(echo $Screensize | cut -d x -f1) --height=$(echo $Screensize | cut -d x -f2)"
       Waylandsocket="wayland-$Newdisplaynumber"
       Kwinrc=$Cachefolder/kwinrc
       echo "#!/bin/bash
         echo \$DISPLAY >$Cachefolder/kwindisplay
         while [ ! -e $Sharefolder/timetosaygoodbye ] ; do sleep 1 ; done
       ">$Kwinrc
-      Compositorcommand="kwin_wayland --xwayland --socket=$Waylandsocket $Kwinoptions  --output-count=$Outputcount --exit-with-session='bash $Kwinrc'"
-      kwin_wayland --xwayland --socket="$Waylandsocket" $Kwinoptions  --output-count="$Outputcount" --exit-with-session="bash $Kwinrc"  > $Compositorlogfile 2>&1 & storepid $! kwin_wayland && export Compositorpid=$!
+      Compositorcommand="kwin_wayland --xwayland --socket=$Waylandsocket -width=$Xaxis --height=$Yaxis  --output-count=$Outputcount --exit-with-session='bash $Kwinrc'"
+      kwin_wayland --xwayland --socket="$Waylandsocket" -width=$Xaxis --height=$Yaxis  --output-count="$Outputcount" --exit-with-session="bash $Kwinrc"  > $Compositorlogfile 2>&1 & storepid $! kwin_wayland && export Compositorpid=$!
       waitforlogentry   "kwin"   "$Compositorlogfile" "X-Server"
       bash -c "while ps -p $Compositorpid >/dev/null; do sleep 1 ; done ; touch $Sharefolder/timetosaygoodbye" &  #storepid $! bash
       Newdisplay=$(cat $Cachefolder/kwindisplay)
@@ -1823,10 +1851,9 @@ transform=$Rotation
       Newxsocket=/tmp/.X11-unix/X$Newdisplaynumber
     ;;
     Kwin)
-      [ -n "$Screensize" ] && Kwinoptions="--width=$(echo $Screensize | cut -d x -f1) --height=$(echo $Screensize | cut -d x -f2)"
       Waylandsocket="wayland-$Newdisplaynumber"
       Sharewayland="yes"
-      Compositorcommand="kwin_wayland --xwayland --socket=$Waylandsocket $Kwinoptions --output-count='$Outputcount'" 
+      Compositorcommand="kwin_wayland --xwayland --socket=$Waylandsocket -width=$Xaxis --height=$Yaxis --output-count='$Outputcount'" 
     ;;
     Nxagent)
       Xcommand="$(command -v nxagent) $Newdisplay $Xserveroptions $Nxagentoptions -options $Cachefolder/nxagentoptions"
@@ -2041,6 +2068,8 @@ esac
       Dockercommand="$Dockercommand -e HOME=$Benutzerhome -w $Benutzerhome"
 
       Dockercommand="$Dockercommand --security-opt=no-new-privileges"
+
+      Dockercommand="$Dockercommand -e XDG_RUNTIME_DIR=/tmp"
       
       case $Xserver in
         Nothing|Weston|Hostwayland|Kwin) ;;
@@ -2057,7 +2086,6 @@ esac
       [ "$Sharewayland" = "yes" ] && {   # option --sharewayland: Share wayland socket
         [ -n "$Waylandsocket" ] && {
           Dockercommand="$Dockercommand -e WAYLAND_DISPLAY=$Waylandsocket"
-          Dockercommand="$Dockercommand -e XDG_RUNTIME_DIR=/tmp"
           Dockercommand="$Dockercommand -v $XDG_RUNTIME_DIR/$Waylandsocket:/tmp/$Waylandsocket:ro"
         } 
       }
@@ -2104,7 +2132,6 @@ esac
             echo "} || $Imagecommand"
             #echo "touch $Cshare/timetosaygoodbye && chmod 666 $Cshare/timetosaygoodbye"
           } > $Imagecommandscript
-          Dockercommand="$Dockercommand -v $Imagecommandscript:$Cshare/x11docker_CMD:ro"
           Dockercommand="$Dockercommand -- $Imagename /bin/bash $Cshare/x11docker_CMD"
         ;;
       esac
@@ -2130,6 +2157,9 @@ esac
     echo "export $Hostxenv"
     echo "no_xhost"
   }
+  
+  echo "Hostxenv=$Hostxenv"
+  echo "Newxenv=$Newxenv"
 
   # avoid exploit of --env with --nothing
   echo "export $Newxenv || error 'Invalid environment variables
@@ -2141,10 +2171,6 @@ esac
     *) # here something for real X servers
       echo "# set X variables to new display"
       [ "$Xserver" = "Hostdisplay" ] && echo "export $Hostxenv" || echo "export $Newxenv"
-      
-      case $Xserver in
-        Xpra|Xpra-Xwayland) echo "export XPRA_OPENGL_DOUBLE_BUFFERED=1 # avoids xpra bug http://xpra.org/trac/ticket/1469"  ;;
-      esac
       
       [ "$Xserver" = "Hostdisplay" ] || {
         [ -n "$Xhost" ] && echo "$Xhost" || {
@@ -2194,13 +2220,20 @@ esac
   
   case $Xserver in # some server special settings
     Xpra|Xpra-Xwayland) 
-      echo "## start xpra server on display $Newdisplay created by Xdummy"
-      echo "$Xprashm xpra start $Newdisplay --use-display --no-daemon $Xpraoptions > $Xpraserverlogfile 2>&1 &"
+      echo "## start xpra server on display $Newdisplay created by Xdummy or Xvfb"
+      echo "export XPRA_OPENGL_DOUBLE_BUFFERED=1 # avoid xpra resizing window bug in older versions http://xpra.org/trac/ticket/1469" 
+      echo "$Xprashm xpra $Xpramode $Newdisplay --use-display --no-daemon $Xpraoptions --exit-with-children --start-child='$Waitforgoodbye' > $Xpraserverlogfile 2>&1 &"
       echo 'storepid $! xpra'
-      echo  "waitforlogentry xpra $Xpraserverlogfile \"xpra is ready\""
+      echo "waitforlogentry xpra $Xpraserverlogfile \"xpra is ready\""
       echo "# start xpra viewer on host display"
       echo "export $Hostxenv"
-      echo "xpra attach $Newdisplay $Xpraoptions  &"
+      echo "xpra attach $Newdisplay $Xpraoptions &"
+      echo 'storepid $! xpra'
+      echo "Xpraclientpid=\$!"
+      echo "while : ; do"
+      echo "  sleep 1"
+      echo "  ps -p \$Xpraclientpid >/dev/null || { touch $Sharefolder/timetosaygoodbye ; break ; }"
+      echo "done &"
       echo "export $Newxenv"
     ;;
     Xephyr)
@@ -2293,9 +2326,11 @@ echo ''"
 { #### part:  some verbose output
     verbose "$(date) $(lsb_release -ds) $(Xorg -version 2>&1 | grep X.Org)
 $(xrandr | grep Screen)
-Command: $0 $X11dockerargs"
+Command: $0 $X11dockerargs
+$Parsedoptions"
     [ "$Xserver" != "Nothing" ] && {
       verbose "X or Wayland server: $Xserver"
+      verbose "Virtual screen size: $Screensize"
       verbose "Environment variables: 
   $Newxenv"
     }
