@@ -22,8 +22,8 @@ Make x11docker executable with `chmod +x x11docker` or run it with `bash x11dock
 # Security 
  Main purpose of x11docker is to run dockered GUI applications while preserving container isolation.
  Core concept is:
-   - Run a second X server to avoid X security leaks.
-   - Create container user similar to host user to avoid root in container.
+   - Run a second X server to avoid [X security leaks](http://www.windowsecurity.com/whitepapers/unix_security/Securing_X_Windows.html).
+   - Create container user similar to host user to [avoid root in container](http://blog.dscpl.com.au/2015/12/don-run-as-root-inside-of-docker.html).
    - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum (docker run option `--cap-drop=ALL`).
 
 Avoiding X security leaks is done using an additional X server separate from X on host display :0. Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.  (This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control. x11docker provides this  possibility with discouraged and insecure option `--hostdisplay`.)
