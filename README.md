@@ -37,13 +37,16 @@ x11docker can run with standard system utilities without additional dependencies
 
 If no additional X server is installed, only less isolated option `--hostdisplay` will work out of the box within X, and option `--xorg` from console. 
  - As a well working base for convenience and security, it is recommended to install [`xpra`](http://xpra.org/), `xephyr` and `xvfb`. 
- - For hardware acceleration with option `--gpu`, also install `xwayland`, `weston` and `xdotool`. (Applications in image should have installed their OpenGL dependencies already. If not, try `libgl1-mesa-glx` `libglew2.0` `libglu1-mesa` `libgl1-mesa-dri` `libdrm2` `libgles2-mesa` `libegl1-mesa` `libxv1`).
+ - For hardware acceleration with option `--gpu`, also install `xwayland`, `weston` and `xdotool`. Applications in image should already have installed their OpenGL dependencies. If not, install `libgl1-mesa-glx libglew2.0 libglu1-mesa libgl1-mesa-dri libdrm2 libgles2-mesa libegl1-mesa libxv1` in image).
  - For sound with option `--pulseaudio`, install `pulseaudio` on host and in image. 
- - Best native `--clipboard` support provides xpra. X servers other than xpra and nxagent need `xclip`.
+ - Rarer needed dependencies for special options:
+   - Best native `--clipboard` support provides xpra. X servers other than xpra and nxagent need `xclip`.
+   - `--dbus` is needed only for QT5 application in Wayland. It needs `dbus-launch` (package `dbus-x11`) in image.
+   - `--nxagent` provides a fast and lightweight alternative to `xpra` and `xephyr`. Needs `nxagent` to be installed.
+   - `--kwin`, `--kwin-native` and `--kwin-xwayland` need `kwin_wayland`, included in modern `kwin` packages.
+ - List of all host packages for all possible x11docker options: `xpra xserver-xephyr xvfb weston xwayland nxagent kwin xclip xdotool`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
 
-Some options needs some packages to be installed on host.
-x11docker will check for them on startup and show terminal messages if some are missing. Options `--gpu`, `--pulseaudio` and `--dbus` have dependencies in image, too.
-Look at dependencies dialog in x11docker-gui. 
+x11docker will check dependencies for chosen options on startup and shows terminal messages if some are missing. 
 
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
 
