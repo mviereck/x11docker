@@ -41,8 +41,8 @@ If no additional X server is installed, only less isolated option `--hostdisplay
  - For sound with option `--pulseaudio`, install `pulseaudio` on host and in image. 
  - Best native `--clipboard` support provides xpra. X servers other than xpra and nxagent need `xclip`.
 
-For some additional options, x11docker needs some packages to be installed on host.
-It will check for them on startup and show terminal messages if some are missing. Options `--gpu`, `--pulseaudio` and `--dbus` have dependencies in image, too.
+Some options needs some packages to be installed on host.
+x11docker will check for them on startup and show terminal messages if some are missing. Options `--gpu`, `--pulseaudio` and `--dbus` have dependencies in image, too.
 Look at dependencies dialog in x11docker-gui. 
 
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
