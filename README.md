@@ -36,7 +36,7 @@ Avoiding X security leaks is done using an additional X server separate from X o
 x11docker can run with standard system utilities without additional dependencies on host or in image. As a core, it only needs X server (package `xorg`)  and, of course, docker (package `docker.io`) to run docker images on X. 
 
 If no additional X server is installed, only less isolated option `--hostdisplay` will work out of the box within X, and option `--xorg` from console. 
- - As a well working base for convenience and security, it is recommended to install [`xpra`](http://xpra.org/), `xephyr` and `xvfb`. 
+ - As a well working base for convenience and security, it is recommended to install `xpra`, `xephyr` and `xvfb`. (It's recommended to use latest xpra version from [http://xpra.org](http://xpra.org/)).
  - For hardware acceleration with option `--gpu`, also install `xwayland`, `weston` and `xdotool`. Applications in image should already have installed their OpenGL dependencies. If not, install `libgl1-mesa-glx libglew2.0 libglu1-mesa libgl1-mesa-dri libdrm2 libgles2-mesa libegl1-mesa libxv1` in image).
  - For sound with option `--pulseaudio`, install `pulseaudio` on host and in image. 
  - Rarer needed dependencies for special options:
