@@ -44,7 +44,8 @@ If no additional X server is installed, only less isolated option `--hostdisplay
    - `--dbus` is needed only for QT5 application in Wayland. It needs `dbus-launch` (package `dbus-x11`) in image.
    - `--nxagent` provides a fast and lightweight alternative to `xpra` and `xephyr`. Needs [`nxagent`](https://packages.debian.org/experimental/nxagent) to be installed.
    - `--kwin`, `--kwin-native` and `--kwin-xwayland` need `kwin_wayland`, included in modern `kwin` packages.
- - List of all host packages for all possible x11docker options: `xpra xserver-xephyr xvfb weston xwayland nxagent kwin xclip xdotool`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
+   - Web application setup (see below) needs package `websockify`. 
+ - List of all host packages for all possible x11docker options: `xpra xserver-xephyr xvfb weston xwayland nxagent kwin xclip xdotool websockify`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
 
 x11docker will check dependencies for chosen options on startup and shows terminal messages if some are missing. (The package names above are valid for debian and its derivates like Ubuntu and Mint. They may be slightly different for other distributions).
 
