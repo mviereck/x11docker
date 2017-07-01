@@ -94,7 +94,7 @@ read Xenv < <(x11docker --xdummy  x11docker/lxde pcmanfm)
 echo $Xenv && export $Xenv
 xpra start $DISPLAY --use-display --html=on --bind-tcp=localhost:14500
 ```
-Now you can access your application at [http://localhost:14500](http://localhost:14500). Further infos at [xpra wiki: HTML5 clients](https://xpra.org/trac/wiki/Clients/HTML5).
+Now you can access your application at [http://localhost:14500](http://localhost:14500). Further infos at [xpra wiki: HTML5 clients](https://xpra.org/trac/wiki/Clients/HTML5). (Caution: Don't use a host window manager with option `--wm` in this setup. You don't need it and it can be exploited to access your host through a browser!).
 
 # Developer options
 Collection of rarer needed but sometimes useful options.
