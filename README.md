@@ -86,6 +86,15 @@ with lines:
 
 On debian 9 and Ubuntu 16.04 you need to install package `xserver-xorg-legacy`. 
 
+## Web applications
+To provide dockered applications as HTML5 web applications, you need xpra and package `websockify`. Example:
+```
+read xenv < <(x11docker --xdummy  x11docker/lxde pcmanfm)
+echo $xenv && export $env
+xpra start $DISPLAY --use-display --html=on --bind-tcp=localhost:14500
+```
+Now you can access your application at [http://localhost:14500](http://localhost:14500). Further infos at [xpra wiki: HTML5 clients](https://xpra.org/trac/wiki/Clients/HTML5).
+
 # Developer options
 Collection of rarer needed but sometimes useful options.
 
