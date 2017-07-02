@@ -75,7 +75,7 @@ These options are useful to test whether an application supports a pure Wayland 
   `x11docker --weston --exe neverball`
   
 ## Setup for option --xorg
-Option `--xorg` runs ootb from console. To run a second core Xorg server from within an already running X session, you have to edit file `/etc/X11/Xwrapper.conf` and replace line:
+Option `--xorg` runs ootb from console. To run a second core Xorg server from within an already running X session, you have to edit file `/etc/X11/Xwrapper.config` and replace line:
 
 `allowed_users=console`
 
