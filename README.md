@@ -96,6 +96,17 @@ xpra start $DISPLAY --use-display --html=on --bind-tcp=localhost:14500
 ```
 Now you can access your application at [http://localhost:14500](http://localhost:14500). Further infos at [xpra wiki: HTML5 clients](https://xpra.org/trac/wiki/Clients/HTML5).
 
+## VNC
+Sample setup for VNC access:
+```
+read Xenv < <(x11docker --xdummy  x11docker/lxde pcmanfm)
+echo $Xenv && export $Xenv
+x11vnc -localhost -noshm
+```
+In another terminal, start VNC viewer with `vncviewer localhost:0`.
+See `man x11vnc`  for many details and further infos.
+Option `-noshm` disables shared memory (MIT-SHM). To allow shared memory, remove `-noshm` and use isolation breaking x11docker option `--ipc`.
+
 # Developer options
 Collection of rarer needed but sometimes useful options.
 
