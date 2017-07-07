@@ -17,7 +17,7 @@ To use `x11docker-gui`, you need to install package `kaptain`.
 # Terminal usage
 Just type `x11docker IMAGENAME [IMAGECOMMAND]`. Get an [overview of options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`. 
 
-Make x11docker executable with `chmod +x x11docker` or run it with `bash x11docker` respective `bash x11docker-gui`. Or install it on your system (see below at chapter "Installation").
+Make x11docker executable with `chmod +x x11docker` or run it with `bash x11docker` respective `bash x11docker-gui`. Or install it on your system (see below at chapter [Installation](#installation)).
  
 # Security 
  Main purpose of x11docker is to run dockered GUI applications while preserving container isolation.
