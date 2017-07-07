@@ -45,7 +45,9 @@ If no additional X server is installed, only less isolated option `--hostdisplay
    - `--nxagent` provides a fast and lightweight alternative to `xpra` and `xephyr`. Needs [`nxagent`](https://packages.debian.org/experimental/nxagent) to be installed.
    - `--kwin`, `--kwin-native` and `--kwin-xwayland` need `kwin_wayland`, included in modern `kwin` packages.
    - Web application setup (see below) needs package `websockify`. 
- - List of all host packages for all possible x11docker options: `xpra xserver-xephyr xvfb weston xwayland nxagent kwin xclip xdotool websockify`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
+   - `--xdummy` needs `xserver-xorg-video-dummy`
+   - `--xvfb` needs `xvfb`
+ - List of all host packages for all possible x11docker options: `xpra xserver-xephyr xvfb weston xwayland nxagent kwin xclip xdotool xserver-xorg-video-dummy websockify`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
 
 x11docker will check dependencies for chosen options on startup and shows terminal messages if some are missing. (The package names above are valid for debian and its derivates like Ubuntu and Mint. They may be slightly different for other distributions).
 
@@ -107,7 +109,7 @@ In another terminal, start VNC viewer with `vncviewer localhost:0`.
 See `man x11vnc`  for many details and further infos.
 Option `-noshm` disables shared memory (MIT-SHM). To allow shared memory, remove `-noshm` and use isolation breaking x11docker option `--ipc`.
 
-# Developer options
+# Special options
 Collection of rarer needed but sometimes useful options.
 
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/x11docker-developer.png "developer options")
