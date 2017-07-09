@@ -7,19 +7,15 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.5.8"
+Version="3.5.9"
 
 changelog() {
 ### ToDo:
-# check file permission issuance - maybe giving too much for different --user on --homedir?
 # do not terminate x11docker-gui on --orphaned or run-in-terminal
-# support user namespacing with --home and --homedir. Missing key: how to set or predict subuid in use?
-# check setfacl and getfacl with non-acl file systems and with acl not installed
 # --xorg: check custom systemd start of X #7
 # check X in container #7
 # some tests with Xephyrglamor=no
-### SECURITY improvements
-# check X security leaks. Avoid X/--xorg if setuid, or show warning at least?
+# find solution for passwordless x11docker. Some sudo setup with option restrictions?
 ### BUG collection: x11docker bugs:
 # BUG check whether VT is not in use with --xorg/--xpra/--xdummy, bug if accidently using vt that is already in use
 # BUG KDE-Wayland fails with different --user, seems to be ownership issues with wayland socket
@@ -36,7 +32,12 @@ changelog() {
 # BUG debian bug report lightdm/sddm contra gdm, dm can crash on tty switch if multiple graphical sessions are running
 
 # x11docker changelog
-# 07.06.2017 V3.5.8  --nxagent: bugfix due to update? must set -ac (=xhost +) temporary to allow xinit
+# 09-07.2017 V3.5.9  --user: bugfix parsing custom gid, gid was set to username
+#                    --home with --user=(unknown): only show warning (instead of error) not creating persistent home
+#                    do not set write permissions on --home or --homedir folder for different users than $USER or --user. (Not x11docker's job) 
+#                    do not set --read-only if --user=0
+#                    minor bugfix: chown x11docker_CMD to host user to avoid permission issues in $Sharefolder
+# 07.06.2017 V3.5.8  --nxagent: bugfix due to update? must set nxagent -ac (=xhost +) temporary to allow xinit
 # 06.07.2017         --kwin-native: always share Wayland (--sharewayland --waylandenv --dbus)
 #                    minor bugfix: allow --wm for --kwin-xwayland
 #                    docker run "--read-only --volume=/tmp" to restrict container filesystem as read-only (except for --sudouser)
@@ -681,6 +682,8 @@ export IFS=$' \n\t'                             # set IFS to default
 [ -z "${WAYLAND_DISPLAY:-}" ] && WAYLAND_DISPLAY=""
 [ -z "${XDG_RUNTIME_DIR:-}" ] && XDG_RUNTIME_DIR=""
 Exitcode="0"
+
+Hostuser=$(id -un)
 
 Cacherootfolder=$HOME/.cache/x11docker          # define cache folder to store temporary files
 Cachefolder=""
@@ -2128,29 +2131,28 @@ esac
 }
 
 { #### part: check container user and shared home folder
-
-  Containername="x11docker_X${Newdisplaynumber}_$(mcookie | cut -c -6)_$(echo $Imagename | tr / _ | tr : _ )"
-
   ## determine container user
   [ -z "$Benutzer" ] && Benutzer=$(id -un)                 # default: containeruser = hostuser
-  [ -n "$Benutzer" ] && echo $Benutzer | grep -q ':' && {  # option --user can specify a group after :
-    Benutzer="$(echo $Benutzer | cut -d: -f1)"
+  [ -n "$Benutzer" ] && echo $Benutzer | grep -q ':' && {  # option --user can specify a group/gid after :
     Benutzergid="$(echo $Benutzer | cut -d: -f2)"
+    Benutzer="$(echo $Benutzer | cut -d: -f1)"
   }
   [ -n "$(getent passwd $Benutzer)" ] && {                 # user exists on host
-    Benutzer=$(getent passwd $Benutzer | cut -d: -f1)
+    Benutzer=$(getent passwd $Benutzer | cut -d: -f1)      # if name or uid -> now name
     Benutzeruid=$(getent passwd $Benutzer | cut -d: -f3)
     [ -z "$Benutzergid" ] && Benutzergid=$(getent passwd $Benutzer | cut -d: -f4)
     Benutzerhome=$(getent passwd $Benutzer | cut -d: -f6)
   } || {                                                   # user does not exist on host
-    [[ $Benutzer =~ ^[0-9]+$ ]] || error "Unknown user or invalid user number '$Benutzer' for option --user."
+    [[ $Benutzer =~ ^[0-9]+$ ]] || error "Unknown user or invalid user number '$Benutzer' for option --user."  # virtual users can only be specified as uid
     Benutzeruid=$Benutzer
     Benutzer="unknown$Benutzer"
     [ -z "$Benutzergid" ] && Benutzergid=100
     Benutzerhome=/home/$Benutzer
-    [ -z "$Adduserhomefolder" ] && [ "$Adduserhome" = "yes" ] && { error "Will not create a persistent home folder on host
+    [ -z "$Adduserhomefolder" ] && [ "$Adduserhome" = "yes" ] && { warning "Will not create a persistent home folder on host
   for a non-existing user. (Except you specify --homedir to a location
-  where $Benutzer or at least $(id -un) has write access.)"
+  where $Benutzer or at least $(id -un) has write access.)
+  Fallback: Disabling option --home, no persistent home folder will be created."
+      Adduserhome="no"
     }
   }
   
@@ -2174,48 +2176,29 @@ esac
   with user namespace remapping enabled. Disabling user namespace remapping!" 
         Dockeroptions="$Dockeroptions --userns=host"
       }
-      # if no home folder on host is specified, create a standart one in ~/.local/share/x11docker
+      # if no home folder on host is specified (--homedir), create a standard one in ~/.local/share/x11docker
       [ -z "$Adduserhomefolder" ] && Adduserhomefolder=$Benutzerhome/.local/share/x11docker/$(echo $Imagename | tr / - | tr : - )
       [ -e "$Adduserhomefolder" ] || {
         if mkdir -p $Adduserhomefolder; then
           # create symbolic link to ~/x11docker
           echo $Adduserhomefolder | grep -q .local/share/x11docker && [ ! -e $Benutzerhome/x11docker ] && ln -s $Benutzerhome/.local/share/x11docker $Benutzerhome/x11docker
         else
-          # errors can occur if specifying a user with --user
+          # errors can occur if specifying a user with --user different from current user
           error "Could not create persistent home folder for 
   user '$Benutzer' on host (option --home or --homedir). You may create folder 
   $Adduserhomefolder
   with write access for '$Benutzer' so x11docker can provide it to container.
   Otherwise, you can run x11docker one time as user '$Benutzer', afterwards
-  you can access the folder as user '$(id -un)' with option '--user=$Benutzer'."
+  you can provide the folder as user '$(id -un)' with option '--user=$Benutzer'."
         fi
       }
-      writeaccess $Benutzeruid $Adduserhomefolder || {  # if $Benutzer does not have write access, try to give it.
-        [ "$Benutzeruid" != "$(id -u)" ] && {
-          command -v setfacl > /dev/null && {
-            warning "Allowing user '$Benutzer' file access with setfacl:
-  $(setfacl --test -m u:$Benutzeruid:rwx "$Adduserhomefolder")
-  You may occur access permission issues on host with files owned by $Benutzer."
-            setfacl -m u:$Benutzeruid:rwx "$Adduserhomefolder" || warning "setfacl failed. 
-  Either it could not set needed permissions, or it set more than needed."
-          }
-          command -v setfacl > /dev/null || {
-            warning "Could not find command setfacl.
-  Setting read/write/execute permissions (chmod 777) on folder
-  $Adduserhomefolder
-  to allow file access for user $Benutzer."
-            chmod 777 $Adduserhomefolder || warning "chown failed force
-  $Adduserhomefolder"
-          }
-        }
-      }
-      writeaccess $Benutzeruid $Adduserhomefolder || error "User '$Benutzer' does not have write access to
+      writeaccess $Benutzeruid $Adduserhomefolder || warning "User '$Benutzer' does not have write access to
   $Adduserhomefolder."
     ;;
     no) Benutzerhome="/tmp/fakehome" ;;
   esac
   
-  # create /etc/passwd
+  # create /etc/passwd. only needed to provide user name in container
   [ -z "$(getent passwd $Benutzer)" ] && { 
     Benutzerpasswdentry="$Benutzer:*:$Benutzeruid:$Benutzergid:$Benutzer,,,:$Benutzerhome:/bin/bash"
   } || {
@@ -2228,20 +2211,17 @@ esac
 { #### part: create command to run docker
   case $X11dockermode in
     exe)  Dockercommand="# dontrundocker"  ;;
-    run) 
-      Dockercommand='docker run'
-      
-      [ "$Preservecontainer" = "no" ] && Dockercommand="$Dockercommand --rm"
+    run)  Dockercommand='docker run'
       
       case $Sudouser in
         no)
-          # Create container user and /etc/passwd
+          # Create container user
           # group video is needed for non-systemd systems and for KDE
           Dockercommand="$Dockercommand --user $Benutzeruid:$Benutzergid --group-add video --env USER=$Benutzer"
-          [ "$Capdropall" = "yes" ]       && Dockercommand="$Dockercommand --cap-drop=ALL --security-opt=no-new-privileges"
           [ "$Benutzeruid" = "0" ] || Dockercommand="$Dockercommand -v $Etcpasswd:/etc/passwd:ro"
-          # restrict access to image files (except /tmp that must be writeable). docker removes volume on itself on container exit&rm
-          Dockercommand="$Dockercommand --read-only --volume=/tmp"
+          # hardening container security
+          [ "$Capdropall" = "yes" ] && Dockercommand="$Dockercommand --cap-drop=ALL --security-opt=no-new-privileges"
+          [ "$Benutzeruid" = "0" ]  || Dockercommand="$Dockercommand --read-only --volume=/tmp"
         ;;
         yes) # option --sudouser
           warning "You allow $Benutzer sudo permissions without a password.
@@ -2265,6 +2245,8 @@ esac
         ;;
       esac
 
+      [ "$Preservecontainer" = "no" ] && Dockercommand="$Dockercommand --rm"
+      Containername="x11docker_X${Newdisplaynumber}_$(mcookie | cut -c -6)_$(echo $Imagename | tr / _ | tr : _ )"
       Dockercommand="$Dockercommand --name=$Containername"
       
       Dockercommand="$Dockercommand -v $Sharefolder:$Cshare:ro"
@@ -2288,9 +2270,6 @@ esac
           Dockercommand="$Dockercommand -v $XDG_RUNTIME_DIR/$Waylandsocket:/tmp/$Waylandsocket:ro"
         } 
       }
-
-      ## option --env
-#      while read -r Line; do [ -z "$Line" ] || Dockercommand="$Dockercommand --env=\"$Line\"" ; done < <(echo -e $Customenvironment)
       
       ## option --sharedir
       while read -r Line; do 
@@ -2302,7 +2281,6 @@ esac
 
       ## option --gpu : share graphics adapter device files ### SECURITY: degrades container isolation
       [ "$Gpu" = "yes" ] && Dockercommand="$Dockercommand --device=/dev/dri:/dev/dri:rw"
-      
       ## option '--pulseaudio': provide pulseaudio server
       [ "$Pulseaudio" = "yes" ] && Dockercommand="$Dockercommand -e PULSE_SERVER=tcp:$Dockerip:$Pulseaudiotcpport"
       ## options --ipc and --net
@@ -2320,6 +2298,8 @@ esac
 }
 
 { #### part: create dockerrc
+  # create script that needs root permissions or docker group membership to use docker.
+  # This is the part the password prompt is needed for.
   echo "#! /bin/bash"
   echo "Imagecommand='$Imagecommand'"
   echo "[ -z \"\$Imagecommand\" ] && {"
@@ -2341,11 +2321,11 @@ esac
   echo "  echo 'mkdir -p /tmp/.ICE-unix'"
   echo "  echo ''"
   echo "  echo '# link X socket into right folder /tmp/.X11-unix. '"
-  echo "  echo '# Was not directly shared to provide .X11-unix with rw-access -> needed for additional X like in startplasmacompositor'"
+  echo "  echo '# Was not directly shared to provide .X11-unix with rw-access. Needed for X created in container like with startplasmacompositor'"
   echo "  echo 'mkdir -p /tmp/.X11-unix'"
   echo "  [ -e $Newxsocket ] && echo 'ln -s /tmp/X$Newdisplaynumber $Newxsocket'"
   echo "  echo ''"
-  echo "  echo '# Wayland socket resides in XDG_RUNTIME_DIR that must be owned by user'"
+  echo "  echo '# XDG_RUNTIME_DIR that must be owned by user'"
   echo "  echo 'mkdir -p /tmp/XDG_RUNTIME_DIR'"
   echo "  echo 'export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR'"
   [ "$Sharewayland" = "yes" ] && [ -n "$Waylandsocket" ] && echo "  echo 'ln -s /tmp/$Waylandsocket /tmp/XDG_RUNTIME_DIR/$Waylandsocket'"
@@ -2365,10 +2345,11 @@ esac
   echo "  echo '  while ps -p \$Imagecommandpid >/dev/null && [ ! -e $Cshare/timetosaygoodbye ] ; do sleep 1 ; done '"
   echo "  echo \"} || \\\$Imagecommand\""
   echo "} > $Imagecommandscript"
+  echo "chown $Hostuser $Imagecommandscript"
   echo ""
   echo "$Dockercommand >> $Dockerlogfile 2>&1 &"
   echo "echo \$! >> $Dockerpidfile" 
-  echo "sleep 1 # wait a moment until IP is available"
+  echo "sleep 1 # wait a moment until IP is available. Currently, IP is only needed for --pulseaudio"
   echo "docker inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername > $Containerip"
 } > $Dockerrc
   
