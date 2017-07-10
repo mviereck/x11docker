@@ -1,10 +1,16 @@
-# x11docker: Run graphical GUI applications and desktop environments in docker on a segregated X server or Wayland compositor.
+# x11docker: Run GUI applications in docker
+## Avoiding X security leaks and hardening container security
 
- - Avoids common X security leaks.
+ - Avoids X security leaks by running additional X servers.
  - Restricts container privileges to bare minimum.
- - Container user is similar to host user.
+ - Container user is similar to host user to avoid root in container.
  - No dependencies inside of docker images.
- - Pulseaudio sound and GPU hardware acceleration possible.
+ - Wayland support.
+ - Optional features: 
+   - Pulseaudio sound
+   - Hardware acceleration for OpenGL
+   - Clipboard sharing
+   - Shared host folder as /home in container
 
 # GUI for x11docker ![x11docker logo](/../screenshots/x11docker_klein.jpeg?raw=true "Optional Title")
 To use `x11docker-gui`, you need to install package `kaptain`. 
