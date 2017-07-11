@@ -30,16 +30,17 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. x11docker
  - On systems without a root password like Ubuntu, activate option `--sudo`.
 
 # Security 
- Main purpose of x11docker is to run dockered GUI applications while preserving container isolation.
- Core concept is:
+Main purpose of x11docker is to run dockered GUI applications while preserving container isolation.
+Core concept is:
    - Run a second X server to avoid [X security leaks](http://www.windowsecurity.com/whitepapers/unix_security/Securing_X_Windows.html).
      - This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control. (x11docker provides this with option `--hostdisplay`).
      - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.
-   - Create container user similar to host user to [avoid root in container](http://blog.dscpl.com.au/2015/12/don-run-as-root-inside-of-docker.html).
    - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum 
      - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges --read-only --volume=/tmp`. (This behaviour can be disabled with x11docker options `--cap-default` and `--sudouser`).
+   - Create container user similar to host user to [avoid root in container](http://blog.dscpl.com.au/2015/12/don-run-as-root-inside-of-docker.html).
 
-Some options can degrade container isolation. Most important:
+### Options degrading container isolation
+Most important:
   - `--hostdisplay` shares host X socket of display :0 instead of running a second X server. Danger of abuse is reduced providing so-called untrusted cookies. Along with option `--gpu`, option `--ipc` and trusted cookies are used and no protection against X security leaks is left. (If you do not care about container isolation, this is a quite fast setup without any overhead.)
   - `--gpu` allows access to GPU hardware. This can be abused to get window content from host ([palinopsia bug](https://hsmr.cc/palinopsia/)) and makes [GPU rootkits](https://github.com/x0r1/jellyfish) possible.
   - `--pulseaudio` allows catching audio output and microphone input.
