@@ -3,20 +3,20 @@
 
  - Avoids X security leaks by running additional X servers.
  - Restricts container privileges to bare minimum.
- - Container user is similar to host user to avoid root in container.
+ - Container user is same as host user to avoid root in container.
  - No dependencies inside of docker images.
  - Wayland support.
+ - Single applications as well as dockered desktop environments are possible.
  - Optional features: 
    - Pulseaudio sound
    - Hardware acceleration for OpenGL
    - Clipboard sharing
    - Shared host folder as /home in container
+   - Adjust properties of new X server like multiple outputs, rotation, scaling, dpi.
 
 # GUI for x11docker ![x11docker logo](/../screenshots/x11docker_klein.jpeg?raw=true "Optional Title")
-To use `x11docker-gui`, you need to install package `kaptain`. 
- - On systems without a root password like Ubuntu, activate option `--sudo`.
- - For troubleshooting, run x11docker-gui in a terminal or use [Run in xterm]. Also you can activate option `--verbose`.
- - Package `kaptain` is not available in repositories of debian 9 and Ubuntu 16.04. You can install [kaptain for debian jessie](https://packages.debian.org/jessie/kaptain) respective [kaptain for Ubuntu 14.04](http://packages.ubuntu.com/trusty/kaptain) instead.
+To use `x11docker-gui`, you need package `kaptain`. 
+  - Package `kaptain` is not available in repositories of debian 9 and Ubuntu 16.04. You can install [kaptain for debian jessie](https://packages.debian.org/jessie/kaptain) respective [kaptain for Ubuntu 14.04](http://packages.ubuntu.com/trusty/kaptain) instead.
 
 ![x11docker-gui screenshot](/../screenshots/x11docker-gui.png?raw=true "Optional Title")
 
@@ -24,18 +24,32 @@ To use `x11docker-gui`, you need to install package `kaptain`.
 Just type `x11docker IMAGENAME [IMAGECOMMAND]`. Get an [overview of options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`. 
 
 Make x11docker executable with `chmod +x x11docker` or run it with `bash x11docker` respective `bash x11docker-gui`. Or install it on your system (see below at chapter [Installation](#installation)).
- 
+
+# Troubleshooting
+For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. x11docker shows some warnings on itself if something is insecure or is going wrong. Additional, you can activate option `--verbose` to see logfile output. You can get help in the [issue tracker](https://github.com/mviereck/x11docker/issues).
+ - On systems without a root password like Ubuntu, activate option `--sudo`.
+
 # Security 
  Main purpose of x11docker is to run dockered GUI applications while preserving container isolation.
  Core concept is:
    - Run a second X server to avoid [X security leaks](http://www.windowsecurity.com/whitepapers/unix_security/Securing_X_Windows.html).
+     - This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control. (x11docker provides this with option `--hostdisplay`).
+     - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.
    - Create container user similar to host user to [avoid root in container](http://blog.dscpl.com.au/2015/12/don-run-as-root-inside-of-docker.html).
-   - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum (docker run option `--cap-drop=ALL`).
+   - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum 
+     - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges --read-only --volume=/tmp`. (This behaviour can be disabled with x11docker options `--cap-default` and `--sudouser`).
 
-Avoiding X security leaks is done using an additional X server separate from X on host display :0. Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.  (This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control. x11docker provides this  possibility with discouraged and insecure option `--hostdisplay`.)
-
- - Some options can degrade or break container isolation. Look at security info dialog to see the differences.
+Some options can degrade container isolation. Most important:
+  - `--hostdisplay` shares host X socket of display :0 instead of running a second X server. Danger of abuse is reduced providing so-called untrusted cookies. Along with option `--gpu`, option `--ipc` and trusted cookies are used and no protection against X security leaks is left. (If you do not care about container isolation, this is a quite fast setup without any overhead.)
+  - `--gpu` allows access to GPU hardware. This can be abused to get window content from host ([palinopsia bug](https://hsmr.cc/palinopsia/)) and makes [GPU rootkits](https://github.com/x0r1/jellyfish) possible.
+  - `--pulseaudio` allows catching audio output and microphone input.
   
+Rather special options reducing security, but not needed for regular use:
+  - `--sudouser` allows sudo without password for container user. If an application breaks out of container, it can do anything. Includes option `--cap-default`.
+  - `--cap-default` disables x11docker's container hardening and falls back to default docker container privileges.
+  - `--ipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory)
+  - `--net` sets docker run option `--net=host`. (Allows dbus connection to host)
+   
 ![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true)
 
 # Dependencies
@@ -60,10 +74,10 @@ x11docker will check dependencies for chosen options on startup and shows termin
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
 
 # X servers and Wayland compositors to choose from
-If no X server option is specified, x11docker automatically chooses one depending on installed dependencies and on given or missing options `--wm` and `--gpu`. 
+If no X server is specified, x11docker automatically chooses one depending on installed dependencies and on given or missing options `--wm` and `--gpu`. 
 For single applications, x11docker prefers `--xpra`.
 If `--wm=none`, x11docker assumes a window manager or desktop environment in image and prefers `--xephyr`. 
-If option `--gpu` is given, it prefers `--xpra-xwayland` or `--weston-xwayland`.
+If option `--gpu` is given, it prefers `--xpra-xwayland` or `--weston-xwayland`. If none of them can be started due to missing dependencies, it uses `--hostdisplay` or `--xorg`.
  
 ![x11docker-gui server screenshot](/../screenshots/x11docker-server.png?raw=true)
 
