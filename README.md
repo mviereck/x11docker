@@ -6,7 +6,6 @@
  - Container user is same as host user to avoid root in container.
  - No dependencies inside of docker images.
  - Wayland support.
- - Single applications as well as dockered desktop environments are possible.
  - Optional features: 
    - Pulseaudio sound
    - Hardware acceleration for OpenGL
