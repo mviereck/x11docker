@@ -1,4 +1,4 @@
-# x11docker: Run GUI applications in docker
+# x11docker: Run GUI applications in docker ![x11docker logo](/../screenshots/x11docker_klein.jpeg?raw=true "Optional Title") 
 ## Avoiding X security leaks and hardening container security
 
  - Avoids X security leaks by running additional X servers.
@@ -12,8 +12,11 @@
    - Clipboard sharing
    - Shared host folder as /home in container
    - Adjust properties of new X server like multiple outputs, rotation, scaling, dpi.
+ - Easy to use. Example: `x11docker jess/cathode` 
+ 
+![x11docker-gui screenshot](/../screenshots/screenshot-retroterm.png?raw=true "Cathode retro term in docker")
 
-# GUI for x11docker ![x11docker logo](/../screenshots/x11docker_klein.jpeg?raw=true "Optional Title")
+# GUI for x11docker
 To use `x11docker-gui`, you need package `kaptain`. 
   - Package `kaptain` is not available in repositories of debian 9 and Ubuntu 16.04. You can install [kaptain for debian jessie](https://packages.debian.org/jessie/kaptain) respective [kaptain for Ubuntu 14.04](http://packages.ubuntu.com/trusty/kaptain) instead.
 
@@ -22,7 +25,7 @@ To use `x11docker-gui`, you need package `kaptain`.
 # Terminal usage
 Just type `x11docker IMAGENAME [IMAGECOMMAND]`. Get an [overview of options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`. 
 
-Make x11docker executable with `chmod +x x11docker` or run it with `bash x11docker` respective `bash x11docker-gui`. Or install it on your system (see below at chapter [Installation](#installation)).
+Make x11docker executable with `chmod +x x11docker` or just run it with `bash x11docker` respective `bash x11docker-gui`. Or install it on your system (see below at chapter [Installation](#installation)).
 
 # Troubleshooting
 For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. x11docker shows some warnings if something is insecure or is going wrong. Additionally, you can use option `--verbose` to see logfile output. You can get help in the [issue tracker](https://github.com/mviereck/x11docker/issues).
