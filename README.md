@@ -14,6 +14,8 @@
 
 ![screenshot](screenshot-lxde.png "lxde desktop running in Xephyr window using x11docker")
 
+![screenshot](screenshot-retroterm.png "cool retro term running in Xpra window using x11docker")
+
 # x11docker-gui
 
 ![screenshot](x11docker-gui.png "x11docker GUI main")
