@@ -3,11 +3,11 @@
 # x11docker
 # Run GUI applications and desktop environments in docker on a separate X server or Wayland compositor.
 # Provides GPU acceleration and pulseaudio sound. Circumvents common X security leaks.
-# Restrictes docker container privileges with 'docker run --cap-drop=ALL' 
+# Restrictes docker container privileges with 'docker run --cap-drop=ALL --security-opt=no-new-privileges' 
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.5.9"
+Version="3.5.10"
 
 changelog() {
 ### ToDo:
@@ -32,7 +32,8 @@ changelog() {
 # BUG debian bug report lightdm/sddm contra gdm, dm can crash on tty switch if multiple graphical sessions are running
 
 # x11docker changelog
-# 09-07.2017 V3.5.9  --user: bugfix parsing custom gid, gid was set to username
+# 12.07.2017 V3.5.10 regard ENTRYPOINT in dockerrc
+# 09.07.2017 V3.5.9  --user: bugfix parsing custom gid, gid was set to username
 #                    --home with --user=(unknown): only show warning (instead of error) not creating persistent home
 #                    do not set write permissions on --home or --homedir folder for different users than $USER or --user. (Not x11docker's job) 
 #                    do not set --read-only if --user=0
@@ -2248,6 +2249,8 @@ esac
       [ "$Preservecontainer" = "no" ] && Dockercommand="$Dockercommand --rm"
       Containername="x11docker_X${Newdisplaynumber}_$(mcookie | cut -c -6)_$(echo $Imagename | tr / _ | tr : _ )"
       Dockercommand="$Dockercommand --name=$Containername"
+
+      Dockercommand="$Dockercommand --entrypoint='' "
       
       Dockercommand="$Dockercommand -v $Sharefolder:$Cshare:ro"
       [ "$Adduserhome" = "yes" ] && [ -n "$Adduserhomefolder" ] && Dockercommand="$Dockercommand -v $Adduserhomefolder:$Benutzerhome"
@@ -2301,6 +2304,7 @@ esac
   # create script that needs root permissions or docker group membership to use docker.
   # This is the part the password prompt is needed for.
   echo "#! /bin/bash"
+  declare -f warning
   echo "Imagecommand='$Imagecommand'"
   echo "[ -z \"\$Imagecommand\" ] && {"
   echo "  # extract image command from image if not given on cli"
@@ -2309,12 +2313,19 @@ esac
   echo "  Imagecommand=\${Imagecommand#/bin/sh -c }"
   echo "  Imagecommand=\${Imagecommand%]}"
   echo "}"
-  echo "[ -z \"\$Imagecommand\" ] && echo 'x11docker ERROR: No image command specified and no CMD found in image.' >&2"
+  echo "# extract entrypoint of image"
+  echo "Entrypoint=\$(docker inspect --format='{{.Config.Entrypoint}}' $Imagename)"
+  echo "Entrypoint=\${Entrypoint#[}"
+  echo "Entrypoint=\${Entrypoint#/bin/sh -c }"
+  echo "Entrypoint=\${Entrypoint%]}"
+  echo "[ -z \"\$Imagecommand\" ] && [ -z \"\$Entrypoint\" ] && echo 'x11docker WARNING: No image command specified and no CMD found in image.' >&2"
   echo ""
   echo "# create x11docker_CMD (shared with container and given as image command on docker run)"
   echo "{ echo '#! /bin/bash'"
+  echo "  # created startscript for docker run: x11docker_CMD"
   echo '  echo Imagecommand="\"$Imagecommand\""'
-  [ "$Dbuslaunch" = "yes" ] && echo "  echo 'command -v dbus-launch >/dev/null && Imagecommand=\"dbus-launch '\$Imagecommand'\" || echo \"x11docker ERROR: image does not provide dbus-launch (--dbus)\" >&2'"
+  echo '  echo Entrypoint="\"$Entrypoint\""'
+  [ "$Dbuslaunch" = "yes" ] && echo "  echo 'command -v dbus-launch >/dev/null && Imagecommand=\"dbus-launch '\$Imagecommand'\" || echo \"x11docker WARNING: image does not provide dbus-launch (--dbus)\" >&2'"
   echo "  echo ''"
   echo "  echo export HOME=\"\\\"$Benutzerhome\\\"\""
   echo "  echo 'mkdir -p  \"\$HOME\" && cd \"\$HOME\"'"
@@ -2325,7 +2336,7 @@ esac
   echo "  echo 'mkdir -p /tmp/.X11-unix'"
   echo "  [ -e $Newxsocket ] && echo 'ln -s /tmp/X$Newdisplaynumber $Newxsocket'"
   echo "  echo ''"
-  echo "  echo '# XDG_RUNTIME_DIR that must be owned by user'"
+  echo "  echo '# XDG_RUNTIME_DIR must be owned by user'"
   echo "  echo 'mkdir -p /tmp/XDG_RUNTIME_DIR'"
   echo "  echo 'export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR'"
   [ "$Sharewayland" = "yes" ] && [ -n "$Waylandsocket" ] && echo "  echo 'ln -s /tmp/$Waylandsocket /tmp/XDG_RUNTIME_DIR/$Waylandsocket'"
@@ -2340,19 +2351,22 @@ esac
   done < <(echo -e $Customenvironment)
   echo "  echo ''"
   echo "  echo 'command -v ps >/dev/null && {'"
-  echo "  echo \"  \\\$Imagecommand &\""
+  echo "  echo \"  \\\$Entrypoint \\\$Imagecommand &\""
   echo "  echo '  Imagecommandpid=\$!'"
   echo "  echo '  while ps -p \$Imagecommandpid >/dev/null && [ ! -e $Cshare/timetosaygoodbye ] ; do sleep 1 ; done '"
-  echo "  echo \"} || \\\$Imagecommand\""
+  echo "  echo \"} || \\\$Entrypoint \\\$Imagecommand\""
   echo "} > $Imagecommandscript"
   echo "chown $Hostuser $Imagecommandscript"
+  echo ""
+  echo "cat $Imagecommandscript | nl >> $Dockerlogfile"
   echo ""
   echo "$Dockercommand >> $Dockerlogfile 2>&1 &"
   echo "echo \$! >> $Dockerpidfile" 
   echo "sleep 1 # wait a moment until IP is available. Currently, IP is only needed for --pulseaudio"
   echo "docker inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername > $Containerip"
 } > $Dockerrc
-  
+
+
 { #### part: create xinitrc
   echo "#!/bin/bash"
 
@@ -2403,10 +2417,8 @@ esac
           echo "export XAUTHORITY=$Xclientcookie.bak"
         }
         echo ':> '$Xclientcookie
-        echo "echo XAUTHXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
         [ "$Trusted" = "yes" ] && Trusted="trusted" || Trusted="untrusted" 
         echo "xauth -v -f $Xclientcookie generate $Newdisplay . $Trusted"  
-#        echo "cp $Xclientcookie $Xservercookie"
         echo "# create prepared cookie with localhost identification disabled by ffff, needed if X socket is shared. ffff means 'familiy wild'"
         echo "Cookie=\$(xauth -f $Xclientcookie nlist $Newdisplay | sed -e 's/^..../ffff/' )"   
         echo "echo \$Cookie | xauth -v -f $Xclientcookie nmerge -"
