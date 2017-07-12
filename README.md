@@ -25,7 +25,7 @@ Just type `x11docker IMAGENAME [IMAGECOMMAND]`. Get an [overview of options](htt
 Make x11docker executable with `chmod +x x11docker` or run it with `bash x11docker` respective `bash x11docker-gui`. Or install it on your system (see below at chapter [Installation](#installation)).
 
 # Troubleshooting
-For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. x11docker shows some warnings on itself if something is insecure or is going wrong. Additional, you can activate option `--verbose` to see logfile output. You can get help in the [issue tracker](https://github.com/mviereck/x11docker/issues).
+For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. x11docker shows some warnings if something is insecure or is going wrong. Additionally, you can use option `--verbose` to see logfile output. You can get help in the [issue tracker](https://github.com/mviereck/x11docker/issues).
  - On systems without a root password like Ubuntu, activate option `--sudo`.
 
 # Security 
