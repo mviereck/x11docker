@@ -14,7 +14,7 @@
    - Adjust properties of new X server like multiple outputs, rotation, scaling, dpi.
  - Easy to use. Example: `x11docker jess/cathode` 
  
-![x11docker-gui screenshot](/../screenshots/screenshot-retroterm.png?raw=true "Cathode retro term in docker")
+![x11docker-gui screenshot](/../screenshots/screenshot-retroterm.png?raw=true "Cathode retro term in docker") ![LXDE in xpra](/../screenshots/screenshot-lxde-small.png?raw=true "LXDE desktop in docker")
 
 # GUI for x11docker
 To use `x11docker-gui`, you need package `kaptain`. 
