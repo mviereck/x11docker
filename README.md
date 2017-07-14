@@ -62,7 +62,7 @@ Rather special options reducing security, but not needed for regular use:
 x11docker can run with standard system utilities without additional dependencies on host or in image. As a core, it only needs X server (package `xorg`)  and, of course, docker (package `docker.io`) to run docker images on X. 
 
 Basics:
- - If no additional X server is installed, only less isolated option `--hostdisplay` will work out of the box within X, and option `--xorg` from console. 
+ - If no additional X server is installed, only less isolated option `--hostdisplay` will work out of the box within X, and option `--xorg` from console. (To use `--xorg` within X, look at [setup for option --xorg](#setup-for-option---xorg)).
  - As a well working base for convenience and security, it is recommended to install `xpra`, `xserver-xephyr` and `xvfb`. (It's recommended to use latest xpra version from [http://xpra.org](http://xpra.org/)).
  
 Advanced usage:
