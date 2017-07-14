@@ -15,7 +15,7 @@
    - Adjust properties of new X server like multiple outputs, rotation, scaling, dpi.
  - Easy to use. Examples: 
     - `x11docker jess/cathode`
-    - `x11docker --desktop --size 290x180 x11docker/lxde`
+    - `x11docker --desktop --size 300x200 x11docker/lxde`
  
 ![x11docker-gui screenshot](/../screenshots/screenshot-retroterm.png?raw=true "Cathode retro term in docker") ![LXDE in xpra](/../screenshots/screenshot-lxde-small.png?raw=true "LXDE desktop in docker")
 
