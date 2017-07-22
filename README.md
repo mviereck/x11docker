@@ -46,7 +46,7 @@ Core concept is:
 
 ### Options degrading container isolation
 Most important:
-  - `--hostdisplay` shares host X socket of display :0 instead of running a second X server. Danger of abuse is reduced providing so-called untrusted cookies. Along with option `--gpu`, option `--ipc` and trusted cookies are used and no protection against X security leaks is left. (If you do not care about container isolation, this is a quite fast setup without any overhead.)
+  - `--hostdisplay` shares host X socket of display :0 instead of running a second X server. Danger of abuse is reduced providing so-called untrusted cookies. Along with option `--gpu`, option `--ipc` and trusted cookies are used and no protection against X security leaks is left. (If you don't care about container isolation, `x11docker --hostdisplay --gpu` is an insecure, but quite fast setup without any overhead.)
   - `--gpu` allows access to GPU hardware. This can be abused to get window content from host ([palinopsia bug](https://hsmr.cc/palinopsia/)) and makes [GPU rootkits](https://github.com/x0r1/jellyfish) possible.
   - `--pulseaudio` allows catching audio output and microphone input.
   
