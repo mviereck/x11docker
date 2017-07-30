@@ -154,9 +154,13 @@ Installs into `/usr/local/bin`. Creates an icon in `/usr/share/icons`. Creates a
 # Examples
 Some example images can be found on docker hub: https://hub.docker.com/u/x11docker/
 
- - Run xfce desktop in Xephyr:
+ - Single application: fractal generator XaoS
    
-  `x11docker --xephyr  x11docker/xfce`
+  `x11docker patricknw/xaos  xaos`
+
+ - Desktop: Xfce
+   
+  `x11docker --desktop  x11docker/xfce`
    
  - Run wine and playonlinux on xfce desktop in a Xephyr window, sharing a home folder to preserve settings and wine installations:
 
