@@ -20,8 +20,7 @@
 ![x11docker-gui screenshot](/../screenshots/screenshot-retroterm.png?raw=true "Cathode retro term in docker") ![LXDE in xpra](/../screenshots/screenshot-lxde-small.png?raw=true "LXDE desktop in docker")
 
 # GUI for x11docker
-To use `x11docker-gui`, you need package `kaptain`. 
-  - Package `kaptain` is not available in repositories of debian 9 and Ubuntu 16.04. You can install [kaptain for debian jessie](https://packages.debian.org/jessie/kaptain) respective [kaptain for Ubuntu 14.04](http://packages.ubuntu.com/trusty/kaptain) instead.
+To use `x11docker-gui`, you need package `kaptain`. If your distribution misses it, see [mviereck/kaptain](https://github.com/mviereck/kaptain)
 
 ![x11docker-gui screenshot](/../screenshots/x11docker-gui.png?raw=true "Optional Title")
 
