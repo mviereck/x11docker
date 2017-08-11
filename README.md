@@ -31,7 +31,6 @@ Make x11docker executable with `chmod +x x11docker` or just run it with `bash x1
 
 # Troubleshooting
 For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. x11docker shows some warnings if something is insecure or is going wrong. Additionally, you can use option `--verbose` to see logfile output. You can get help in the [issue tracker](https://github.com/mviereck/x11docker/issues).
- - On systems without a root password like Ubuntu, activate option `--sudo`.
 
 # Security 
 Main purpose of x11docker is to run dockered GUI applications while preserving and improving container isolation.
@@ -42,6 +41,11 @@ Core concept is:
    - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
      - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges --read-only --volume=/tmp`. (This behaviour can be disabled with x11docker options `--cap-default` or `--sudouser`).
    - Create container user similar to host user to [avoid root in container](http://blog.dscpl.com.au/2015/12/don-run-as-root-inside-of-docker.html).
+
+Weaknesses / ToDo: 
+ - If docker daemon runs with --selinux-enabled, it is disabled for x11docker containers as it inhibits access to X unix socket.
+   Compare: [Using volumes with docker can cause problems with SELinux](http://www.projectatomic.io/blog/2015/06/using-volumes-with-docker-can-cause-problems-with-selinux/)
+ - User namespace remapping has limited support and is disabled for options `--home` and `--homedir`.
 
 ### Options degrading container isolation
 Most important:
@@ -137,7 +141,7 @@ In another terminal, start VNC viewer with `vncviewer localhost:0`.
 See `man x11vnc`  for many details and further infos.
 Option `-noshm` disables shared memory (MIT-SHM). To allow shared memory, remove `-noshm` and use isolation breaking x11docker option `--ipc`.
 
-# Special options
+# Developer options
 Collection of rarer needed but sometimes useful options.
 
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/x11docker-developer.png "developer options")
