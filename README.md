@@ -43,7 +43,7 @@ Core concept is:
    - Create container user similar to host user to [avoid root in container](http://blog.dscpl.com.au/2015/12/don-run-as-root-inside-of-docker.html).
 
 Weaknesses / ToDo: 
- - If docker daemon runs with --selinux-enabled, it is disabled for x11docker containers as it inhibits access to X unix socket.
+ - If docker daemon runs with `--selinux-enabled`, it is disabled for x11docker containers as it inhibits access to X unix socket.
    Compare: [Using volumes with docker can cause problems with SELinux](http://www.projectatomic.io/blog/2015/06/using-volumes-with-docker-can-cause-problems-with-selinux/)
  - User namespace remapping has limited support and is disabled for options `--home` and `--homedir`.
 
