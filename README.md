@@ -160,7 +160,7 @@ You don't need to install x11docker, you can just run it as user with `bash x11d
  - `x11docker --update` : download and install latest version from github.
  - `x11docker --remove` : remove all files installed by x11docker.
  
-Installs into `/usr/local/bin`. Creates an icon in `/usr/share/icons`. Creates an `x11docker.desktop` file in `/usr/share/applications`. Copies `README.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
+Installs into `/usr/bin`. Creates an icon in `/usr/share/icons`. Creates an `x11docker.desktop` file in `/usr/share/applications`. Copies `README.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
 
 # Examples
 Some example images can be found on docker hub: https://hub.docker.com/u/x11docker/
