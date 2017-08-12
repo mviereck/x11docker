@@ -26,7 +26,15 @@ To use `x11docker-gui`, you need package `kaptain`. If your distribution misses 
 
 # Terminal usage
 Just type `x11docker IMAGENAME [IMAGECOMMAND]`. Get an [overview of options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`. 
-
+General syntax:
+```
+To run a docker image with new X server (auto-choosing X server):
+  x11docker [OPTIONS] IMAGE [COMMAND]
+  x11docker [OPTIONS] -- "[DOCKER_RUN_OPTIONS]" IMAGE [COMMAND [ARG1 ARG2 ...]]
+To run a host application on a new X server:
+  x11docker [OPTIONS] --exe COMMAND
+  x11docker [OPTIONS] --exe -- COMMAND [ARG1 ARG2 ...]
+```
 Make x11docker executable with `chmod +x x11docker` or just run it with `bash x11docker` respective `bash x11docker-gui`. Or install it on your system (see below at chapter [Installation](#installation)).
 
 # Troubleshooting
