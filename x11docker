@@ -7,15 +7,13 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.6.0.2"
+Version="3.6.0.3"
 
 changelog() {
 ### ToDo:
 # SECURITY: fedora: selinux issue: can not share unix socket with :z, Permission denied. Currently disabling SELinux for container
 #           http://www.projectatomic.io/blog/2015/06/using-volumes-with-docker-can-cause-problems-with-selinux/
 #           http://danwalsh.livejournal.com/74421.html
-# xinit as subshell: no longer console user for --xorg
-# check: maybe would not need xwrapper.config changes with xdummywrapper for --xorg
 # check all FIXME 
 # improve orphaned(): password prompt, running docker
 # part check terminal: missing terminal emulator needn't to be fatal.
@@ -42,6 +40,9 @@ changelog() {
 # BUG debian bug report lightdm/sddm contra gdm, dm can crash on tty switch if multiple graphical sessions are running
 
 # x11docker changelog
+# 13.08.2017 V3.6.0.3  xpra dpi warning only if --dpi or --scale is set
+#                      cookie failure warning for untrusted cookies only
+#                      bugfix installer: remove older installations in /usr/local/bin
 # 13.08.2017 V3.6.0.2  bugfix preventing --xorg from console if running in subshell
 #                      bugfix in finish(): check for still running container with ps, too. formerly root only could detect it
 # 12.08.2017           check for running docker daemon with $Dockerdaemon instead of ifconfig
@@ -461,6 +462,8 @@ installer() {           # --install, --update, --remove: Installer for x11docker
   # Doing
   case ${1:-} in
     --install|--update)
+      [ -x /usr/local/bin/x11docker ]     && rm -v /usr/local/bin/x11docker
+      [ -x /usr/local/bin/x11docker-gui ] && rm -v /usr/local/bin/x11docker-gui
       echo "Installing x11docker and x11docker-gui in /usr/bin"
       cp x11docker /usr/bin/           || error "Could not copy x11docker to /usr/bin"
       chmod 755 /usr/bin/x11docker      || error "Could not set executeable bit on x11docker"
@@ -665,7 +668,7 @@ waitforfilecontent() {  # wait for a file $1 to be not empty
   Zeit=$(date +%s)
   while [ ! -s "$1" ] ; do
     sleep 0.1
-    [ 5 -lt $(expr $(date +%s) - $Zeit) ]  && return 1
+    [ 10 -lt $(expr $(date +%s) - $Zeit) ]  && return 1
     [ -e "$Sharefolder/timetosaygoodbye" ] && return 1
   done
   return 0
@@ -679,7 +682,7 @@ waitforlogentry() {     # wait for entry in logfile
   Zeit=$(date +%s)
   while [ -z "$(cat ${2:-} | grep "${3:-}")" ] ; do
     echo "waiting since $(expr $(date +%s) - $Zeit)s for ${1:-} to be ready..." >&2 && sleep 1
-    [ 10 -lt $(expr $(date +%s) - $Zeit) ] && { error "x11docker: Timeout error: ${1:-} not ready after 10 seconds." & break ; }
+    [ 20 -lt $(expr $(date +%s) - $Zeit) ] && { error "x11docker: Timeout error: ${1:-} not ready after 20 seconds." & break ; }
     [ -e "$Sharefolder/timetosaygoodbye" ] && return 1
   done
 }
@@ -1366,7 +1369,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
   [ "$Xserver" = "Xorg" ] && {
     # if x11docker is running from within an X server, check if user is allowed to run a new core X server
     [ -z "$Newxvt" ] && {
-      if [ ! -e "/etc/X11/Xwrapper.config" ] || [ -z "$(grep "allowed_users=anybody" </etc/X11/Xwrapper.config)" ] ; then
+      if [ ! -e "/etc/X11/Xwrapper.config" ] || [ -z "$(cat /etc/X11/Xwrapper.config | grep "allowed_users" | grep "anybody")" ] ; then
         error "You are not allowed to start a second X server from within X.
   As a default configuration, only root or console users can start X.
   You may use Xephyr (option --xephyr) instead.
@@ -1800,7 +1803,7 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
 { #### part: create xorg.conf and Xorg wrapper for Xdummy (options --xdummy, --xpra)
 #error $(($Xaxis * $Yaxis * 24 / 8 /1024))
   case $Xserver in
-    Xpra|Xdummy)
+    Xpra|Xdummy|Xorg)
       # create xorg.conf for Xdummy
       echo '# This xorg configuration file is forked and changed from xpra to start a dummy X11 server.
 # For original and details, please see: https://xpra.org/Xdummy.html
@@ -1979,6 +1982,17 @@ fi
       *) Xserveroptions="$Xserveroptions -tst -extension XTEST" ;;
     esac
   }
+  
+  case $Xserver in
+    Xpra|Xpra-Xwayland)
+      { [ -n "$Dpi" ] || [ "$Scaling" != "1" ] ; } && verlt "$Xpraversion" "xpra v2.1-r16547" && ! verlt "$Xpraversion" "xpra v2.1" && {
+        warning "Option --dpi is buggy in $Xpraversion
+  due to xpra bug #1605. Need at least xpra v2.1-r16547 or one of 2.0 series.
+  This limits option --scale, too, leading to wrong font sizes.
+  Fallback: disabling dpi settings."
+        # disabling further down
+      } ;;
+  esac
   case $Xserver in
     Weston|Kwin|Nothing) ;;
     *)
@@ -2002,17 +2016,13 @@ fi
   esac
   case $Xserver in
     Xpra|Xpra-Xwayland)
-      [ -n "$Dpi" ] && verlt "$Xpraversion" "xpra v2.1-r16547" && ! verlt "$Xpraversion" "xpra v2.1" && {
-        warning "Option --dpi is buggy in $Xpraversion
-  due to xpra bug #1605. Need at least xpra v2.1-r16547 or one of 2.0 series.
-  This limits option --scaling, too, leading to wrong font sizes.
-  Fallback: disabling dpi settings."
-        Dpi=""
-      }
-      
+      # disable --dpi for buggy versions
+      [ -n "$Dpi" ] && verlt "$Xpraversion" "xpra v2.1-r16547" && ! verlt "$Xpraversion" "xpra v2.1" &&  Dpi=""
+      # disable proxy forhigh versions
       verlt "$Xpraversion" "xpra v2.1" || Xpraoptions="$Xpraoptions --start-via-proxy=no"
-      
+      # disable sound transfer, --pulseaudio works different
       Xpraoptions="$Xpraoptions -z0 --no-speaker --no-pulseaudio"
+      # version check for scaling already done above
       [ "$Scaling" != "1" ] && Xpraoptions="$Xpraoptions --desktop-scaling=$Scaling"
     ;;
   esac
@@ -2737,7 +2747,7 @@ $Dockercommand
         [ "$Trusted" = "yes" ] && Trusted="trusted" || Trusted="untrusted" 
         echo "xauth -v -f $Xclientcookie generate $Newdisplay . $Trusted"
         echo "[ -s '$Xclientcookie' ] || { "
-        echo "  warning 'Could not create $Trusted cookie. "
+        echo "  [ '$Trusted' = 'untrusted' ] && warning 'Could not create $Trusted cookie. "
         echo "  Maybe your X server misses extension SECURITY. "
         echo "  Fallback: Will try to create a standard cookie.'"
         echo "  xauth -f $Xclientcookie add $Newdisplay . $(mcookie)"
