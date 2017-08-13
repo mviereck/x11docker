@@ -7,12 +7,15 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.6.0"
+Version="3.6.0.2"
 
 changelog() {
 ### ToDo:
 # SECURITY: fedora: selinux issue: can not share unix socket with :z, Permission denied. Currently disabling SELinux for container
-# check installer if it works fine
+#           http://www.projectatomic.io/blog/2015/06/using-volumes-with-docker-can-cause-problems-with-selinux/
+#           http://danwalsh.livejournal.com/74421.html
+# xinit as subshell: no longer console user for --xorg
+# check: maybe would not need xwrapper.config changes with xdummywrapper for --xorg
 # check all FIXME 
 # improve orphaned(): password prompt, running docker
 # part check terminal: missing terminal emulator needn't to be fatal.
@@ -39,9 +42,14 @@ changelog() {
 # BUG debian bug report lightdm/sddm contra gdm, dm can crash on tty switch if multiple graphical sessions are running
 
 # x11docker changelog
-# 12.08.2017 V3.6.0.1 minor bugfix --gpu: :rw,z does not work for --device
-# 12.08.2017 V3.6.0  workaround: disabling SELinux for container until solution for sharing unix socket is found.
-#                    compare: http://www.projectatomic.io/blog/2015/06/using-volumes-with-docker-can-cause-problems-with-selinux/
+# 13.08.2017 V3.6.0.2  bugfix preventing --xorg from console if running in subshell
+#                      bugfix in finish(): check for still running container with ps, too. formerly root only could detect it
+# 12.08.2017           check for running docker daemon with $Dockerdaemon instead of ifconfig
+#                      do not disable SELinux if --ipc is set
+#                      bugfix fedora: --xorg: add -keeptty if running from tty
+# 12.08.2017 V3.6.0.1  minor bugfix --gpu: :rw,z does not work for --device
+# 12.08.2017 V3.6.0    workaround: disabling SELinux for container until solution for sharing unix socket is found.
+#                      compare: http://www.projectatomic.io/blog/2015/06/using-volumes-with-docker-can-cause-problems-with-selinux/
 # 11.08.2017         install to /usr/bin instead of /usr/local/bin to support root
 #                    chmod 755 instead of +x in installation
 #                    check if docker is installed
@@ -145,7 +153,7 @@ x11docker: Run GUI applications and desktop environments in docker.
            Wayland support included. Published under MIT license.
 
 Usage:
-To run a docker image with new X server (auto-choosing X server option):
+To run a docker image with new X server (auto-choosing X server):
   x11docker [OPTIONS] IMAGE [COMMAND]
   x11docker [OPTIONS] -- "'"[DOCKER_RUN_OPTIONS]"'" IMAGE [COMMAND [ARG1 ARG2 ...]]
 To run a host application on a new X server:
@@ -285,7 +293,7 @@ User, shared folders, GPU, clipboard and sound options:
                        Degrades container isolation. Container access to GPU.
                        
 Advanced options:
-     --no-entrypoint   disable ENTRYPOINT in image
+     --no-entrypoint   disable ENTRYPOINT in image to allow other commands, too
  -o, --no-xhost        disable any access to host X server granted by xhost
  -E, --waylandenv      set some environment variables summoning some toolkits
                        to use Wayland. (GTK3 QT5 Clutter SDL Elementary Evas)
@@ -391,7 +399,7 @@ $(tput setaf 1)x11docker ERROR$(tput sgr0) $Message
       echo "x11docker ERROR: $Message" | xmessage -file - -default okay
     } || { 
       command -v zenity >/dev/null && {
-        zenity --error --ellipsize --text="x11docker ERROR: $Message"
+        zenity --error --no-markup --ellipsize --text="x11docker ERROR: $Message"
       }
     } || notify-send "x11docker ERROR: $Message"
   }
@@ -575,8 +583,8 @@ finish() {              # trap routine, clean up background processes and cache
             }
           ;;
           docker) 
-            docker stop $Containername >/dev/null 2>&1 || {
-              ! docker images >/dev/null 2>&1 || [ -n "$(docker ps --filter name=$Containername --quiet 2>&1)" ] && {
+            $Sudo docker stop $Containername >/dev/null 2>&1 || {
+              ! $Sudo docker images >/dev/null 2>&1 || { [ -n "$($Sudo docker ps --filter name=$Containername --quiet 2>&1)" ] || [ -n "$(ps -p $Pid | grep docker)" ] ; } && {
                 warning "Found remaining docker process. Most probably the X session
   was not closed in a clean way. Can not stop container because x11docker
   does not run as root. Will wait up to 10 seconds for docker to finish."
@@ -647,7 +655,8 @@ waitforfilecreation() { # similar to inotify-wait: wait up to 10s for file $1 to
   Zeit=$(date +%s)
   while [ ! "$(find  ${1:-} 2>/dev/null)" ] ; do
     sleep 0.2
-    [ 10 -lt $(expr $(date +%s) - $Zeit) ] && return 1 ||:
+    [ 10 -lt $(expr $(date +%s) - $Zeit) ] && return 1
+    [ -e "$Sharefolder/timetosaygoodbye" ] && return 1
   done
   return 0
 }
@@ -656,7 +665,8 @@ waitforfilecontent() {  # wait for a file $1 to be not empty
   Zeit=$(date +%s)
   while [ ! -s "$1" ] ; do
     sleep 0.1
-    [ 5 -lt $(expr $(date +%s) - $Zeit) ] && return 1
+    [ 5 -lt $(expr $(date +%s) - $Zeit) ]  && return 1
+    [ -e "$Sharefolder/timetosaygoodbye" ] && return 1
   done
   return 0
 }
@@ -665,10 +675,12 @@ waitforlogentry() {     # wait for entry in logfile
   # $2 points to logfile
   # $3 keyword to wait for 
   # terminate x11docker on fail
+  ### FIXME should return 1 on failure,error message by calling process
   Zeit=$(date +%s)
   while [ -z "$(cat ${2:-} | grep "${3:-}")" ] ; do
     echo "waiting since $(expr $(date +%s) - $Zeit)s for ${1:-} to be ready..." >&2 && sleep 1
     [ 10 -lt $(expr $(date +%s) - $Zeit) ] && { error "x11docker: Timeout error: ${1:-} not ready after 10 seconds." & break ; }
+    [ -e "$Sharefolder/timetosaygoodbye" ] && return 1
   done
 }
 no_xhost() {            # remove any access to X server granted by xhost
@@ -735,6 +747,7 @@ Dockeriprange=""                                # IP adress of docker interface 
 Dockerpid=""                                    # process ID of docker container
 Containerip=container.ip                        # IP adress of container
 Dockerrc=dockerrc
+Dockerdaemon="$(pgrep -xa $(ps -e -o comm | grep dockerd) 2>/dev/null)"
 
 Imagecommandscript=x11docker_CMD                # name of shared script containing imagecommand
 Createsudouser=createsudouser                   # script to create sudo user (option --sudouser)
@@ -1145,7 +1158,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
   [ "$X11dockermode" = "run" ] && {
     command -v docker >/dev/null || error "docker is not installed.
   To run docker images, you need to install docker."
-    [ -z "$(/sbin/ifconfig | grep -E 'docker0|172.17.0.1')" ] && error "Please make sure docker daemon is running.
+    [ -z "$Dockerdaemon" ] && error "Please make sure docker daemon is running.
   Try 'systemctl start docker'"
   }
 }
@@ -1430,10 +1443,6 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
   [ "$Xserver" = "Hostdisplay" ] && {
     [ "$Trusted" = "no" ] && {
       warning "Option --hostdisplay provides only low container isolation!
-  Restricting X access with untrusted cookies. Some programs wont like that.
-  You can enforce trusted cookies with option --trusted, but then you risk
-  RAM access failures due to missing MIT-SHM. Or you can break container
-  isolation with option --ipc.
   It is recommended to use another X server option."
     } || {
       warning "Option --hostdisplay with trusted cookies provides 
@@ -2049,6 +2058,7 @@ locking=false
     Xorg) 
       Xserveroptions="$Xserveroptions +extension XFree86-DRI +extension XFree86-DGA +extension XFree86-VidModeExtension"
       Xserveroptions="$Xserveroptions -verbose"                  # make X verbose
+      [ "$Tty" = "yes" ] && Xserveroptions="$Xserveroptions -keeptty"
       Xcommand="$(command -v Xorg) $Newdisplay $Newxvt $Xserveroptions"
     ;;
     Xpra) # To use xpra, Xdummy will run first. xpra server uses it later. Use Xvfb if available.
@@ -2419,8 +2429,7 @@ done
   
   ## check --userns-remap
   nsBenutzeruid=$Benutzeruid
-  Line="$(pgrep -xa $(ps -e -o comm | grep dockerd))"
-  Line="${Line#*dockerd}"
+  Line="${Dockerdaemon#*dockerd}"
   echo "$Line" | grep -q userns-remap && {
     Line="$(echo "${Line#*userns-remap}" | xargs)"
     [ "$(echo $Line | cut -c1)" = "=" ] && Line="$(echo $Line | cut -c2-)"
@@ -2474,12 +2483,13 @@ done
     exe)  Dockercommand="# dontrundocker"  ;;
     run)  Dockercommand='docker run'
     
-      [ -n "$(pgrep -xa $(ps -e -o comm | grep dockerd) | grep 'selinux-enabled')" ] && {
+      [ -n "$(echo "$Dockerdaemon" | grep 'selinux-enabled')" ] && [ "$Shareipc" = "no" ] && {
         ### FIXME SECURITY disable SELinux restrictions for docker container. --volume :z does not work for unix sockets yet.
         Dockercommand="$Dockercommand --security-opt label=disable" 
-        warning "SELinux restrictions are disabled for this container.
-  They forbid access to shared unix sockets.
-  SECURITY ISSUE. Hopefully, there will be a solution, soon"
+        warning "SECURITY ISSUE: SELinux restrictions are disabled 
+  for this container. They forbid access to shared unix sockets.
+  (You can set option --ipc to preserve SELinux restrictions,
+  but that just opens another gap of risk.)"
       }
       
       case $Sudouser in
@@ -2685,6 +2695,7 @@ $Dockercommand
   declare -f no_xhost 
   declare -f warning 
   declare -f error
+  declare -f verbose
 
   [ "$Noxhost" = "yes" ] && [ -n "$Hostdisplay" ] && {  
     echo "## option --no-xhost: disable any access to host display granted by xhost"
@@ -2726,14 +2737,25 @@ $Dockercommand
         [ "$Trusted" = "yes" ] && Trusted="trusted" || Trusted="untrusted" 
         echo "xauth -v -f $Xclientcookie generate $Newdisplay . $Trusted"
         echo "[ -s '$Xclientcookie' ] || { "
-        echo "  warning 'Could not create $Trusted cookie. Maybe your X server misses extension SECURITY. Will try to create a standard cookie.'"
+        echo "  warning 'Could not create $Trusted cookie. "
+        echo "  Maybe your X server misses extension SECURITY. "
+        echo "  Fallback: Will try to create a standard cookie.'"
         echo "  xauth -f $Xclientcookie add $Newdisplay . $(mcookie)"
-        [ "$Xserver" = "Hostdisplay" ] && echo "  warning 'SECURITY RISK! Keylogging and remote host control may be possible!'"
+        [ "$Xserver" = "Hostdisplay" ] && {
+          echo "  warning 'SECURITY RISK! Keylogging and remote host control "
+          echo "  may be possible! Just avoid using option --hostdisplay.'"
+          [ "$Shareipc" = "no" ] && {
+            echo "  warning 'Rendering glitches may occur as cookie is not untrusted."
+            echo "  Avoid this with insecure option --ipc, "
+            echo "  or just avoid using option --hostdisplay.'"
+          }
+        }
         echo "}"
         echo "# create prepared cookie with localhost identification disabled by ffff, needed if X socket is shared. ffff means 'familiy wild'"
         echo "xauth -f $Xclientcookie nlist $Newdisplay | echo ffff \$(cut -c6-) | xauth -v -f $Xclientcookie-ffff nmerge -"
         echo "mv $Xclientcookie-ffff $Xclientcookie"
         echo "cp $Xclientcookie $Xservercookie"
+        echo "[ -s '$Xclientcookie' ] || warning 'Cookie creation failed! $Xserver runs without cookie authentication.'" 
         echo "export $Newxenv"
         echo "xauth list"
         [ "$Xserver" = "Nxagent" ] && echo "rm $Xclientcookie.bak"
@@ -2901,58 +2923,15 @@ Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' '
   fi
 }
 
-{ #### part: start X server
-  export $Hostxenv
-  export -f waitforlogentry
-  export -f error
-  case $Xserver in
-    Xorg|Xpra|Xephyr|Xdummy|Xvfb|Xwayland)
-      $Mksu                                              "xinit $Xinitrc -- $Xcommand          > $Xinitlogfile  2>&1 " ;;
-    Nxagent)
-      xhost +SI:localuser:$Hostuser # will be disabled in xinitrc. Nxagent can't divide between host XAUTHORITY and its own with --auth
-      $Mksu                                              "xinit $Xinitrc -- $Xcommand          > $Xinitlogfile  2>&1 "
-      xhost -SI:localuser:$Hostuser # just to  make sure if xinit fails
-      ;;
-    Hostdisplay|Hostwayland|Kwin-Native)
-      $Mksu                                              "bash  $Xinitrc                       > $Xinitlogfile  2>&1 " ;;
-    Xpra-Xwayland|Xdummy-Xwayland)
-      [ -z "$WAYLAND_DISPLAY" ] || [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] && {
-        # Weston is needed for Xwayland if no Wayland is running already, and also if option scale has a value smaller than 1
-        $Mksu "$Compositorcommand                                                              > $Compositorlogfile 2>&1 & echo \$! >$Compositorpidfile"
-        $Mksu "waitforlogentry weston $Compositorlogfile weston-desktop-shell                  > $Xinitlogfile  2>&1 "
-        # hide weston window
-        $Mksu "xdotool windowunmap 0x$(printf '%x\n' $(cat $Compositorlogfile | grep 'window id' | rev | cut -d' ' -f1 | rev))"
-      }
-      $Mksu "env WAYLAND_DISPLAY=$Waylandsocket           xinit $Xinitrc -- $Xcommand          > $Xinitlogfile  2>&1 " ;;
-    Weston-Xwayland)
-      $Mksu "$Compositorcommand                                                                > $Compositorlogfile 2>&1 & echo \$! >$Compositorpidfile"
-      $Mksu "waitforlogentry   weston $Compositorlogfile weston-desktop-shell                  > $Xinitlogfile  2>&1 " 
-      $Mksu "env WAYLAND_DISPLAY=$Waylandsocket           xinit $Xinitrc -- $Xcommand          > $Xinitlogfile  2>&1 " ;;
-    Weston)
-      $Mksu "$Compositorcommand                                                                > $Compositorlogfile 2>&1  & echo \$! >$Compositorpidfile"
-      $Mksu "waitforlogentry   weston $Compositorlogfile weston-desktop-shell                  > $Xinitlogfile  2>&1 "
-      $Mksu                                              "bash  $Xinitrc                       > $Xinitlogfile  2>&1" ;;
-    Kwin-Xwayland)
-      $Mksu "$Compositorcommand --exit-with-session='$Waitforgoodbye'                          > $Compositorlogfile 2>&1 & echo \$! >$Compositorpidfile"
-      $Mksu "waitforlogentry   kwin   $Compositorlogfile X-Server                              > $Xinitlogfile  2>&1 "
-      $Mksu "env WAYLAND_DISPLAY=$Waylandsocket           xinit $Xinitrc -- $Xcommand          > $Xinitlogfile  2>&1 " ;;
-    Kwin)
-      $Mksu "$Compositorcommand --exit-with-session='$Waitforgoodbye'                          > $Compositorlogfile 2>&1 & echo \$! >$Compositorpidfile"
-      $Mksu "waitforlogentry   kwin   $Compositorlogfile X-Server                              > $Xinitlogfile  2>&1 "
-      $Mksu                                              "bash  $Xinitrc                       > $Xinitlogfile  2>&1 " ;;
-    Nothing)
-      $Mksu                                              "bash  $Xinitrc                       > $Xinitlogfile  2>&1 " ;;
-  esac
-} &
+{ #### part: watch X server and start docker
 
-{ #### part: watch X server
+  #### watch X server ####
   waitforfilecreation $Cachefolder/Xready || error "Startup of $Xserver failed. Last lines of xinit logfile:
   $(tail $Xinitlogfile)"
   [ -s "$Compositorpidfile" ] && {
     Compositorpid=$(cat $Compositorpidfile)
     ps -p $Compositorpid >/dev/null 2>&1 && storepid $Compositorpid compositor
   }
-
   case $Xserver in
     Nothing|Hostwayland) ;;
     Weston|Weston-Xwayland|Kwin|Kwin-Xwayland|Kwin-Native)
@@ -2968,9 +2947,8 @@ Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' '
       } &
     ;;
   esac
-}
-
-{ #### part: start docker
+  
+  #### start docker ####
   case $X11dockermode in
     run)
       # prefer asking for password on host X
@@ -3010,6 +2988,51 @@ $(tail $Xtermlogfile)"
       $Mksu "bash $Sharefolder/x11docker_CMD >$Xinitlogfile 2>&1" & Hostexepid=$! && storepid $! hostexe
       while [ ! -e $Sharefolder/timetosaygoodbye ] && ps -p $Hostexepid >/dev/null; do sleep 1 ; done
     ;;
+  esac
+  $Mksu "touch $Sharefolder/timetosaygoodbye"
+} &
+
+{ #### part: start X server
+  export $Hostxenv
+  export -f waitforlogentry
+  export -f error
+  case $Xserver in
+    Xorg|Xpra|Xephyr|Xdummy|Xvfb|Xwayland)
+      $Mksu                                              "xinit $Xinitrc -- $Xcommand          > $Xinitlogfile  2>&1" ;;
+    Nxagent)
+      xhost +SI:localuser:$Hostuser # will be disabled in xinitrc. Nxagent can't divide between host XAUTHORITY and its own with --auth
+      $Mksu                                              "xinit $Xinitrc -- $Xcommand          > $Xinitlogfile  2>&1 "
+      xhost -SI:localuser:$Hostuser # just to  make sure if xinit fails
+      ;;
+    Hostdisplay|Hostwayland|Kwin-Native)
+      $Mksu                                              "bash  $Xinitrc                       > $Xinitlogfile  2>&1 " ;;
+    Xpra-Xwayland|Xdummy-Xwayland)
+      [ -z "$WAYLAND_DISPLAY" ] || [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] && {
+        # Weston is needed for Xwayland if no Wayland is running already, and also if option scale has a value smaller than 1 to provide a virtual display larger than monitor
+        $Mksu "$Compositorcommand                                                              > $Compositorlogfile 2>&1 & echo \$! >$Compositorpidfile"
+        $Mksu "waitforlogentry weston $Compositorlogfile weston-desktop-shell                  > $Xinitlogfile  2>&1 "
+        # hide weston window
+        $Mksu "xdotool windowunmap 0x$(printf '%x\n' $(cat $Compositorlogfile | grep 'window id' | rev | cut -d' ' -f1 | rev))"
+      }
+      $Mksu "env WAYLAND_DISPLAY=$Waylandsocket           xinit $Xinitrc -- $Xcommand          > $Xinitlogfile  2>&1 " ;;
+    Weston-Xwayland)
+      $Mksu "$Compositorcommand                                                                > $Compositorlogfile 2>&1 & echo \$! >$Compositorpidfile"
+      $Mksu "waitforlogentry   weston $Compositorlogfile weston-desktop-shell                  > $Xinitlogfile  2>&1 " 
+      $Mksu "env WAYLAND_DISPLAY=$Waylandsocket           xinit $Xinitrc -- $Xcommand          > $Xinitlogfile  2>&1 " ;;
+    Weston)
+      $Mksu "$Compositorcommand                                                                > $Compositorlogfile 2>&1  & echo \$! >$Compositorpidfile"
+      $Mksu "waitforlogentry   weston $Compositorlogfile weston-desktop-shell                  > $Xinitlogfile  2>&1 "
+      $Mksu                                              "bash  $Xinitrc                       > $Xinitlogfile  2>&1" ;;
+    Kwin-Xwayland)
+      $Mksu "$Compositorcommand --exit-with-session='$Waitforgoodbye'                          > $Compositorlogfile 2>&1 & echo \$! >$Compositorpidfile"
+      $Mksu "waitforlogentry   kwin   $Compositorlogfile X-Server                              > $Xinitlogfile  2>&1 "
+      $Mksu "env WAYLAND_DISPLAY=$Waylandsocket           xinit $Xinitrc -- $Xcommand          > $Xinitlogfile  2>&1 " ;;
+    Kwin)
+      $Mksu "$Compositorcommand --exit-with-session='$Waitforgoodbye'                          > $Compositorlogfile 2>&1 & echo \$! >$Compositorpidfile"
+      $Mksu "waitforlogentry   kwin   $Compositorlogfile X-Server                              > $Xinitlogfile  2>&1 "
+      $Mksu                                              "bash  $Xinitrc                       > $Xinitlogfile  2>&1 " ;;
+    Nothing)
+      $Mksu                                              "bash  $Xinitrc                       > $Xinitlogfile  2>&1 " ;;
   esac
 }
 
