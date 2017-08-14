@@ -40,6 +40,10 @@ Make x11docker executable with `chmod +x x11docker` or just run it with `bash x1
 # Troubleshooting
 For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. x11docker shows some warnings if something is insecure or is going wrong. Additionally, you can use option `--verbose` to see logfile output. You can get help in the [issue tracker](https://github.com/mviereck/x11docker/issues).
 
+ - Password prompt: 
+   - x11docker checks whether docker needs a password to run and whether `su` or `sudo` are needed to get root privileges. If that check fails and does not match your setup, use option `--pw FRONTEND`. `FRONTEND` can be one of `su sudo gksu gksudo lxsu lxsudo kdesu kdesudo` or `pkexec`.  
+   - Instead, you can run x11docker directly as root. Unfortunatlely, some systems do not provide `DISPLAY` and `XAUTHORITY` for root.
+
 # Security 
 Main purpose of x11docker is to run dockered GUI applications while preserving and improving container isolation.
 Core concept is:
@@ -161,6 +165,12 @@ You don't need to install x11docker, you can just run it as user with `bash x11d
  - `x11docker --remove` : remove all files installed by x11docker.
  
 Installs into `/usr/bin`. Creates an icon in `/usr/share/icons`. Creates an `x11docker.desktop` file in `/usr/share/applications`. Copies `README.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
+
+Shortest way:
+ - Download x11docker script only: 
+   - `wget https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker -O /tmp/x11docker`
+ - Run as root: `bash /tmp/x11docker --update`
+ - Remove temporary file: `rm /tmp/x11docker`
 
 # Examples
 Some example images can be found on docker hub: https://hub.docker.com/u/x11docker/
