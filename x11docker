@@ -7,7 +7,7 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.6.0.4"
+Version="3.6.0.5"
 
 changelog() {
 ### ToDo:
@@ -40,6 +40,9 @@ changelog() {
 # BUG debian bug report lightdm/sddm contra gdm, dm can crash on tty switch if multiple graphical sessions are running
 
 # x11docker changelog
+# 14.08.2017 V3.6.0.5  bugfix opensuse: cookie creation failed due to different xauth behaviour
+#                      bugfix sudo: do not prompt for password for 'docker stop' in finish(), rather fail stopping
+#                      note() instead of warning() for less urgent messages
 # 14.08.2017 V3.6.0.4  minor bugfix: do not complain about missing docker daemon on --xonly
 # 13.08.2017 V3.6.0.3  xpra dpi warning only if --dpi or --scale is set
 #                      cookie failure warning for untrusted cookies only
@@ -415,6 +418,12 @@ warning() {             # show warning messages
   [ -e "$Logfile" ] && echo "x11docker WARNING: $*" >> $Logfile
   return 0
 }
+note() {                # show notice messages
+  echo "$(tput setaf 2)x11docker NOTE:$(tput sgr0) $*" >&3
+  echo "" >&3
+  [ -e "$Logfile" ] && echo "x11docker NOTE: $*" >> $Logfile
+  return 0
+}
 verbose() {             # show verbose messages
   # only logfile notes here for now, terminal output with tail in part:verbose
   [ -e $Logfile ] && echo "x11docker: $*
@@ -475,7 +484,7 @@ installer() {           # --install, --update, --remove: Installer for x11docker
       x11docker-gui --icon && {
         xdg-icon-resource install --context apps --novendor --size 72 /tmp/x11docker.png x11docker
         rm /tmp/x11docker.png
-      } || warning "Could not create icon for x11docker"
+      } || note "Could not create icon for x11docker"
       [ -e "/usr/bin/x11docker-gui" ] && {
         echo "[Desktop Entry]
   Version=1.0
@@ -486,13 +495,13 @@ installer() {           # --install, --update, --remove: Installer for x11docker
   Icon=x11docker
   Categories=System
 " > /usr/share/applications/x11docker.desktop
-      } || warning "Did not create desktop entry for x11docker-gui"
+      } || note "Did not create desktop entry for x11docker-gui"
 
       echo "Storing README.md and LICENSE.txt in /usr/share/doc/x11docker"
       mkdir -p /usr/share/doc/x11docker && {
         cp README.md /usr/share/doc/x11docker/
         cp LICENSE.txt /usr/share/doc/x11docker/
-      } || warning "Error while creating /usr/share/doc/x11docker"
+      } || note "Error while creating /usr/share/doc/x11docker"
       
       echo "Installation ready: x11docker version $(x11docker --version)"
     ;;
@@ -511,7 +520,7 @@ installer() {           # --install, --update, --remove: Installer for x11docker
       [ -e "/usr/share/applications/x11docker.desktop" ] && rm -v /usr/share/applications/x11docker.desktop
       [ -e "/usr/share/doc/x11docker" ] &&                  rm -R -v /usr/share/doc/x11docker
       xdg-icon-resource uninstall --size 72 x11docker
-      warning "Will not remove files in your home folder.
+      note "Will not remove files in your home folder.
   There may be files left in \$HOME/.local/share/x11docker
   The symbolic link \$HOME/x11docker may exist, too.
   The cache folder \$HOME/.cache/x11docker should be removed already." 
@@ -581,15 +590,16 @@ finish() {              # trap routine, clean up background processes and cache
       if [ -n "$Pid" ] && [ -n "$(ps -p $Pid --no-headers)" ] ; then ### FIXME check with name was cleaner
         verbose "terminating background pid $Pid of $Name"
         case $Name in
-          weston|kwin_wayland|compositor|xpra|windowmanager|shareclipboard|hostexe) kill -s KILL $Pid || {
+          weston|kwin_wayland|compositor|xpra|windowmanager|shareclipboard|hostexe|Xwatch) kill -s KILL $Pid || {
               sleep 1
               [ -n "$(ps -p $Pid --no-headers)" ] && warning "error terminating $Pid $Name"
             }
           ;;
           docker) 
+            [ -n "$Sudo" ] && Sudo="sudo -n" # no password prompt here, rather fail
             $Sudo docker stop $Containername >/dev/null 2>&1 || {
               ! $Sudo docker images >/dev/null 2>&1 || { [ -n "$($Sudo docker ps --filter name=$Containername --quiet 2>&1)" ] || [ -n "$(ps -p $Pid | grep docker)" ] ; } && {
-                warning "Found remaining docker process. Most probably the X session
+                note "Found remaining docker process. Most probably the X session
   was not closed in a clean way. Can not stop container because x11docker
   does not run as root. Will wait up to 10 seconds for docker to finish."
                 Zeit=$(date +%s)
@@ -599,7 +609,7 @@ finish() {              # trap routine, clean up background processes and cache
                   [ 10 -lt $(echo "$(date +%s) - $Zeit" | bc) ] && break ||:
                 done
                 if [ -n "$(ps -p $Pid | grep docker)" ] ; then
-                  warning "docker didn't terminate as it should. 
+                  note "docker didn't terminate as it should. 
   Will not clean cache to avoid file permission problems. 
   You can remove the new container with command:
 docker rm -f $Containername
@@ -614,7 +624,7 @@ x11docker --orphaned"
               }
             }
           ;;
-          *) warning "Found remaining background process.
+          *) note "Found remaining background process.
   Will send signal KILL to process tree of $Line
   $(ps -p $Pid --no-headers)"
             pkill -KILL -P $Pid || warning "error terminating $Pid $Name"
@@ -693,7 +703,7 @@ no_xhost() {            # remove any access to X server granted by xhost
     xhost -$Line                                         # disable every entry
   done
   xhost -                                                # enable access control
-  [ "$(xhost | wc -l)" = "1" ] || { warning "Remaining xhost permissions found on display $DISPLAY!
+  [ "$(xhost | wc -l)" = "1" ] || { note "Remaining xhost permissions found on display $DISPLAY!
 $(xhost)" 
   }
 }
@@ -1020,18 +1030,18 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
       --install|--update|--remove) Installermode="${1:-}" ;;   # installer
 
       ##### depracated
-      --virtualgl|--tcpxsocket|--xsocket|--tcp|--cache)                      warning "Option ${1:-} is deprecated and has no effect now." ;; 
+      --virtualgl|--tcpxsocket|--xsocket|--tcp|--cache)                         note "Option ${1:-} is deprecated and has no effect now." ;; 
       --xpra-image|--xpra-attach|--xorg-image|--xdummy-image)                  error "Option ${1:-} is no longer included." ;;
-      --volume)              Sharevolumes="$Sharevolumes\n${2:-}" ; shift ;  warning "Option --volume is now called --sharedir
+      --volume)              Sharevolumes="$Sharevolumes\n${2:-}" ; shift ;     note "Option --volume is now called --sharedir
   to avoid confusion with divergent docker run option --volume.
   Please use --sharedir instead." ;;
-   -P|--nopwd|--no-password) Passwordprompt="none" ;                         warning "Option --no-password is deprecated. 
+   -P|--nopwd|--no-password) Passwordprompt="none" ;                            note "Option --no-password is deprecated. 
   x11docker checks on its own if it can run docker without password prompt.
   To explicitly disable password prompt,  you can set '--pw=none'" ;;
-      -s|--sudo)             Passwordprompt="sudo" ;                         warning "Option --sudo is deprecated.
+      -s|--sudo)             Passwordprompt="sudo" ;                            note "Option --sudo is deprecated.
   x11docker checks on its own if sudo is needed or possible.
   To explicitly use sudo, you can set '--pw=sudo'" ;;
-      --root)                Hostuser="root" ;                               warning "Option --root is deprecated.
+      --root)                Hostuser="root" ;                                  note "Option --root is deprecated.
   To have root in container, use --user=root.
   To run X as root (discouraged!), use --hostuser=root.
   Fallback: Setting option --hostuser=root" ;;
@@ -1070,9 +1080,9 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
   Command 'logname' does not return a value.
   Consider to use another terminal emulator.
   Fallback: Will try to check \$SUDO_USER and \$PKEXEC_UID."
-  [ -z "$Lognameuser" ] && [ -n "$SUDO_USER" ]  && Lognameuser="$SUDO_USER"  && [ -z "$Hostuser" ] && warning "Will use \$SUDO_USER = $SUDO_USER as host user."
-  [ -z "$Lognameuser" ] && [ -n "$PKEXEC_UID" ] && Lognameuser="$PKEXEC_UID" && [ -z "$Hostuser" ] && warning "Will use user with uid \$PKEXEC_UID = $PKEXEC_UID as host user."
-  [ -z "$Lognameuser" ] &&                         Lognameuser="$(id -un)"   && [ -z "$Hostuser" ] && warning "Will use \$(id -un) = $Lognameuser as host user."
+  [ -z "$Lognameuser" ] && [ -n "$SUDO_USER" ]  && Lognameuser="$SUDO_USER"  && [ -z "$Hostuser" ] && note "Will use \$SUDO_USER = $SUDO_USER as host user."
+  [ -z "$Lognameuser" ] && [ -n "$PKEXEC_UID" ] && Lognameuser="$PKEXEC_UID" && [ -z "$Hostuser" ] && note "Will use user with uid \$PKEXEC_UID = $PKEXEC_UID as host user."
+  [ -z "$Lognameuser" ] &&                         Lognameuser="$(id -un)"   && [ -z "$Hostuser" ] && note "Will use \$(id -un) = $Lognameuser as host user."
   
   [ -z "$Hostuser" ] && Hostuser=$Lognameuser
   [ "$Hostuser" != "$Lognameuser" ] && {
@@ -1217,7 +1227,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
       Xserver="Xpra-Xwayland"
     ;;
     Xdummy|Xvfb) 
-      warning "Using special setup with Weston, Xwayland and xdotool
+      note "Using special setup with Weston, Xwayland and xdotool
   instead of $Xserver to allow GPU access."
       Xserver="Xdummy-Xwayland"
     ;;
@@ -1333,7 +1343,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
     Xpra|Xpra-Xwayland)
       Xpraversion="$(xpra --version)"
       verlt "$Xpraversion" "xpra v1.0" && {
-        warning "Your xpra version '$Xpraversion' is out of date. 
+        note "Your xpra version '$Xpraversion' is out of date. 
   It is recommended to install latest stable from www.xpra.org, at least v1.0."
         [ "$Desktopmode" = "yes" ] && {
           warning "Your xpra version does not support desktop mode.
@@ -1341,7 +1351,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
           Xserver="Xorg"
         }
       }
-      [ "$Desktopmode" = "yes" ] && warning "Xpra desktop mode is still in development.
+      [ "$Desktopmode" = "yes" ] && note "Xpra desktop mode is still in development.
   It is recommended to use Xephyr (option --xephyr) instead."
     ;;
   esac
@@ -1468,10 +1478,10 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
   [ "$Fullscreen" = "yes" ] && {
     case $Xserver in
       Xephyr|Weston|Weston-Xwayland|Nxagent|Xdummy|Xdummy-Xwayland|Xvfb) ;;
-      Xpra|Xpra-Xwayland) warning "Xpra support of fullscreen mode is in
+      Xpra|Xpra-Xwayland) note "Xpra support of fullscreen mode is in
   development, you may encounter bugs. Toggle fullscreen with [SHIFT][F11].
   You can try --xephyr, --nxagent or --weston-xwayland instead." ;;
-      *) warning "$Xserver does not support option --fullscreen" ;;
+      *) note "$Xserver does not support option --fullscreen" ;;
     esac
   }
   
@@ -1518,10 +1528,10 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
   
   case $Xserver in
     Weston|Kwin|Hostwayland)
-      [ "$Dbuslaunch" = "no" ] || [ "$Setwaylandenv" = "no" ] && warning "You are running a pure Wayland environment.
+      [ "$Dbuslaunch" = "no" ] || [ "$Setwaylandenv" = "no" ] && note "You are running a pure Wayland environment.
   X applications without Wayland support will fail.
   QT5 / KDE applications also need options --dbus --waylandenv"
-      [ -n "$Dpi" ] && warning "Option --dpi has no effect on $Xserver"
+      [ -n "$Dpi" ] && note "Option --dpi has no effect on $Xserver"
     ;;
   esac
   
@@ -1529,12 +1539,12 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
     case $Xserver in
       Weston|Weston-Xwayland|Xorg)
         echo "0 90 180 270 flipped flipped-90 flipped-180 flipped-270" | grep -q "$Rotation" || {  # fuzzy test, have been lazy
-          warning "Unsupported value '$Rotation' for option --rotate. 
+          note "Unsupported value '$Rotation' for option --rotate. 
   Must be one of 0 90 180 270 flipped flipped-90 flipped-180 flipped-270"
           Rotation="0"
         }
       ;;
-      *) warning "$Xserver does not support option --rotate" ; Rotation="0" ;;
+      *) note "$Xserver does not support option --rotate" ; Rotation="0" ;;
     esac
   }
   [ "$Rotation" = "0" ] && Rotation="normal"
@@ -1543,23 +1553,23 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
     case $Xserver in
       Xephyr|Weston|Kwin|Weston-Xwayland|Kwin-Xwayland|Kwin-Native) 
         [[ "$Outputcount" =~ ^[1-9]$ ]] || {
-          warning "--output-count value must be one of 1 2 3 4 5 6 7 8 9
+          note "--output-count value must be one of 1 2 3 4 5 6 7 8 9
   Disabling invalid value $Outputcount"
           Outputcount="1"
         }
       ;;
-      *) warning "$Xserver does not support option --output-count.
+      *) note "$Xserver does not support option --output-count.
   Only available for Weston, KWin and Xephyr, thus for options --weston,
   --weston-xwayland, --kwin, --kwin-xwayland, --kwin-native, --xephyr." 
         Outputcount="1"
       ;;
     esac
     case $Xserver in
-      Weston-Xwayland) warning "Xwayland sometimes does not position itself 
+      Weston-Xwayland) note "Xwayland sometimes does not position itself 
   at origin 0+0 of first virtual screen, and some screens appear to 
   be unused. 
-  You may need to move Xwayland manually  with [META]+[LeftMouseButton]." ;;
-      Xephyr) warning "Xinerama support would be best here,
+  You may need to move Xwayland manually with [META]+[LeftMouseButton]." ;;
+      Xephyr) note "Xinerama support would be best here,
   but is disabled in Xephyr because it does not handle it well.
   Different window managers handle this different. Just try out." ;;
     esac
@@ -1677,7 +1687,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
   Dockerrc=$Cachefolder/$Dockerrc                           && mkfile $Dockerrc
   Containerip="$Cachefolder/$Containerip"                   && mkfile $Containerip
   Xservercookie="$Cachefolder/$Xservercookie"               && mkfile $Xservercookie
-  Xclientcookie="$Sharefolder/$Xclientcookie"               && mkfile $Xclientcookie && mkfile $Xclientcookie-ffff
+  Xclientcookie="$Sharefolder/$Xclientcookie"               && mkfile $Xclientcookie
   Hostxauthority="$Cachefolder/$Hostxauthority"
   Xpraserverlogfile="$Cachefolder/$Xpraserverlogfile"
   Compositorlogfile="$Cachefolder/$Compositorlogfile"
@@ -1720,7 +1730,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
         Windowmanager="" 
       ;; 
       Kwin-Native) Windowmanager=""
-        warning "$Xserver provides its own window management.
+        note "$Xserver provides its own window management.
   Will not use another window manager from host." 
       ;;
       Xephyr|Xorg|Xdummy|Xvfb|Xwayland|Weston-Xwayland|Nxagent|Xpra|Xpra-Xwayland|Xdummy-Xwayland|Kwin-Xwayland)
@@ -2002,7 +2012,7 @@ fi
         xdpyinfo >/dev/null 2>&1 && {
         Dpi=$(xdpyinfo | grep dots | cut -dx -f2 | cut -d' ' -f1)
         } || {
-          [ -n "$Hostdisplay" ] && [ -z "$(command -v xdpyinfo)" ] && warning "Could not determine dpi settings. If you encounter too
+          [ -n "$Hostdisplay" ] && [ -z "$(command -v xdpyinfo)" ] && note "Could not determine dpi settings. If you encounter too
   big or small fonts in $Xserver, please install xdpyinfo or use option --dpi."
         }
         case $Xserver in
@@ -2288,7 +2298,7 @@ esac
   
   [ "$Shareclipboard" = "yes" ] && case $Xserver in
     Nothing|Weston|Hostwayland|Kwin) Shareclipboard="no" 
-      warning "Option --clipboard is not supported for $Xserver" ;;
+      note "Option --clipboard is not supported for $Xserver" ;;
     Nxagent) ;; # look at "create command to start X server", nxagent has its own clipboard management
     Xephyr|Xorg|Xdummy|Xdummy-Xwayland|Xvfb|Xwayland|Weston-Xwayland)
       command -v xclip >/dev/null && {
@@ -2604,22 +2614,23 @@ done
   echo "Imagecommand='$Imagecommand'"
   echo "Imagename='$Imagename'"
   echo "Logfile='$Logfile'"
+  [ -n "$Sudo" ] && echo "Sudo='sudo -n'" || echo "Sudo=''"
   echo "# check if image is available locally"
-  echo "$Sudo docker inspect --type=image $Imagename > /dev/null 2>&1 || {"
+  echo "\$Sudo docker inspect --type=image $Imagename > /dev/null 2>&1 || {"
   echo "  warning 'Image $Imagename not found locally.'"
-  echo "  $Anyterminal bash -c 'read -n1 -e -p \"Image '$Imagename' not found locally. Do you want to pull it from docker hub? [Y|n]\" Choice && { [[ \"\$Choice\" == [YyJj]* ]] || [ -z \"\$Choice\" ] && $Sudo docker pull $Imagename 2>&1 | tee $Xtermlogfile; sleep 2 ; } '"
-  echo "  $Sudo docker inspect --type=image $Imagename > /dev/null 2>&1 || error \"Image '$Imagename' not found locally and not pulled from docker hub. \" "
+  echo "  $Anyterminal bash -c 'read -n1 -e -p \"Image '$Imagename' not found locally. Do you want to pull it from docker hub? [Y|n]\" Choice && { [[ \"\$Choice\" == [YyJj]* ]] || [ -z \"\$Choice\" ] && \$Sudo docker pull $Imagename 2>&1 | tee $Xtermlogfile; sleep 2 ; } '"
+  echo "  \$Sudo docker inspect --type=image $Imagename > /dev/null 2>&1 || error \"Image '$Imagename' not found locally and not pulled from docker hub. \" "
   echo "}"  
   echo "[ -z \"\$Imagecommand\" ] && {"
   echo "  # extract image command from image if not given on cli"
-  echo "  Imagecommand=\$($Sudo docker inspect --format='{{.Config.Cmd}}' $Imagename)"
+  echo "  Imagecommand=\$(\$Sudo docker inspect --format='{{.Config.Cmd}}' $Imagename)"
   echo "  Imagecommand=\${Imagecommand#[}"
   echo "  Imagecommand=\${Imagecommand#/bin/sh -c }"
   echo "  Imagecommand=\${Imagecommand%]}"
   echo "}"
   [ "$Noentrypoint" = "no" ] && {
     echo "# extract entrypoint of image"
-    echo "Entrypoint=\$($Sudo docker inspect --format='{{.Config.Entrypoint}}' $Imagename)"
+    echo "Entrypoint=\$(\$Sudo docker inspect --format='{{.Config.Entrypoint}}' $Imagename)"
     echo "Entrypoint=\${Entrypoint#[}"
     echo "Entrypoint=\${Entrypoint#/bin/sh -c }"
     echo "Entrypoint=\${Entrypoint%]}"
@@ -2674,10 +2685,10 @@ done
   echo ""
   echo "cat $Imagecommandscript | nl >> $Dockerlogfile"
   echo ""
-  echo "$Sudo $Dockercommand >> $Dockerlogfile 2>&1 & echo \$! >> $Dockerpidfile" 
+  echo "\$Sudo $Dockercommand >> $Dockerlogfile 2>&1 & echo \$! >> $Dockerpidfile" 
 #  echo "docker inspect --format '{{ .State.Pid }}' $Containername >> $Dockerpidfile"
   echo "sleep 3 # wait a moment until IP is available. Currently, IP is only needed for --pulseaudio"
-  echo "$Sudo docker inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername > $Containerip"
+  echo "\$Sudo docker inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername > $Containerip"
 } >> $Dockerrc
 
 { #### part: create xtermrc: password prompt to run docker
@@ -2749,7 +2760,7 @@ $Dockercommand
         [ "$Trusted" = "yes" ] && Trusted="trusted" || Trusted="untrusted" 
         echo "xauth -v -f $Xclientcookie generate $Newdisplay . $Trusted"
         echo "[ -s '$Xclientcookie' ] || { "
-        echo "  [ '$Trusted' = 'untrusted' ] && warning 'Could not create $Trusted cookie. "
+        echo "  [ '$Trusted' = 'untrusted' ] && warning 'Could not create untrusted cookie. "
         echo "  Maybe your X server misses extension SECURITY. "
         echo "  Fallback: Will try to create a standard cookie.'"
         echo "  xauth -f $Xclientcookie add $Newdisplay . $(mcookie)"
@@ -2764,8 +2775,8 @@ $Dockercommand
         }
         echo "}"
         echo "# create prepared cookie with localhost identification disabled by ffff, needed if X socket is shared. ffff means 'familiy wild'"
-        echo "xauth -f $Xclientcookie nlist $Newdisplay | echo ffff \$(cut -c6-) | xauth -v -f $Xclientcookie-ffff nmerge -"
-        echo "mv $Xclientcookie-ffff $Xclientcookie"
+        echo "Cookie=\$(xauth -f $Xclientcookie nlist | sed -e 's/^..../ffff/')"
+        echo "echo \$Cookie | xauth -v -f $Xclientcookie nmerge -"
         echo "cp $Xclientcookie $Xservercookie"
         echo "[ -s '$Xclientcookie' ] || warning 'Cookie creation failed! $Xserver runs without cookie authentication.'" 
         echo "export $Newxenv"
