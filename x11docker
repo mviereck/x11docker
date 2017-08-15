@@ -7,7 +7,7 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.6.0.5"
+Version="3.6.1"
 
 changelog() {
 ### ToDo:
@@ -40,6 +40,10 @@ changelog() {
 # BUG debian bug report lightdm/sddm contra gdm, dm can crash on tty switch if multiple graphical sessions are running
 
 # x11docker changelog
+# 15.08.2017 V3.6.1    --stdout and --stderr: new options showing stdout and stderr of imagecommand
+#                      forward stdin of x11docker to image command
+#                      --silent: new option supressing all x11docker terminal messages
+#                      x11docker-gui trys to use image x11docker/kaptain if kaptain is not installed
 # 14.08.2017 V3.6.0.5  bugfix opensuse: cookie creation failed due to different xauth behaviour
 #                      bugfix sudo: do not prompt for password for 'docker stop' in finish(), rather fail stopping
 #                      note() instead of warning() for less urgent messages
@@ -307,8 +311,11 @@ Advanced options:
                        (needs dbus-x11 to be installed in image)
      --env VAR=value   set custom environment variable VAR=value
  -v, --verbose         be verbose
+     --silent          do not show any terminal messages
+     --stdout          show stdout of image command
+     --stderr          show stderr of image command
      --pw FRONTEND     choose frontend for password prompt. Possible FRONTEND:
-                      pkexec su sudo gksu gksudo lxsu lxsudo kdesu kdesudo none
+                     pkexec su sudo gksu gksudo lxsu lxsudo kdesu kdesudo none
 
 Developer options:
      --sudouser        sudo without password for container user (testing only,
@@ -604,7 +611,7 @@ finish() {              # trap routine, clean up background processes and cache
   does not run as root. Will wait up to 10 seconds for docker to finish."
                 Zeit=$(date +%s)
                 while [ -n "$(ps -p $Pid | grep docker)" ] ; do
-                  echo "waiting for docker to terminate ..."
+                  echo "waiting for docker to terminate ..." >&2
                   sleep 1
                   [ 10 -lt $(echo "$(date +%s) - $Zeit" | bc) ] && break ||:
                 done
@@ -619,7 +626,7 @@ rm -R $Cachefolder
 x11docker --orphaned"
                   Preservecachefiles="yes"
                 else
-                  echo "docker container terminated successfully"
+                  note "docker container terminated successfully"
                 fi
               }
             }
@@ -715,8 +722,6 @@ mkfile() {              # create file $1 owned by $Hostuser
 
 { #### part: variables default settings
 
-exec 3>&2                                       # second stderr to show x11docker warnings and errors from within redirected output (especially xinitrc and xtermrc)
-
 export IFS=$' \n\t'                             # set IFS to default
 [ -z "${DISPLAY:-}" ]         && DISPLAY=""
 [ -z "${XAUTHORITY:-}" ]      && XAUTHORITY=""
@@ -779,6 +784,9 @@ Westonini=weston.ini                            # config file for weston
 Customwestonini=""                              # custom config file for weston
 Xdummyconf=xdummy.xorg.conf                     # xorg.conf for dummy video driver
 Xdummywrapper=Xdummywrapper                     # fork from xpra to wrap Xorg for Xdummy
+Cmdstdinfile="stdin"                            # stdin for image command piped to x11docker
+Cmdstdoutlogfile="stdout"                       # stdout for image command
+Cmdstderrlogfile="stderr"                       # stderr for image command
 
 Hostdisplay="$DISPLAY"                          # store environment variable containing name of current display
 Hostdisplaynumber="$(echo $Hostdisplay | cut -d: -f2 | cut -d. -f1)"                         # display number without ":" and ".0"
@@ -859,6 +867,7 @@ Createdesktopstarter="no"                       # option '--starter': create des
 Installermode=""                                # options --install/--update/--remove
 
 Verbose="no"                                    # option '-v, --verbose': if "yes", be verbose
+Silent="no"                                     # option --silent: do not show messages
 Preservecachefiles="no"                         # if yes, dont delete cache files
 Preservecontainer="no"                          # option '-p, --ps': if yes, preserve container instead of removing it with 'docker run --rm'
 Gpu="no"                                        # option '--gpu': Use hardware accelerated OpenGL, share files in /dev/dri
@@ -866,6 +875,8 @@ Customenvironment=""                            # option '--env': set custom env
 Dbuslaunch="no"                                 # option '--dbus': run image command with dbus-launch
 Shareipc="no"                                   # option --ipc, set --ipc=host.
 Sharenet="no"                                   # option --net, set --ipc=net
+Showstdout="no"                                 # option --stdout: show image command stdout
+Showstderr="no"                                 # option --stderr: show image command stderr
 
 Trusted="yes"                                   # create trusted or untrusted cookies, see --trusted and --untrusted. Important for --hostdisplay and --kwin-native
 Noxhost="no"                                    # option '--no-xhost': if yes, disable all X server access granted by xhost
@@ -912,7 +923,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
   Longoptions="$Longoptions,user:,home,clipboard,pulseaudio"                                                               # comfort options
   Longoptions="$Longoptions,verbose,no-xhost,trusted,untrusted,dbus,waylandenv,pw:"                                        # advanced options
   Longoptions="$Longoptions,starter,orphaned,license,licence,help,version,install,update,remove"                           # special options without starting X server
-  Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,env:,showenv,sharewayland"                                         # developer options
+  Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,env:,showenv,sharewayland,stdout,stderr,silent"                    # developer options
   Longoptions="$Longoptions,ipc,net,ps,cache,cap-default,no-entrypoint,sudouser,hostuser:,rw"                              # developer options
   Longoptions="$Longoptions,cachedir:,homedir:,westonini:,sharedir:"                                                       # developer options
   Longoptions="$Longoptions,xsocket,tcp,tcpxsocket,virtualgl,glamor,volume:,xhost+"                                        # deprecated
@@ -1009,6 +1020,10 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
          --no-auth)    Xauthentication="no" ;;             # disable cookie authentication
 
          --ps)         Preservecontainer="yes"  ;;         # preserve container instead of removing it with 'docker run --rm'
+         
+         --stdout)     Showstdout="yes" ;;                 # show stdout of image command
+         --stderr)     Showstderr="yes" ;;                 # show stderr of image command
+         --silent)     Silent="yes" ;;                     # do not show warnings or errors
          
       -S|--sharewayland) Sharewayland="yes" ;;             # Share wayland socket
       
@@ -1114,6 +1129,8 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
 
 { #### part: some init
   trap finish EXIT
+  [ "$Silent" = "yes" ] && exec 3>/dev/null || exec 3>&2   # second stderr to show x11docker warnings and errors from within redirected output (especially xinitrc and xtermrc)
+  exec 4>&2                                                # stderr channel for --stderr
   
   ## options --install --update --remove
   [ -n "$Installermode" ] && {
@@ -1706,6 +1723,10 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
   Xdummyconf="$Cachefolder/$Xdummyconf"                     && mkfile $Xdummyconf
   Xdummywrapper="$Cachefolder/$Xdummywrapper"               && mkfile $Xdummywrapper
   
+  Cmdstdinfile="$Sharefolder/$Cmdstdinfile"                 && mkfile $Cmdstdinfile
+  Cmdstdoutlogfile="$Sharefolder/$Cmdstdoutlogfile"         && mkfile $Cmdstdoutlogfile
+  Cmdstderrlogfile="$Sharefolder/$Cmdstderrlogfile"         && mkfile $Cmdstderrlogfile
+  
   [ "$Newxvt" = "" ] && Newxvt="vt$Newdisplaynumber"    # FIXME: assuming instead of knowing whether VT is free
   Newdisplay=":$Newdisplaynumber"
   
@@ -1718,6 +1739,10 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
   ## Get inet adress of docker0 interface
   Dockeriprange=$(ip -4 -o a | grep docker0 | awk '{print $4}')
   Dockerip=$(echo $Dockeriprange | cut -d/ -f1)
+  
+  # catch stdin
+  if_read() {     IFS="" read -t 0.1 -rN 1 BYTE && { echo -nE "$BYTE"; cat; } | "$@"; }
+  if_read && cat >> $Cmdstdinfile
 }
 
 { #### part: check window manager
@@ -2553,6 +2578,7 @@ done
       Dockercommand="$Dockercommand --name=$Containername"
       
       Dockercommand="$Dockercommand -v $Sharefolder:$Cshare:ro,z"
+
       [ "$Adduserhome" = "yes" ] && [ -n "$Adduserhomefolder" ] && Dockercommand="$Dockercommand -v $Adduserhomefolder:$Benutzerhome:rw,z"
 
       Dockercommand="$Dockercommand --entrypoint=''"
@@ -2567,7 +2593,6 @@ done
           [ "$Xauthentication" = "yes" ] && Dockercommand="$Dockercommand -e XAUTHORITY=$Cshare/Xclientcookie"
           #      X socket (link to /tmp/.X11-unix in dockerrc)
           Dockercommand="$Dockercommand -v $Newxsocket:/tmp/X$Newdisplaynumber:rw,z"               ### FIXME: rw,z does not help, permission denied with SELinux enabled
-#          Dockercommand="$Dockercommand -v $Newxsocket:/tmp/.X11-unix/X$Newdisplaynumber:rw,z"
         ;;
       esac
       #          WAYLAND_DISPLAY
@@ -2604,7 +2629,7 @@ done
   esac
 }
 
-{ #### part: create dockerrc: inspect image and create x11docker_CMD
+{ #### part: create dockerrc: inspect image, create x11docker_CMD and run docker
   # create script that needs root permissions or docker group membership to use docker.
   # This is the part the password prompt / $Getroot is needed for.
   echo "#! /bin/bash"
@@ -2641,6 +2666,7 @@ done
   echo "# create x11docker_CMD (shared with container and given as image command on docker run)"
   echo "{ echo '#! /bin/bash'"
   echo "  echo '# created startscript for docker run: x11docker_CMD'"
+ # echo "  echo cat"
   echo '  echo Imagecommand="\"$Imagecommand\""'
   echo '  echo Entrypoint="\"$Entrypoint\""'
   echo "  echo ''"
@@ -2668,16 +2694,18 @@ done
     }
   done < <(echo -e $Customenvironment)
   echo "  echo ''"
+  echo "  echo 'cd \$HOME'"
+  echo "  echo ''"
   [ "$Getroot" = "bash -c" ] && {
-    echo "  echo \"\$Dbus \$Entrypoint \$Imagecommand\""
+    echo "  echo \"cat $Cshare/stdin | \$Dbus \$Entrypoint \$Imagecommand\""
   } || {
     echo "  echo 'command -v ps >/dev/null && {'"
-    echo "  echo \"  \$Dbus \$Entrypoint \$Imagecommand &\""
+    echo "  echo \"  cat $Cshare/stdin | \$Dbus \$Entrypoint \$Imagecommand &\""
     echo "  echo '  Imagecommandpid=\$!'"
     echo "  echo '  # This loop allows terminating container from outside with file timetosaygoodbye'"
     echo "  echo '  while ps -p \$Imagecommandpid >/dev/null && [ ! -e $Cshare/timetosaygoodbye ] ; do sleep 1 ; done '"
     echo "  echo '} || {'"
-    echo "  echo \"  \$Dbus \$Entrypoint \$Imagecommand\""
+    echo "  echo \"  cat $Cshare/stdin | \$Dbus \$Entrypoint \$Imagecommand\""
     echo "  echo '}'"
   }
   echo "  echo '# Ready for docker run'"
@@ -2685,13 +2713,14 @@ done
   echo ""
   echo "cat $Imagecommandscript | nl >> $Dockerlogfile"
   echo ""
-  echo "\$Sudo $Dockercommand >> $Dockerlogfile 2>&1 & echo \$! >> $Dockerpidfile" 
+#  echo "\$Sudo $Dockercommand >> $Dockerlogfile 2>&1 & echo \$! >> $Dockerpidfile" 
+  echo "$Sudo $Dockercommand >> $Cmdstdoutlogfile 2>>$Cmdstderrlogfile & echo \$! >> $Dockerpidfile" 
 #  echo "docker inspect --format '{{ .State.Pid }}' $Containername >> $Dockerpidfile"
   echo "sleep 3 # wait a moment until IP is available. Currently, IP is only needed for --pulseaudio"
   echo "\$Sudo docker inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername > $Containerip"
 } >> $Dockerrc
 
-{ #### part: create xtermrc: password prompt to run docker
+{ #### part: create xtermrc: prompt for password and run dockerrc
   echo "#! /bin/bash
 echo 'Created docker command:
 
@@ -2856,7 +2885,7 @@ $Dockercommand
   echo "while [ ! -e '$Sharefolder/timetosaygoodbye' ] ; do sleep 1 ; done"
 } >> $Xinitrc
 
-{ #### part: option "--verbose" and x11docker.log
+{ #### part: options --verbose, --stdout,--stderr and x11docker.log
     verbose "$(date) $(command -v lsb_release >/dev/null && lsb_release -ds) $(Xorg -version 2>&1 | grep X.Org)
 $(xrandr 2>/dev/null | grep Screen)
 Command: $0 $X11dockerargs
@@ -2914,10 +2943,14 @@ Copy of logfile: $Logfile2"
     verbose "Running X server $Xserver on display $Newdisplay now ..."
 
   # create summary logfile
+  tail --pid=$$ --retry -n +1 -F $Cmdstdoutlogfile $Cmdstderrlogfile 2>/dev/null >> $Dockerlogfile &
   tail --pid=$$ --retry -n +1 -F $Xtermlogfile $Dockerlogfile $Xpraserverlogfile $Xinitlogfile $Compositorlogfile 2>/dev/null >> $Logfile &
   tail --pid=$$ --retry -n +1 -F $Logfile >> $Logfile2 2>/dev/null &
   # option --verbose: Show logfile on stdout
   [ "$Verbose" = "yes" ] && tail --pid=$$ --retry -n +1 -F $Logfile >&3 2>/dev/null &
+  # options --stdout, --stderr
+  [ "$Showstdout" = "yes" ] && tail --pid=$$ --retry -n +1 -F $Cmdstdoutlogfile     2>/dev/null &
+  [ "$Showstderr" = "yes" ] && tail --pid=$$ --retry -n +1 -F $Cmdstderrlogfile >&4 2>/dev/null &
 }
 
 { #### part: option '--starter': create desktop starter
