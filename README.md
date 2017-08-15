@@ -74,7 +74,10 @@ Rather special options reducing security, but not needed for regular use:
 ![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true)
 
 # Dependencies
-x11docker can run with standard system utilities without additional dependencies on host or in image. As a core, it only needs X server (package `xorg`)  and, of course, docker (package `docker.io`) to run docker images on X. 
+x11docker can run with standard system utilities without additional dependencies on host or in image. As a core, it only needs X server (package `xorg`)  and, of course, docker (package `docker.io`) to run docker images on X.
+
+x11docker will check dependencies for chosen options on startup and shows terminal messages if some are missing. 
+The package names are those for debian and its derivates like Ubuntu and Mint. They are be slightly different for other distributions.
 
 Basics:
  - If no additional X server is installed, only less isolated option `--hostdisplay` will work out of the box within X, and option `--xorg` from console. (To use `--xorg` within X, look at [setup for option --xorg](#setup-for-option---xorg)).
@@ -92,8 +95,6 @@ Advanced usage:
    - `--xdummy` needs `xserver-xorg-video-dummy`
    - `--xvfb` needs `xvfb`
  - List of all host packages for all possible x11docker options: `xpra xserver-xephyr xvfb weston xwayland nxagent kwin xclip xdotool xserver-xorg-video-dummy websockify`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
-
-x11docker will check dependencies for chosen options on startup and shows terminal messages if some are missing. (The package names above are valid for debian and its derivates like Ubuntu and Mint. They may be slightly different for other distributions).
 
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
 
