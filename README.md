@@ -84,7 +84,7 @@ Basics:
  - As a well working base for convenience and security, it is recommended to install `xpra`, `xserver-xephyr` and `xvfb`. (It's recommended to use latest xpra version from [http://xpra.org](http://xpra.org/)).
  
 Advanced usage:
- - For hardware acceleration with option `--gpu`, also install `xwayland`, `weston` and `xdotool`. Applications in image should already have installed their OpenGL dependencies. If not, install `libgl1-mesa-glx libglew2.0 libglu1-mesa libgl1-mesa-dri libdrm2 libgles2-mesa libegl1-mesa libxv1` in image).
+ - For hardware acceleration with option `--gpu`, also install `xwayland`, `weston` and `xdotool`. Applications in image should already have installed their OpenGL dependencies. If not, install `libgl1-mesa-glx libglew2.0 libglu1-mesa libgl1-mesa-dri libdrm2 libgles2-mesa libegl1-mesa libxv1` in image.
  - For sound with option `--pulseaudio`, install `pulseaudio` on host and in image. 
  - Rarer needed dependencies for special options:
    - Best native `--clipboard` support provides xpra. X servers other than xpra and nxagent need `xclip`.
@@ -176,7 +176,7 @@ Shortest way:
 # Examples
 Some example images can be found on docker hub: https://hub.docker.com/u/x11docker/
 
- - Single application: fractal generator XaoS
+ - Single GUI application: fractal generator XaoS
    
   `x11docker patricknw/xaos  xaos`
 
