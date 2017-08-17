@@ -20,7 +20,7 @@
 ![x11docker-gui screenshot](/../screenshots/screenshot-retroterm.png?raw=true "Cathode retro term in docker") ![LXDE in xpra](/../screenshots/screenshot-lxde-small.png?raw=true "LXDE desktop in docker")
 
 # GUI for x11docker
-To use `x11docker-gui`, you need package `kaptain`. If your distribution misses it, see [mviereck/kaptain](https://github.com/mviereck/kaptain). If `kaptain` is not found on your system, `x11docker-gui` tries to use image [`x11docker/kaptain`](https://hub.docker.com/r/x11docker/kaptain/). 
+To use `x11docker-gui`, you need package `kaptain`. If your distribution misses it, look at repository [mviereck/kaptain](https://github.com/mviereck/kaptain). If `kaptain` is not found on your system, `x11docker-gui` tries to use image [`x11docker/kaptain`](https://hub.docker.com/r/x11docker/kaptain/). 
 
 ![x11docker-gui screenshot](/../screenshots/x11docker-gui.png?raw=true "Optional Title")
 
