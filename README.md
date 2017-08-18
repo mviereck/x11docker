@@ -53,13 +53,15 @@ Core concept is:
    - Run a second X server to avoid [X security leaks](http://www.windowsecurity.com/whitepapers/unix_security/Securing_X_Windows.html).
      - This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control. (x11docker provides this with option `--hostdisplay`).
      - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.
-   - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
-     - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges --read-only --volume=/tmp`. (This behaviour can be disabled with x11docker options `--cap-default` or `--sudouser`).
    - Create container user similar to host user to [avoid root in container](http://blog.dscpl.com.au/2015/12/don-run-as-root-inside-of-docker.html).
+   - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
+     - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. This behaviour can be disabled with x11docker options `--cap-default` or `--sudouser`.
+   - Disallow write access to container root filesystem except `/tmp`.
+     - Uses docker run options `--read-only --volume=/tmp` to restrict write access in container to `/tmp` only. To allow read/write access to whole container file system, use option `--rw`. (This behaviour is disabled for options `--sudouser` and `--user=root`.
 
 Weaknesses / ToDo: 
  - If docker daemon runs with `--selinux-enabled`, it is disabled for x11docker containers as it inhibits access to X unix socket.
-   Compare: [Using volumes with docker can cause problems with SELinux](http://www.projectatomic.io/blog/2015/06/using-volumes-with-docker-can-cause-problems-with-selinux/)
+   Compare: [SELinux and docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
  - User namespace remapping has limited support and is disabled for options `--home` and `--homedir`.
 
 ### Options degrading container isolation
