@@ -12,7 +12,6 @@
    - Hardware acceleration for OpenGL
    - Clipboard sharing
    - Shared host folder as /home in container
-   - Adjust properties of new X server like multiple outputs, rotation, scaling, dpi.
  - Easy to use. Examples: 
     - `x11docker jess/cathode`
     - `x11docker --desktop --size 300x200 x11docker/lxde`
@@ -20,7 +19,9 @@
 ![x11docker-gui screenshot](/../screenshots/screenshot-retroterm.png?raw=true "Cathode retro term in docker") ![LXDE in xpra](/../screenshots/screenshot-lxde-small.png?raw=true "LXDE desktop in docker")
 
 # GUI for x11docker
-To use `x11docker-gui`, you need package `kaptain`. If your distribution misses it, look at repository [mviereck/kaptain](https://github.com/mviereck/kaptain). If `kaptain` is not found on your system, `x11docker-gui` tries to use image [`x11docker/kaptain`](https://hub.docker.com/r/x11docker/kaptain/). 
+`x11docker` is independent from `x11docker-gui`.
+ - `x11docker-gui` needs package `kaptain`. If your distribution misses it, look at repository [mviereck/kaptain](https://github.com/mviereck/kaptain). 
+ - If `kaptain` is not installed on your system, `x11docker-gui` tries to use image [`x11docker/kaptain`](https://hub.docker.com/r/x11docker/kaptain/). 
 
 ![x11docker-gui screenshot](/../screenshots/x11docker-gui.png?raw=true "Optional Title")
 
@@ -41,11 +42,11 @@ Make x11docker executable with `chmod +x x11docker` or just run it with `bash x1
 For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. x11docker shows some warnings if something is insecure or is going wrong. Additionally, you can use option `--verbose` to see logfile output. You can get help in the [issue tracker](https://github.com/mviereck/x11docker/issues).
 
 # Password prompt
+root permissions are needed only to run docker. X servers run as unprivileged user.
+
 x11docker checks whether docker needs a password to run and whether `su` or `sudo` are needed to get root privileges. If that check fails and does not match your setup, use option `--pw FRONTEND`. `FRONTEND` can be one of `su sudo gksu gksudo lxsu lxsudo kdesu kdesudo pkexec` or `none`.  
 
-Instead, you can run x11docker directly as root. Unfortunately, some systems do not provide `DISPLAY` and `XAUTHORITY` for root, but needed for nested X servers like Xephyr.
-
-root permissions are needed only to run docker. X servers run as unprivileged user.
+Instead, you can run x11docker directly as root. Unfortunately, some systems do not provide `DISPLAY` and `XAUTHORITY` for root, but needed for nested X servers like Xephyr. (Commands other than `docker` are executed as unprivileged user determined with `logname`).
 
 # Security 
 Main purpose of x11docker is to run dockered GUI applications while preserving and improving container isolation.
@@ -107,10 +108,11 @@ Advanced usage:
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
 
 # X servers and Wayland compositors to choose from
-If no X server is specified, x11docker automatically chooses one depending on installed dependencies and on given or missing options `--wm` and `--gpu`. 
-For single applications, x11docker prefers `--xpra`.
-If `--wm=none`, x11docker assumes a window manager or desktop environment in image and prefers `--xephyr`. 
-If option `--gpu` is given, it prefers `--xpra-xwayland` or `--weston-xwayland`. If none of them can be started due to missing dependencies, it uses `--hostdisplay` or `--xorg`.
+If no X server option is specified, x11docker automatically chooses one depending on installed dependencies and on given or missing options `--desktop` and `--gpu`. 
+ - For single applications, x11docker prefers `--xpra`.
+ - With option `--desktop`, x11docker assumes a desktop environment in image and prefers `--xephyr`. 
+ - With option `--gpu`, x11docker prefers `--xpra-xwayland` for single applications, or `--weston-xwayland` for desktop environments. 
+ - If none of above can be started due to missing dependencies, x11docker uses `--hostdisplay` or `--xorg`.
  
 ![x11docker-gui server screenshot](/../screenshots/x11docker-server.png?raw=true)
 
@@ -135,15 +137,14 @@ Option `--xorg` runs ootb from console. To run a second core Xorg server from wi
 `allowed_users=console`
 
 with lines:
-
-`allowed_users=anybody`
-
-`needs_root_rights=yes`
-
+```
+allowed_users=anybody
+needs_root_rights=yes
+```
 On debian 9 and Ubuntu 16.04 you need to install package `xserver-xorg-legacy`. 
 
 ## Web applications
-To provide dockered applications as HTML5 web applications, you need xpra and package `websockify`. Example:
+To provide dockered applications as HTML5 web applications, you need `xpra` and `websockify`. Example:
 ```
 read Xenv < <(x11docker --xdummy  x11docker/lxde pcmanfm)
 echo $Xenv && export $Xenv
