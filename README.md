@@ -55,9 +55,12 @@ Core concept is:
      - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.
    - Create container user similar to host user to [avoid root in container](http://blog.dscpl.com.au/2015/12/don-run-as-root-inside-of-docker.html).
    - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
-     - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. This behaviour can be disabled with x11docker options `--cap-default` or `--sudouser`.
+     - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. 
+     - This restriction can be disabled with x11docker options `--cap-default` or `--sudouser`.
    - Disallow write access to container root filesystem except `/tmp`.
-     - Uses docker run options `--read-only --volume=/tmp` to restrict write access in container to `/tmp` only. To allow read/write access to whole container file system, use option `--rw`. (This behaviour is disabled for options `--sudouser` and `--user=root`.
+     - Uses docker run options `--read-only --volume=/tmp` to restrict write access in container to `/tmp` only. 
+     - To allow read/write access to whole container file system, use option `--rw`. 
+     - This restriction is disabled for options `--sudouser` and `--user=root`.
 
 Weaknesses / ToDo: 
  - If docker daemon runs with `--selinux-enabled`, it is disabled for x11docker containers as it inhibits access to X unix socket.
