@@ -41,7 +41,7 @@ Make x11docker executable with `chmod +x x11docker` or just run it with `bash x1
 For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. x11docker shows some warnings if something is insecure or is going wrong. Additionally, you can use option `--verbose` to see logfile output. You can get help in the [issue tracker](https://github.com/mviereck/x11docker/issues).
 
 # Password prompt
-x11docker checks whether docker needs a password to run and whether `su` or `sudo` are needed to get root privileges. If that check fails and does not match your setup, use option `--pw FRONTEND`. `FRONTEND` can be one of `su sudo gksu gksudo lxsu lxsudo kdesu kdesudo` or `pkexec`.  
+x11docker checks whether docker needs a password to run and whether `su` or `sudo` are needed to get root privileges. If that check fails and does not match your setup, use option `--pw FRONTEND`. `FRONTEND` can be one of `su sudo gksu gksudo lxsu lxsudo kdesu kdesudo pkexec` or `none`.  
 
 Instead, you can run x11docker directly as root. Unfortunately, some systems do not provide `DISPLAY` and `XAUTHORITY` for root, but needed for nested X servers like Xephyr.
 
