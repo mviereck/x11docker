@@ -87,27 +87,28 @@ Rather special options reducing security, but not needed for regular use:
 ![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true)
 
 # Dependencies
-x11docker can run with standard system utilities without additional dependencies on host or in image. As a core, it only needs X server (package `xorg`)  and, of course, docker (package `docker.io`) to run docker images on X.
+x11docker can run with standard system utilities without additional dependencies on host or in image. As a core, it only needs an `X` server and, of course, `docker` to run docker images on X.
 
 x11docker will check dependencies for chosen options on startup and shows terminal messages if some are missing. 
-The package names are those for debian and its derivates like Ubuntu and Mint. They are be slightly different for other distributions.
 
 Basics:
  - If no additional X server is installed, only less isolated option `--hostdisplay` will work out of the box within X, and option `--xorg` from console. (To use `--xorg` within X, look at [setup for option --xorg](#setup-for-option---xorg)).
- - As a well working base for convenience and security, it is recommended to install `xpra`, `xserver-xephyr` and `xvfb`. (It's recommended to use latest xpra version from [http://xpra.org](http://xpra.org/)).
+ - As a well working base for convenience and security, it is recommended to install `xpra` and `Xephyr`. (On Ubuntu also `Xvfb`). It is recommended to use latest xpra version from [http://xpra.org](http://xpra.org/).
  
 Advanced usage:
- - For hardware acceleration with option `--gpu`, also install `xwayland`, `weston` and `xdotool`. Applications in image should already have installed their OpenGL dependencies. If not, install `libgl1-mesa-glx libglew2.0 libglu1-mesa libgl1-mesa-dri libdrm2 libgles2-mesa libegl1-mesa libxv1` in image.
+ - Hardware acceleration with option `--gpu`
+   - Beside `xpra`, also install `Xwayland`, `weston` and `xdotool`. 
+   - Applications in image should already have installed their OpenGL dependencies. If not, install `libgl1-mesa-glx libglew2.0 libglu1-mesa libgl1-mesa-dri libdrm2 libgles2-mesa libegl1-mesa libxv1` in image (debian package names).
  - For sound with option `--pulseaudio`, install `pulseaudio` on host and in image. 
+ - For clipboard sharing with `--clipboard` install `xclip`.
  - Rarer needed dependencies for special options:
-   - Best native `--clipboard` support provides xpra. X servers other than xpra and nxagent need `xclip`.
    - `--dbus` is needed only for QT5 application in Wayland. It needs `dbus-launch` (package `dbus-x11`) in image.
-   - `--nxagent` provides a fast and lightweight alternative to `xpra` and `xephyr`. Needs [`nxagent`](https://packages.debian.org/experimental/nxagent) to be installed.
+   - `--nxagent` provides a fast and lightweight alternative to `xpra` and `Xephyr`. Needs [`nxagent`](https://packages.debian.org/experimental/nxagent) to be installed.
    - `--kwin`, `--kwin-native` and `--kwin-xwayland` need `kwin_wayland`, included in modern `kwin` packages.
-   - Web application setup (see below) needs package `websockify`. 
-   - `--xdummy` needs `xserver-xorg-video-dummy`
-   - `--xvfb` needs `xvfb`
- - List of all host packages for all possible x11docker options: `xpra xserver-xephyr xvfb weston xwayland nxagent kwin xclip xdotool xserver-xorg-video-dummy websockify`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
+   - Web application setup with xpra (see below) needs `websockify`. 
+   - `--xdummy` needs `xserver-xorg-video-dummy` (debian) or `xorg-x11-drv-dummy` (fedora).
+   - `--xvfb` needs `Xvfb`
+ - List of all host packages for all possible x11docker options (debian package names): `xpra xserver-xephyr xvfb weston xwayland nxagent kwin xclip xdotool xserver-xorg-video-dummy websockify`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
 
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
 
