@@ -7,17 +7,14 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.6.1.3"
+Version="3.6.1.4"
 
 changelog() {
 ### ToDo:
 # SECURITY: fedora: selinux issue: can not share unix socket with :z, Permission denied. Currently disabling SELinux for container
-#           http://www.projectatomic.io/blog/2015/06/using-volumes-with-docker-can-cause-problems-with-selinux/
+#           https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix
 #           http://danwalsh.livejournal.com/74421.html
 # check all FIXME 
-# improve orphaned(): password prompt, running docker
-# part check terminal: missing terminal emulator needn't to be fatal.
-# $Adduserhomefolder with --user: if running as root, root could create folder for user
 # --xorg: check custom systemd start of X #7
 # check X in container #7
 # some tests with Xephyrglamor=no
@@ -37,6 +34,12 @@ changelog() {
 # BUG debian bug report lightdm/sddm contra gdm, dm can crash on tty switch if multiple graphical sessions are running
 
 # x11docker changelog
+# 19.08.2017 V3.6.1.4  bugfix: wrong file descriptor for messages before part init()
+# 18.08.2017           strange bugfix: passwordless sudo -n on fedora did not work with x11docker-gui started from menu instead of cli, without -n is ok
+#                      beesu: new frontend for --pw available on fedora
+#                      do not test for passwordless docker if --pw is set
+#                      create non-existing shared home folder for user different from host user if running as root
+# 17.08.2017           more verbose cache folder names, now with image name and X server in use
 # 17.08.2017 V3.6.1.3  minor bugfix installer: did not find icon at new location
 # 15.08.2017 V3.6.1.2  --resizeable: deprecated. Xephyr can crash if resized.
 #                      no |tee to $Xtermlogfile on 'docker pull': better interactive output
@@ -314,7 +317,8 @@ Advanced options:
      --stdout          show stdout of image command
      --stderr          show stderr of image command
      --pw FRONTEND     choose frontend for password prompt. Possible FRONTEND:
-                     pkexec su sudo gksu gksudo lxsu lxsudo kdesu kdesudo none
+                         su sudo gksu gksudo lxsu lxsudo kdesu kdesudo
+                         pkexec beesu none
 
 Developer options:
      --sudouser        sudo without password for container user (testing only,
@@ -724,6 +728,8 @@ mkfile() {              # create file $1 owned by $Hostuser
 }
 
 { #### part: variables default settings
+exec 3>&2   # second stderr to show x11docker warnings and errors from within redirected output (especially xinitrc and xtermrc)
+exec 4>&2   # stderr channel for --stderr
 
 export IFS=$' \n\t'                             # set IFS to default
 [ -z "${DISPLAY:-}" ]         && DISPLAY=""
@@ -1082,6 +1088,65 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
   done
 }
 
+{ #### part: some init
+  trap finish EXIT
+  
+  [ "$Silent" = "yes" ] && exec 3>/dev/null
+    
+  ## options --install --update --remove
+  [ -n "$Installermode" ] && {
+    [ "0" = "$(id -u)" ] || error "Must run as root to install, update or remove x11docker."
+    installer $Installermode
+    exit
+  }
+   
+  ## option --orphaned : check for non-removed containers and left cache files possibly owned by root and created by docker
+  [ "$Orphanedcheck" = "yes" ] && {
+    docker images >/dev/null 2>&1 || error "'x11docker --orphaned' must run as root."
+    checkorphaned ; exit            ### FIXME: currently using hardcoded pkexec
+  }
+
+  [ "$Tty" = "no" ] && [ -z "$Hostdisplay" ] && warning "Environment variable DISPLAY is empty, but
+  it seems x11docker was started within X, not from console. 
+  Please set DISPLAY and XAUTHORITY.
+  If you have started x11docker with sudo, it may be configured to unset
+  X environment variables. You can trick it out, for example with
+    sudo env DISPLAY=\$DISPLAY XAUTHORITY=\$XAUTHORITY x11docker [...]
+  Otherwise, you can use tools like gksu/gksudo/kdesu/kdesudo/lxsu/lxsudo."
+  
+  # if desktop starter should be created, check if xdg-user-dir is installed
+  if [ "$Createdesktopstarter" = "yes" ] ; then
+    command -v "xdg-user-dir" >/dev/null 2>&1 || { error "could not find xdg-user-dir.
+  x11docker needs it to create a desktop starter. 
+  Please install xdg-user-dir (mostly part of package xdg-utils)." ; }
+  fi
+  
+  # option '--pulseaudio': find a free tcp port
+  [ "$Pulseaudio" = "yes" ] && {
+    read -r Lowerport Upperport < /proc/sys/net/ipv4/ip_local_port_range
+    while : ; do
+      Pulseaudiotcpport="$(shuf -i $Lowerport-$Upperport -n 1)"
+      ss -lpn | grep -q ":$Pulseaudiotcpport " || break
+    done
+  }
+  
+  # check whether x11docker runs on tty1-tty6
+  # console users have to use their own tty for X since debian 9
+  if [ "$Tty" = "yes" ] && [ "$Newxvt" = "" ] ; then Newxvt="vt$(tty | cut -c9-)" ; fi
+
+  [ -n "$Customwestonini" ] && [ ! -e "$Customwestonini" ] && { 
+    warning "Custom weston.ini (option --westonini) not found."
+    Customwestonini=""
+  }
+  
+  [ "$X11dockermode" = "run" ] && {
+    command -v docker >/dev/null || error "docker is not installed.
+  To run docker images, you need to install docker."
+    [ -z "$Dockerdaemon" ] && error "Please make sure docker daemon is running.
+  Try 'systemctl start docker'"
+  }
+}
+
 { #### part: check host user
   # check host user, want an unprivileged one to run X server
   # default behaviour:
@@ -1090,6 +1155,8 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
   #  x11docker started as root with --hostuser=root:  root runs X server and root is container user (discouraged)
   #                                                   if you want root in container, just use --user=root
   #  x11docker with --user=someuser                   container user is someuser, host user is unprivileged user $(logname)
+  # 
+  # root permissions are only needed to run docker. If started unprivileged, you will be prompted for your password.
   
   [ -z "$Hostuser" ] && [ "$(id -un)" != "root" ] && Hostuser="$(id -un)"
 
@@ -1128,74 +1195,6 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
   [ -z "$Hostuserhome" ] && error "No home directory found for user '$Hostuser'.
   You need to specify option --cachedir (and --homedir for option --home)."
   [ -z "$Cacherootfolder" ] && Cacherootfolder="$Hostuserhome/.cache/x11docker"
-}
-
-{ #### part: some init
-  trap finish EXIT
-  [ "$Silent" = "yes" ] && exec 3>/dev/null || exec 3>&2   # second stderr to show x11docker warnings and errors from within redirected output (especially xinitrc and xtermrc)
-  exec 4>&2                                                # stderr channel for --stderr
-  
-  ## options --install --update --remove
-  [ -n "$Installermode" ] && {
-    [ "0" = "$(id -u)" ] || error "Must run as root to install, update or remove x11docker."
-    installer $Installermode
-    exit
-  }
-   
-  ## option --orphaned : check for non-removed containers and left cache files possibly owned by root and created by docker
-  [ "$Orphanedcheck" = "yes" ] && {
-    docker images >/dev/null 2>&1 || error "'x11docker --orphaned' must run as root."
-    checkorphaned ; exit            ### FIXME: currently using hardcoded pkexec
-  }
-
-  [ "$Tty" = "no" ] && [ -z "$Hostdisplay" ] && warning "Environment variable DISPLAY is empty, but
-  it seems x11docker was started within X, not from console. 
-  Please set DISPLAY and XAUTHORITY.
-  If you have started x11docker with sudo, it may be configured to unset
-  X environment variables. You can trick it out, for example with
-    sudo env DISPLAY=\$DISPLAY XAUTHORITY=\$XAUTHORITY x11docker [...]
-  Otherwise, you can use tools like gksu/gksudo/kdesu/kdesudo/lxsu/lxsudo."
-  
-  # if desktop starter should be created, check if xdg-user-dir is installed
-  if [ "$Createdesktopstarter" = "yes" ] ; then
-    command -v "xdg-user-dir" >/dev/null 2>&1 || { error "could not find xdg-user-dir.
-  x11docker needs it to create a desktop starter. Please install xdg-utils with
-  command:
-  apt-get install xdg-utils" ; }
-  fi
-  
-  # option '--pulseaudio': find a free tcp port
-  [ "$Pulseaudio" = "yes" ] && {
-    read -r Lowerport Upperport < /proc/sys/net/ipv4/ip_local_port_range
-    while : ; do
-      Pulseaudiotcpport="$(shuf -i $Lowerport-$Upperport -n 1)"
-      ss -lpn | grep -q ":$Pulseaudiotcpport " || break
-    done
-  }
-  
-  # check whether x11docker runs on tty1-tty6
-  # console users have to use their own tty for X since debian 9
-  if [ "$Tty" = "yes" ] && [ "$Newxvt" = "" ] ; then Newxvt="vt$(tty | cut -c9-)" ; fi
-  
-  # Weston and Xwayland need XDG_RUNTIME_DIR
-  [ -z "$XDG_RUNTIME_DIR" ] && [ -e "/run/user/$Hostuseruid" ] && export XDG_RUNTIME_DIR="/run/user/$Hostuseruid" 
-  [ -z "$XDG_RUNTIME_DIR" ] && {
-    $Mksu "mkdir -p /tmp/XDG_RUNTIME.x11docker.$Hostuseruid"
-    export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME.x11docker.$Hostuseruid
-    $Mksu "chmod 700 $XDG_RUNTIME_DIR"
-  }
-
-  [ -n "$Customwestonini" ] && [ ! -e "$Customwestonini" ] && { 
-    warning "Custom weston.ini (option --westonini) not found."
-    Customwestonini=""
-  }
-  
-  [ "$X11dockermode" = "run" ] && {
-    command -v docker >/dev/null || error "docker is not installed.
-  To run docker images, you need to install docker."
-    [ -z "$Dockerdaemon" ] && error "Please make sure docker daemon is running.
-  Try 'systemctl start docker'"
-  }
 }
 
 { #### part: check X server and option interferences
@@ -1417,12 +1416,13 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
   and start x11docker there.
   
   Setup to start a second Xorg X server from within already running X:
-  Edit file '/etc/X11/Xwrapper.conf' and replace line:
+  Edit file '/etc/X11/Xwrapper.config' and replace line:
       allowed_users=console
   with lines
       allowed_users=anybody
       needs_root_rights=yes
-  On Ubuntu 16.04 and debian 9 you need package xserver-xorg-legacy."
+  On Ubuntu 16.04 and debian 9 you need package xserver-xorg-legacy.
+  If the file does not exist already, create it."
       fi
     }
   }
@@ -1558,13 +1558,16 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
   
   case $Xserver in
     Weston|Kwin|Hostwayland)
-      [ "$Dbuslaunch" = "no" ] || [ "$Setwaylandenv" = "no" ] && note "You are running a pure Wayland environment.
-  X applications without Wayland support will fail.
-  QT5 / KDE applications also need options --dbus --waylandenv"
-      [ -n "$Dpi" ] && note "Option --dpi has no effect on $Xserver"
+     note "You are running a pure Wayland environment.
+  X applications without Wayland support will fail."
+    [ "$Dbuslaunch" = "no" ] || [ "$Setwaylandenv" = "no" ] && note "QT5 / KDE applications need options --dbus --waylandenv to run in Wayland."
     ;;
   esac
-  
+
+  [ -n "$Dpi" ] && case $Xserver in
+    Weston|Kwin|Hostwayland|Hostdisplay) note "Option --dpi has no effect on $Xserver" ;;
+  esac
+
   [ "$Rotation" != "0" ] && {
     case $Xserver in
       Weston|Weston-Xwayland|Xorg)
@@ -1604,6 +1607,14 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
   Different window managers handle this different. Just try out." ;;
     esac
   }
+  
+  # Weston and Xwayland need XDG_RUNTIME_DIR
+  [ -z "$XDG_RUNTIME_DIR" ] && [ -e "/run/user/$Hostuseruid" ] && export XDG_RUNTIME_DIR="/run/user/$Hostuseruid" 
+  [ -z "$XDG_RUNTIME_DIR" ] && {
+    $Mksu "mkdir -p /tmp/XDG_RUNTIME.x11docker.$Hostuseruid"
+    export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME.x11docker.$Hostuseruid
+    $Mksu "chmod 700 $XDG_RUNTIME_DIR"
+  }
 }
 
 { #### part: check physical and virtual screen size
@@ -1616,9 +1627,9 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
     } || command -v xdpyinfo >/dev/null && {
       Xaxis=$(xdpyinfo | grep dimensions | cut -dx -f1 | rev | cut -d ' ' -f1 | rev)
       Yaxis=$(xdpyinfo | grep dimensions | cut -dx -f2 | cut -d ' ' -f1)
-    } || command -v xrandr   >/dev/null && {
-      Xaxis=$(xrandr | grep current | head -n1 | cut -d, -f2 | cut -d' ' -f3)
-      Yaxis=$(xrandr | grep current | head -n1 | cut -d, -f2 | cut -d' ' -f5)
+    } || command -v xrandr   >/dev/null 2>/dev/null && {
+      Xaxis=$(xrandr 2>/dev/null | grep current | head -n1 | cut -d, -f2 | cut -d' ' -f3)
+      Yaxis=$(xrandr 2>/dev/null | grep current | head -n1 | cut -d, -f2 | cut -d' ' -f5)
     } || {
       note "Could not determine your screen size. Will use arbitrary
   virtual resolution 4720x3840 as hopefully big enough. Please improve this by
@@ -1637,9 +1648,9 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
       [ "$Tty" = "yes" ] && {
         : # nothing to do on tty; maybe should check --size=$Screensize
       } || {
-        command -v xrandr > /dev/null && [ -n "$(xrandr | grep ' connected')" ] && { # reduce size to primary monitor for windowed desktop
-          Xaxis=$(xrandr | grep ' connected' | head -n1 | cut -dx -f1 | rev | cut -d' ' -f1 | rev)
-          Yaxis=$(xrandr | grep ' connected' | head -n1 | cut -dx -f2 | cut -d' ' -f1 | cut -d+ -f1)
+        command -v xrandr > /dev/null 2>/dev/null && [ -n "$(xrandr 2>/dev/null | grep ' connected')" ] && { # reduce size to primary monitor for windowed desktop
+          Xaxis=$(xrandr 2>/dev/null | grep ' connected' | head -n1 | cut -dx -f1 | rev | cut -d' ' -f1 | rev)
+          Yaxis=$(xrandr 2>/dev/null | grep ' connected' | head -n1 | cut -dx -f2 | cut -d' ' -f1 | cut -d+ -f1)
         } || note "Could not determine size of your primary display to
   create a roughly maximized window for $Xserver. Please install xrandr
   or use option --size=XxY."
@@ -1698,15 +1709,15 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
       Nothing)                Newdisplaynumber="900" ;; # dummy number to look for free cache folder
     esac
     #
-    while [ -e "/tmp/.X11-unix/X$Newdisplaynumber" ] || [ -h "/tmp/.X11-unix/X$Newdisplaynumber" ] || [ -e "/tmp/,X$Newdisplaynumber-lock" ]  || [ -d "$Cacherootfolder/X$Newdisplaynumber" ] || [ -e "$XDG_RUNTIME_DIR/wayland-$Newdisplaynumber" ] ; do   # search unused X socket, passing already used cache numbers
+    while [ -e "/tmp/.X11-unix/X$Newdisplaynumber" ] || [ -h "/tmp/.X11-unix/X$Newdisplaynumber" ] || [ -e "/tmp/,X$Newdisplaynumber-lock" ]  || [ -d "$Cacherootfolder/X$Newdisplaynumber-$(echo $Imagename | tr / - | cut -d: -f1)-$Xserver" ] || [ -e "$XDG_RUNTIME_DIR/wayland-$Newdisplaynumber" ] ; do   # search unused X socket, passing already used cache numbers
       Newdisplaynumber=$(($Newdisplaynumber + 1))
     done
   } || {
     [ -e "/tmp/.X11-unix/X$Newdisplaynumber" ] || [ -h "/tmp/.X11-unix/X$Newdisplaynumber" ]  || [ -d "$Cacherootfolder/X$Newdisplaynumber" ] && error "Display :$Newdisplaynumber is already in use"
   }
   
-  Cachefolder="$Cacherootfolder/X$Newdisplaynumber"         && $Mksu "mkdir $Cachefolder"
-  Sharefolder="$Cachefolder/$Sharefolder"                   && $Mksu "mkdir $Sharefolder"
+  Cachefolder="$Cacherootfolder/X$Newdisplaynumber-$(echo $Imagename | tr / - | cut -d: -f1)-$Xserver" && $Mksu "mkdir $Cachefolder"
+  Sharefolder="$Cachefolder/$Sharefolder"                                                 && $Mksu "mkdir $Sharefolder"
   #
   Xinitrc="$Cachefolder/$Xinitrc"                           && mkfile $Xinitrc
   Xinitlogfile="$Cachefolder/$Xinitlogfile"
@@ -2374,8 +2385,8 @@ done
 
 { #### part: check password prompt frontend (pkexec, su, sudo, ...) 
   # check if x11docker can run docker without prompting for password
-          docker images  >/dev/null 2>&1 && Passwordprompt="none"
-  sudo -n docker images  >/dev/null 2>&1 && Passwordprompt="sudo" && Terminal="bash -c"
+  [ -z "$Passwordprompt" ] &&         docker images  >/dev/null 2>&1 && Passwordprompt="none"
+  [ -z "$Passwordprompt" ] && sudo -n docker images  >/dev/null 2>&1 && Passwordprompt="sudo" && Terminal="bash -c"
 
   # check pkexec ### disabled, too many pitfalls. dialog fails in opensuse, on console and on additional X servers
   #[ -z "$Passwordprompt" ] && command -v pkexec >/dev/null && {
@@ -2401,6 +2412,7 @@ done
     [ -z "$Passwordprompt" ] && command -v gksu  >/dev/null && Passwordprompt="gksu"
     [ -z "$Passwordprompt" ] && command -v lxsu  >/dev/null && Passwordprompt="lxsu"
     [ -z "$Passwordprompt" ] && command -v kdesu >/dev/null && Passwordprompt="kdesu"
+    [ -z "$Passwordprompt" ] && command -v beesu >/dev/null && Passwordprompt="beesu"
   }
   [ -z "$Passwordprompt" ] && Passwordprompt="su" # default if everything else fails
 
@@ -2415,6 +2427,7 @@ done
     lxsudo)    Getroot="lxsudo"                                                 ; Sudo=""     ; Pkexec=""        ; Terminal="bash -c" ;;
     kdesu)     Getroot="kdesu -c"                                               ; Sudo=""     ; Pkexec=""        ; Terminal="bash -c" ;;
     kdesudo)   Getroot="kdesudo --comment 'x11docker $Imagename $Imagecommand'" ; Sudo=""     ; Pkexec=""        ; Terminal="bash -c" ;;
+    beesu)     Getroot="beesu -c"                                               ; Sudo=""     ; Pkexec=""        ; Terminal="bash -c" ;;
     none)      Getroot="bash -c"                                                ; Sudo=""     ; Pkexec=""        ; Terminal="bash -c" ;;
     *) error "Unknown password prompt '$Passwordprompt' (option --pw).
   Possible are: pkexec su sudo gksu gksudo lxsu lxsudo kdesu kdesudo none" ;;
@@ -2509,17 +2522,20 @@ done
       # if no home folder on host is specified (--homedir), create a standard one in ~/.local/share/x11docker
       [ -z "$Adduserhomefolder" ] && Adduserhomefolder=$Benutzerhome/.local/share/x11docker/$(echo $Imagename | tr / - | tr : - )
       [ -e "$Adduserhomefolder" ] || {
+        echo "su $Benutzer -c 'mkdir -p $Adduserhomefolder'"
+        [ "$(id -un)" = "root" ] && su $Benutzer -c "mkdir -p $Adduserhomefolder"
         if $($Mksu "mkdir -p $Adduserhomefolder"); then   ### FIXME: if running as root, root could create folder for user
           # create symbolic link to ~/x11docker
           echo $Adduserhomefolder | grep -q .local/share/x11docker && [ ! -e $Benutzerhome/x11docker ] && $Mksu "ln -s $Benutzerhome/.local/share/x11docker $Benutzerhome/x11docker"
         else
           # errors can occur if specifying a user with --user different from current user
           error "Could not create persistent home folder for 
-  user '$Benutzer' on host (option --home or --homedir). You may create folder 
+  user '$Benutzer' on host (option --home or --homedir). 
+  Three possibilities to solve issue: 
+  1.) Create folder with write access for user '$Benutzer'
   $Adduserhomefolder
-  with write access for '$Benutzer' so x11docker can provide it to container.
-  Otherwise, you can run x11docker one time as user '$Benutzer', afterwards
-  you can provide the folder as user '$Hostuser' with option '--user=$Benutzer'."
+  2.) Run x11docker one time as user '$Benutzer'.
+  3.) Run x11docker one time as user 'root'."
         fi
       }
       writeaccess $Benutzeruid $Adduserhomefolder || warning "User '$Benutzer' does not have write access to
@@ -2652,24 +2668,23 @@ done
   echo "Imagecommand='$Imagecommand'"
   echo "Imagename='$Imagename'"
   echo "Logfile='$Logfile'"
-  [ -n "$Sudo" ] && echo "Sudo='sudo -n'" || echo "Sudo=''"
   echo "# check if image is available locally"
-  echo "\$Sudo docker inspect --type=image $Imagename > /dev/null 2>&1 || {"
+  echo "$Sudo docker inspect --type=image $Imagename > /dev/null 2>&1 || {"
   echo "  warning 'Image $Imagename not found locally.'"
   echo "  $Anyterminal bash -c 'read -n1 -e -p \"Image '$Imagename' not found locally. "
-  echo "Do you want to pull it from docker hub? [Y|n]\" Choice && { [[ \"\$Choice\" == [YyJj]* ]] || [ -z \"\$Choice\" ] && \$Sudo docker pull $Imagename 2>&1 ; sleep 2 ; } '"
-  echo "  \$Sudo docker inspect --type=image $Imagename > /dev/null 2>&1 || error \"Image '$Imagename' not found locally and not pulled from docker hub. \" "
+  echo "Do you want to pull it from docker hub? [Y|n]\" Choice && { [[ \"\$Choice\" == [YyJj]* ]] || [ -z \"\$Choice\" ] && $Sudo docker pull $Imagename 2>&1 ; sleep 2 ; } '"
+  echo "  $Sudo docker inspect --type=image $Imagename > /dev/null 2>&1 || error \"Image '$Imagename' not found locally and not pulled from docker hub. \" "
   echo "}"  
   echo "[ -z \"\$Imagecommand\" ] && {"
   echo "  # extract image command from image if not given on cli"
-  echo "  Imagecommand=\$(\$Sudo docker inspect --format='{{.Config.Cmd}}' $Imagename)"
+  echo "  Imagecommand=\$($Sudo docker inspect --format='{{.Config.Cmd}}' $Imagename)"
   echo "  Imagecommand=\${Imagecommand#[}"
   echo "  Imagecommand=\${Imagecommand#/bin/sh -c }"
   echo "  Imagecommand=\${Imagecommand%]}"
   echo "}"
   [ "$Noentrypoint" = "no" ] && {
     echo "# extract entrypoint of image"
-    echo "Entrypoint=\$(\$Sudo docker inspect --format='{{.Config.Entrypoint}}' $Imagename)"
+    echo "Entrypoint=\$($Sudo docker inspect --format='{{.Config.Entrypoint}}' $Imagename)"
     echo "Entrypoint=\${Entrypoint#[}"
     echo "Entrypoint=\${Entrypoint#/bin/sh -c }"
     echo "Entrypoint=\${Entrypoint%]}"
@@ -2727,11 +2742,11 @@ done
   echo ""
   echo "cat $Imagecommandscript | nl >> $Dockerlogfile"
   echo ""
-#  echo "\$Sudo $Dockercommand >> $Dockerlogfile 2>&1 & echo \$! >> $Dockerpidfile" 
+#  echo "$Sudo $Dockercommand >> $Dockerlogfile 2>&1 & echo \$! >> $Dockerpidfile" 
   echo "$Sudo $Dockercommand >> $Cmdstdoutlogfile 2>>$Cmdstderrlogfile & echo \$! >> $Dockerpidfile" 
 #  echo "docker inspect --format '{{ .State.Pid }}' $Containername >> $Dockerpidfile"
   echo "sleep 3 # wait a moment until IP is available. Currently, IP is only needed for --pulseaudio"
-  echo "\$Sudo docker inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername > $Containerip"
+  echo "$Sudo docker inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername > $Containerip"
 } >> $Dockerrc
 
 { #### part: create xtermrc: prompt for password and run dockerrc
@@ -2988,7 +3003,9 @@ Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' '
     } > "$Cachefolder/$Name.desktop"
     $Mksu "cp '$Cachefolder/$Name.desktop' '$($Mksu 'xdg-user-dir DESKTOP')/$Name.desktop'"
     $Mksu "rm '$Cachefolder/$Name.desktop'"
-    $Mksu "echo Created desktop icon: $($Mksu 'xdg-user-dir DESKTOP')/$Name.desktop"
+    note "Created desktop icon: $($Mksu 'xdg-user-dir DESKTOP')/$Name.desktop
+  If you move this file to \$HOME/.config/applications,
+  you will find it in your application menu."
     exit 0
   fi
 }
