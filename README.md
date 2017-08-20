@@ -81,8 +81,8 @@ Most important:
 Rather special options reducing security, but not needed for regular use:
   - `--sudouser` allows sudo without password for container user. If an application breaks out of container, it can do anything. Includes option `--cap-default`.
   - `--cap-default` disables x11docker's container hardening and falls back to default docker container privileges.
-  - `--ipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory)
-  - `--net` sets docker run option `--net=host`. (Allows dbus connection to host)
+  - `--ipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory. Disables IPC namespacing.)
+  - `--net` sets docker run option `--net=host`. (Allows dbus connection to host, Shares host network stack.)
    
 ![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true)
 
