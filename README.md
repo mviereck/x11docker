@@ -19,14 +19,14 @@
 ![x11docker-gui screenshot](/../screenshots/screenshot-retroterm.png?raw=true "Cathode retro term in docker") ![LXDE in xpra](/../screenshots/screenshot-lxde-small.png?raw=true "LXDE desktop in docker")
 
 # GUI for x11docker
-`x11docker` is independent from `x11docker-gui`.
+`x11docker-gui` is an optional graphical frontend for `x11docker`.
  - `x11docker-gui` needs package `kaptain`. If your distribution misses it, look at repository [mviereck/kaptain](https://github.com/mviereck/kaptain). 
  - If `kaptain` is not installed on your system, `x11docker-gui` tries to use image [`x11docker/kaptain`](https://hub.docker.com/r/x11docker/kaptain/). 
 
 ![x11docker-gui screenshot](/../screenshots/x11docker-gui.png?raw=true "Optional Title")
 
 # Terminal usage
-Just type `x11docker IMAGENAME [IMAGECOMMAND]`. Get an [overview of options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`. 
+Just type `x11docker IMAGENAME [IMAGECOMMAND]`. Get an [overview of options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`. For desktop environments in image add option `--desktop`.
 General syntax:
 ```
 To run a docker image with new X server (auto-choosing X server):
@@ -68,13 +68,13 @@ Core concept is:
      - This restriction is disabled for options `--sudouser` and `--user=root`.
 
 Weaknesses / ToDo: 
- - If docker daemon runs with `--selinux-enabled`, it is disabled for x11docker containers as it inhibits access to X unix socket.
+ - If docker daemon runs with `--selinux-enabled`, SELinux restrictions are disabled for x11docker containers as they inhibit access to X unix sockets.
    Compare: [SELinux and docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
  - User namespace remapping has limited support and is disabled for options `--home` and `--homedir`.
 
 ### Options degrading container isolation
 Most important:
-  - `--hostdisplay` shares host X socket of display :0 instead of running a second X server. Danger of abuse is reduced providing so-called untrusted cookies. Along with option `--gpu`, option `--ipc` and trusted cookies are used and no protection against X security leaks is left. (If you don't care about container isolation, `x11docker --hostdisplay --gpu` is an insecure, but quite fast setup without any overhead.)
+  - `--hostdisplay` shares host X socket of display :0 instead of running a second X server. Danger of abuse is reduced providing so-called untrusted cookies. Using `--gpu`, option `--ipc` and trusted cookies are enabled and no protection against X security leaks is left. (If you don't care about container isolation, `x11docker --hostdisplay --gpu` is an insecure, but quite fast setup without any overhead.)
   - `--gpu` allows access to GPU hardware. This can be abused to get window content from host ([palinopsia bug](https://hsmr.cc/palinopsia/)) and makes [GPU rootkits](https://github.com/x0r1/jellyfish) possible.
   - `--pulseaudio` allows catching audio output and microphone input.
   
@@ -87,7 +87,7 @@ Rather special options reducing security, but not needed for regular use:
 ![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true)
 
 # Dependencies
-x11docker can run with standard system utilities without additional dependencies on host or in image. As a core, it only needs an `X` server and, of course, `docker` to run docker images on X.
+x11docker can run with standard system utilities without additional dependencies on host or in image. As a core, it only needs an `X` server and, of course, [`docker`](https://www.docker.com/) to run docker images on X.
 
 x11docker will check dependencies for chosen options on startup and shows terminal messages if some are missing. 
 
@@ -97,7 +97,7 @@ Basics:
  
 Advanced usage:
  - Hardware acceleration with option `--gpu`
-   - Beside `xpra`, also install `Xwayland`, `weston` and `xdotool`. 
+   - Beside `xpra`, also install `Xwayland`, `weston` and `xdotool`. (Not needed for `--xorg` and `--hostdisplay`)
    - Applications in image should already have installed their OpenGL dependencies. If not, install `libgl1-mesa-glx libglew2.0 libglu1-mesa libgl1-mesa-dri libdrm2 libgles2-mesa libegl1-mesa libxv1` in image (debian package names).
  - For sound with option `--pulseaudio`, install `pulseaudio` on host and in image. 
  - For clipboard sharing with `--clipboard` install `xclip`.
@@ -123,12 +123,12 @@ If no X server option is specified, x11docker automatically chooses one dependin
 
 ## Wayland
 Beside the X servers to choose from there are options `--weston`, `--kwin` and `--hostwayland` to run pure [Wayland](https://wayland.freedesktop.org/) applications without X. QT5 applications (most of KDE) also need options `--dbus` and `--waylandenv` to use Wayland instead of X. (Option `--waylandenv` sets some environment variables to summon toolkits GTK3, QT5, Clutter, SDL, Elementary and Evas to use Wayland.) 
-With option `--kwin-native --sharewayland --dbus --waylandenv` you can run Wayland and X applications side by side.
+With combination `--kwin-native --sharewayland --dbus --waylandenv` you can run Wayland and X applications side by side.
  - Example: KDE plasma shell (QT5) in a pure Wayland environment with hardware acceleration:
  
   `x11docker --kwin --waylandenv --dbus --gpu -- kdeneon/plasma:user-lts plasmashell`
   
-These options are useful to test whether an application supports a pure Wayland environment. You can also test applications from host with option `--exe`. 
+You can also run Wayland applications from host with option `--exe`. 
 
  - Examples: gnome-calculator (GTK3) and neverball (SDL) from host in Weston without X:
 
