@@ -7,14 +7,20 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.6.1.4"
+Version="3.6.1.5"
 
 changelog() {
 ### ToDo:
+# arch: --weston-xwayland: weston panel appears although weston.ini is loaded
+#                          fails as user
+# --auto: --scale --gpu without xpra leads to --xorg
 # SECURITY: fedora: selinux issue: can not share unix socket with :z, Permission denied. Currently disabling SELinux for container
 #           https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix
 #           http://danwalsh.livejournal.com/74421.html
+# x11docker.log: should work since startup, maybe use /tmp+mcookie
+
 # check all FIXME 
+# check multimonitor support for --xorg. --scale and --size will most probably be strange or fail.
 # --xorg: check custom systemd start of X #7
 # check X in container #7
 # some tests with Xephyrglamor=no
@@ -29,11 +35,16 @@ changelog() {
 # BUG nxagent with x11docker/lxde: segmentation fault of lxpanel with --userns-remap. bug in nxagent, lxpanel or x11docker?
 # BUG --kwin*: wrong fullscreen and crashes in gnome-wayland, strange in weston, WAYLAND_DISPLAY="" does not help, probably bug in kwin
 # BUG --output-count: sometimes multiple windows don't close although x11docker is finished. high cpu load, probably Weston and Kwin bug
-# BUG scale>1 Xwayland in Weston is too large (Xwayland bug), rendering issues on tty (witching scaled/unscaled Xwayland on keyboard/mouse events)
+# BUG scale>1 Xwayland in Weston is too large (Xwayland bug), rendering issues on tty (switching scaled/unscaled Xwayland on keyboard/mouse events)
 # BUG x11docker-gui in weston freezes weston in combo boxes. Weston bug ? QT3/4 bug?
 # BUG debian bug report lightdm/sddm contra gdm, dm can crash on tty switch if multiple graphical sessions are running
 
 # x11docker changelog
+# 21.08.2017 V3.6.1.5  bugfix: broken stdin pipe if running as root
+# 19.08.2017           mkdir -p in installer for tmp folder: -p was missing, could cause error
+#                      declare note() in xinitrc
+#                      --scale support for --xorg
+#                      --size without --scale for --xorg: first try --mode, than panning
 # 19.08.2017 V3.6.1.4  bugfix: wrong file descriptor for messages before part init()
 # 18.08.2017           strange bugfix: passwordless sudo -n on fedora did not work with x11docker-gui started from menu instead of cli, without -n is ok
 #                      beesu: new frontend for --pw available on fedora
@@ -270,9 +281,9 @@ Host window manager and container desktop environment:
 
 Screensize and related options:
  -f, --fullscreen      run Xephyr, nxagent or Weston in fullscreen mode.
-     --size XxY        set Xephyr, Weston or KWin screen size (f.e. 800x600).
- -l, --scale N         scale factor N for xpra or Weston. 
-                       Allowed for --xpra and --xpra-xwayland: 0.25 ... 8.0.
+     --size XxY        set screen size of new X server (f.e. 800x600).
+ -l, --scale N         scale factor N for xpra, Xorg or Weston. 
+                       Allowed for --xpra, --xorg --xpra-xwayland: 0.25...8.0.
                        Allowed for --weston and --weston-xwayland: 1...9.
                        (Mismatching font sizes can be adjusted with --dpi).
      --rotate N        Rotate display (--xorg, --weston and --weston-xwayland)
@@ -469,12 +480,13 @@ installer() {           # --install, --update, --remove: Installer for x11docker
   Get kaptain on github: https://github.com/mviereck/kaptain" ; }
     ;;
     --update)
-      mkdir /tmp/x11docker-install && cd /tmp/x11docker-install || error "Could not create or cd to /tmp/x11docker-install"
+      mkdir -p /tmp/x11docker-install && cd /tmp/x11docker-install || error "Could not create or cd to /tmp/x11docker-install"
 
       echo "Downloading latest x11docker version from github"
       wget https://github.com/mviereck/x11docker/archive/master.zip || error "Could not download x11docker-master from github"
 
       echo "Unpacking archive"
+      command -v unzip >/dev/null && error "Can not unpack archive. Please install 'unzip'."
       unzip master.zip || error "Could not unzip archive"
   
       echo ""
@@ -826,7 +838,7 @@ Nxagentoptions=""                               # options for nxagent
 Xephyroptions=""                                # options for Xephyr
 Xephyrglamor="yes"                              # former option '--glamor': enable Xephyr glamor 2D acceleration (deprecated, now always yes)
 Westonoptions=""                                # options for Weston
-Scaling="1"                                     # option --scale: Scaling factor for xpra and weston
+Scaling="0"                                     # option --scale: Scaling factor for xpra and weston
 Rotation="0"                                    # option --rotate: Rotation for --weston and --weston-xwayland 0/90/180/270/flipped/flipped-90/..
 Dpi=""                                          # option --dpi: dots per inch to tell the clients.
 Outputcount="1"                                 # option --output-count, quantum of virtual screens for Weston and Xephyr
@@ -897,6 +909,7 @@ Name=""
 Zeit=""
 Line=""
 Count=""
+Byte=""
 
 # these window managers are known to work well with x11docker (alphabetical order)(excluding $Wm_not_recommended and $Wm_ugly):
 Wm_good="amiwm blackbox cinnamon compiz ctwm enlightenment fluxbox flwm fvwm"
@@ -1339,8 +1352,8 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
     Xephyr) Xserver="Weston-Xwayland";;
     Xpra|Nxagent|Xpra-Xwayland) Xserver="Weston-Xwayland" && { [ "$Desktopmode" = "no" ] && Windowmanager="auto" && Desktopmode="yes" ; } ;;
   esac
-  [ "$Scaling" != "1" ] && [ "$Autochooseserver" = "yes" ] && case $Xserver in
-    Weston-Xwayland|Xephyr) Xserver="Xpra-Xwayland" && { [ "$Desktopmode" = "no" ] && Windowmanager="auto" && Desktopmode="yes" ; } ;;
+  [ "$Scaling" != "0" ] && [ "$Autochooseserver" = "yes" ] && case $Xserver in
+    Weston-Xwayland|Xephyr) command -v "xpra" >/dev/null 2>&1 && Xserver="Xpra-Xwayland" && { [ "$Desktopmode" = "no" ] && Windowmanager="auto" && Desktopmode="yes" ; } ;;
   esac
   
   case $Xserver in
@@ -1372,7 +1385,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
         note "Your xpra version '$Xpraversion' is out of date. 
   It is recommended to install latest stable from www.xpra.org, at least v1.0."
         [ "$Desktopmode" = "yes" ] && {
-          warning "Your xpra version does not support desktop mode.
+          note "Your xpra version does not support desktop mode.
   Fallback: Will try to use Xorg (option --xorg)."
           Xserver="Xorg"
         }
@@ -1474,10 +1487,10 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
   esac
   
   [ "$Shareclipboard" = "yes" ] && { 
-    [ "$Trusted" = "no" ] && warning "Sharing clipboard does not work with untrusted cookies."
+    [ "$Trusted" = "no" ] && note "Sharing clipboard does not work with untrusted cookies."
     case $Xserver in
-      Weston|Kwin) warning "Sharing clipboard with $Xserver is not supported" ;;
-      Hostwayland) warning "Sharing clipboard may or may not work.
+      Weston|Kwin) note "Sharing clipboard with $Xserver is not supported" ;;
+      Hostwayland) note "Sharing clipboard may or may not work.
   Cannot enable or disable it, it depends on your Wayland compositor." ;;
     esac
   }
@@ -1512,34 +1525,41 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
     esac
   }
   
-  [ "$Scaling" != "1" ] && {
+  [ "$Scaling" != "0" ] && {
     case $Xserver in
       Weston|Weston-Xwayland)
         [[ $Scaling =~ ^[1-9]$ ]] || {
-          warning "The scale factor for $Xserver must be one of 1 2 3 4 5 6 7 8 9
-  Fallback: setting option --scale=1"
-          Scaling="1"
+          note "The scale factor for $Xserver must be one of 1 2 3 4 5 6 7 8 9
+  Fallback: disabling option --scale"
+          Scaling="0"
+        }
+      ;;
+      Xorg)
+        isnum $Scaling || {
+          note "Option --scale needs a number. '$Scaling' is not allowed.
+  Fallback: disabling option --scale"
+          Scaling="0"
         }
       ;;
       Xpra|Xpra-Xwayland)
         isnum $Scaling || {
-          warning "Option --scale needs a number. '$Scaling' is not allowed.
-  Fallback: setting option --scale=1"
-          Scaling="1"
+          note "Option --scale needs a number. '$Scaling' is not allowed.
+  Fallback: disabling option --scale"
+          Scaling="0"
         }
         verlt "$Xpraversion" "xpra v0.16" && {
-          warning "Your xpra version is too old and does not support --scale.
+          note "Your xpra version is too old and does not support --scale.
   You need at least xpra version 0.16
-  Fallback: setting option --scale=1"
-          Scaling="1"
+  Fallback: disabling option --scale"
+          Scaling="0"
         }
-        [ "$Desktopmode" = "yes" ] && warning "Xpra in desktop mode with option --scale can be buggy.
+        [ "$Desktopmode" = "yes" ] && note "Xpra in desktop mode with option --scale can be buggy.
   Rendering issues can be reduced disabling OpenGL in xpra tray icon."
       ;;
-      *) warning "$Xserver does not support option --scale" ; Scaling="1" ;;
+      *) note "$Xserver does not support option --scale" ; Scaling="0" ;;
     esac
     case $Xserver in
-      Weston-Xwayland) warning "Weston does not work well with Xwayland in scaled mode.
+      Weston-Xwayland) note "Weston does not work well with Xwayland in scaled mode.
   In summary, Xwayland does not get the right screen resolution from Weston.
   Try out if it works for you. Otherwise, you can combine 
   --xpra-xwayland --desktop for better desktop scaling support." 
@@ -1547,11 +1567,15 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
       Xpra-Xwayland)
         [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] && {
           command -v weston >/dev/null || { 
-            warning "$Xserver needs weston for scale factor smaller than 1.
-  Fallback: setting --scale=1"
-            Scaling="1"
+            note "$Xserver needs weston for scale factor smaller than 1.
+  Fallback: disabling option --scale"
+            Scaling="0"
           }
         }
+      ;;
+      Xorg) 
+        [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] && [ "$Rotation" != "0" ] && note "--xorg does not work well with combination
+  of --scale smaller than 1 and rotation diferent from 0."
       ;;
     esac
   }
@@ -1662,10 +1686,12 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
   Xserver=${Xserver%-Desktop}
   
   # regard scaling (option --scale)
-  Xaxis=$(awk -v a=$Xaxis -v b=$Scaling 'BEGIN {print (a / b)}')
-  Xaxis=${Xaxis%.*}
-  Yaxis=$(awk -v a=$Yaxis -v b=$Scaling 'BEGIN {print (a / b)}')
-  Yaxis=${Yaxis%.*}
+  [ "$Scaling" = "0" ] || {
+    Xaxis=$(awk -v a=$Xaxis -v b=$Scaling 'BEGIN {print (a / b)}')
+    Xaxis=${Xaxis%.*}
+    Yaxis=$(awk -v a=$Yaxis -v b=$Scaling 'BEGIN {print (a / b)}')
+    Yaxis=${Yaxis%.*}
+  }
 
   [ -n "$Screensize" ] && {
     Xaxis=${Screensize%x*}
@@ -1765,8 +1791,11 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_desktop_light $Wm_recomm
   Dockerip=$(echo $Dockeriprange | cut -d/ -f1)
   
   # catch stdin
-  if_read() {     IFS="" read -t 0.1 -rN 1 BYTE && { echo -nE "$BYTE"; cat; } | "$@"; }
-  if_read && cat >> $Cmdstdinfile
+  IFS="" read -t 0.1 -rn 1 Byte
+  [ -n "$Byte" ] && {
+    echo -n $Byte
+    cat
+  } >> $Cmdstdinfile
 }
 
 { #### part: check window manager
@@ -2021,10 +2050,10 @@ fi
       }
     ;;
   esac
-  case $Xserver in
-    Xpra|Xpra-Xwayland|Nxagent)        Xserveroptions="$Xserveroptions -audit 4" ;;
-    *) [ "$Shareclipboard" = "no" ] && Xserveroptions="$Xserveroptions -audit 4" ;;
-  esac
+#  case $Xserver in
+#    Xpra|Xpra-Xwayland|Nxagent)        Xserveroptions="$Xserveroptions -audit 4" ;;
+#    *) [ "$Shareclipboard" = "no" ] && Xserveroptions="$Xserveroptions -audit 4" ;;
+#  esac
   
   [ -n "$Windowmanager" ] && {
     case $Xserver in
@@ -2046,7 +2075,7 @@ fi
   
   case $Xserver in
     Xpra|Xpra-Xwayland)
-      { [ -n "$Dpi" ] || [ "$Scaling" != "1" ] ; } && verlt "$Xpraversion" "xpra v2.1-r16547" && ! verlt "$Xpraversion" "xpra v2.1" && {
+      { [ -n "$Dpi" ] || [ "$Scaling" != "0" ] ; } && verlt "$Xpraversion" "xpra v2.1-r16547" && ! verlt "$Xpraversion" "xpra v2.1" && {
         note "Option --dpi is buggy in $Xpraversion
   due to xpra bug #1605. Need at least xpra v2.1-r16547 or one of 2.0 series.
   This limits option --scale, too, leading to wrong font sizes.
@@ -2066,7 +2095,7 @@ fi
         }
         case $Xserver in
           Xpra|Xpra-Xwayland)
-            [ "$Desktopmode" = "no" ] && {
+            [ "$Desktopmode" = "no" ] && [ "$Scaling" != "0" ] && {
               Dpi=$(awk -v a="$Scaling" -v b="$Dpi" 'BEGIN {print (b * a * a)}')
               Dpi=${Dpi%.*}
             }
@@ -2084,7 +2113,7 @@ fi
       # disable sound transfer, --pulseaudio works different
       Xpraoptions="$Xpraoptions -z0 --no-speaker --no-pulseaudio"
       # version check for scaling already done above
-      [ "$Scaling" != "1" ] && Xpraoptions="$Xpraoptions --desktop-scaling=$Scaling"
+      [ "$Scaling" != "0" ] && Xpraoptions="$Xpraoptions --desktop-scaling=$Scaling"
     ;;
   esac
   [ -n "$Dpi" ] && { :
@@ -2113,7 +2142,7 @@ locking=false
         [ -n "$Hostdisplay" ] && Westonoutput="X"
       }
       [ "$Tty" = "yes" ] && { # short start&stop of Weston to grep name of monitor
-        [ -n "$Screensize" ] || [ "$Scaling" != "1" ] || [ "$Rotation" != "0" ] && {
+        [ -n "$Screensize" ] || [ "$Scaling" != "0" ] || [ "$Rotation" != "0" ] && {
           $Mksu "weston --no-config > $Compositorlogfile 2>&1 & echo \$! >$Compositorpidfile"
           Compositorpid=$(cat $Compositorpidfile)
           waitforlogentry weston $Compositorlogfile connector
@@ -2161,7 +2190,9 @@ locking=false
       [ "$Desktopmode" = "no" ] && [ "$Xserver" = "Xpra-Xwayland" ] && Xserveroptions="$Xserveroptions -rootless" 
       Xcommand="$(command -v Xwayland) $Newdisplay $Xserveroptions"
       [ -z "$WAYLAND_DISPLAY" ] && Waylandsocket="wayland-$Newdisplaynumber" || { 
-        [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] && Waylandsocket="wayland-$Newdisplaynumber" || Waylandsocket=$WAYLAND_DISPLAY 
+#        [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] && Waylandsocket="wayland-$Newdisplaynumber" || Waylandsocket=$WAYLAND_DISPLAY 
+        Waylandsocket=$WAYLAND_DISPLAY
+        [ "$Scaling" != "0" ] && [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] && Waylandsocket="wayland-$Newdisplaynumber"
       }
       echo "[output]" >> $Westonini
       case $Westonoutput in
@@ -2176,8 +2207,8 @@ locking=false
       [ "$Xserver" = "Weston" ]          && Sharewayland="yes"
       Waylandsocket="wayland-$Newdisplaynumber"
       case "$Customwestonini" in
-        "") Compositorcommand="weston --socket=$Waylandsocket --config=$Westonini " ;;
-        *)  Compositorcommand="weston --socket=$Waylandsocket --config=$Customwestonini " ;;
+        "") Compositorcommand="weston --socket=$Waylandsocket --config='$Westonini' " ;;
+        *)  Compositorcommand="weston --socket=$Waylandsocket --config='$Customwestonini' " ;;
       esac
       [ "$Tty" = "yes" ] && Compositorcommand="$Compositorcommand --backend=drm-backend.so"
       [ "$Fullscreen" = "yes" ] && Compositorcommand="$Compositorcommand --fullscreen"
@@ -2187,9 +2218,9 @@ locking=false
         echo "[output]
 name=$Westonoutput$Count
 mode=$Screensize
-scale=$Scaling
 transform=$Rotation
-" >> $Westonini
+" >> "$Westonini"
+        [ "$Scaling" != "0" ] && echo "scale=$Scaling" >> "$Westonini"
       done
     ;;
     Kwin-Xwayland)
@@ -2777,6 +2808,7 @@ $Dockercommand
   declare -f warning 
   declare -f error
   declare -f verbose
+  declare -f note
 
   [ "$Noxhost" = "yes" ] && [ -n "$Hostdisplay" ] && {  
     echo "## option --no-xhost: disable any access to host display granted by xhost"
@@ -2888,7 +2920,40 @@ $Dockercommand
       echo "echo '$(setxkbmap -display $Hostdisplay -print)' | xkbcomp - $Newdisplay"
     ;;
     Xorg)
-      [ "$Rotation" = "0" ] || {
+      [ "$Screensize" = "0x0" ] && {
+        echo "# determine screen size"
+        echo "Xaxis=\$(xrandr 2>/dev/null | grep current | head -n1 | cut -d, -f2 | cut -d' ' -f3)"
+        echo "Yaxis=\$(xrandr 2>/dev/null | grep current | head -n1 | cut -d, -f2 | cut -d' ' -f5)"
+        [ "$Scaling" = "0" ] || echo "Xaxis=\$(awk -v a=\$Xaxis -v b=$Scaling 'BEGIN {print (a / b)}')"
+        echo "export Xaxis=\${Xaxis%.*}"
+        [ "$Scaling" = "0" ] || echo "Yaxis=\$(awk -v a=\$Yaxis -v b=$Scaling 'BEGIN {print (a / b)}')"
+        echo "export Yaxis=\${Yaxis%.*}"
+      } || {
+        echo "export Xaxis=$Xaxis"
+        echo "export Yaxis=$Yaxis"
+      }
+      echo "export Screensize=\${Xaxis}x\${Yaxis}"
+      [ "$Screensize" = "0x0" ] || {
+        echo "# Trying to set resolution \$Screensize $Screensize, fails if not part of provided resolutions"
+        echo "bash -c 'while read Line ; do xrandr --output \$Line --mode \$Screensize ; done < <(xrandr | grep \" connected\" | cut -d \" \" -f1)'"
+      }
+       
+      [ "$Scaling" = "0" ] && [ "$Screensize" != "0x0" ] && {
+        #echo "# Trying to set resolution $Screensize"
+        #echo "bash -c 'while read Line ; do xrandr --output \$Line --mode $Screensize ; done < <(xrandr | grep \" connected\" | cut -d \" \" -f1)'"
+        echo "note 'Panning ${Xaxis}x${Yaxis}. If virtual screen is greater than "
+        echo "maximal screen size, you can move virtual screen with mouse at screen edges'"
+        echo "bash -c 'while read Line ; do xrandr --output \$Line --panning ${Xaxis}x${Yaxis}+0+0/${Xaxis}x${Yaxis}+0+0/100/100/100/100 ; done < <(xrandr | grep \" connected\" | cut -d \" \" -f1)'"
+        echo "[ '$Xaxis' != \"\$(xrandr 2>/dev/null | grep current | head -n1 | cut -d, -f2 | cut -d' ' -f3)\" ] && {"
+        echo '  # if panning fails to set desired screen size (especially for size smaller than actual screen size), try scaling'
+        echo "  bash -c 'while read Line ; do xrandr --output \$Line --scale-from ${Xaxis}x${Yaxis} --panning ${Xaxis}x${Yaxis} ; done < <(xrandr | grep \" connected\" | cut -d \" \" -f1)'"
+        echo '}'
+      }
+      [ "$Scaling" != "0" ] && {
+        echo "# Scaling $Scaling"
+        echo "bash -c 'while read Line ; do xrandr --output \$Line --scale-from \${Xaxis}x\${Yaxis} --panning \${Xaxis}x\${Yaxis} ; done < <(xrandr | grep \" connected\" | cut -d \" \" -f1)'"
+      }
+      [ -n "$Rotation" ] && {
         echo "# Rotation $Rotation"
         case $Rotation in
           0|normal)    Rotation="" ;;
@@ -3094,7 +3159,7 @@ $(tail $Xtermlogfile)"
     Hostdisplay|Hostwayland|Kwin-Native)
       $Mksu                                              "bash  $Xinitrc                       > $Xinitlogfile  2>&1 " ;;
     Xpra-Xwayland|Xdummy-Xwayland)
-      [ -z "$WAYLAND_DISPLAY" ] || [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] && {
+      [ -z "$WAYLAND_DISPLAY" ] || { [ "$Scaling" != "0" ] && [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] ;} && {
         # Weston is needed for Xwayland if no Wayland is running already, and also if option scale has a value smaller than 1 to provide a virtual display larger than monitor
         $Mksu "$Compositorcommand                                                              > $Compositorlogfile 2>&1 & echo \$! >$Compositorpidfile"
         $Mksu "waitforlogentry weston $Compositorlogfile weston-desktop-shell                  > $Xinitlogfile  2>&1 "
