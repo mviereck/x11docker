@@ -68,7 +68,7 @@ Core concept is:
      - This restriction is disabled for options `--sudouser` and `--user=root`.
 
 Weaknesses / ToDo: 
- - If docker daemon runs with `--selinux-enabled`, SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t`. A more restrictive solution is desirable.
+ - If docker daemon runs with `--selinux-enabled`, SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. A more restrictive solution is desirable.
    Compare: [SELinux and docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
  - User namespace remapping has limited support and is disabled for options `--home` and `--homedir`.
 
