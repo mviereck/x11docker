@@ -7,15 +7,14 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.6.1.7"
+Version="3.6.1.8"
 
 changelog() {
 #### ToDo:
 # arch: --weston-xwayland: weston panel appears although weston.ini is loaded
 #                          fails as user
-# SECURITY: fedora: selinux issue: '--security-opt label=type:container_runtime_t': need more restrictive setting
-#           https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix
-
+# fedora: selinux issue: '--security-opt label=type:container_runtime_t': need more restrictive setting
+#         https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix
 # check all FIXME 
 # check multimonitor support for --xorg. --scale and --size will most probably be strange or fail.
 # --xorg: check custom systemd start of X #7
@@ -37,6 +36,11 @@ changelog() {
 # BUG debian bug report lightdm/sddm contra gdm, dm can crash on tty switch if multiple graphical sessions are running
 
 #### x11docker changelog ####
+# 25.08.2017 V3.6.1.8  bugfix --orphaned: did not find cache folder
+#                      provide stdin to host exe, too (--exe)
+#                      bugfix --hostuser: cache folder created with root ownership
+# 23.08.2017           --silent: supress error dialog box, too
+#                      more reliable exit code 1 on error
 # 22.08.2017 V3.6.1.7  removed color from verbose, looks strange in logfile
 #                      bugfix installer: check for installed unzip
 # 22.08.2017 V3.6.1.6  code cleanup
@@ -427,7 +431,7 @@ error() {               # show error messages on stderr and exit
 $(tput setaf 1)x11docker ERROR$(tput sgr0) $Message
 " >&3
   #[ -n "$Hostxenv" ] && export $Hostxenv
-  [ -n "$DISPLAY" ] && {
+  [ "$Silent" = "no" ] && [ -n "$DISPLAY" ] && {
     command -v xmessage >/dev/null && {
       echo "x11docker ERROR: $Message" | xmessage -file - -default okay
       :
@@ -440,8 +444,9 @@ $(tput setaf 1)x11docker ERROR$(tput sgr0) $Message
   }
   [ -e "$Logfile" ] && echo "x11docker ERROR: $Message
 " >> $Logfile
+  [ -d "$Sharefolder" ] && { mkfile $Sharefolder/timetosaygoodbye ; echo 1 >> $Sharefolder/timetosaygoodbye ; }
   Exitcode=1
-  finish || exit $Exitcode
+  exit $Exitcode # trap to finish()
 }
 warning() {             # show warning messages
   echo "$(tput setaf 3)x11docker WARNING:$(tput sgr0) $*" >&3
@@ -575,36 +580,41 @@ installer() {           # --install, --update, --remove: Installer for x11docker
   echo "Ready."
 }
 checkorphaned() {       # --orphaned : check for non-removed containers and left cache files
-  echo "x11docker will check for orphaned containers from earlier sessions.
+  note "x11docker will check for orphaned containers from earlier sessions.
   This can happen if docker was not closed successfully. 
   x11docker will look for those containers and will clean up x11docker cache.
   Caution: any currently running x11docker sessions will be terminated, too."
   Orphanedcontainers=""
   Orphanedfolders=""
-  cd $Cacherootfolder
-  [ $? ] && [ -n "$(echo $Cacherootfolder | grep .cache/x11docker)" ] && Orphanedfolders=$(echo $(find $Cacherootfolder -mindepth 1 -maxdepth 1 -type d)) ||:
+  cd $Cacherootfolder || error "Could not cd to cache folder $Cacherootfolder."
+  [ $? ] && [ -n "$(echo $Cacherootfolder | grep .cache/x11docker)" ] && Orphanedfolders=$(echo $(find $Cacherootfolder -mindepth 1 -maxdepth 1 -type d | sed s%$Cacherootfolder/%%))
   Orphanedcontainers="$(docker ps -a --filter name=x11docker_X --format "{{.Names}}")"
   Orphanedcontainers="$(env IFS='' echo $Orphanedcontainers)"
   if [ -z "$Orphanedcontainers" ] && [ -z "$Orphanedfolders" ] ; then 
-    echo "No orphaned containers or cache files found. good luck!"
+    note "No orphaned containers or cache files found. good luck!"
   else
-    echo "Found orphaned containers: $Orphanedcontainers"
-    echo -n "Found orphaned folders in $Cacherootfolder: " 
-    for Line in $Orphanedfolders ; do echo -n "$(basename $Line) " ; done ; echo ""
-    if [ -n "$Orphanedcontainers" ] && [ -n "$Orphanedfolders" ] ; then
-      echo "docker rm -f $Orphanedcontainers ; rm -R -f -v $Orphanedfolders"
-      bash -c "docker rm -f $Orphanedcontainers ; rm -R -f -v $Orphanedfolders"
-    fi
-    if [ -n "$Orphanedcontainers" ] && [ -z "$Orphanedfolders" ] ; then
-      echo "docker rm -f $Orphanedcontainers"
-      docker rm -f $Orphanedcontainers
-    fi
-    if [ -z "$Orphanedcontainers" ] && [ -n "$Orphanedfolders" ] ; then
-      echo "rm -R -f -v $Orphanedfolders"
-      rm -R -f -v $Orphanedfolders
-    fi
+    note "Found orphaned containers: 
+  $Orphanedcontainers"
+    note "Found orphaned folders in $Cacherootfolder:
+  $Orphanedfolders" 
+    for Line in $Orphanedfolders ; do
+      [ -d "$Cacherootfolder/$Line/share" ] && [ ! -e "$Cacherootfolder/$Line/share/timetosaygoodbye" ] && {
+        note "Found possible active container $Line.
+  Will summon it to terminate itself."
+        touch "$Cacherootfolder/$Line/share/timetosaygoodbye"  # terminating possibly running x11docker sessions
+        sleep 2
+      }
+    done
+    [ -n "$Orphanedcontainers" ] && {
+      note "docker rm -f $Orphanedcontainers"
+      note "$(bash -c "docker rm -f $Orphanedcontainers" 2>&1)"
+    }
+    [ -n "$Orphanedfolders" ] && {
+      note "rm -R -f -v $Orphanedfolders"
+      note "$(rm -R -f -v $Orphanedfolders 2>&1)"
+    }
   fi
-  echo "Ready."
+  note "Ready."
 }
 storepid () {           # store pids and names of background processes in file $Bgpidfile
   # store Pid and process name of background processes in file
@@ -680,9 +690,9 @@ x11docker --orphaned"
     rm $Logfile
   }
     
+  [ -s "$Sharefolder/timetosaygoodbye" ] && Exitcode=1
   [ "$Preservecontainer" = "yes" ] && Preservecachefiles="yes"
   [ "$Preservecachefiles" = "no" ] && [ -n "$(echo $Cachefolder | grep .cache)" ] && [ -n "$(echo $Cachefolder | grep x11docker)" ] && [ "x11docker" != "$(basename $Cachefolder)" ] && rm -f -R $Cachefolder ||:
-  
   exit $Exitcode
 }
 verlte() {              # version number checker $1 less than or equal $2
@@ -759,6 +769,7 @@ mkfile() {              # create file $1 owned by $Hostuser
 }
 
 { #### part: variables: default settings
+trap finish EXIT
 
 export IFS=$' \n\t'                                 # set IFS to default
 exec 3>&2                                           # second stderr channel
@@ -1144,8 +1155,57 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
   done
 }
 
+{ #### part: check host user
+  # check host user, want an unprivileged one to run X server
+  # default behaviour:
+  #  x11docker started as unprivileged user:          starting X server as this user and create same user in container
+  #  x11docker started as root:                       determine real user with $(logname), instead of root use real user as above
+  #  x11docker started as root with --hostuser=root:  root runs X server and root is container user (discouraged)
+  #                                                   if you want root in container, just use --user=root
+  #  x11docker with --user=someuser                   container user is someuser, host user is unprivileged user $(logname)
+  # 
+  # root permissions are only needed to run docker. If started unprivileged, you will be prompted for your password.
+  
+  [ -z "$Hostuser" ] && [ "$(id -un)" != "root" ] && Hostuser="$(id -un)"
+
+  Lognameuser="$(logname 2>/dev/null)"
+  [ -z "$Lognameuser" ] && [ -z "$Hostuser" ] && warning "Your terminal seems to be not POSIX compliant.
+  Command 'logname' does not return a value.
+  Consider to use another terminal emulator.
+  Fallback: Will try to check \$SUDO_USER and \$PKEXEC_UID."
+  [ -z "$Lognameuser" ] && [ -n "$SUDO_USER" ]  && Lognameuser="$SUDO_USER"  && [ -z "$Hostuser" ] && note "Will use \$SUDO_USER = $SUDO_USER as host user."
+  [ -z "$Lognameuser" ] && [ -n "$PKEXEC_UID" ] && Lognameuser="$PKEXEC_UID" && [ -z "$Hostuser" ] && note "Will use user with uid \$PKEXEC_UID = $PKEXEC_UID as host user."
+  [ -z "$Lognameuser" ] &&                         Lognameuser="$(id -un)"   && [ -z "$Hostuser" ] && note "Will use \$(id -un) = $Lognameuser as host user."
+  
+  [ -z "$Hostuser" ] && Hostuser=$Lognameuser
+  [ "$Hostuser" != "$Lognameuser" ] && {
+    [ "$(id -un)" = "root" ] || error "x11docker must run as root to choose a host user
+  different from user '$Lognameuser'. (option --hostuser)"
+  }
+  getent passwd $Hostuser >/dev/null 2>&1 || error "Could not find user '$Hostuser' in /etc/passwd."
+  
+  Hostuser=$(id -un $Hostuser)
+  Hostuseruid=$(id -u $Hostuser)
+  Hostusergid=$(id -g $Hostuser)
+  Hostuserhome=$(getent passwd $Hostuser | cut -d: -f6)
+
+  # Mksu: prefix to run command as unprivileged host user
+  [ "$Hostuser" = "$(id -un)" ] && Mksu="bash -c" || Mksu="su $Hostuser -c"  # differenciated as only root can use su on itself and others without password
+  
+  [ "$(id -un)" = "root" ] && [ "$Hostuser" = "root" ] && { 
+      warning "Running as user root. 
+  Maybe \$(logname) did not provide an unprivileged user. 
+  Please use option --hostuser=USER to specify an unprivileged user.
+  Otherwise, new X server runs as root, and container user will be root."
+  }
+  
+  [ -z "$Hostuserhome" ] && error "No home directory found for user '$Hostuser'.
+  You need to specify option --cachedir.
+  (Also specify --homedir if you want to use option --home)."
+  [ -z "$Cacherootfolder" ] && Cacherootfolder="$Hostuserhome/.cache/x11docker"
+}
+
 { #### part: some init
-  trap finish EXIT
     
   verbose "$(date) $(command -v lsb_release >/dev/null && lsb_release -ds) $(Xorg -version 2>&1 | grep X.Org)
 Command: $0 $X11dockerargs
@@ -1206,56 +1266,6 @@ Parsed options: $Parsedoptions"
     [ -z "$Dockerdaemon" ] && error "Please make sure docker daemon is running.
   Try 'systemctl start docker'"
   }
-}
-
-{ #### part: check host user
-  # check host user, want an unprivileged one to run X server
-  # default behaviour:
-  #  x11docker started as unprivileged user:          starting X server as this user and create same user in container
-  #  x11docker started as root:                       determine real user with $(logname), instead of root use real user as above
-  #  x11docker started as root with --hostuser=root:  root runs X server and root is container user (discouraged)
-  #                                                   if you want root in container, just use --user=root
-  #  x11docker with --user=someuser                   container user is someuser, host user is unprivileged user $(logname)
-  # 
-  # root permissions are only needed to run docker. If started unprivileged, you will be prompted for your password.
-  
-  [ -z "$Hostuser" ] && [ "$(id -un)" != "root" ] && Hostuser="$(id -un)"
-
-  Lognameuser="$(logname 2>/dev/null)"
-  [ -z "$Lognameuser" ] && [ -z "$Hostuser" ] && warning "Your terminal seems to be not POSIX compliant.
-  Command 'logname' does not return a value.
-  Consider to use another terminal emulator.
-  Fallback: Will try to check \$SUDO_USER and \$PKEXEC_UID."
-  [ -z "$Lognameuser" ] && [ -n "$SUDO_USER" ]  && Lognameuser="$SUDO_USER"  && [ -z "$Hostuser" ] && note "Will use \$SUDO_USER = $SUDO_USER as host user."
-  [ -z "$Lognameuser" ] && [ -n "$PKEXEC_UID" ] && Lognameuser="$PKEXEC_UID" && [ -z "$Hostuser" ] && note "Will use user with uid \$PKEXEC_UID = $PKEXEC_UID as host user."
-  [ -z "$Lognameuser" ] &&                         Lognameuser="$(id -un)"   && [ -z "$Hostuser" ] && note "Will use \$(id -un) = $Lognameuser as host user."
-  
-  [ -z "$Hostuser" ] && Hostuser=$Lognameuser
-  [ "$Hostuser" != "$Lognameuser" ] && {
-    [ "$(id -un)" = "root" ] || error "x11docker must run as root to choose a host user
-  different from user '$Lognameuser'. (option --hostuser)"
-  }
-  getent passwd $Hostuser >/dev/null 2>&1 || error "Could not find user '$Hostuser' in /etc/passwd."
-  
-  Hostuser=$(id -un $Hostuser)
-  Hostuseruid=$(id -u $Hostuser)
-  Hostusergid=$(id -g $Hostuser)
-  Hostuserhome=$(getent passwd $Hostuser | cut -d: -f6)
-
-  # Mksu: prefix to run command as unprivileged host user
-  [ "$Hostuser" != "$(id -un)" ] && [ -z  "$Benutzer" ] && Mksu="su $Hostuser -c"
-  [ -z "$Mksu" ] && Mksu="bash -c" 
-  
-  [ "$(id -un)" = "root" ] && [ "$Hostuser" = "root" ] && { 
-      warning "Running as user root. 
-  Maybe \$(logname) did not provide an unprivileged user. 
-  Please use option --hostuser=USER to specify an unprivileged user.
-  Otherwise, new X server runs as root, and container user will be root."
-  }
-  
-  [ -z "$Hostuserhome" ] && error "No home directory found for user '$Hostuser'.
-  You need to specify option --cachedir (and --homedir for option --home)."
-  [ -z "$Cacherootfolder" ] && Cacherootfolder="$Hostuserhome/.cache/x11docker"
 }
 
 { #### part: check X server dependencies and option interferences
@@ -1756,8 +1766,8 @@ Parsed options: $Parsedoptions"
 }
 
 { #### part: check free display, create cache folder and cache files 
-  $Mksu "mkdir -p $Cacherootfolder || error 'Could not create cache folder
-  $Cacherootfolder'"
+  $Mksu "mkdir -p $Cacherootfolder" || error "Could not create cache folder
+  $Cacherootfolder"
   writeaccess $Hostuseruid $Cacherootfolder || error "User $Hostuser does not have write access to
   cache folder $Cacherootfolder"  # can happen with --cachedir
 
@@ -1835,11 +1845,11 @@ Parsed options: $Parsedoptions"
   Dockeriprange=$(ip -4 -o a | grep docker0 | awk '{print $4}')
   Dockerip=$(echo $Dockeriprange | cut -d/ -f1)
   
-  # catch stdin ### FIXME: If only one byte is submitted, cat will wait until end of world
+  # catch stdin
   IFS="" read -t 0.1 -rn 1 Byte
   [ -n "$Byte" ] && {
     echo -n $Byte
-    cat
+    cat                          ### FIXME: If only one byte is submitted, cat will wait until end of world
   } >> $Cmdstdinfile
 }
 
@@ -2594,6 +2604,7 @@ done
       [ -z "$Adduserhomefolder" ] && Adduserhomefolder=$Benutzerhome/.local/share/x11docker/$(echo $Imagename | tr / - | tr : - )
       [ -e "$Adduserhomefolder" ] || {
         [ "$(id -un)" = "root" ] && su $Benutzer -c "mkdir -p $Adduserhomefolder"
+        error $Adduserhomefolder
         if $($Mksu "mkdir -p $Adduserhomefolder"); then
           # create symbolic link to ~/x11docker
           echo $Adduserhomefolder | grep -q .local/share/x11docker && [ ! -e $Benutzerhome/x11docker ] && $Mksu "ln -s $Benutzerhome/.local/share/x11docker $Benutzerhome/x11docker"
@@ -2810,7 +2821,7 @@ done
   echo "  echo '# Ready for docker run'"
   echo "} >> $Imagecommandscript"
   echo ""
-  echo "cat $Imagecommandscript | nl >> $Dockerlogfile"
+  echo "cat $Imagecommandscript | nl -ba >> $Dockerlogfile"
   echo ""
 #  echo "$Sudo $Dockercommand >> $Dockerlogfile 2>&1 & echo \$! >> $Dockerpidfile" 
   echo "$Sudo $Dockercommand >> $Cmdstdoutlogfile 2>>$Cmdstderrlogfile & echo \$! >> $Dockerpidfile" 
@@ -3059,16 +3070,16 @@ $Dockercommand
   $Dockercommand"
         verbose "IP of docker interface: $Dockeriprange"
         [ -s "$Dockerrc" ] && verbose "Created dockerrc:
-$(cat $Dockerrc | nl)" 
+$(cat $Dockerrc | nl -ba)" 
         [ -s "$Xtermrc" ] && verbose "Created xtermrc:
-$(cat $Xtermrc | nl)"
+$(cat $Xtermrc | nl -ba)"
       ;;
       exe) verbose "Running host application: $Hostexe" ;;
     esac
     verbose "Created xinitrc:
-$(cat $Xinitrc | nl)"
+$(cat $Xinitrc | nl -ba)"
     [ -s $Westonini ] && verbose "Created weston.ini:
-$(cat $Westonini | nl)"
+$(cat $Westonini | nl -ba)"
     verbose "Logfiles are:
   $Xinitlogfile
   $Xpraserverlogfile
@@ -3079,15 +3090,15 @@ In container: $Cshare/x11docker.log
 After finish: $Logfile3"
     verbose "Running X server $Xserver on display $Newdisplay now ..."
 
-  # create summary logfile
-  tail --pid=$$ --retry -n +1 -F $Cmdstdoutlogfile $Cmdstderrlogfile 2>/dev/null >> $Dockerlogfile &
-  tail --pid=$$ --retry -n +1 -F $Xtermlogfile $Dockerlogfile $Xpraserverlogfile $Xinitlogfile $Compositorlogfile 2>/dev/null >> $Logfile &
-  tail --pid=$$ --retry -n +1 -F $Logfile >> $Logfile2 2>/dev/null &
-  # option --verbose: Show logfile on stdout
-  [ "$Verbose" = "yes" ] && tail --pid=$$ --retry -n +1 -F $Logfile >&3 2>/dev/null &
-  # options --stdout, --stderr
-  [ "$Showstdout" = "yes" ] && tail --pid=$$ --retry -n +1 -F $Cmdstdoutlogfile     2>/dev/null &
-  [ "$Showstderr" = "yes" ] && tail --pid=$$ --retry -n +1 -F $Cmdstderrlogfile >&4 2>/dev/null &
+    # create summary logfile
+    tail --pid=$$ --retry -n +1 -F $Cmdstdoutlogfile $Cmdstderrlogfile 2>/dev/null >> $Dockerlogfile &
+    tail --pid=$$ --retry -n +1 -F $Xtermlogfile $Dockerlogfile $Xpraserverlogfile $Xinitlogfile $Compositorlogfile 2>/dev/null >> $Logfile &
+    tail --pid=$$ --retry -n +1 -F $Logfile >> $Logfile2 2>/dev/null &
+    # option --verbose: Show logfile on stdout
+    [ "$Verbose" = "yes" ]    && tail --pid=$$ --retry -n +1 -F $Logfile          >&3 2>/dev/null &
+    # options --stdout, --stderr
+    [ "$Showstdout" = "yes" ] && tail --pid=$$ --retry -n +1 -F $Cmdstdoutlogfile     2>/dev/null &
+    [ "$Showstderr" = "yes" ] && tail --pid=$$ --retry -n +1 -F $Cmdstderrlogfile >&4 2>/dev/null &
 }
 
 { #### part: option '--starter': create desktop starter
@@ -3179,7 +3190,7 @@ $(tail $Xtermlogfile)"
     ;;
     exe) # run host application. includes --xonly
       export $Newxenv
-      echo "$Hostexe" >> $Sharefolder/x11docker_CMD
+      echo "cat $Cmdstdinfile | $Hostexe" >> $Sharefolder/x11docker_CMD
       $Mksu "bash $Sharefolder/x11docker_CMD >$Xinitlogfile 2>&1" & Hostexepid=$! && storepid $! hostexe
       while [ ! -e $Sharefolder/timetosaygoodbye ] && ps -p $Hostexepid >/dev/null; do sleep 1 ; done
     ;;
@@ -3236,5 +3247,5 @@ $(tail $Xtermlogfile)"
   case $Xserver in
     Xpra|Xpra-Xwayland) [ -e "$Hostuserhome/.:$Newdisplaynumber-fakexinerama" ] && rm $Hostuserhome/.:$Newdisplaynumber-fakexinerama ;;
   esac
-  finish
+  #finish
 }
