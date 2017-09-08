@@ -157,6 +157,14 @@ xpra start $DISPLAY --use-display --html=on --bind-tcp=localhost:14500
 ```
 Now you can access your application at [http://localhost:14500](http://localhost:14500). Further infos at [xpra wiki: HTML5 clients](https://xpra.org/trac/wiki/Clients/HTML5).
 
+### GTK3 broadway web applications
+[Broadway](https://developer.gnome.org/gtk3/stable/gtk-broadway.html) is a GTK3 specific feature to allow HTML5 web applications. A sample setup without x11docker is [moondev/gtk3-docker](https://github.com/moondev/gtk3-docker). A possible setup with x11docker:
+```
+x11docker --nothing --env BROADWAY_DISPLAY=:5 --env GDK_BACKEND=broadway \
+          -- --publish=8085:8085 chadmoon/gtk3-docker "broadwayd :5 & sleep 2 && xfce4-terminal"
+```
+Now you can access the dockered web application at http://localhost:8085
+
 ## VNC
 Sample setup for VNC access:
 ```
