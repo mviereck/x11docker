@@ -148,7 +148,13 @@ needs_root_rights=yes
 ```
 On debian 9 and Ubuntu 16.04 you need to install package `xserver-xorg-legacy`. 
 
-## Web applications
+# Developer options
+Collection of rarer needed but sometimes useful options.
+
+![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/x11docker-developer.png "developer options")
+
+# Network setup
+## HTML5 web applications
 To provide dockered applications as HTML5 web applications, you need `xpra` and `websockify`. Example:
 ```
 read Xenv < <(x11docker --xdummy  x11docker/lxde pcmanfm)
@@ -157,7 +163,7 @@ xpra start $DISPLAY --use-display --html=on --bind-tcp=localhost:14500
 ```
 Now you can access your application at [http://localhost:14500](http://localhost:14500). Further infos at [xpra wiki: HTML5 clients](https://xpra.org/trac/wiki/Clients/HTML5).
 
-### GTK3 broadway web applications
+### HTML5 web applications with GTK3 broadway
 [Broadway](https://developer.gnome.org/gtk3/stable/gtk-broadway.html) is a GTK3 specific feature to allow HTML5 web applications. The image needs `libgtk-3-bin` (debian) or `gtk3` (Arch Linux) to be installed. A possible setup with x11docker:
 ```
 x11docker --nothing --env BROADWAY_DISPLAY=:5 --env GDK_BACKEND=broadway \
@@ -176,10 +182,6 @@ In another terminal, start VNC viewer with `vncviewer localhost:0`.
 See `man x11vnc`  for many details and further infos.
 Option `-noshm` disables shared memory (MIT-SHM). To allow shared memory, remove `-noshm` and use isolation breaking x11docker option `--ipc`.
 
-# Developer options
-Collection of rarer needed but sometimes useful options.
-
-![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/x11docker-developer.png "developer options")
 
 # Installation
 You don't need to install x11docker, you can just run it as user with `bash x11docker` respective `bash x11docker-gui`. As root, you can install, update and remove x11docker on your system:
