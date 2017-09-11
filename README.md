@@ -102,13 +102,14 @@ Advanced usage:
  - For sound with option `--pulseaudio`, install `pulseaudio` on host and in image. 
  - For clipboard sharing with `--clipboard` install `xclip`.
  - Rarer needed dependencies for special options:
-   - `--dbus` is needed only for QT5 application in Wayland. It needs `dbus-launch` (package `dbus-x11`) in image.
    - `--nxagent` provides a fast and lightweight alternative to `xpra` and `Xephyr`. Needs [`nxagent`](https://packages.debian.org/experimental/nxagent) to be installed.
    - `--kwin`, `--kwin-native` and `--kwin-xwayland` need `kwin_wayland`, included in modern `kwin` packages.
    - Web application setup with xpra (see below) needs `websockify`. 
    - `--xdummy` needs `xserver-xorg-video-dummy` (debian) or `xorg-x11-drv-dummy` (fedora).
    - `--xvfb` needs `Xvfb`
- - List of all host packages for all possible x11docker options (debian package names): `xpra xserver-xephyr xvfb weston xwayland nxagent kwin xclip xdotool xserver-xorg-video-dummy websockify`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
+   - `--xfishtank` needs `xfishtank` to show a fish tank.
+   - `--dbus` is needed only for QT5 application in Wayland. It needs `dbus-launch` (package `dbus-x11`) in image.
+ - List of all host packages for all possible x11docker options (debian package names): `xpra xserver-xephyr xvfb weston xwayland nxagent kwin xclip xdotool xserver-xorg-video-dummy xfishtank websockify`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
 
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
 
