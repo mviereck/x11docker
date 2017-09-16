@@ -3,7 +3,7 @@
 
  - Avoids X security leaks by running additional X servers.
  - Improves container security:
-   - Restricts container privileges to bare minimum.
+   - Restricts container capabilities to bare minimum.
    - Container user is same as host user to avoid root in container.
  - No dependencies inside of docker images.
  - No obliging dependencies on host beside X and docker. Recommended: `xpra` and `Xephyr`.
