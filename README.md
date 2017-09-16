@@ -2,8 +2,9 @@
 ## Avoiding X security leaks and hardening container security
 
  - Avoids X security leaks by running additional X servers.
- - Restricts container privileges to bare minimum.
- - Container user is same as host user to avoid root in container.
+ - Improves container security:
+   - Restricts container privileges to bare minimum.
+   - Container user is same as host user to avoid root in container.
  - No dependencies inside of docker images.
  - No obliging dependencies on host beside X and docker. Recommended: `xpra` and `Xephyr`.
  - Wayland support.
@@ -89,7 +90,7 @@ Rather special options reducing security, but not needed for regular use:
 # Dependencies
 x11docker can run with standard system utilities without additional dependencies on host or in image. As a core, it only needs an `X` server and, of course, [`docker`](https://www.docker.com/) to run docker images on X.
 
-x11docker will check dependencies for chosen options on startup and shows terminal messages if some are missing. 
+x11docker checks dependencies for chosen options on startup and shows terminal messages if some are missing. 
 
 Basics:
  - If no additional X server is installed, only less isolated option `--hostdisplay` will work out of the box within X, and option `--xorg` from console. (To use `--xorg` within X, look at [setup for option --xorg](#setup-for-option---xorg)).
@@ -104,12 +105,11 @@ Advanced usage:
  - Rarer needed dependencies for special options:
    - `--nxagent` provides a fast and lightweight alternative to `xpra` and `Xephyr`. Needs [`nxagent`](https://packages.debian.org/experimental/nxagent) to be installed.
    - `--kwin`, `--kwin-native` and `--kwin-xwayland` need `kwin_wayland`, included in modern `kwin` packages.
-   - Web application setup with xpra (see below) needs `websockify`. 
-   - `--xdummy` needs `xserver-xorg-video-dummy` (debian) or `xorg-x11-drv-dummy` (fedora).
+   - `--xdummy` needs dummy video driver `xserver-xorg-video-dummy` (debian) or `xorg-x11-drv-dummy` (fedora).
    - `--xvfb` needs `Xvfb`
    - `--xfishtank` needs `xfishtank` to show a fish tank.
    - `--dbus` is needed only for QT5 application in Wayland. It needs `dbus-launch` (package `dbus-x11`) in image.
- - List of all host packages for all possible x11docker options (debian package names): `xpra xserver-xephyr xvfb weston xwayland nxagent kwin xclip xdotool xserver-xorg-video-dummy xfishtank websockify`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
+ - List of all host packages for all possible x11docker options (debian package names): `xpra xserver-xephyr xvfb weston xwayland nxagent kwin xclip xdotool xserver-xorg-video-dummy xfishtank`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
 
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
 
@@ -138,7 +138,7 @@ You can also run Wayland applications from host with option `--exe`.
   `x11docker --weston --exe neverball`
   
 ## Setup for option --xorg
-Option `--xorg` runs ootb from console. To run a second core Xorg server from within an already running X session, you have to edit file `/etc/X11/Xwrapper.config` and replace line:
+Option `--xorg` runs ootb from console. To run a second core Xorg server from within an already running X session, you have to edit or create file `/etc/X11/Xwrapper.config` and replace line:
 ```
 allowed_users=console
 ```
@@ -148,6 +148,7 @@ allowed_users=anybody
 needs_root_rights=yes
 ```
 On debian 9 and Ubuntu 16.04 you need to install package `xserver-xorg-legacy`. 
+(Depending on your hardware and system setup, you may not need line `needs_root_rights=yes`).
 
 # Developer options
 Collection of rarer needed but sometimes useful options.
@@ -185,7 +186,7 @@ Option `-noshm` disables shared memory (MIT-SHM). To allow shared memory, remove
 
 
 # Installation
-You don't need to install x11docker, you can just run it as user with `bash x11docker` respective `bash x11docker-gui`. As root, you can install, update and remove x11docker on your system:
+As root, you can install, update and remove x11docker on your system:
  - `x11docker --install` : install x11docker and x11docker-gui. 
  - `x11docker --update` : download and install latest version from github.
  - `x11docker --remove` : remove all files installed by x11docker.
