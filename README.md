@@ -138,7 +138,8 @@ You can also run Wayland applications from host with option `--exe`.
   `x11docker --weston --exe neverball`
   
 ## Setup for option --xorg
-Option `--xorg` runs ootb from console. To run a second core Xorg server from within an already running X session, you have to edit or create file `/etc/X11/Xwrapper.config` and replace line:
+ - Option `--xorg` runs from console without additional setup. 
+ - To run a second core Xorg server from within an already running X session, you have to edit or create file `/etc/X11/Xwrapper.config` and replace line:
 ```
 allowed_users=console
 ```
