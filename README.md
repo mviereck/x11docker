@@ -206,9 +206,10 @@ Shortest way:
 # Examples
 Some example images can be found on docker hub: https://hub.docker.com/u/x11docker/
 
- - Single GUI application: fractal generator XaoS
-   
-  `x11docker patricknw/xaos  xaos`
+ - Single GUI application: 
+   - Fractal generator XaoS: `x11docker patricknw/xaos`
+   - glxgears with hardware acceleration: `x11docker --gpu x11docker/xfce glxgears`
+   - Firefox with your host firefox profile and shared Download folder: `x11docker --env HOME=$HOME --sharedir $HOME/.mozilla --sharedir $HOME/.cache/mozilla --sharedir $HOME/Downloads -- jess/firefox`
 
  - Desktop: Xfce
    
