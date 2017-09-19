@@ -206,22 +206,15 @@ Shortest way:
 # Examples
 Some example images can be found on docker hub: https://hub.docker.com/u/x11docker/
 
- - Single GUI application: 
+ - Single GUI application in container: 
    - Fractal generator XaoS: `x11docker patricknw/xaos`
    - glxgears with hardware acceleration: `x11docker --gpu x11docker/xfce glxgears`
-   - Firefox with your host firefox profile and shared Download folder: `x11docker --env HOME=$HOME --sharedir $HOME/.mozilla --sharedir $HOME/.cache/mozilla --sharedir $HOME/Downloads -- jess/firefox`
+   - Firefox with your host Firefox profile and shared download folder: `x11docker --env HOME=$HOME --sharedir $HOME/.mozilla --sharedir $HOME/.cache/mozilla --sharedir $HOME/Downloads -- jess/firefox`
 
- - Desktop: Xfce
-   
-  `x11docker --desktop  x11docker/xfce`
-   
- - Run wine and playonlinux on xfce desktop in a Xephyr window, sharing a home folder to preserve settings and wine installations:
-
-  `x11docker --xephyr --home  x11docker/xfce-wine-playonlinux`
-   
- - Run playonlinux in an xpra-xwayland window, sharing a home folder to preserve settings and installations, sharing clipboard, enabling pulseaudio sound and GPU acceleration:
-
-  `x11docker --xpra-xwayland --home --clipboard --pulseaudio --gpu x11docker/xfce-wine-playonlinux playonlinux`
+ - Desktop in container: 
+   - Xfce: `x11docker --desktop x11docker/xfce`
+   - LXDE: `x11docker --desktop x11docker/lxde`
+   - LXDE with wine and a persistent home folder to preserve settings and installed Windows applications: `x11docker --desktop --home x11docker/lxde-wine`
   
 ## Screenshots
 Sample screenshots can be found in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
