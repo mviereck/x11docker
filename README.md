@@ -120,7 +120,7 @@ Advanced usage:
 If no X server option is specified, x11docker automatically chooses one depending on installed dependencies and on given or missing options `--desktop` and `--gpu`. 
  - For single applications, x11docker prefers `--xpra`.
  - With option `--desktop`, x11docker assumes a desktop environment in image and prefers `--xephyr`. 
- - With option `--gpu`, x11docker prefers `--xpra-xwayland` for single applications, or `--weston-xwayland` for desktop environments. 
+ - With option `--gpu` for hardware acceleration, x11docker prefers `--xpra-xwayland` for single applications, or `--weston-xwayland` for desktop environments. 
  - If none of above can be started due to missing dependencies, x11docker uses `--hostdisplay` or `--xorg`.
  
 ![x11docker-gui server screenshot](/../screenshots/x11docker-server.png?raw=true)
