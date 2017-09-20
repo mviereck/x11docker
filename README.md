@@ -219,6 +219,6 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
 ## Screenshots
 Sample screenshots can be found in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
 
-x11docker/lxde running in a Xephyr window:
+`x11docker --desktop x11docker/lxde-wine` in a Xephyr window showing pstree:
 
-![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxde.png "lxde desktop running in Xephyr window using x11docker")
+![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxde-wine-pstree.png "LXDE desktop in Xephyr window showing pstree")
