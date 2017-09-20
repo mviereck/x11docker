@@ -3,11 +3,14 @@
 ![screenshot](x11docker_klein.jpeg "x11docker logo") 
 
 ![screenshot](screenshot-xpra-pstree.png "xterm showing pstree in xpra window using x11docker")
+
 ![screenshot](screenshot-lxde-small.png "LXDE desktop in xpra window using x11docker")
 
 ![screenshot](screenshot-xfce-wine-playonlinux.png "xfce-wine-playonlinux desktop running in Xephyr window using x11docker")
 
 ![screenshot](screenshot-lxde-wine.png "lxde-wine desktop running in Xephyr window using x11docker")
+
+![screenshot](screenshot-lxde-wine-pstree.png "lxde-wine desktop running in Xephyr, showing pstree")
 
 ![screenshot](screenshot-plasma.png "plasma desktop running in Xephyr window using x11docker")
 
