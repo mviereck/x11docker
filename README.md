@@ -4,7 +4,11 @@
 
 ![screenshot](screenshot-xpra-pstree.png "xterm showing pstree in xpra window using x11docker")
 
-![screenshot](screenshot-lxde-small.png "LXDE desktop in xpra window using x11docker")
+![screenshot](screenshot-plasma.png "plasma desktop running in Xephyr window using x11docker")
+
+![screenshot](screenshot-xfce.png "Xfce desktop running in Xephyr window using x11docker")
+
+![screenshot](screenshot-lxde.png "LXDE desktop running in Xephyr window using x11docker")
 
 ![screenshot](screenshot-xfce-wine-playonlinux.png "xfce-wine-playonlinux desktop running in Xephyr window using x11docker")
 
@@ -12,13 +16,9 @@
 
 ![screenshot](screenshot-lxde-wine-pstree.png "lxde-wine desktop running in Xephyr, showing pstree")
 
-![screenshot](screenshot-plasma.png "plasma desktop running in Xephyr window using x11docker")
-
-![screenshot](screenshot-xfce.png "xfce desktop running in Xephyr window using x11docker")
-
-![screenshot](screenshot-lxde.png "lxde desktop running in Xephyr window using x11docker")
-
 ![screenshot](screenshot-retroterm.png "cool retro term running in Xpra window using x11docker")
+
+![screenshot](screenshot-lxde-small.png "LXDE desktop in xpra window using x11docker")
 
 # x11docker-gui
 
