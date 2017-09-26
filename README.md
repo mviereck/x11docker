@@ -98,6 +98,7 @@ x11docker checks dependencies for chosen options on startup and shows terminal m
 Basics:
  - If no additional X server is installed, only less isolated option `--hostdisplay` will work out of the box within X, and option `--xorg` from console. (To use `--xorg` within X, look at [setup for option --xorg](#setup-for-option---xorg)).
  - As a well working base for convenience and security, it is recommended to install `xpra` and `Xephyr`. (On Ubuntu also `Xvfb`). It is recommended to use latest stable xpra version from [http://xpra.org](http://xpra.org/).
+ - Already installed on most systems with an X server: `xrandr`, `xauth` and `xdotool`.
  
 Advanced usage:
  - Hardware acceleration with option `--gpu`
@@ -112,7 +113,9 @@ Advanced usage:
    - `--xvfb` needs `Xvfb`
    - `--xfishtank` needs `xfishtank` to show a fish tank.
    - `--dbus` is needed only for QT5 application in Wayland. It needs `dbus-launch` (package `dbus-x11`) in image.
- - List of all host packages for all possible x11docker options (debian package names): `xpra xserver-xephyr xvfb weston xwayland nxagent kwin xclip xdotool xserver-xorg-video-dummy xfishtank`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
+   - `--starter` needs `xdg-user-dir` to locate your `Desktop` folder for starter icons.
+   - `--install`, `--update` and `--remove` need `unzip` and `xdg-icon-resource`.
+ - List of all host packages for all possible x11docker options (debian package names): `xpra xserver-xephyr xvfb weston xwayland nxagent kwin xserver-xorg-video-dummy xfishtank xclip xdg-utils xauth xdotool xrandr unzip`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
 
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
 
