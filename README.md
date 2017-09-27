@@ -210,7 +210,8 @@ Shortest way:
 Some example images can be found on docker hub: https://hub.docker.com/u/x11docker/
 
  - Single GUI application in container: 
-   - Fractal generator XaoS: `x11docker patricknw/xaos`
+   - Terminal: `x11docker x11docker/xfce xfce4-terminal`
+   - Fractal generator XaoS: `x11docker patricknw/xaos` (xaos command defined in image with CMD)
    - glxgears with hardware acceleration: `x11docker --gpu x11docker/xfce glxgears`
    - Firefox with your host Firefox profile and shared download folder: `x11docker --env HOME=$HOME --sharedir $HOME/.mozilla --sharedir $HOME/.cache/mozilla --sharedir $HOME/Downloads -- jess/firefox`
 
