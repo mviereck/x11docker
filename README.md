@@ -131,6 +131,10 @@ If no X server option is specified, x11docker automatically chooses one dependin
 ## Wayland
 Beside the X servers to choose from there are options `--weston`, `--kwin` and `--hostwayland` to run pure [Wayland](https://wayland.freedesktop.org/) applications without X. QT5 applications (most of KDE) also need options `--dbus` and `--waylandenv` to use Wayland instead of X. (Option `--waylandenv` sets some environment variables to summon toolkits GTK3, QT5, Clutter, SDL, Elementary and Evas to use Wayland.) 
 With combination `--kwin-native --sharewayland --dbus --waylandenv` you can run Wayland and X applications side by side.
+ - Example: xfce4-terminal (GTK3) in Weston: 
+ 
+  `x11docker --weston x11docker/xfce xfce4-terminal`
+  
  - Example: KDE plasma shell (QT5) in a pure Wayland environment with hardware acceleration:
  
   `x11docker --kwin --waylandenv --dbus --gpu -- kdeneon/plasma:user-lts plasmashell`
