@@ -40,7 +40,7 @@ To run a host application on a new X server:
 Make x11docker executable with `chmod +x x11docker` or just run it with `bash x11docker` respective `bash x11docker-gui`. Or install it on your system (see below at chapter [Installation](#installation)).
 
 # Troubleshooting
-For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. x11docker shows warnings if something is insecure or is going wrong. Use option `--verbose` to see logfile output, too. You can get help in the [issue tracker](https://github.com/mviereck/x11docker/issues).
+For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. x11docker shows warnings if something is insecure, missing or going wrong. Use option `--verbose` to see logfile output, too. Get help in the [issue tracker](https://github.com/mviereck/x11docker/issues).
 
 # Password prompt
 root permissions are needed only to run docker. X servers run as unprivileged user.
