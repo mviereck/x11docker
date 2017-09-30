@@ -13,7 +13,7 @@
    - Hardware acceleration for OpenGL
    - Clipboard sharing
    - Shared host folder as /home in container
- - Easy to use. Examples: 
+ - Easy to use. [Examples](#examples): 
     - `x11docker jess/cathode`
     - `x11docker --desktop --size 320x240 x11docker/lxde`
  
