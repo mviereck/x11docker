@@ -1,13 +1,13 @@
 # x11docker: Run GUI applications in docker ![x11docker logo](/../screenshots/x11docker_klein.jpeg?raw=true "Optional Title") 
 ## Avoiding X security leaks and hardening container security
 
- - Avoids X security leaks by running additional X servers.
- - Improves container security:
+ - Avoids X security leaks by running [additional X servers](#x-servers-and-wayland-compositors-to-choose-from).
+ - Improves container [security](#security):
    - Restricts container capabilities to bare minimum.
    - Container user is same as host user to avoid root in container.
  - No dependencies inside of docker images.
- - No obliging dependencies on host beside X and docker. Recommended: `xpra` and `Xephyr`.
- - Wayland support.
+ - No obliging [dependencies](#dependencies) on host beside X and docker. Recommended: `xpra` and `Xephyr`.
+ - [Wayland](#wayland) support.
  - Optional features: 
    - Pulseaudio sound
    - Hardware acceleration for OpenGL
