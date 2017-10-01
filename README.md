@@ -172,6 +172,12 @@ xterm
 # run docker image on new X server
 docker run --env DISPLAY --env XAUTHORITY -v $XAUTHORITY:$XAUTHORITY -v $XSOCKET:$XSOCKET x11docker/xfce
 ```
+If you like to, you can run two docker images sharing the same X server. Example:
+```
+read Xenv < <(x11docker --xephyr --showenv x11docker/lxde)  # LXDE desktop
+echo $Xenv && export $Xenv
+x11docker --hostdisplay x11docker/xfce thunar  # Thunar from another image appears on LXDE desktop
+```
 
 # Developer options
 Collection of rarer needed but sometimes useful options.
