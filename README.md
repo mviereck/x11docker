@@ -179,6 +179,14 @@ On another system in your network, attach with xpra over SSH:
 ```
 xpra attach ssh:HOSTNAME:30     # replace HOSTNAME with IP or host name of ssh server
 ```
+You can detach the SSH connection and reattach later again without terminating the application:
+```
+xpra detach ssh:HOSTNAME:30
+```
+You can stop xpra server without terminating x11docker:
+```
+xpra stop ssh:HOSTNAME:30
+```
 Warning: don't try this on localhost due to an xpra memory bug. On localhost, use `xpra attach :30` instead.
 
 ## HTML5 web applications
