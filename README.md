@@ -13,6 +13,7 @@
    - Hardware acceleration for OpenGL
    - Clipboard sharing
    - Shared host folder as /home in container
+ - [Network setup](#network-setup) with [SSH](#ssh-x-forwarding), [VNC](#vnc) or [HTML5](#html5-web-applications) possible.
  - Easy to use. [Examples](#examples): 
     - `x11docker jess/cathode`
     - `x11docker --desktop --size 320x240 x11docker/lxde`
