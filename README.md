@@ -162,6 +162,17 @@ needs_root_rights=yes
 On debian 9 and Ubuntu 16.04 you need to install package `xserver-xorg-legacy`. 
 (Depending on your hardware and system setup, you may not need line `needs_root_rights=yes`).
 
+## Custom access to X server
+Running x11docker without an image name (or explicitly with option `--xonly`) creates an empty X server. In that case, or forced with option `--showenv`, x11docker writes some environment variables on stdout. You can use this for custom access to new X server. Example:
+```
+read Xenv < <(x11docker --xephyr --showenv)
+echo $Xenv && export $Xenv
+# run xterm from host on new X server
+xterm   
+# run docker image on new X server
+docker run --env DISPLAY --env XAUTHORITY -v $XAUTHORITY:$XAUTHORITY -v $XSOCKET:$XSOCKET x11docker/xfce
+```
+
 # Developer options
 Collection of rarer needed but sometimes useful options.
 
