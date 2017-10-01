@@ -167,6 +167,19 @@ Collection of rarer needed but sometimes useful options.
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/x11docker-developer.png "developer options")
 
 # Network setup
+## SSH X forwarding
+Example for an SSH setup with xpra:
+```
+read Xenv < <(x11docker --xdummy --display=30 x11docker/lxde pcmanfm)
+echo $Xenv && export $Xenv
+xpra start :30 --use-display --start-via-proxy=no
+```
+On another system, attach with xpra over SSH:
+```
+xpra attach ssh:HOSTNAME:30     # replace HOSTNAME with IP or host name of ssh server
+```
+Warning: don't try this on localhost due to an xpra bug. On localhost, use `xpra attach :30` instead.
+
 ## HTML5 web applications
 To provide dockered applications as HTML5 web applications, you need `xpra` and `websockify`. Example:
 ```
