@@ -190,6 +190,7 @@ Example for an SSH setup with xpra:
 ```
 read Xenv < <(x11docker --xdummy --display=30 x11docker/lxde pcmanfm)
 echo $Xenv && export $Xenv
+# replace "start" with "start-desktop" to forward a desktop environment
 xpra start :30 --use-display --start-via-proxy=no
 ```
 On another system in your network, attach with xpra over SSH:
@@ -211,6 +212,7 @@ To provide dockered applications as HTML5 web applications, you need `xpra` and 
 ```
 read Xenv < <(x11docker --xdummy  x11docker/lxde pcmanfm)
 echo $Xenv && export $Xenv
+# replace "start" with "start-desktop" to forward a desktop environment
 xpra start $DISPLAY --use-display --html=on --bind-tcp=localhost:14500 --start-via-proxy=no
 ```
 Now you can access your application at [http://localhost:14500](http://localhost:14500). Further infos at [xpra wiki: HTML5 clients](https://xpra.org/trac/wiki/Clients/HTML5).
