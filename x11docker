@@ -8,9 +8,14 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.6.2.7"
+Version="3.6.2.8"
 
-changelog() { 
+changelog() {
+# 12.10.2017 v3.6.2.8   --xdummy/--xpra: add multiple modelines for virtual display sizes to allow flexible changes of xpra client desktop window
+# 10.10.2017            --xpra: virtual display size always equal with physical display, create smaller mode in xinitrc -> allow fullscreen
+#                       xpra: disable some unused, but possibly leaking options (webcam, notifications, printer)
+#                       xpra: set xpra specific environment variables in dockerrc
+#                       xpra: show keyboard shortcuts
 # 08.10.2017 V3.6.2.7   --xephyr: title for Xephyr windows
 #                       --xephyr: Xnest as fallback for missing Xephyr
 #                       --xpra --desktop hint: screensize bug fixed since xpra v2.2-r17117
@@ -563,11 +568,7 @@ x11docker --orphaned"
   sleep 1.5 # a bit time for all processes to look for $Timetosaygoodbye (most look once in a second)
   [ -n "$Logfile2$Logfile3" ] && $Mksu "cp '$Logfile2' '$Logfile3'"
   rm "$Logfile"
-  
-  case $Xserver in # clean up behind xpra
-    Xpra|Xpra-Xwayland) [ -e "$Hostuserhome/.:$Newdisplaynumber-fakexinerama" ] && rm "$Hostuserhome/.:$Newdisplaynumber-fakexinerama" ;;
-  esac
-    
+
   [ "$Preservecontainer" = "yes" ] && Preservecachefiles="yes"
   [ "$Preservecachefiles" = "no" ] && echo "$Cachefolder" | grep -q .cache && echo "$Cachefolder" | grep -q x11docker && [ "x11docker" != "$(basename "$Cachefolder")" ] && rm -f -R "$Cachefolder"
   if [ -e "$Errorfile" ]; then rm "$Errorfile" ; exit 1; else exit 0; fi
@@ -653,7 +654,6 @@ trap finish EXIT
 export IFS=$' \n\t'                                 # set IFS to default
 exec 3>&2                                           # second stderr channel
 exec 4>&2                                           # stderr channel for --stderr
-#[ -n "$(tty | grep tty)" ] && Tty="yes" || Tty="no" # check if running on X or on tty
 tty | grep -q tty && Tty="yes" || Tty="no"          # check if running on X or on tty
 export PATH="$PATH:/usr/games:/usr/local/bin"       # may miss for root, but can be needed for --exe and --xfishtank
 
@@ -754,6 +754,8 @@ Newxenv=""                                      # environment variables for new 
 Newxvt=""                                       # Virtual console to use for core new X server (>7)
 #Newxlock=""                                     # .Xn-lock - exists for running X server with socket n
 Xserveroptions=""                               # options for new X server
+Xpraservercommand=""
+Xpraclientcommand=""
 Xpraoptions=""                                  # options for xpra server and client
 Xprashm=""                                      # content XPRA_XSHM=0 disables usage of MIT-SHM in xpra
 Xpraversion=""                                  # $(xpra --version)
@@ -772,7 +774,9 @@ Gpu="no"                                        # option '--gpu': Use hardware a
 Screensize=""                                   # option --size  XxY
 Xaxis=""                                        # virtual screen width
 Yaxis=""                                        # virtual screen height
-Modeline=""                                     # screen modeline, see "man cvt"
+Modeline=""                                     # screen modeline describing display size, see "man cvt"
+Maxxaxis=""                                     # describes maximal screen size of display to support fullscreen beside windowed desktop
+Maxyaxis=""
 Fullscreen="no"                                 # option '-f, --fullscreen': use fullscreen mode (Xephyr only)
 Scaling="0"                                     # option --scale: Scaling factor for xpra and weston
 Rotation=""                                     # option --rotate: Rotation for --weston and --weston-xwayland 0/90/180/270/flipped/flipped-90/..
@@ -1250,15 +1254,6 @@ Parsed options: $Parsedoptions"
     ;;
   esac
   case $Xserver in 
-    Xpra)
-      command -v lsb_release >/dev/null && [ "$(lsb_release -is)" = "Ubuntu" ] && {
-        command -v Xvfb >/dev/null || { warning "On Ubuntu you need to install
-  package xvfb to use $Xserver. 
-  Fallback: Will try to use Xephyr"
-          Xserver="Xephyr"
-        }
-      }
-    ;;
     Xpra-Xwayland)
       command -v weston >/dev/null || { 
         [ "$Autochooseserver" = "no" ] && note "Could not find executeable weston.
@@ -1519,10 +1514,7 @@ Parsed options: $Parsedoptions"
   
   [ "$Fullscreen" = "yes" ] && {
     case $Xserver in
-      Xephyr|Weston|Weston-Xwayland|Nxagent|Xdummy|Xdummy-Xwayland|Xvfb|Xorg) ;;
-      Xpra|Xpra-Xwayland) note "Xpra support of fullscreen mode is in
-  development, you may encounter bugs. Toggle fullscreen with [SHIFT][F11].
-  You can try --xephyr, --nxagent or --weston-xwayland instead." ;;
+      Xephyr|Weston|Weston-Xwayland|Nxagent|Xdummy|Xdummy-Xwayland|Xvfb|Xorg|Xpra|Xpra-Xwayland) ;;
       *) note "$Xserver does not support option --fullscreen" ;;
     esac
   }
@@ -1647,12 +1639,8 @@ Parsed options: $Parsedoptions"
     }
     case $Xserver in
       Xpra|Xpra-Xwayland|Nxagent) 
-        [ "$Desktopmode" = "no" ] && {
-          note "Option --xfishtank is not supported for $Xserver
-  except in desktop mode (option --desktop)."
-          Xfishtank="no"
-        } ;;
-      Weston|Kwin|Hostwayland)
+        [ "$Desktopmode" = "no" ] && [ -z "$Windowmanager" ] && Windowmanager="auto" && Desktopmode="yes" ;;
+      Weston|Kwin|Hostwayland|Hostdisplay)
         note "Option --xfishtank is not supported for $Xserver." 
         Xfishtank="no"
       ;;
@@ -1665,23 +1653,28 @@ Parsed options: $Parsedoptions"
   # check whole display size, can include multiple monitors
   [ -n "$Hostdisplay" ] && {
     command -v xrandr >/dev/null && {
-      Xaxis=$(xrandr 2>/dev/null | grep current | head -n1 | cut -d, -f2 | cut -d' ' -f3)
-      Yaxis=$(xrandr 2>/dev/null | grep current | head -n1 | cut -d, -f2 | cut -d' ' -f5)
+      Maxxaxis=$(xrandr 2>/dev/null | grep current | head -n1 | cut -d, -f2 | cut -d' ' -f3)
+      Maxyaxis=$(xrandr 2>/dev/null | grep current | head -n1 | cut -d, -f2 | cut -d' ' -f5)
     } 
-    [ -z "$Xaxis" ] && command -v xdpyinfo >/dev/null && {
-      Xaxis=$(xdpyinfo | grep dimensions | cut -dx -f1 | rev | cut -d ' ' -f1 | rev)
-      Yaxis=$(xdpyinfo | grep dimensions | cut -dx -f2 | cut -d ' ' -f1)
+    [ -z "$Maxxaxis" ] && command -v xdpyinfo >/dev/null && {
+      Maxxaxis=$(xdpyinfo | grep dimensions | cut -dx -f1 | rev | cut -d ' ' -f1 | rev)
+      Maxyaxis=$(xdpyinfo | grep dimensions | cut -dx -f2 | cut -d ' ' -f1)
     }
-    [ -z "$Xaxis" ] && command -v xwininfo >/dev/null && {
-      Xaxis=$(xwininfo -root -stats | grep Width  | rev | cut -d' ' -f1 | rev)
-      Yaxis=$(xwininfo -root -stats | grep Height | rev | cut -d' ' -f1 | rev)
+    [ -z "$Maxxaxis" ] && command -v xwininfo >/dev/null && {
+      Maxxaxis=$(xwininfo -root -stats | grep Width  | rev | cut -d' ' -f1 | rev)
+      Maxyaxis=$(xwininfo -root -stats | grep Height | rev | cut -d' ' -f1 | rev)
     } 
-    [ -z "$Xaxis" ] && note "Could not determine your screen size. 
+    [ -z "$Maxxaxis" ] && note "Could not determine your screen size. 
   Please improve this by installing one of xrandr, xdpyinfo or xwininfo. 
   Or use option --size=XxY."
   }
   
-  [ "$Fullscreen" = "yes" ] && [ "$Tty" = "no" ] && [ -n "$Xaxis" ] && Screensize="${Xaxis}x${Yaxis}"
+  [ -n "$Maxxaxis" ] && {
+    Xaxis=$Maxxaxis
+    Yaxis=$Maxyaxis
+  }
+  
+  [ "$Fullscreen" = "yes" ] && [ "$Tty" = "no" ] && [ -n "$Maxxaxis" ] && Screensize="${Maxxaxis}x${Maxyaxis}"
   
   # size for windowed desktops, roughly maximized relative to primary monitor
   case $Xserver in
@@ -1731,6 +1724,10 @@ Parsed options: $Parsedoptions"
   [ -n "$Screensize" ] && {  # regard --size, overwriting Xaxis/Yaxis from above
     Xaxis=${Screensize%x*}
     Yaxis=${Screensize#*x}
+  }
+  [ -z "$Maxxaxis" ] && {
+    Maxxaxis=$Xaxis
+    Maxyaxis=$Yaxis
   }
 
   case $Xserver in
@@ -1925,11 +1922,10 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
 }
 
 { #### part: create xorg.conf and Xorg wrapper for Xdummy (options --xdummy, --xpra)
-#error $(($Xaxis * $Yaxis * 24 / 8 /1024))
   case $Xserver in
     Xpra|Xdummy)
       # create xorg.conf for Xdummy
-      echo '# This xorg configuration file is forked and changed from xpra to start a dummy X11 server.
+      { echo '# This xorg configuration file is forked and changed from xpra to start a dummy X11 server.
 # For original and details, please see: https://xpra.org/Xdummy.html
 Section "ServerFlags"
   Option "DontVTSwitch" "true"
@@ -1943,13 +1939,21 @@ Section "Device"
   Driver "dummy"
   DacSpeed 600
   Option "ConstantDPI" "true"
-  VideoRam '$(($Xaxis * $Yaxis * 2 * 32 / 8 / 1024))'
+  VideoRam '$(($Maxxaxis * $Maxyaxis * 2 * 32 / 8 / 1024))'
 EndSection
 Section "Monitor"
   Identifier "dummy_monitor"
   HorizSync   1.0 - 2000.0
   VertRefresh 1.0 - 200.0
   Modeline '$Modeline'
+  '
+  echo "# add some virtual display sizes to allow flexible xpra client window resizing from 25% up to fullscreen"
+  for Ycount in 25 30 35 40 45 50 55 60 65 60 75 80 85 90 95 100; do
+    for Xcount in 25 30 35 40 45 50 55 60 65 60 75 80 85 90 95 100; do
+      cvt $(awk -v a=$Maxxaxis -v b=$Xcount 'BEGIN {print (a * b / 100)}') $(awk -v a=$Maxyaxis -v b=$Ycount 'BEGIN {print (a * b / 100)}') | tail -n1
+    done
+  done
+  echo '
 EndSection
 Section "Screen"
   Identifier "dummy_screen"
@@ -1967,7 +1971,8 @@ Section "ServerLayout"
   Identifier   "dummy_layout"
   Screen       "dummy_screen"
 EndSection
-' >> $Xdummyconf
+' 
+  } >> $Xdummyconf
       # create starter script for Xdummy
       echo '#!/bin/sh
 #@PydevCodeAnalysisIgnore
@@ -2140,14 +2145,28 @@ fi
     Xpra|Xpra-Xwayland)
       # disable --dpi for buggy versions
       [ -n "$Dpi" ] && verlt "$Xpraversion" "xpra v2.1-r16547" && ! verlt "$Xpraversion" "xpra v2.1" &&  Dpi=""
-      # disable proxy forhigh versions
+      # disable proxy for high versions
       verlt "$Xpraversion" "xpra v2.1" || Xpraoptions="$Xpraoptions --start-via-proxy=no"
       # disable sound transfer, --pulseaudio works different
       Xpraoptions="$Xpraoptions -z0 --no-speaker --no-pulseaudio"
+      Xpraoptions="$Xpraoptions --daemon=no --fake-xinerama=no --no-notifications --printing=no --webcam=no"
+      [ "$Fullscreen" = "yes" ]  && Xpraoptions="$Xpraoptions --desktop-fullscreen=yes"
+      [ "$Desktopmode" = "yes" ] && Xpraoptions="$Xpraoptions --title='$Imagename on $Newdisplay (shift+F11 toggles fullscreen)'"
       # version check for scaling already done above
       [ "$Scaling" != "0" ] && Xpraoptions="$Xpraoptions --desktop-scaling=$Scaling"
+      
+      # show xpra keyboard shortcuts
+      Line=$(xpra showconfig | grep "key-shortcut" | head -n1 | cut -d= -f2-)
+      note "Xpra keyboard shortcuts:
+$(while [ -n "$Line" ] ; do
+    echo $Line | cut -d"'" -f2
+    Line=$(echo $Line | cut -d"'" -f3- -s)
+  done | column -t -s:)
+(Shortcuts starting with a # are disabled.
+Adjustable in /etc/xpra/conf.d/40_client.conf)"
     ;;
   esac
+
   [ -n "$Dpi" ] && { :
     Xserveroptions="$Xserveroptions -dpi $Dpi"
     Xpraoptions="$Xpraoptions --dpi $Dpi"
@@ -2155,7 +2174,6 @@ fi
   
   Waitforgoodbye='bash -c "while [ ! -e '$Sharefolder'/timetosaygoodbye ] ; do sleep 1 ; done"' 
 
-  
   # Prepare weston.ini: config file for Weston
   case $Xserver in
     Weston|Weston-Xwayland|Xpra-Xwayland|Xdummy-Xwayland)
@@ -2201,9 +2219,11 @@ $(tail "$Compositorlogfile")"
     ;;
     Xpra) # To use xpra, Xdummy will run first. xpra server uses it later. Use Xvfb if available.
       command -v Xvfb >/dev/null && {
-        Xcommand="$(command -v Xvfb) $Newdisplay $Xserveroptions -screen 0 ${Screensize}x24"
+        Xcommand="$(command -v Xvfb) $Newdisplay $Xserveroptions -screen 0 ${Maxxaxis}x${Maxyaxis}x24"
       } || {
         Xcommand="$Xdummywrapper $Newdisplay $Newxvt -config $Xdummyconf $Xserveroptions"
+        note "Xvfb not found. Will try to use dummy video driver Xdummy.
+  If you encounter xpra startup errors, please install 'Xvfb'."
       }
     ;;
     Xdummy)
@@ -2218,13 +2238,13 @@ $(tail "$Compositorlogfile")"
         no)  for Count in $(seq 1 $Outputcount) ; do Xephyroptions="$Xephyroptions -screen $Screensize" ; done ;;
       esac
       [ "$Xephyrglamor" = "yes" ] && Xephyroptions="$Xephyroptions -glamor"      # deprecated option '--glamor'
-      Xcommand="$(command -v Xephyr) $Newdisplay $Xserveroptions $Xephyroptions -title '$Imagename on $Newdisplay. CTRL+SHIFT grabs mouse and keyboard.'"
+      Xcommand="$(command -v Xephyr) $Newdisplay $Xserveroptions $Xephyroptions -title '$Imagename on $Newdisplay (ctrl+shift grabs mouse and keyboard)'"
       command -v Xephyr >/dev/null || {
         # Fallback: Xnest
         Xcommand="$(command -v Xnest) $Newdisplay -geometry $Screensize -scrns $Outputcount $Xserveroptions -name '$Imagename on $Newdisplay'"
         note "Xephyr not found. Fallback: using Xnest.
   Xnest is less stable and has less features than Xephyr.
-  For example, it misses RandR and Composite extension and fullscreen mode.
+  For example, it misses RandR and Composite extensions and fullscreen mode.
   It is recommended to install 'Xephyr'."
       }
     ;;
@@ -2233,7 +2253,8 @@ $(tail "$Compositorlogfile")"
       Waylandsocket="$Hostwayland"
     ;;
     Xpra-Xwayland|Xdummy-Xwayland)
-      [ "$Desktopmode" = "yes" ] && [ "$Xserver" != "Xpra-Xwayland" ] && Xserveroptions="$Xserveroptions -rootless" 
+#      [ "$Desktopmode" = "yes" ] && [ "$Xserver" != "Xpra-Xwayland" ] && Xserveroptions="$Xserveroptions -rootless" 
+#      [ "$Xserver" = "Xdummy-Xwayland" ] && Xserveroptions="$Xserveroptions -rootless" 
       Xcommand="$(command -v Xwayland) $Newdisplay $Xserveroptions"
       [ -z "$Hostwayland" ] && Waylandsocket="wayland-$Newdisplaynumber" || {
         Waylandsocket="$Hostwayland"
@@ -2778,6 +2799,17 @@ done
   echo "  echo 'mkdir -p /tmp/.X11-unix'"
   echo "  [ -e '$Newxsocket' ] && echo 'ln -s /tmp/X$Newdisplaynumber $Newxsocket'"
   echo "  echo ''"
+  case $Xserver in
+    Xpra|Xpra-Xwayland) 
+      echo "  echo '# xpra specific environment variables'"
+      Line=$(xpra showconfig | grep start-env | head -n1 | cut -d= -f2-)
+      while [ -n "$Line" ] ; do
+        Line=$(echo $Line | cut -d"'" -f2- -s)
+        Byte="$(echo $Line | cut -c1)"
+        [ "$Byte" != "${Byte,,}" ] && echo "  echo 'export $(echo $Line | cut -d"'" -f1)'"
+      done ;;
+  esac
+  echo "  echo ''"
   [ "$Xserver" = "Nothing" ] && echo "  echo 'unset DISPLAY WAYLAND_DISPLAY XAUTHORITY'"
   echo "  echo '# XDG_RUNTIME_DIR must be owned by user'"
   echo "  echo 'mkdir -p /tmp/XDG_RUNTIME_DIR'"
@@ -2928,23 +2960,30 @@ $Dockercommand
       }
     ;;
   esac
-  case $Xserver in # --xorg: --scale, --size, --rotate
-    Xorg)
-      echo "getscreensize() {"
-      echo "  CurrentXaxis=\$(xrandr | grep primary | cut -d' ' -f4 | cut -dx -f1 )"
-      echo "  CurrentYaxis=\$(xrandr | grep primary | cut -d' ' -f4 | cut -dx -f2 | cut -d+ -f1)"
-      echo "}"
-      echo "checkscreensize() {"
-      echo "  getscreensize"
-      echo "  [ \"\$Xaxis\" = \"\$CurrentXaxis\" ] || return 1"
-      echo "  [ \"\$Yaxis\" = \"\$CurrentYaxis\" ] || return 1"
-      echo "  return 0"
-      echo "}"
-      echo "getprimary() {"
-      echo "  xrandr | grep -q primary || xrandr --output \$(xrandr | grep ' connected' | head -n1 | cut -d' ' -f1) --primary"
-      echo "  echo \$(xrandr | grep primary | cut -d' ' -f1)"
-      echo "}"
+  
+  echo "getscreensize() {"
+  echo "  CurrentXaxis=\$(xrandr | grep primary | cut -d' ' -f4 | cut -dx -f1 )"
+  echo "  CurrentYaxis=\$(xrandr | grep primary | cut -d' ' -f4 | cut -dx -f2 | cut -d+ -f1)"
+  echo "}"
+  echo "checkscreensize() {"
+  echo "  getscreensize"
+  echo "  [ \"\$Xaxis\" = \"\$CurrentXaxis\" ] || return 1"
+  echo "  [ \"\$Yaxis\" = \"\$CurrentYaxis\" ] || return 1"
+  echo "  return 0"
+  echo "}"
+  echo "getprimary() {"
+  echo "  xrandr | grep -q primary || xrandr --output \$(xrandr | grep ' connected' | head -n1 | cut -d' ' -f1) --primary"
+  echo "  echo \$(xrandr | grep primary | cut -d' ' -f1)"
+  echo "}"
+  echo "Output=\$(getprimary)"
       
+  case $Xserver in 
+    Xpra) # --xpra --desktop: New mode for window smaller than fullscreen
+      echo "xrandr --newmode $Modeline"
+      echo "xrandr --addmode \$Output $(echo $Modeline | cut -d " " -f1)"
+      echo "xrandr --output  \$Output --mode $(echo $Modeline | cut -d " " -f1)"
+    ;;
+    Xorg) # --xorg: --scale, --size, --rotate
       [ -z "$Screensize" ] && {
         echo "# determine screen size"
         echo "getscreensize"
@@ -2964,7 +3003,7 @@ $Dockercommand
         echo "[ -n \"\$(xrandr | grep \$Screensize)\" ] && { "
         echo "  note \"Will try to set native resolution \$Screensize."
         echo "  If that looks ugly, use --scale=1 to enforce a fake scaled resolution.\""
-        echo "  xrandr --output \$(getprimary) --mode \$Screensize"
+        echo "  xrandr --output \$Output --mode \$Screensize"
         echo "}"
       }
        
@@ -2972,10 +3011,10 @@ $Dockercommand
         echo "note \"Panning \$Screensize. If virtual screen is greater than "
         echo "  maximal screen size, you can move virtual screen with mouse at screen edges."
         echo "  You can force the virtual screen to match your monitor with option --scale=1\""
-        echo "  xrandr --output \$(getprimary) --panning \$Screensize+0+0/\$Screensize+0+0/100/100/100/100"
+        echo "  xrandr --output \$Output --panning \$Screensize+0+0/\$Screensize+0+0/100/100/100/100"
         echo "checkscreensize || {"
         echo "  note 'Panning failed, trying to scale instead.'"
-        echo "  xrandr --output \$(getprimary) --scale-from \$Screensize --panning \$Screensize+0+0/\$Screensize+0+0"
+        echo "  xrandr --output \$Output --scale-from \$Screensize --panning \$Screensize+0+0/\$Screensize+0+0"
         echo "  checkscreensize && note \"Successfully set screen size \$Screensize\""
         echo '}'
         echo "checkscreensize || {"
@@ -2989,7 +3028,7 @@ $Dockercommand
         echo "# Scaling $Scaling"
         echo "verbose \"Setting scaled resolution \$Screensize\""
         # must use --scale-from and --panning because --scale causes mouse barriers/crtc-boundaries
-        echo "xrandr --output \$(getprimary) --scale-from \$Screensize --panning \$Screensize+0+0/\$Screensize+0+0"
+        echo "xrandr --output \$Output --scale-from \$Screensize --panning \$Screensize+0+0/\$Screensize+0+0"
         echo "checkscreensize || {"
         echo "  getscreensize"
         echo "  note \"Setting desired resolution \$Screensize failed."
@@ -3013,6 +3052,8 @@ $Dockercommand
       }
     ;;
   esac
+  echo 'verbose "Output of xrandr on '$Newdisplay''
+  echo '$(xrandr)"'
 
   [ "$Xfishtank" = "yes" ] && echo "xfishtank & storepid \$! xfishtank"
   [ -n "$Windowmanager" ] && {
@@ -3148,15 +3189,16 @@ $(tail $Xinitlogfile)"
   case $Xserver in      
     Xpra|Xpra-Xwayland) 
       notify-send 'Please be patient, xpra will start soon ...' 2>/dev/null
-      case $Desktopmode in
-        yes) Xpraservercommand="xpra start-desktop $Newdisplay --use-display --no-daemon $Xpraoptions --exit-with-children --start-child='$Waitforgoodbye'" ;;
-        no)  Xpraservercommand="xpra start         $Newdisplay --use-display --no-daemon $Xpraoptions --exit-with-children --start-child='$Waitforgoodbye'" ;;
-      esac
+      
+      [ "$Desktopmode" = "yes" ] && Xpraservercommand="xpra start-desktop" || Xpraservercommand="xpra start"
+      Xpraservercommand="$Xpraservercommand $Newdisplay --use-display $Xpraoptions --exit-with-children --start-child='$Waitforgoodbye'"
+      Xpraclientcommand="xpra attach $Newdisplay $Xpraoptions"
       verbose "Xpra server command:
   $Xpraservercommand"
-      Xpraclientcommand="xpra attach $Newdisplay $Xpraoptions"
       verbose "Xpra client command:
   $Xpraclientcommand"
+      
+      verbose "starting xpra server"
       export XPRA_OPENGL_DOUBLE_BUFFERED=1 # avoid xpra resizing window bug in older versions http://xpra.org/trac/ticket/1469
       export $Newxenv
       $Mksu "$Xpraservercommand" >> $Xpraserverlogfile 2>&1 &
@@ -3164,17 +3206,17 @@ $(tail $Xinitlogfile)"
       waitforlogentry xpra $Xpraserverlogfile 'xpra is ready' || error "Xpra startup failed.
   Last lines of Xpra server log:
 $(tail $Xpraserverlogfile)"
-      # start xpra viewer on host display
+
+      verbose "starting xpra client"
       export $Hostxenv
-      #$Mksu "xpra attach $Newdisplay $Xpraoptions" >> $Xpraclientlogfile 2>&1 &
       $Mksu "$Xpraclientcommand" >> $Xpraclientlogfile 2>&1 &
       Xpraclientpid=$!
       storepid $Xpraclientpid xpra
-      # catch closing xpra client
-      {
+      { # watch for closing xpra client
         while ps -p $Xpraclientpid >/dev/null && [ ! -e "$Timetosaygoodbye" ] ; do sleep 1 ; done
         $Mksu "touch $Timetosaygoodbye"
       } &
+      
     ;;
   esac
   
