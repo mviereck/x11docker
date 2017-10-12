@@ -211,7 +211,7 @@ To provide dockered applications as HTML5 web applications, you need `xpra` and 
 ```
 read Xenv < <(x11docker --xdummy  x11docker/lxde pcmanfm)
 echo $Xenv && export $Xenv
-xpra start $DISPLAY --use-display --html=on --bind-tcp=localhost:14500
+xpra start $DISPLAY --use-display --html=on --bind-tcp=localhost:14500 --start-via-proxy=no
 ```
 Now you can access your application at [http://localhost:14500](http://localhost:14500). Further infos at [xpra wiki: HTML5 clients](https://xpra.org/trac/wiki/Clients/HTML5).
 
