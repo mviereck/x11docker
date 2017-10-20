@@ -8,9 +8,12 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.6.2.16"
+Version="3.6.3"
 
 changelog() {
+# 20.10.2017 V3.6.3     allow gnome-terminal / self-forking terminals in general
+# 19.10.2017            --no-internet: new option to disable internet access
+#                       split docker command with \backslash in multiple lines
 # 19.10.2017 V3.6.2.16  remaining xhost check >1 instead of !=1
 #                       setsid in dockerrc allows terminal password prompt in centos/rhel/manjaro
 # 18.10.2017 V3.6.2.15  Manjaro workaround: insist on root or gksu; terminal password prompt causes docker to terminate regardless of nohup
@@ -65,12 +68,10 @@ changelog() {
   : 
 }
 todo() {
-# find workaround for forking terminals
 # further checks on centos 7, manjaro and mageia
 # check --dpi settings for --xpra --desktop with different xpra versions, wrong on centos
 
 # check all FIXME 
-# new option --no-internet?
 # new option --printer: xpra printer forwarding?
 # xpra: --file-transfer? How to set folder?
 # --xpra-xwayland, xdummy-xwayland: use kwin-wayland as fallback for missing weston? 
@@ -162,7 +163,9 @@ Shared folders, GPU, clipboard and sound options:
  -p, --pulseaudio      Sound with pulseaudio over tcp. Needs
                        'pulseaudio' to be installed on host and in image.
  -g, --gpu             Hardware accelerated OpenGL rendering. Shares files in
-                       /dev/dri. Needs MESA/OpenGL to be installed in image.
+                       /dev/dri. Works best with open source drivers (mesa)
+                       installed on host and in image. Closed source drivers 
+                       need to be the very same on host and in image.
                        Degrades container isolation. Container access to GPU.
 
 X server options: 
@@ -240,6 +243,7 @@ Advanced options:
                        (Needed often for QT5 applications running on Wayland).
                        (Needs 'dbus-launch' to be installed in image).
      --no-entrypoint   Disable ENTRYPOINT in image to allow other commands, too
+     --no-internet     Disable internet access for container.
      --pw FRONTEND     Choose frontend for password prompt. Possible FRONTEND:
                          su sudo gksu gksudo lxsu lxsudo kdesu kdesudo
                          pkexec beesu none
@@ -284,7 +288,7 @@ Developer options:
 Options not starting docker or X server:
      --license         Show license of x11docker (MIT) and exit.
      --starter         Create starter on desktop and exit.
-     --orphaned        Clean up orphaned containers and cache files.
+     --cleanup         Clean up orphaned containers and cache files.
 
 Installation options   (needs root permissions):
      --install         Install x11docker and x11docker-gui on your system.
@@ -377,7 +381,7 @@ installer() {           # --install, --update, --remove: Installer for x11docker
   #   - download and install latest version from github
   # --remove
   #   - remove installed files
-  
+  local X11dockericonfile
   export PATH="$PATH:/usr/local/bin"  # avoid bug on opensuse where root does not have this in $PATH. Will become obsolete as new default is /usr/bin
   
   # Prepairing
@@ -456,12 +460,12 @@ installer() {           # --install, --update, --remove: Installer for x11docker
     --remove)
       echo "removing x11docker from your system"
       [ -x /usr/local/bin/x11docker ] && {    # from older installations. /usr/bin is default now as /usr/local/bin can miss in $PATH for root
-        /usr/local/bin/x11docker --orphaned
+        /usr/local/bin/x11docker --cleanup
         rm -v /usr/local/bin/x11docker
         rm -v /usr/local/bin/x11docker-gui
       }
       [ -x /usr/bin/x11docker ] && {
-        /usr/bin/x11docker --orphaned
+        /usr/bin/x11docker --cleanup
         rm -v /usr/bin/x11docker
         rm -v /usr/bin/x11docker-gui
       }
@@ -485,7 +489,8 @@ installer() {           # --install, --update, --remove: Installer for x11docker
   esac
   echo "Ready."
 }
-checkorphaned() {       # --orphaned : check for non-removed containers and left cache files
+checkorphaned() {       # --cleanup : check for non-removed containers and left cache files
+  local Orphanedcontainers Orphanedfolders Line
   note "x11docker will check for orphaned containers from earlier sessions.
   This can happen if docker was not closed successfully. 
   x11docker will look for those containers and will clean up x11docker cache.
@@ -531,6 +536,7 @@ storepid () {           # store pids and names of background processes in file $
   verbose "stored background pid ${1:-} of ${2:-}"
 }
 finish() {              # trap routine, clean up background processes and cache
+  local Pid Name Zeit
   trap - EXIT
   verbose "terminating x11docker ..."
   [ -e "$Sharefolder" ] && $Mksu "touch $Timetosaygoodbye"
@@ -542,7 +548,7 @@ finish() {              # trap routine, clean up background processes and cache
       if [ -n "$Pid" ] && [ -n "$(ps -p $Pid --no-headers)" ] ; then ### FIXME check with name was cleaner
         verbose "terminating background pid $Pid of $Name"
         case $Name in
-          weston|kwin_wayland|compositor|xpra|windowmanager|shareclipboard|hostexe|xfishtank) kill -s KILL $Pid || {
+          weston|kwin_wayland|compositor|xpraserver|xpraclient|windowmanager|shareclipboard|hostexe|xfishtank) kill -s KILL $Pid || {
               sleep 1
               [ -n "$(ps -p $Pid --no-headers)" ] && warning "error terminating $Pid $Name"
             }
@@ -568,7 +574,7 @@ docker rm -f $Containername
   Afterwards, remove cache files with:
 rm -R $Cachefolder
   or let x11docker do the cleanup work for you: 
-x11docker --orphaned"
+x11docker --cleanup"
                   Preservecachefiles="yes"
                 else
                   note "docker container terminated successfully"
@@ -607,6 +613,7 @@ isnum() {               # check if $1 is a number
   [ "1" = "$(awk -v a="${1:-}" 'BEGIN {print (a == a + 0)}')" ]
 }
 writeaccess() {         # check if useruid $1 has write access to folder $2
+  local dirVals gMember
   if read -a dirVals < <(stat -Lc "%U %G %A" "${2:-}") && (
     ( [ "$(id -u $dirVals)" == "${1:-}" ] && [ "${dirVals[2]:2:1}" == "w" ] ) ||
     ( [ "${dirVals[2]:8:1}" == "w" ] ) ||
@@ -622,15 +629,23 @@ writeaccess() {         # check if useruid $1 has write access to folder $2
 }
 waitforfilecreation() { # similar to inotify-wait: wait up to 15s for file $1 to be created
   # $1 file to wait for
+  # $2 time to wait. default: 15s. possible: infinity
+  local Zeit Warten
   Zeit=$(date +%s)
+  case $2 in
+    "")           Warten=15 ;;
+    infinity|inf) Warten=32000 ;; # nearly infinity in fast-moving today ...
+    *)            Warten=${2:-} ;;
+  esac
   while [ ! "$(find  "${1:-}" 2>/dev/null)" ] ; do
     sleep 0.2
-    [ 15 -lt $(expr $(date +%s) - $Zeit) ] && return 1
+    [ $Warten -lt $(expr $(date +%s) - $Zeit) ] && return 1
     [ -e "$Timetosaygoodbye" ] && return 1
   done
   return 0
 }
 waitforfilecontent() {  # wait for file $1 to be not empty
+  local Zeit
   # $1 file to look at
   Zeit=$(date +%s)
   while [ ! -s "${1:-}" ] ; do
@@ -644,6 +659,7 @@ waitforlogentry() {     # wait for entry $3 in logfile $2 of application $1
   # $1 is the application we are waiting for to be ready
   # $2 points to logfile
   # $3 keyword to wait for 
+  local Zeit
   Zeit=$(date +%s)
   while [ -z "$(cat "${2:-}" | grep "${3:-}")" ] ; do
     verbose "waiting since $(expr $(date +%s) - $Zeit)s for ${1:-} to be ready..."
@@ -654,6 +670,7 @@ waitforlogentry() {     # wait for entry $3 in logfile $2 of application $1
   return 0
 }
 no_xhost() {            # remove any access to X server granted by xhost
+  local Line
   xhost
   xhost | tail -n +2  /dev/stdin | while read -r Line ; do  # read all but the first line (header)
     xhost -$Line                                         # disable every entry
@@ -726,7 +743,7 @@ Hostexe=""                                      # can contain host executable
 Dockeroptions=""                                # options for docker after -- and before image name
 
 # docker variables
-Containername=""                                # name of container set by x11docker to make --orphaned able to find orphaned containers
+Containername=""                                # name of container set by x11docker to make --cleanup able to find orphaned containers
 Dockerip=""                                     # IP adress of docker interface
 Dockeriprange=""                                # IP adress of docker interface including suffix /16
 Dockerpid=""                                    # process ID of docker container
@@ -744,9 +761,9 @@ Etcpasswd=passwd                                # created /etc/passwd for contai
 # X server config files, log files and such stuff
 Xinitrc=xinitrc                                 # file to store xinitrc commands
 Xinitlogfile=xinit.log                          # file to log output of X server
-Xtermrc=terminalrc                              # file for password prompt script
+Xtermrc=xtermrc                                 # file for password prompt script
 Pullrc=pullrc                                   # file for pull dialog script
-Xtermlogfile=terminal.log                       # file to log output of xterm
+Xtermlogfile=xterm.log                          # file to log output of xterm
 Compositorlogfile=compositor.log                # file to log output of Weston or KWin 
 Compositorpidfile=compositor.pid                # process id of compositor
 Xpraserverlogfile=xpraserver.log                # logfile for xpra server
@@ -836,6 +853,7 @@ Pulseaudio="no"                                 #   "                    use pul
 Pulseaudiotcpport=""                            # option '--pulseaudio': pulseaudio tcp port to use
 Pulseaudiomoduleid="pulseaudio.module.id"       #   "                    file with number of customized pulseaudio tcp module, output of pactl
 Noentrypoint="no"                               # option --no-entrypoint: disable entrypoint in image
+Internetaccess="yes"                            # option --no-internet: disable internet access
 
 # verbosity options
 Verbose="no"                                    # option '-v, --verbose': if "yes", be verbose
@@ -860,7 +878,7 @@ Noxhost="no"                                    # option '--no-xhost': if yes, d
 Xhost=""                                        # option '--xhost': xhost + on new X server
 
 # special options not starting X or docker
-Checkorphaned="no"                              # option '--orphaned': check for non-removed containers and maybe root-owned files in cache
+Checkorphaned="no"                              # option '--cleanup': check for non-removed containers and maybe root-owned files in cache
 Createdesktopstarter="no"                       # option '--starter': create desktop starter and exit yes/no
 Desktopfolder=""                                #              "    : Desktop folder of host user (xdg-user-dirs)
 Installermode=""                                # options --install/--update/--remove
@@ -903,12 +921,12 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
   Longoptions="$Longoptions,wm:,desktop,exe,xonly"
   Longoptions="$Longoptions,fullscreen,size:,glamor,scale:,rotate:,dpi:,output-count:,gpu"                                 # screen options
   Longoptions="$Longoptions,user:,home,clipboard,pulseaudio,xfishtank"                                                     # comfort options
-  Longoptions="$Longoptions,verbose,no-xhost,trusted,untrusted,dbus,waylandenv,pw:"                                        # advanced options
-  Longoptions="$Longoptions,starter,orphaned,license,licence,help,version,install,update,remove"                           # special options without starting X server
+  Longoptions="$Longoptions,verbose,no-xhost,trusted,untrusted,dbus,waylandenv,pw:,no-internet"                            # advanced options
+  Longoptions="$Longoptions,starter,cleanup,license,licence,help,version,install,update,remove"                            # special options without starting X server
   Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,env:,showenv,sharewayland,stdout,stderr,silent"                    # developer options
   Longoptions="$Longoptions,ipc,net,ps,cache,cap-default,no-entrypoint,sudouser,hostuser:,rw"                              # developer options
   Longoptions="$Longoptions,cachedir:,homedir:,westonini:,sharedir:"                                                       # developer options
-  Longoptions="$Longoptions,xsocket,tcp,tcpxsocket,virtualgl,glamor,volume:,xhost+,resizeable"                             # deprecated
+  Longoptions="$Longoptions,xsocket,tcp,tcpxsocket,virtualgl,glamor,volume:,xhost+,resizeable,orphaned"                    # deprecated
   Longoptions="$Longoptions,xpra-image,xpra-attach,xorg-image,xdummy-image,nopwd,no-password,root,sudo"                    # deprecated
 
   Parsedoptions="$(getopt --options $Shortoptions --longoptions $Longoptions --name "$0" -- "$@" 2>/tmp/x11docker_parsererror)"
@@ -981,6 +999,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
       -b|--dbus)       Dbuslaunch="yes" ;;                 # run command with dbus-launch
       -E|--waylandenv) Setwaylandenv="yes" ;;              # set environment variables forcing toolkits like QTK and QT to use wayland
          --no-entrypoint) Noentrypoint="yes" ;;            # don't use ENTRYPOINT of image
+         --no-internet)Internetaccess="no" ;;              # disallow internet access
          --pw)         Passwordprompt="${2:-}" ; shift ;;  # frontend for password prompt
       
      #### Developer options
@@ -1034,7 +1053,8 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
 
      #### special options not starting X or docker
       --starter)       Createdesktopstarter="yes" ;;       # create desktop starter and exit
-      --orphaned)      Checkorphaned="yes"  ;;             # check for orphaned containers and files owned by root, created by docker)
+      --cleanup)       Checkorphaned="yes"  ;;             # check for orphaned containers and files owned by root, created by docker)
+      --orphaned)      Checkorphaned="yes" ; note "Option '--orphaned' is now called '--cleanup'." ;;
       --install|--update|--remove) Installermode="${1:-}" ;;   # installer
 
      #### depracated
@@ -1145,9 +1165,9 @@ Parsed options: $Parsedoptions"
     exit
   }
    
-  ## option --orphaned : check for non-removed containers and left cache files possibly owned by root and created by docker
+  ## option --cleanup: check for non-removed containers and left cache files
   [ "$Checkorphaned" = "yes" ] && {
-    docker images >/dev/null 2>&1 || error "'x11docker --orphaned' must run as root."   ### FIXME: could be more flexible
+    docker images >/dev/null 2>&1 || error "'x11docker --cleanup' must run as root."   ### FIXME: could be more flexible
     checkorphaned
     exit
   }
@@ -1414,11 +1434,13 @@ Parsed options: $Parsedoptions"
     # if x11docker is running from within an X server, check if user is allowed to run a new core X server
     [ -z "$Newxvt" ] && {
       if [ ! -e "/etc/X11/Xwrapper.config" ] || [ -z "$(cat /etc/X11/Xwrapper.config | grep "allowed_users" | grep "anybody")" ] ; then
-        error "You are not allowed to start a second X server from within X.
-  As a default configuration, only root or console users can start X.
-  Recommended solution: install and use 'Xephyr' (option --xephyr) instead.
+        error "Your configuration does not allow you to start
+  a second core Xorg server from within X.
+  (As a default configuration, only root or console users can do that).
   
-  You can switch to console tty1...tty6 with <CTRL><ALT><F1>...<F6>
+  Recommended easy solution: install nested X server 'Xephyr'.
+  
+  Or you can switch to console tty1...tty6 with <CTRL><ALT><F1>...<F6>
   and start x11docker there.
   
   Setup to start a second Xorg X server from within already running X:
@@ -1437,7 +1459,7 @@ Parsed options: $Parsedoptions"
 }
 
 { #### part: check multiple option interferences
-  #
+
   [ "$Desktopmode" = "no" ] && [ -z "$Windowmanager" ] && case $Xserver in
     Xephyr|Weston-Xwayland|Kwin-Xwayland|Xorg|Xwayland) Windowmanager="auto" ;;
   esac
@@ -1453,10 +1475,16 @@ Parsed options: $Parsedoptions"
         Gpu="no" ;;
     esac
   }
-  [ "$Gpu" = "yes" ] && warning "Option --gpu degrades container isolation.
+  [ "$Gpu" = "yes" ] && {
+    warning "Option --gpu degrades container isolation.
   Container gains access to GPU hardware.
   This allows reading host window content (palinopsia leak)
   and GPU rootkits (compare proof of concept: jellyfish)."
+    note "Hardware acceleration (option --gpu) works quite well with
+  open source drivers (mesa) on host and in image. 
+  If you have closed source drivers on your host, you need to install
+  the very same driver version in your image to get hardware acceleration."
+  }
   
   case $Xserver in
     Hostdisplay|Kwin-Native) Trusted="no" ;;
@@ -1532,9 +1560,17 @@ Parsed options: $Parsedoptions"
   Can be interesting though, having two overlapping desktops."
   }
   
-  [ "$Shareipc" = "yes" ] && warning "SECURITY RISK!
+  [ "$Sharenet" = "yes" ] && [ "$Internetaccess" = "no" ] && {
+    note "You have chosen --net and --no-internet. That does not work.
+  You can not share host network stack (--net) and forbid internet access
+  at the same time (except you disconnect your host from internet).
+  Fallback: disabling option --net, keeping --no-internet."
+    Sharenet="no"
+  }
+  
+  [ "$Shareipc" = "yes" ] && warning "Security risk!
   Option --ipc breaks down container isolation!"
-  [ "$Sharenet" = "yes" ] && warning "SECURITY RISK: 
+  [ "$Sharenet" = "yes" ] && warning "Security risk: 
   Option --net breaks down container isolation!"
   
   [ "$Fullscreen" = "yes" ] && {
@@ -1789,14 +1825,14 @@ Parsed options: $Parsedoptions"
       Nothing)                Newdisplaynumber="900" ;; # dummy number to look for free cache folder
     esac
     #
-    while [ -e "/tmp/.X11-unix/X$Newdisplaynumber" ] || [ -h "/tmp/.X11-unix/X$Newdisplaynumber" ] || [ -e "/tmp/,X$Newdisplaynumber-lock" ]  || [ -d "$Cacherootfolder/X$Newdisplaynumber-$(echo $Imagename | tr / - | cut -d: -f1)-$Xserver" ] || [ -e "$XDG_RUNTIME_DIR/wayland-$Newdisplaynumber" ] ; do   # search unused X socket, passing already used cache numbers
+    while [ -e "/tmp/.X11-unix/X$Newdisplaynumber" ] || [ -h "/tmp/.X11-unix/X$Newdisplaynumber" ] || [ -e "/tmp/,X$Newdisplaynumber-lock" ]  || [ -d "$Cacherootfolder/X$Newdisplaynumber-$(echo $Imagename | tr / - | cut -d: -f1)" ] || [ -e "$XDG_RUNTIME_DIR/wayland-$Newdisplaynumber" ] ; do   # search unused X socket, passing already used cache numbers
       Newdisplaynumber=$(($Newdisplaynumber + 1))
     done
   } || {
     [ -e "/tmp/.X11-unix/X$Newdisplaynumber" ] || [ -h "/tmp/.X11-unix/X$Newdisplaynumber" ]  || [ -d "$Cacherootfolder/X$Newdisplaynumber" ] && error "Display :$Newdisplaynumber is already in use"
   }
   
-  Cachefolder="$Cacherootfolder/X$Newdisplaynumber-$(echo $Imagename | tr / - | cut -d: -f1)-$Xserver" && $Mksu "mkdir $Cachefolder"
+  Cachefolder="$Cacherootfolder/X$Newdisplaynumber-$(echo $Imagename | tr / - | cut -d: -f1)" && $Mksu "mkdir $Cachefolder"
   Sharefolder="$Cachefolder/$Sharefolder"                                                 && $Mksu "mkdir $Sharefolder"
   export Cachefolder=$Cachefolder Sharefolder=$Sharefolder
   #
@@ -1953,7 +1989,7 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
 
 { #### part: create xorg.conf and Xorg wrapper for Xdummy (options --xdummy, --xpra)
   case $Xserver in
-    Xpra|Xdummy)
+    Xpra|Xdummy|Xorg)
       # create xorg.conf for Xdummy
       { echo '# This xorg configuration file is forked and changed from xpra to start a dummy X11 server.
 # For original and details, please see: https://xpra.org/Xdummy.html
@@ -2244,7 +2280,7 @@ $(tail "$Compositorlogfile")"
   esac
 
   case $Xserver in
-    Xorg) 
+    Xorg)
       Xserveroptions="$Xserveroptions +extension XFree86-DRI +extension XFree86-DGA +extension XFree86-VidModeExtension"
       Xserveroptions="$Xserveroptions -verbose"                  # make X verbose
       [ "$Tty" = "yes" ] && Xserveroptions="$Xserveroptions -keeptty"
@@ -2555,32 +2591,35 @@ done
     pkexec|"") Getroot="bash -c"                                                ; Sudo=""     ; Pkexec="pkexec " ; Passwordterminal="bash -c" ;;
     su)        Getroot="su -c"                                                  ; Sudo=""     ; Pkexec=""        ;;
     sudo)      Getroot="bash -c"                                                ; Sudo="sudo" ; Pkexec=""        ;;
-    gksu)      Getroot="gksu    --message 'x11docker $Imagename $Imagecommand'" ; Sudo=""     ; Pkexec=""        ; Passwordterminal="bash -c" ;;
-    gksudo)    Getroot="gksudo  --message 'x11docker $Imagename $Imagecommand'" ; Sudo=""     ; Pkexec=""        ; Passwordterminal="bash -c" ;;
+    gksu)      Getroot="gksu    --message 'x11docker $Imagename'"               ; Sudo=""     ; Pkexec=""        ; Passwordterminal="bash -c" ;;
+    gksudo)    Getroot="gksudo  --message 'x11docker $Imagename'"               ; Sudo=""     ; Pkexec=""        ; Passwordterminal="bash -c" ;;
     lxsu)      Getroot="lxsu"                                                   ; Sudo=""     ; Pkexec=""        ; Passwordterminal="bash -c" ;;
     lxsudo)    Getroot="lxsudo"                                                 ; Sudo=""     ; Pkexec=""        ; Passwordterminal="bash -c" ;;
     kdesu)     Getroot="kdesu -c"                                               ; Sudo=""     ; Pkexec=""        ; Passwordterminal="bash -c" ;;
-    kdesudo)   Getroot="kdesudo --comment 'x11docker $Imagename $Imagecommand'" ; Sudo=""     ; Pkexec=""        ; Passwordterminal="bash -c" ;;
+    kdesudo)   Getroot="kdesudo --comment 'x11docker $Imagename'"               ; Sudo=""     ; Pkexec=""        ; Passwordterminal="bash -c" ;;
     beesu)     Getroot="beesu -c"                                               ; Sudo=""     ; Pkexec=""        ; Passwordterminal="bash -c" ;;
     none)      Getroot="bash -c"                                                ; Sudo=""     ; Pkexec=""        ; Passwordterminal="bash -c" ;;
     *) error "Unknown password prompt '$Passwordprompt' (option --pw).
   Possible are: pkexec su sudo gksu gksudo lxsu lxsudo kdesu kdesudo none" ;;
   esac
+  command -v $(echo $Getroot|cut -d' ' -f1) >/dev/null || error "Password prompt frontend $(echo $Getroot|cut -d' ' -f1) not found"
 }
 
 { #### part: check terminal for password prompt of su or  sudo and for 'docker pull'
   # $Passwordterminal:  To prompt for su or sudo password
   # $Pullterminal:      To show output of "docker pull"
   
-  # Not working: gnome-terminal stterm pangoterm Eterm mrxvt rxvt xvt lilyterm fbterm
+  # Not working: stterm pangoterm Eterm mrxvt rxvt xvt lilyterm fbterm
   # Makes problems if X and Wayland are independently available at same time: xfce4-terminal
   # Works, but does not appear: 'guake -te'
   
-  Terminallist=("xterm lxterm lxterminal stterm konsole qterminal sakura termit pterm terminator terminology xfce4-terminal NOLUCK")
+  Terminallist=("xterm lxterm lxterminal stterm sakura termit pterm terminator terminology konsole qterminal gnome-terminal xfce4-terminal NOLUCK")
   [ -z "$Hostdisplay$Newdisplay" ] && {
     case $Xserver in
-      Weston|Hostwayland)  Terminallist=("konsole qterminal terminator NOLUCK") ;;
+      Weston|Hostwayland)  Terminallist=("gnome-terminal konsole qterminal NOLUCK") ;;
       Kwin)                Terminallist=("konsole NOLUCK") ;;
+      Nothing)             Terminallist=("bash NOLUCK") ;;
+      *)                   Terminallist=("konsole NOLUCK") ;;
     esac
   }
   
@@ -2589,17 +2628,16 @@ done
   Please install one of:
   ${Terminallist%"NOLUCK"}" ### FIXME: Needn't to be fatal, only few indispensible cases.
   
-  case $Xserver in
-    Weston|Kwin|Hostwayland)
-      case $Pullterminal in 
-        qterminal) Pullterminal="env QT_QPA_PLATFORM=wayland $Pullterminal" ;;
-        konsole) Pullterminal="env QT_QPA_PLATFORM=wayland $Pullterminal --nofork" ;;
-      esac
-    ;;
-  esac
+  [ -z "$DISPLAY" ] && [ -n "$WAYLAND_DISPLAY" ] && {
+    case $Pullterminal in 
+      qterminal) Pullterminal="env QT_QPA_PLATFORM=wayland $Pullterminal" ;;
+      konsole) Pullterminal="env QT_QPA_PLATFORM=wayland $Pullterminal --nofork" ;;
+    esac
+  }
   
   case $Pullterminal in
     xfce4-terminal) Pullterminal="$Pullterminal --disable-server -x" ;;
+    gnome-terminal) Pullterminal="dbus-launch $Pullterminal -x" ;;
     terminator)     Pullterminal="$Pullterminal --no-dbus -x" ;;
     konsole)        Pullterminal="$Pullterminal --nofork -e" ;;
     *)              Pullterminal="$Pullterminal -e" ;;
@@ -2703,13 +2741,16 @@ done
         no)
           # Create container user
           # group video is needed for non-systemd systems and for KDE
-          Dockercommand="$Dockercommand --user $Benutzeruid:$Benutzergid --group-add video --env USER=$Benutzer"
-          [ "$Benutzeruid" = "0" ] || Dockercommand="$Dockercommand -v $Etcpasswd:/etc/passwd:ro"
+          Dockercommand="$Dockercommand --user $Benutzeruid:$Benutzergid --env USER=$Benutzer --group-add video"
+          [ "$Benutzeruid" = "0" ] || Dockercommand="$Dockercommand \\
+  -v $Etcpasswd:/etc/passwd:ro"
           # hardening container security
           [ "$Capdropall" = "yes" ] && [ "$Benutzeruid" != "0" ] && { 
-            Dockercommand="$Dockercommand --cap-drop=ALL --security-opt=no-new-privileges"
+            Dockercommand="$Dockercommand \\
+  --cap-drop=ALL --security-opt=no-new-privileges"
           }
-          [ "$Benutzeruid" != "0" ] && [ "$Readwrite" = "no" ] && Dockercommand="$Dockercommand --read-only --volume=/tmp"
+          [ "$Benutzeruid" != "0" ] && [ "$Readwrite" = "no" ] && Dockercommand="$Dockercommand \\
+  --read-only --volume=/tmp"
         ;;
         yes) # option --sudouser
           warning "You allow $Benutzer sudo permissions without a password.
@@ -2734,56 +2775,71 @@ done
       esac
     
       [ -n "$(echo "$Dockerdaemon" | grep 'selinux-enabled')" ] && [ "$Shareipc" = "no" ] && {
-        Dockercommand="$Dockercommand --security-opt label=type:container_runtime_t" 
+        Dockercommand="$Dockercommand \\
+  --security-opt label=type:container_runtime_t" 
         note "SELinux restrictions for this container are decreased
   with option '--security-opt label=type:container_runtime_t'
   to allow access to X unix socket. A more precise restriction is desirable."
       }
       
-      [ "$Preservecontainer" = "no" ] && Dockercommand="$Dockercommand --rm"
       Containername="x11docker_X${Newdisplaynumber}_${Mycookie}_$(echo $Imagename | tr / _ | tr : _ )"
-      Dockercommand="$Dockercommand --name=$Containername"
+      Dockercommand="$Dockercommand \\
+  --name=$Containername"
+      [ "$Preservecontainer" = "no" ] && Dockercommand="$Dockercommand --rm"
+      Dockercommand="$Dockercommand --entrypoint='env'"
 
       # shared host folders
-      Dockercommand="$Dockercommand -v $Sharefolder:$Cshare:ro"
-      [ "$Adduserhome" = "yes" ] && [ -n "$Adduserhomefolder" ] && Dockercommand="$Dockercommand -v '$Adduserhomefolder':'$Benutzerhome':rw"
-      Dockercommand="$Dockercommand $Sharevolumes"
-
-      Dockercommand="$Dockercommand --entrypoint='env'"
-     
+      Dockercommand="$Dockercommand \\
+  -v $Sharefolder:$Cshare:ro"
+      [ "$Adduserhome" = "yes" ] && [ -n "$Adduserhomefolder" ] && Dockercommand="$Dockercommand \\
+  -v '$Adduserhomefolder':'$Benutzerhome':rw"
+      [ -n "$Sharevolumes" ] && Dockercommand="$Dockercommand \\
+  $Sharevolumes"
+   
       case $Xserver in
         Nothing) ;;
         Weston|Hostwayland|Kwin) ;;
         *)
           #      DISPLAY
-          Dockercommand="$Dockercommand -e DISPLAY=unix$Newdisplay"
+          Dockercommand="$Dockercommand \\
+  -e DISPLAY=unix$Newdisplay"
           #      XAUTHORITY
           [ "$Xauthentication" = "yes" ] && Dockercommand="$Dockercommand -e XAUTHORITY=$Cshare/Xclientcookie"
           #      X socket (link to /tmp/.X11-unix in dockerrc)
-          Dockercommand="$Dockercommand -v $Newxsocket:/tmp/X$(echo $Newdisplay | cut -d: -f2 | cut -d. -f1):rw"
+          Dockercommand="$Dockercommand \\
+  -v $Newxsocket:/tmp/X$(echo $Newdisplay | cut -d: -f2 | cut -d. -f1):rw"
         ;;
       esac
       #          WAYLAND_DISPLAY
       [ "$Sharewayland" = "yes" ] && {   # option --sharewayland: Share wayland socket
         [ -n "$Waylandsocket" ] && {
-          Dockercommand="$Dockercommand -e WAYLAND_DISPLAY=$Waylandsocket"
-          Dockercommand="$Dockercommand -v $XDG_RUNTIME_DIR/$Waylandsocket:/tmp/$Waylandsocket:ro"
+          Dockercommand="$Dockercommand \\
+  -e WAYLAND_DISPLAY=$Waylandsocket"
+          Dockercommand="$Dockercommand \\
+  -v $XDG_RUNTIME_DIR/$Waylandsocket:/tmp/$Waylandsocket:ro"
         } 
       }
       
       ## option --gpu : share graphics adapter device files ### SECURITY: degrades container isolation
-      [ "$Gpu" = "yes" ] && Dockercommand="$Dockercommand --device=/dev/dri:/dev/dri:rw"
+      [ "$Gpu" = "yes" ]           && Dockercommand="$Dockercommand \\
+  --device=/dev/dri:/dev/dri:rw"
       ## option '--pulseaudio': provide pulseaudio server
-      [ "$Pulseaudio" = "yes" ] && Dockercommand="$Dockercommand -e PULSE_SERVER=tcp:$Dockerip:$Pulseaudiotcpport"
+      [ "$Pulseaudio" = "yes" ]    && Dockercommand="$Dockercommand \\
+  -e PULSE_SERVER=tcp:$Dockerip:$Pulseaudiotcpport"
       ## options --ipc and --net
-      [ "$Shareipc" = "yes" ]   && Dockercommand="$Dockercommand --ipc=host"
-      [ "$Sharenet" = "yes" ]   && Dockercommand="$Dockercommand --net=host"
+      [ "$Shareipc" = "yes" ]      && Dockercommand="$Dockercommand \\
+  --ipc=host"
+      [ "$Sharenet" = "yes" ]      && Dockercommand="$Dockercommand \\
+  --net=host"
+      [ "$Internetaccess" = "no" ] && Dockercommand="$Dockercommand \\
+  --net=none"
         
       # add custom docker arguments, imagename and imagecommand
-      Dockercommand="$Dockercommand $Dockeroptions"
+      Dockercommand="$Dockercommand \\
+  $Dockeroptions"
       case $Sudouser in
-        no)  Dockercommand="$Dockercommand -- $Imagename /bin/sh $Cshare/x11docker_CMD" ;;
-        yes) Dockercommand="$Dockercommand -- $Imagename /bin/sh $Cshare/createsudouser" ;;
+        no)  Dockercommand="$Dockercommand  --  $Imagename /bin/sh $Cshare/x11docker_CMD" ;;
+        yes) Dockercommand="$Dockercommand  --  $Imagename /bin/sh $Cshare/createsudouser" ;;
       esac
     ;;
   esac
@@ -2793,14 +2849,15 @@ done
   # create script that needs root permissions or docker group membership to use docker.
   # This is the part the password prompt / $Getroot is needed for.
   echo "#! /bin/bash"
-  declare -f warning
+  declare -f waitforfilecreation
   echo "export \$(dbus-launch)"
   echo "Imagename='$Imagename'"
   echo "Imagecommand='$Imagecommand'"
   echo "# check if image is available locally"
   echo "$Sudo docker inspect --type=image $Imagename > /dev/null 2>&1 || {"
-  echo "  warning 'Image $Imagename not found locally.'"
+  [ "$Pullterminal" = "$Passwordterminal" ] && Pullterminal=""
   echo "  $Pullterminal /bin/bash $Pullrc"
+  echo "  waitforfilecreation $Cachefolder/pullready"
   echo "  $Sudo docker inspect --type=image $Imagename > /dev/null 2>&1 || {"
   echo "    echo \"ERROR: Image '$Imagename' not found locally and not pulled from docker hub. \" >&2"
   echo "    exit 1"
@@ -2820,7 +2877,7 @@ done
     echo "Entrypoint=\${Entrypoint#/bin/sh -c }"
     echo "Entrypoint=\${Entrypoint%]}"
   }
-  echo "[ -z \"\$Imagecommand\$Entrypoint\" ] && warning 'No image command specified and no CMD or ENTRYPOINT found in image.'"
+  echo "[ -z \"\$Imagecommand\$Entrypoint\" ] && echo 'x11docker WARNING: No image command specified and no CMD or ENTRYPOINT found in image.'|tee $Logfile"
   [ "$Dbuslaunch" = "yes" ] && echo 'Dbus=dbus-launch' || echo "Dbus=''"
   echo ""
   echo "# create x11docker_CMD (shared with container and given as image command on docker run)"
@@ -2881,20 +2938,31 @@ done
 
 { #### part: create pullrc: interactive script to pull image from docker hub
   echo "#! /bin/bash"
+  echo "touchpullready() {"
+  echo "  $Mksu 'touch $Cachefolder/pullready'"
+  echo "}"
+  echo "trap touchpullready EXIT"
+  echo "echo ''"
   echo "read -n1 -e -p \"Image '$Imagename' not found locally. "
   echo "Do you want to pull it from docker hub? [Y|n]\" Choice"
   echo "[[ \"\$Choice\" == [YyJj]* ]] || [ -z \"\$Choice\" ] && $Sudo docker pull $Imagename 2>&1"
   echo "sleep 2"
+  echo "exit"
 } >> $Pullrc
 
 { #### part: create xtermrc: prompt for password and run dockerrc
-  echo "#! /bin/bash
-echo \"Created docker command for $Imagename $Imagecommand:
-
-$Dockercommand
-\" >&2"
-  [ "$Getroot" = "bash -c" ] || [ "$(echo "$Getroot" | cut -c 1-4)" = "gksu" ] || echo "echo 'Please type in your password to run docker on display $Newdisplay' >&2"
+  echo "#! /bin/bash"
+  echo "touchxtermready() {"
+  echo "  $Mksu 'touch $Cachefolder/xtermready'"
+  echo "}"
+  echo "trap touchxtermready EXIT"
+  echo "echo -e \"Created docker command for $Imagename $Imagecommand:"
+  echo ""
+  echo "$(echo $Dockercommand | sed 's,\\,\\\\ \n,g')"
+  echo "\""
+  [ "$Getroot" = "bash -c" ] || echo "echo 'Please type in your password to run docker on display $Newdisplay'"
   echo "$Getroot \"${Pkexec}env DISPLAY=\$DISPLAY XAUTHORITY=\$XAUTHORITY bash $Dockerrc\""
+  echo "exit"
 } >> $Xtermrc
 
 { #### part: create xinitrc: set up X environment, create cookies
@@ -3249,7 +3317,7 @@ $(tail $Xinitlogfile)"
       export XPRA_OPENGL_DOUBLE_BUFFERED=1 # avoid xpra resizing window bug in older versions http://xpra.org/trac/ticket/1469
       export $Newxenv
       $Mksu "$Xpraservercommand" >> $Xpraserverlogfile 2>&1 &
-      storepid $! xpra
+      storepid $! xpraserver
       waitforlogentry "xpra server" $Xpraserverlogfile 'xpra is ready' && verbose "xpra server is ready" || error "Xpra server startup failed.
   Last lines of Xpra server log:
 $(tail $Xpraserverlogfile)"
@@ -3259,7 +3327,7 @@ $(tail $Xpraserverlogfile)"
       export XPRA_PADDING_COLORS="0,0.2,1"
       $Mksu "$Xpraclientcommand" >> $Xpraclientlogfile 2>&1 &
       Xpraclientpid=$!
-      storepid $Xpraclientpid xpra
+      storepid $Xpraclientpid xpraclient
       { # watch for closing xpra client
         while ps -p $Xpraclientpid >/dev/null && [ ! -e "$Timetosaygoodbye" ] ; do sleep 1 ; done
         $Mksu "touch $Timetosaygoodbye"
@@ -3301,12 +3369,15 @@ $(tail $Xpraserverlogfile)"
       [ -n "$DISPLAY" ] && case $Passwordprompt in
         su|sudo)
           [ "$Passwordterminal" = "bash -c" ] && Passwordterminal=""
-          $Passwordterminal  /bin/bash $Xtermrc  >> $Xtermlogfile 2>&1 
+          $Passwordterminal  /bin/bash $Xtermrc  >> $Xtermlogfile 2>&1
         ;;
-        *)       $Passwordterminal "/bin/bash $Xtermrc" >> $Xtermlogfile 2>&1 ;;
+        *)
+          $Passwordterminal "/bin/bash $Xtermrc" >> $Xtermlogfile 2>&1
+        ;;
       esac
       [ -z "$DISPLAY" ] && $Passwordterminal "/bin/bash $Xtermrc"
-        
+      waitforfilecreation $Cachefolder/xtermready infinity
+      
       [ -s "$Dockerpidfile" ] && { 
         Dockerpid=$(cat $Dockerpidfile)
         ps -p $Dockerpid >/dev/null 2>&1 || [ "$Xserver" = "Nothing" ] || error "Docker startup seems to have failed! 
