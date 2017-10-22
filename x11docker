@@ -8,9 +8,11 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.6.3"
+Version="3.6.3.1"
 
 changelog() {
+# 23.10.2017 V3.6.3.1   bugfix: don't use su $USER in xinitrc
+# 20.10.2017            split X server command with \backslash in multiple lines
 # 20.10.2017 V3.6.3     allow gnome-terminal / self-forking terminals in general
 # 19.10.2017            --no-internet: new option to disable internet access
 #                       split docker command with \backslash in multiple lines
@@ -68,8 +70,12 @@ changelog() {
   : 
 }
 todo() {
+# development of --driver:
+#          - check vesa
+#          - check multiple graphics cards
+#          - xserver-xorg-video-all in image?
+#          - option --exp to allow experimental options
 # further checks on centos 7, manjaro and mageia
-# check --dpi settings for --xpra --desktop with different xpra versions, wrong on centos
 
 # check all FIXME 
 # new option --printer: xpra printer forwarding?
@@ -333,7 +339,7 @@ error() {               # show error messages on stderr and exit
   echo "
 $(tput setaf 1)x11docker ERROR$(tput sgr0) $Message
 " >&3
-  [ -n "$Hostxenv" ] && [ "$Xserver" != "Xorg" ] && local $Hostxenv
+  [ -n "$Hostxenv" ] && [ "$Xserver" != "Xorg" ] && [ "$Xserver" != "Xorg-Dri" ] && export $Hostxenv
   [ ! -s "$Timetosaygoodbye" ] && [ "$Silent" != "yes" ] && [ -n "$DISPLAY" ] && {
     command -v xmessage >/dev/null && {
       echo "x11docker ERROR: $Message" | xmessage -file - -default okay
@@ -770,8 +776,8 @@ Xpraserverlogfile=xpraserver.log                # logfile for xpra server
 Xpraclientlogfile=xpraclient.log                # logfile for xpra server
 Westonini=weston.ini                            # config file for weston
 Customwestonini=""                              # custom config file for weston
-Xdummyconf=xdummy.xorg.conf                     # xorg.conf for dummy video driver
-Xdummywrapper=Xdummywrapper                     # fork from xpra to wrap Xorg for Xdummy
+Xorgconf=xorg.conf                              # xorg.conf for dummy video driver
+Xorgwrapper=Xorgwrapper                         # fork from xpra to wrap Xorg for Xdummy
 Xservercookie=Xservercookie                     # file to store new X server cookies
 Xclientcookie=Xclientcookie                     # file to store new X client cookies
 
@@ -805,6 +811,7 @@ Nxagentoptions=""                               # options for nxagent
 Xephyroptions=""                                # options for Xephyr
 Xephyrglamor="yes"                              # former option '--glamor': enable Xephyr glamor 2D acceleration (deprecated, now always yes)
 Xfishtank="no"                                  # --fish: xfishtank on new X server
+Videodriver=""                                  # --driver: specify video driver for --xorg
 
 # Main X server options
 Autochooseserver="yes"                          # option '--auto': automated choosing server
@@ -870,6 +877,11 @@ Sharenet="no"                                   # option --net, set --ipc=net
 Preservecachefiles="no"                         # if yes, dont delete cache files
 Preservecontainer="no"                          # option '-p, --ps': if yes, preserve container instead of removing it with 'docker run --rm'
 
+# Experimental options
+Experimental="no"                               # option --exp: allowexperimental options
+Videodriver=""                                  # option --driver: choose custom video driver for --xorg
+Videocard=""
+
 # X authentication
 Xauthentication="yes"                           # option '--no-auth' use cookie authentication yes/no
 Trusted="yes"                                   # create trusted or untrusted cookies, see --trusted and --untrusted. Important for --hostdisplay and --kwin-native
@@ -926,6 +938,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
   Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,env:,showenv,sharewayland,stdout,stderr,silent"                    # developer options
   Longoptions="$Longoptions,ipc,net,ps,cache,cap-default,no-entrypoint,sudouser,hostuser:,rw"                              # developer options
   Longoptions="$Longoptions,cachedir:,homedir:,westonini:,sharedir:"                                                       # developer options
+  Longoptions="$Longoptions,exp,driver:"                                                                                   # experimental options
   Longoptions="$Longoptions,xsocket,tcp,tcpxsocket,virtualgl,glamor,volume:,xhost+,resizeable,orphaned"                    # deprecated
   Longoptions="$Longoptions,xpra-image,xpra-attach,xorg-image,xdummy-image,nopwd,no-password,root,sudo"                    # deprecated
 
@@ -1056,6 +1069,10 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
       --cleanup)       Checkorphaned="yes"  ;;             # check for orphaned containers and files owned by root, created by docker)
       --orphaned)      Checkorphaned="yes" ; note "Option '--orphaned' is now called '--cleanup'." ;;
       --install|--update|--remove) Installermode="${1:-}" ;;   # installer
+
+     #### experimental options in development, don't use them.
+        --exp)        Experimental="yes" ;;               # allow experimental options
+        --driver)     Videodriver=${2:-} ; shift ;;       # custom video driver for --xorg
 
      #### depracated
       --virtualgl|--tcpxsocket|--xsocket|--tcp|--cache)                         note "Option ${1:-} is deprecated and has no effect now." ;; 
@@ -1418,8 +1435,15 @@ Parsed options: $Parsedoptions"
     Xserver="Xorg"
   }
   
+  [ -n "$Videodriver" ] && [ "$Xserver" != "Xorg" ] && {
+    warning "Option --driver only works with --xorg.
+  Fallback: disabling option --driver, using $Xserver"
+    Videodriver=""
+  } 
+  [ -n "$Videodriver" ] && Xserver="Xorg-Dri"
+  
   case $Xserver in 
-    Xorg|Xdummy)
+    Xorg|Xorg-Dri|Xdummy)
       command -v "Xorg" >/dev/null 2>&1 || error "Could not find executable 'Xorg'." ;;
   esac
   [ "$Xserver" = "Xorg" ] && {
@@ -1459,9 +1483,8 @@ Parsed options: $Parsedoptions"
 }
 
 { #### part: check multiple option interferences
-
   [ "$Desktopmode" = "no" ] && [ -z "$Windowmanager" ] && case $Xserver in
-    Xephyr|Weston-Xwayland|Kwin-Xwayland|Xorg|Xwayland) Windowmanager="auto" ;;
+    Xephyr|Weston-Xwayland|Kwin-Xwayland|Xorg|Xorg-Dri|Xwayland) Windowmanager="auto" ;;
   esac
   
   [ "$Xserver" = "Hostdisplay" ] && [ "$Autochooseserver" = "yes" ] && warning "To allow protection against X security leaks,
@@ -1575,7 +1598,7 @@ Parsed options: $Parsedoptions"
   
   [ "$Fullscreen" = "yes" ] && {
     case $Xserver in
-      Xephyr|Weston|Weston-Xwayland|Nxagent|Xdummy|Xdummy-Xwayland|Xvfb|Xorg|Xpra|Xpra-Xwayland) ;;
+      Xephyr|Weston|Weston-Xwayland|Nxagent|Xdummy|Xdummy-Xwayland|Xvfb|Xorg|Xorg-Dri|Xpra|Xpra-Xwayland) ;;
       *) note "$Xserver does not support option --fullscreen" ;;
     esac
   }
@@ -1589,7 +1612,7 @@ Parsed options: $Parsedoptions"
           Scaling="0"
         }
       ;;
-      Xpra|Xpra-Xwayland|Xorg)
+      Xpra|Xpra-Xwayland|Xorg|Xorg-Dri)
         isnum $Scaling || {
           note "Option --scale needs a number. '$Scaling' is not allowed.
   Fallback: disabling option --scale"
@@ -1626,7 +1649,7 @@ Parsed options: $Parsedoptions"
           }
         }
       ;;
-      Xorg) 
+      Xorg|Xorg-Dri) 
         [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] && [ -n "$Rotation" ] && note "--xorg does not work well with combination
   of --scale smaller than 1 and rotation diferent from 0."
       ;;
@@ -1635,7 +1658,7 @@ Parsed options: $Parsedoptions"
   
   [ -n "$Rotation" ] && {
     case $Xserver in
-      Weston|Weston-Xwayland|Xorg)
+      Weston|Weston-Xwayland|Xorg|Xorg-Dri)
         echo "0 90 180 270 flipped flipped-90 flipped-180 flipped-270" | grep -q "$Rotation" || {  # fuzzy test, have been lazy
           note "Unsupported value '$Rotation' for option --rotate. 
   Must be one of 0 90 180 270 flipped flipped-90 flipped-180 flipped-270"
@@ -1648,7 +1671,7 @@ Parsed options: $Parsedoptions"
   [ "$Rotation" = "0" ] && Rotation="normal"
   
   command -v xrandr >/dev/null || case $Xserver in
-    Xorg) { [ "$Scaling" != "0" ] || [ -n "$Rotation" ] || [ -n "$Screensize" ] ; } && warning "Option --xorg needs 'xrandr' to support
+    Xorg|Xorg-Dri) { [ "$Scaling" != "0" ] || [ -n "$Rotation" ] || [ -n "$Screensize" ] ; } && warning "Option --xorg needs 'xrandr' to support
   options --size, --scale and --rotate."
     ;;
   esac
@@ -1706,6 +1729,50 @@ Parsed options: $Parsedoptions"
         Xfishtank="no"
       ;;
     esac
+  }
+}
+
+{ #### part: check --driver: custom video driver for --xorg (experimental)
+  [ "$Experimental" = "no" ] && {
+    [ -n "$Videodriver" ] && {
+      warning "Caution: option --driver is experimental and not for 
+  regular use. To allow --driver, you must set option --exp, too.
+  Fallback: disabling option --driver."
+      Videodriver=""
+      Xserver="Xorg"
+    }
+  }
+  [ -n "$Videodriver" ] && {
+    [ "$Tty" = "no" ] && [ "$(id -un)" != "root" ] && warning "Startup of Xorg server with custom video driver may fail.
+  Please start from console or run x11docker as root"
+  
+    Videocard="$(lspci -nn | grep '\[03' | head -n1)"
+    echo $Videocard | grep -q -i ATI    && Videovendor="ATI"
+    echo $Videocard | grep -q -i AMD    && Videovendor="AMD"
+    echo $Videocard | grep -q -i Intel  && Videovendor="Intel"
+    echo $Videocard | grep -q -i Nvidia && Videovendor="Nvidia"
+    
+    [ "$Videodriver" = "auto" ] && {
+      case $Videovendor in
+        ATI)    Videodriver="ati" ;;
+        AMD)    Videodriver="radeon" ;;
+        Intel)  Videodriver="intel" ;;
+        Nvidia) Videodriver="nouveau" ;;
+        "") 
+          warning "Could not autodetect graphics card vendor.
+  Fallback: disabling option --driver" 
+          Xserver="Xorg"
+          Videodriver=""
+        ;;
+      esac
+    }
+    
+    warning "Option --driver is in development and  higly experimental.
+  In worst case you may destroy your monitor."
+    note "Detected graphics card:
+  $Videocard
+  Vendor: $Videovendor
+  Chosen driver: $Videodriver"
   }
 }
 
@@ -1782,7 +1849,7 @@ Parsed options: $Parsedoptions"
   }
   
   [ -z "$Screensize" ] && case $Xserver in
-    Xorg) ;;
+    Xorg|Xorg-Dri) ;;
     *) [ "$Tty" = "no" ] && Screensize="${Xaxis}x${Yaxis}" ;;
   esac
 
@@ -1809,7 +1876,7 @@ Parsed options: $Parsedoptions"
   [ -z "$Newdisplaynumber" ] && {
     # Look for next free display and change some display specific variables
     case $Xserver in                         # set initial value for searching
-      Xorg)                   Newdisplaynumber="8"   ;;
+      Xorg|Xorg-Dri)          Newdisplaynumber="8"   ;;
       Hostdisplay)            Newdisplaynumber="50"  ;; # dummy number to look for free cache folder, DISPLAY will be $Hostdisplay
       Xpra|Xpra-Xwayland)     Newdisplaynumber="100" ;;
       Xephyr)                 Newdisplaynumber="200" ;;
@@ -1863,8 +1930,8 @@ Parsed options: $Parsedoptions"
   Etcpasswd="$Cachefolder/$Etcpasswd"                       && mkfile $Etcpasswd
   #Etcgroup="$Cachefolder/$Etcgroup"
   Westonini="$Cachefolder/$Westonini"                       && mkfile $Westonini
-  Xdummyconf="$Cachefolder/$Xdummyconf"                     && mkfile $Xdummyconf
-  Xdummywrapper="$Cachefolder/$Xdummywrapper"               && mkfile $Xdummywrapper
+  Xorgconf="$Cachefolder/$Xorgconf"                         && mkfile $Xorgconf
+  Xorgwrapper="$Cachefolder/$Xorgwrapper"                   && mkfile $Xorgwrapper
   
   Logfile2="$Sharefolder/x11docker.log"                     && mkfile $Logfile2
   Logfile3="$Cacherootfolder/x11docker.log"
@@ -1903,7 +1970,7 @@ Parsed options: $Parsedoptions"
         note "$Xserver provides its own window management.
   Will not use another window manager from host." 
       ;;
-      Xephyr|Xorg|Xdummy|Xvfb|Xwayland|Weston-Xwayland|Nxagent|Xpra|Xpra-Xwayland|Xdummy-Xwayland|Kwin-Xwayland)
+      Xephyr|Xorg|Xorg-Dri|Xdummy|Xvfb|Xwayland|Weston-Xwayland|Nxagent|Xpra|Xpra-Xwayland|Xdummy-Xwayland|Kwin-Xwayland)
         # try to find out recommended window manager to use it for x11docker (i.e. run a new instance of it)
         [ -z "$Windowmanager" ] && [ -e "/etc/alternatives/x-window-manager" ] && Windowmanager=$(command -v $(ls -l /etc/alternatives/x-window-manager | cut -d ">" -f2))
         # try to find one in list
@@ -1989,7 +2056,7 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
 
 { #### part: create xorg.conf and Xorg wrapper for Xdummy (options --xdummy, --xpra)
   case $Xserver in
-    Xpra|Xdummy|Xorg)
+    Xpra|Xdummy)
       # create xorg.conf for Xdummy
       { echo '# This xorg configuration file is forked and changed from xpra to start a dummy X11 server.
 # For original and details, please see: https://xpra.org/Xdummy.html
@@ -2038,8 +2105,38 @@ Section "ServerLayout"
   Screen       "dummy_screen"
 EndSection
 ' 
-  } >> $Xdummyconf
-      # create starter script for Xdummy
+      } >> $Xorgconf
+    ;;
+    Xorg-Dri) # create xorg.conf for --xorg --driver
+      { echo '
+Section "Device"
+  Identifier "videocard"
+  Driver "'$Videodriver'"
+  BusID       "PCI:0:1:0"
+EndSection
+Section "Monitor"
+  Identifier "monitor"
+EndSection
+Section "Screen"
+  Identifier "screen"
+  Device "videocard"
+  Monitor "monitor"
+  SubSection "Display"
+    Viewport 0 0
+    Depth 24
+  EndSubSection
+EndSection
+Section "ServerLayout"
+  Identifier   "layout"
+  Screen   0    "screen" 0 0
+EndSection
+' 
+      } >> $Xorgconf
+    ;;
+  esac
+  case $Xserver in
+    Xpra|Xdummy|Xorg-Dri)
+      # create wrapper script for Xorg/Xdummy
       echo '#!/bin/sh
 #@PydevCodeAnalysisIgnore
 # fork of https://xpra.org/trac/browser/xpra/trunk/src/scripts/xpra_Xdummy
@@ -2131,22 +2228,23 @@ else
 	# setuid is not set on xorg_bin
 	exec "$XORG_BIN" "$@"
 fi
-' >> $Xdummywrapper    ;;
+' >> $Xorgwrapper    
+    ;;
   esac
 }
 
 { #### part: create command to start X server and/or Wayland compositor
   Xserveroptions="-nolisten tcp -dpms"
-  [ "$Xauthentication" = "yes" ] && Xserveroptions="$Xserveroptions -auth $Xservercookie"
   case $Xserver in
     Nxagent)
       { [ "$Shareipc" = "yes" ] || [ "$X11dockermode" = "exe" ] ; } && Xserveroptions="$Xserveroptions -shmem -shpix" || Xserveroptions="$Xserveroptions -noshmem -noshpix"
     ;;
     *)
-      Xserveroptions="$Xserveroptions +extension Composite +extension RANDR +extension RENDER +extension GLX +iglx +extension XVideo +extension DOUBLE-BUFFER"
-      Xserveroptions="$Xserveroptions -extension XINERAMA -xinerama"
-      Xserveroptions="$Xserveroptions -extension X-Resource +extension SECURITY +extension DAMAGE"
-      Xserveroptions="$Xserveroptions -retro"
+      Xserveroptions="$Xserveroptions -retro \\
++extension XVideo +extension DOUBLE-BUFFER \\
++extension Composite +extension RANDR +extension RENDER +extension GLX +iglx \\
+-extension XINERAMA -xinerama -extension X-Resource \\
++extension SECURITY +extension DAMAGE"
       { [ "$Shareipc" = "yes" ] || [ "$X11dockermode" = "exe" ] ; } && {
         Xserveroptions="$Xserveroptions +extension MIT-SHM"
       } || { 
@@ -2155,6 +2253,8 @@ fi
       }
     ;;
   esac
+  [ "$Xauthentication" = "yes" ] && Xserveroptions="$Xserveroptions \\
+-auth $Xservercookie"
   
   [ -n "$Windowmanager" ] && {
     case $Xserver in
@@ -2163,14 +2263,16 @@ fi
   on its own (for example, with a context menu), container applications
   could abuse this to run and remotly control host applications."
         ;;
-      Xdummy|Xdummy-Xwayland|Xvfb) Xserveroptions="$Xserveroptions +extension XTEST" && warning "Did not disable XTEST for invisible X server.
+      Xdummy|Xdummy-Xwayland|Xvfb) Xserveroptions="$Xserveroptions \\
++extension XTEST" && warning "Did not disable XTEST for invisible X server.
   If your host window manager $Windowmanager can start applications
   on its own (for example, with a context menu), container applications
   could abuse this to run and remotly control host applications.
   If you provide content of $Xserver over network to others,
   they may take control over your computer!"
         ;;
-      *) Xserveroptions="$Xserveroptions -tst -extension XTEST" ;;
+      *) Xserveroptions="$Xserveroptions \\
+-tst -extension XTEST" ;;
     esac
   }
   
@@ -2202,6 +2304,7 @@ fi
                 Dpi=${Dpi%.*}
               }
             }
+            [ "$Desktopmode" = "yes" ] && verlt "$Xpraversion" "xpra v2.2" && Dpi=""
           ;;
         esac
       }
@@ -2281,25 +2384,39 @@ $(tail "$Compositorlogfile")"
 
   case $Xserver in
     Xorg)
-      Xserveroptions="$Xserveroptions +extension XFree86-DRI +extension XFree86-DGA +extension XFree86-VidModeExtension"
-      Xserveroptions="$Xserveroptions -verbose"                  # make X verbose
       [ "$Tty" = "yes" ] && Xserveroptions="$Xserveroptions -keeptty"
-      Xcommand="$(command -v Xorg) $Newdisplay $Newxvt $Xserveroptions"
+      Xserveroptions="$Xserveroptions -verbose \\
++extension XFree86-DRI +extension XFree86-DGA +extension XFree86-VidModeExtension"
+      Xcommand="$(command -v Xorg) $Newdisplay $Newxvt \\
+$Xserveroptions"
+    ;;
+    Xorg-Dri) # special setup for --xorg with custom video driver (option --driver)
+      [ "$Tty" = "yes" ] && Xserveroptions="$Xserveroptions -keeptty"
+      Xserveroptions="$Xserveroptions -verbose \\
++extension XFree86-DRI +extension XFree86-DGA +extension XFree86-VidModeExtension"
+      Xcommand="$Xorgwrapper $Newdisplay $Newxvt \\
+-config $Xorgconf \\$Xserveroptions"
     ;;
     Xpra) # To use xpra, Xdummy will run first. xpra server uses it later. Use Xvfb if available.
       command -v Xvfb >/dev/null && {
-        Xcommand="$(command -v Xvfb) $Newdisplay $Xserveroptions -screen 0 ${Maxxaxis}x${Maxyaxis}x24"
+        Xcommand="$(command -v Xvfb) $Newdisplay -screen 0 ${Maxxaxis}x${Maxyaxis}x24 \\
+$Xserveroptions"
       } || {
-        Xcommand="$Xdummywrapper $Newdisplay $Newxvt -config $Xdummyconf $Xserveroptions"
+        Xcommand="$Xorgwrapper $Newdisplay $Newxvt \\
+-config $Xorgconf \\
+$Xserveroptions"
         note "Xvfb not found. Will try to use dummy video driver Xdummy.
   If you encounter xpra startup errors, please install 'Xvfb'."
       }
     ;;
     Xdummy)
-      Xcommand="$Xdummywrapper $Newdisplay $Newxvt -config $Xdummyconf $Xserveroptions"
+      Xcommand="$Xorgwrapper $Newdisplay $Newxvt \\
+-config $Xorgconf \\
+$Xserveroptions"
     ;;
     Xvfb)
-      Xcommand="$(command -v Xvfb) $Newdisplay $Xserveroptions -screen 0 ${Screensize}x24"   ### FIXME: static setting of depth 24. Could be better?
+      Xcommand="$(command -v Xvfb) $Newdisplay -screen 0 ${Screensize}x24 \\
+$Xserveroptions"   ### FIXME: static setting of depth 24. Could be better?
     ;;
     Xephyr)
       case $Fullscreen in
@@ -2307,10 +2424,14 @@ $(tail "$Compositorlogfile")"
         no)  for Count in $(seq 1 $Outputcount) ; do Xephyroptions="$Xephyroptions -screen $Screensize" ; done ;;
       esac
       [ "$Xephyrglamor" = "yes" ] && Xephyroptions="$Xephyroptions -glamor"      # deprecated option '--glamor'
-      Xcommand="$(command -v Xephyr) $Newdisplay $Xserveroptions $Xephyroptions -title '$Imagename on $Newdisplay (ctrl+shift grabs mouse and keyboard)'"
+      Xcommand="$(command -v Xephyr) $Newdisplay $Xephyroptions \\
+-title '$Imagename on $Newdisplay (ctrl+shift grabs mouse and keyboard)' \\
+$Xserveroptions"
       command -v Xephyr >/dev/null || {
         # Fallback: Xnest
-        Xcommand="$(command -v Xnest) $Newdisplay -geometry $Screensize -scrns $Outputcount $Xserveroptions -name '$Imagename on $Newdisplay'"
+        Xcommand="$(command -v Xnest) $Newdisplay -geometry $Screensize -scrns $Outputcount \\
+ -name '$Imagename on $Newdisplay' \\
+$Xserveroptions"
         note "Xephyr not found. Fallback: using Xnest.
   Xnest is less stable and has less features than Xephyr.
   For example, it misses RandR and Composite extensions and fullscreen mode.
@@ -2318,13 +2439,15 @@ $(tail "$Compositorlogfile")"
       }
     ;;
     Xwayland) 
-      Xcommand="$(command -v Xwayland) $Newdisplay $Xserveroptions"
+      Xcommand="$(command -v Xwayland) $Newdisplay \\
+$Xserveroptions"
       Waylandsocket="$Hostwayland"
     ;;
     Xpra-Xwayland|Xdummy-Xwayland)
 #      [ "$Desktopmode" = "yes" ] && [ "$Xserver" != "Xpra-Xwayland" ] && Xserveroptions="$Xserveroptions -rootless" 
 #      [ "$Xserver" = "Xdummy-Xwayland" ] && Xserveroptions="$Xserveroptions -rootless" 
-      Xcommand="$(command -v Xwayland) $Newdisplay $Xserveroptions"
+      Xcommand="$(command -v Xwayland) $Newdisplay \\
+$Xserveroptions"
       [ -z "$Hostwayland" ] && Waylandsocket="wayland-$Newdisplaynumber" || {
         Waylandsocket="$Hostwayland"
         [ "$Scaling" != "0" ] && [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] && Waylandsocket="wayland-$Newdisplaynumber"
@@ -2343,7 +2466,8 @@ $(tail "$Compositorlogfile")"
       esac
     ;;
     Weston|Weston-Xwayland)
-      [ "$Xserver" = "Weston-Xwayland" ] && Xcommand="$(command -v Xwayland) $Newdisplay $Xserveroptions"
+      [ "$Xserver" = "Weston-Xwayland" ] && Xcommand="$(command -v Xwayland) $Newdisplay \\
+$Xserveroptions"
       [ "$Xserver" = "Weston" ]          && Sharewayland="yes"
       Waylandsocket="wayland-$Newdisplaynumber"
       [ -n "$Westonoutput" ] && for Count in $(seq 1 $Outputcount) ; do
@@ -2365,7 +2489,8 @@ mode=$Screensize
       [ "$Outputcount" = "1" ]  || Compositorcommand="$Compositorcommand --output-count=$Outputcount"
     ;;
     Kwin-Xwayland)
-      Xcommand="$(command -v Xwayland) $Newdisplay $Xserveroptions"
+      Xcommand="$(command -v Xwayland) $Newdisplay \\
+$Xserveroptions"
       Waylandsocket="wayland-$Newdisplaynumber"
       Compositorcommand="kwin_wayland --xwayland --socket=$Waylandsocket --width=$Xaxis --height=$Yaxis --output-count=$Outputcount" 
       [ "$Tty" = "yes" ] && Compositorcommand="$Compositorcommand --drm"
@@ -2466,7 +2591,7 @@ esac
 { #### part: create $Newxenv and $Hostxenv: Environment variables
   # Environment variables for host X and for container X
   case $Xserver in
-    Xpra|Xephyr|Xpra-Xwayland|Weston-Xwayland|Hostdisplay|Xorg|Xdummy|Xvfb|Xdummy-Xwayland|Xwayland|Kwin-Xwayland|Kwin-Native|Nxagent)
+    Xpra|Xephyr|Xpra-Xwayland|Weston-Xwayland|Hostdisplay|Xorg|Xorg-Dri|Xdummy|Xvfb|Xdummy-Xwayland|Xwayland|Kwin-Xwayland|Kwin-Native|Nxagent)
       Newxenv="DISPLAY=$Newdisplay"
       [ "$Xauthentication" = "yes" ] && Newxenv="$Newxenv XAUTHORITY=$Xclientcookie" || Newxenv="$Newxenv XAUTHORITY=  " 
       Newxenv="$Newxenv XSOCKET=$Newxsocket"
@@ -2519,7 +2644,7 @@ esac
     Nothing|Weston|Hostwayland|Kwin) Shareclipboard="no" 
       note "Option --clipboard is not supported for $Xserver" ;;
     Nxagent) ;; # look at "create command to start X server", nxagent has its own clipboard management
-    Xephyr|Xorg|Xdummy|Xdummy-Xwayland|Xvfb|Xwayland|Weston-Xwayland)
+    Xephyr|Xorg|Xorg-Dri|Xdummy|Xdummy-Xwayland|Xvfb|Xwayland|Weston-Xwayland)
       command -v xclip >/dev/null && {
         echo "#! /bin/bash
 # share clipboard between X servers $Hostdisplay and $Newdisplay
@@ -2967,7 +3092,7 @@ done
 
 { #### part: create xinitrc: set up X environment, create cookies
   echo "#! /bin/sh"
-
+echo "set -x"
   # declaring functions echoes them into xinitrc
   declare -f storepid
   declare -f no_xhost 
@@ -3001,7 +3126,6 @@ done
           echo "cp $Xclientcookie $Xclientcookie.bak   # workaround cookie was created before starting xinit" 
           echo "export XAUTHORITY=$Xclientcookie.bak"
         }
-        echo ':> '$Xclientcookie
         [ "$Trusted" = "yes" ] && Trusted="trusted" || Trusted="untrusted" 
         echo "xauth -v -f $Xclientcookie generate $Newdisplay . $Trusted timeout 3600"
         echo "[ -s '$Xclientcookie' ] || { "
@@ -3042,7 +3166,7 @@ done
       [ "$Xserver" = "Hostdisplay" ] || {
         [ -n "$Xhost" ] && {
           echo "verbose 'custom xhost setting (option --xhost): $Xhost'"
-          echo "$Xhost" 
+          echo "$Mksu '$Xhost'" 
         }  || {
           echo "verbose 'disabling any possible access to new X server possibly granted by xhost'"
           echo "no_xhost"
@@ -3068,7 +3192,7 @@ done
   [ "$Sharewayland"  = "yes" ] &&       [ -n "$Waylandsocket" ]    && echo "export WAYLAND_DISPLAY=$Waylandsocket"
   
   case $Xserver in
-    Xephyr|Xorg)
+    Xephyr|Xorg|Xorg-Dri)
       [ -n "$Hostdisplay" ] && {
         echo "# set keyboard layout in $Xserver to same as on host"
         echo "echo '$(setxkbmap -display $Hostdisplay -print)' | xkbcomp - $Newdisplay"
@@ -3098,7 +3222,7 @@ done
       echo "xrandr --addmode \$Output $(echo $Modeline | cut -d " " -f1)"
       echo "xrandr --output  \$Output --mode $(echo $Modeline | cut -d " " -f1)"
     ;;
-    Xorg) # --xorg: --scale, --size, --rotate
+    Xorg|Xorg-Dri) # --xorg: --scale, --size, --rotate
       [ -z "$Screensize" ] && {
         echo "# determine screen size"
         echo "getscreensize"
@@ -3170,10 +3294,10 @@ done
   echo 'verbose "Output of xrandr on '$Newdisplay''
   echo '$(xrandr)"'
 
-  [ "$Xfishtank" = "yes" ] && echo "xfishtank & storepid \$! xfishtank"
+  [ "$Xfishtank" = "yes" ] && echo "$Mksu xfishtank & storepid \$! xfishtank"
   [ -n "$Windowmanager" ] && {
     echo "verbose 'starting host window manager $Windowmanager on new display'"
-    echo "$Windowmanager & storepid \$! windowmanager"
+    echo "$Mksu '$Windowmanager' & storepid \$! windowmanager"
   }
   
   echo "touch $Cachefolder/Xready"
@@ -3361,7 +3485,7 @@ $(tail $Xpraserverlogfile)"
     run)
       # prefer asking for password on host X
       case $Xserver in
-        Xorg) export $Newxenv ;;
+        Xorg|Xorg-Dri) export $Newxenv ;;
         *)  [ -n "$Hostdisplay" ] && export $Hostxenv || export $Newxenv ;;
       esac
 
@@ -3417,6 +3541,9 @@ $(tail $Xtermlogfile)"
   case $Xserver in
     Xorg|Xpra|Xephyr|Xdummy|Xvfb|Xwayland)
       $Mksu                                              "xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1" 
+    ;;
+    Xorg-Dri)
+      bash -c                                            "xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1"
     ;;
     Nxagent)
       xhost +SI:localuser:$Hostuser >/dev/null # will be disabled in xinitrc. Nxagent can't divide between host XAUTHORITY and its own with --auth
