@@ -100,11 +100,12 @@ x11docker checks dependencies for chosen options on startup and shows terminal m
 Basics:
  - If no additional X server is installed, only less isolated option `--hostdisplay` will work out of the box within X, and option `--xorg` from console. (To use `--xorg` within X, look at [setup for option --xorg](#setup-for-option---xorg)).
  - As a well working base for convenience and security, it is recommended to install `xpra` and `Xephyr`. (On Ubuntu also `Xvfb`). It is recommended to use latest stable xpra version from [http://xpra.org](http://xpra.org/).
- - Already installed on most systems with an X server: `xrandr`, `xauth` and `xdotool`.
+ - Already installed on most systems with an X server: `xrandr`, `xauth` and `xdpyinfo`.
  
 Advanced usage:
  - Hardware acceleration with option `--gpu`
    - Beside `xpra`, also install `Xwayland`, `weston` and `xdotool`. (Not needed for `--xorg` and `--hostdisplay`)
+   - Works best with open source drivers on host and OpenGL (mesa) in image. With closed source drivers on host, you need the very same driver version in image.
    - Applications in image should already have installed their OpenGL dependencies. If not, install `libgl1-mesa-glx libglew2.0 libglu1-mesa libgl1-mesa-dri libdrm2 libgles2-mesa libegl1-mesa libxv1` in image (debian package names).
  - For sound with option `--pulseaudio`, install `pulseaudio` on host and in image. 
  - For clipboard sharing with `--clipboard` install `xclip`.
