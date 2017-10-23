@@ -108,7 +108,8 @@ Advanced usage:
    - Works best with open source drivers on host and OpenGL/Mesa in image. With closed source drivers on host, you need the very same driver version in image.
    - Packages for OpenGL/Mesa in image:
      - debian images: `mesa-utils mesa-utils-extra`.
-     - centos images: `mesa-glx-utils mesa-dri-drivers`
+     - CentOS and fedora images: `glx-utils mesa-dri-drivers`
+     - Arch Linux images: `mesa-demos`
  - For sound with option `--pulseaudio`, install `pulseaudio` on host and in image. 
  - For clipboard sharing with `--clipboard` install `xclip`.
  - Rarer needed dependencies for special options:
