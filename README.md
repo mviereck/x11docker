@@ -105,8 +105,10 @@ Basics:
 Advanced usage:
  - Hardware acceleration with option `--gpu`
    - Beside `xpra`, also install `Xwayland`, `weston` and `xdotool`. (Not needed for `--xorg` and `--hostdisplay`)
-   - Works best with open source drivers on host and OpenGL (mesa) in image. With closed source drivers on host, you need the very same driver version in image.
-   - Applications in image should already have installed their OpenGL dependencies. If not, install `libgl1-mesa-glx libglew2.0 libglu1-mesa libgl1-mesa-dri libdrm2 libgles2-mesa libegl1-mesa libxv1` in image (debian package names).
+   - Works best with open source drivers on host and OpenGL/Mesa in image. With closed source drivers on host, you need the very same driver version in image.
+   - Packages for OpenGL/Mesa in image:
+     - debian images: `mesa-utils mesa-utils-extra`.
+     - centos images: `mesa-glx-utils mesa-dri-drivers`
  - For sound with option `--pulseaudio`, install `pulseaudio` on host and in image. 
  - For clipboard sharing with `--clipboard` install `xclip`.
  - Rarer needed dependencies for special options:
