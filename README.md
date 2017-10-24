@@ -111,7 +111,7 @@ Advanced usage:
      - CentOS and fedora images: `glx-utils mesa-dri-drivers`
      - Arch Linux images: `mesa-demos`
  - For **sound** with option `--pulseaudio`, install `pulseaudio` on host and in image. 
- - For **clipboard** sharing with `--clipboard` install `xclip`. (Not needed for --xpra, --nxagent, --hostdisplay and --xorg).
+ - For **clipboard** sharing with `--clipboard` install `xclip`. (Not needed for `--xpra`, `--nxagent` and `--hostdisplay`).
  - Rarer needed dependencies for special options:
    - `--nxagent` provides a fast and lightweight alternative to `xpra` and `Xephyr`. Needs [`nxagent`](https://packages.debian.org/experimental/nxagent) to be installed.
    - `--kwin`, `--kwin-native` and `--kwin-xwayland` need `kwin_wayland`, included in modern `kwin` packages.
