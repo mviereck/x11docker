@@ -99,19 +99,19 @@ x11docker checks dependencies for chosen options on startup and shows terminal m
 
 Basics:
  - If no additional X server is installed, only less isolated option `--hostdisplay` will work out of the box within X, and option `--xorg` from console. (To use `--xorg` within X, look at [setup for option --xorg](#setup-for-option---xorg)).
- - As a well working base for convenience and security, it is recommended to install `xpra` and `Xephyr`. (On Ubuntu also `Xvfb`). It is recommended to use latest stable xpra version from [http://xpra.org](http://xpra.org/).
+ - As a **well working base** for convenience and security, it is recommended to install `xpra` and `Xephyr`. (On Ubuntu also `Xvfb`). It is recommended to use latest stable xpra version from [http://xpra.org](http://xpra.org/).
  - Already installed on most systems with an X server: `xrandr`, `xauth` and `xdpyinfo`.
  
 Advanced usage:
- - Hardware acceleration with option `--gpu`
+ - **Hardware acceleration** with option `--gpu`
    - Beside `xpra`, also install `Xwayland`, `weston` and `xdotool`. (Not needed for `--xorg` and `--hostdisplay`)
    - Works best with open source drivers on host and OpenGL/Mesa in image. With closed source drivers on host, you need the very same driver version in image.
    - Packages for OpenGL/Mesa in image:
      - debian images: `mesa-utils mesa-utils-extra`.
      - CentOS and fedora images: `glx-utils mesa-dri-drivers`
      - Arch Linux images: `mesa-demos`
- - For sound with option `--pulseaudio`, install `pulseaudio` on host and in image. 
- - For clipboard sharing with `--clipboard` install `xclip`.
+ - For **sound** with option `--pulseaudio`, install `pulseaudio` on host and in image. 
+ - For **clipboard** sharing with `--clipboard` install `xclip`. (Not needed for --xpra, --nxagent, --hostdisplay and --xorg).
  - Rarer needed dependencies for special options:
    - `--nxagent` provides a fast and lightweight alternative to `xpra` and `Xephyr`. Needs [`nxagent`](https://packages.debian.org/experimental/nxagent) to be installed.
    - `--kwin`, `--kwin-native` and `--kwin-xwayland` need `kwin_wayland`, included in modern `kwin` packages.
