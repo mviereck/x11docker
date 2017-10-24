@@ -8,10 +8,12 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.6.3.3"
+Version="3.6.3.5"
 
 changelog() {
-# 23.10.2017            add /usr/sbin to PATH, needed on mageia for ip
+# 24.10.2017 V3.6.3.5   bugfix xpra with host user root: set environment variables
+#                       dbus-launch for konsole and terminator, needed in dockerrc
+# 23.10.2017 V3.6.3.4   add /usr/sbin to PATH, needed on mageia for ip
 #                       bugfix --pw=sudo: 'setsid sudo' fails, must use 'sudo setsid'
 # 23.10.2017 V3.6.3.3   removed experimental Code 
 #                       bugfix for --wm as root in xinitrc
@@ -76,6 +78,8 @@ changelog() {
 }
 todo() {
 # further checks on centos 7, manjaro and mageia
+# faster calculation of Xdummy resolutions
+# xpra showconfig is quite slow and called two times
 
 # check all FIXME 
 # new option --printer: xpra printer forwarding?
@@ -1996,7 +2000,7 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
 
 { #### part: create xorg.conf and Xorg wrapper for Xdummy (options --xdummy, --xpra)
   case $Xserver in
-    Xpra|Xdummy|Xorg)
+    Xpra|Xdummy)
       # create xorg.conf for Xdummy
       { echo '# This xorg configuration file is forked and changed from xpra to start a dummy X11 server.
 # For original and details, please see: https://xpra.org/Xdummy.html
@@ -2236,7 +2240,7 @@ fi
       [ "$Scaling" != "0" ] && Xpraoptions="$Xpraoptions --desktop-scaling=$Scaling"
       
       # show xpra keyboard shortcuts
-      Line=$(xpra showconfig | grep "key-shortcut" | head -n1 | cut -d= -f2-)
+      Line=$($Mksu 'xpra showconfig' | grep "key-shortcut" | head -n1 | cut -d= -f2-)
       note "Xpra keyboard shortcuts:
 $(while [ -n "$Line" ] ; do
     echo $Line | cut -d"'" -f2
@@ -2302,6 +2306,10 @@ $(tail "$Compositorlogfile")"
       [ "$Tty" = "yes" ] && Xserveroptions="$Xserveroptions -keeptty"
       Xcommand="$(command -v Xorg) $Newdisplay $Newxvt \\
   $Xserveroptions"
+      warning "Although x11docker starts Xorg as unprivileged user,
+  most system setups wrap Xorg to give it root permissions (setuid).
+  Evil containers may try to abuse this.
+  Other x11docker X server options like --xephyr are more secure at this point."
     ;;
     Xpra) # To use xpra, Xdummy will run first. xpra server uses it later. Use Xvfb if available.
       command -v Xvfb >/dev/null && {
@@ -2637,7 +2645,7 @@ done
   command -v $(echo $Getroot|cut -d' ' -f1) >/dev/null || error "Password prompt frontend $(echo $Getroot|cut -d' ' -f1) not found"
 }
 
-{ #### part: check terminal for password prompt of su or  sudo and for 'docker pull'
+{ #### part: check terminal for password prompt of su or sudo and for 'docker pull'
   # $Passwordterminal:  To prompt for su or sudo password
   # $Pullterminal:      To show output of "docker pull"
   
@@ -2670,8 +2678,8 @@ done
   case $Pullterminal in
     xfce4-terminal) Pullterminal="$Pullterminal --disable-server -x" ;;
     gnome-terminal) Pullterminal="dbus-launch $Pullterminal -x" ;;
-    terminator)     Pullterminal="$Pullterminal --no-dbus -x" ;;
-    konsole)        Pullterminal="$Pullterminal --nofork -e" ;;
+    terminator)     Pullterminal="dbus-launch $Pullterminal --no-dbus -x" ;;
+    konsole)        Pullterminal="dbus-launch $Pullterminal --nofork -e" ;;
     *)              Pullterminal="$Pullterminal -e" ;;
   esac
   [ -z "$Passwordterminal" ] && Passwordterminal="$Pullterminal"
@@ -2882,7 +2890,6 @@ done
   # This is the part the password prompt / $Getroot is needed for.
   echo "#! /bin/bash"
   declare -f waitforfilecreation
-  #echo "export \$(dbus-launch)"
   echo "Imagename='$Imagename'"
   echo "Imagecommand='$Imagecommand'"
   echo "# check if image is available locally"
@@ -2930,7 +2937,7 @@ done
   case $Xserver in
     Xpra|Xpra-Xwayland) 
       echo "  echo '# xpra specific environment variables'"
-      Line=$(xpra showconfig | grep start-env | head -n1 | cut -d= -f2-)
+      Line=$($Mksu 'xpra showconfig' | grep start-env | head -n1 | cut -d= -f2-)
       while [ -n "$Line" ] ; do
         Line=$(echo $Line | cut -d"'" -f2- -s)
         Byte="$(echo $Line | cut -c1)"
@@ -3346,18 +3353,14 @@ $(tail $Xinitlogfile)"
   $Xpraclientcommand"
       
       verbose "starting xpra server"
-      export XPRA_OPENGL_DOUBLE_BUFFERED=1 # avoid xpra resizing window bug in older versions http://xpra.org/trac/ticket/1469
-      export $Newxenv
-      $Mksu "$Xpraservercommand" >> $Xpraserverlogfile 2>&1 &
+      $Mksu "env $Newxenv XPRA_OPENGL_DOUBLE_BUFFERED=1 $Xpraservercommand" >> $Xpraserverlogfile 2>&1 &
       storepid $! xpraserver
       waitforlogentry "xpra server" $Xpraserverlogfile 'xpra is ready' && verbose "xpra server is ready" || error "Xpra server startup failed.
   Last lines of Xpra server log:
 $(tail $Xpraserverlogfile)"
 
       verbose "starting xpra client"
-      export $Hostxenv
-      export XPRA_PADDING_COLORS="0,0.2,1"
-      $Mksu "$Xpraclientcommand" >> $Xpraclientlogfile 2>&1 &
+      $Mksu "env $Hostxenv XPRA_PADDING_COLORS='0,0.2,1' $Xpraclientcommand" >> $Xpraclientlogfile 2>&1 &
       Xpraclientpid=$!
       storepid $Xpraclientpid xpraclient
       { # watch for closing xpra client
