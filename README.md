@@ -107,7 +107,7 @@ Advanced usage:
    - Beside `xpra`, also install `Xwayland`, `weston` and `xdotool`. (Not needed for `--xorg` and `--hostdisplay`)
    - Works best with open source drivers on host and OpenGL/Mesa in image. With closed source drivers on host, you need the very same driver version in image.
    - Packages for OpenGL/Mesa in image:
-     - debian images: `mesa-utils mesa-utils-extra`.
+     - debian and Ubuntu images: `mesa-utils mesa-utils-extra`.
      - CentOS and fedora images: `glx-utils mesa-dri-drivers`
      - Arch Linux images: `mesa-demos`
  - For **sound** with option `--pulseaudio`, install `pulseaudio` on host and in image. 
