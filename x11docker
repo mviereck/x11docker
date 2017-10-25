@@ -8,12 +8,13 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.6.3.6"
+Version="3.6.3.7"
 
 changelog() {
+# 25.10.2017 V3.6.3.7   bugfix --hostdisplay on fedora: use host cookie, custom cookie is rejected
 # 24.10.2017 V3.6.3.6   --wmlist: new option to retrieve list of window managers, used by x11docker-gui
 #                       --gpu: improved support in autochoosing mode
-#                       disabled note of xpra keyboard sortcuts, takes too long
+#                       disabled note of xpra keyboard shortcuts, takes too long
 #                       hardcoded xpra environment variables, parsing 'xpra showconfig' takes too long
 #                       bugfix for --pw=sudo, issue with setsid
 # 24.10.2017 V3.6.3.5   bugfix xpra with host user root: set environment variables
@@ -795,6 +796,7 @@ Cmdstdoutlogfile=stdout                         # stdout for image command
 Cmdstderrlogfile=stderr                         # stderr for image command
 
 # host environment
+Hostsystem=""
 Hostdisplay="$DISPLAY"                          # store environment variable containing name of current display
 Hostdisplaynumber="$(echo $Hostdisplay | cut -d: -f2 | cut -d. -f1)"                         # display number without ":" and ".0"
 Hostxauthority="Xauthority-$Hostdisplaynumber"                                               # file to store copy of $XAUTHORITY
@@ -1228,6 +1230,16 @@ Parsed options: $Parsedoptions"
   $XDG_RUNTIME_DIR/$Hostwayland"
     Hostwayland=""
   }
+  
+  while read -r Line; do  # estimate host system
+    [ "$(echo $Line | cut -c1-3)" = "ID=" ] && Hostsystem=$(echo $Line | cut -d= -f2 | cut -d'"' -f2)
+  done < <(cat /etc/os-release | grep 'ID=')
+  case "$Hostsystem" in
+    fedora)
+      Trusted="yes"
+      Shareipc="yes"
+    ;;
+  esac
 }
 
 { #### part: check X server dependencies, use fallbacks if needed, auto-choose X server
@@ -1302,7 +1314,7 @@ Parsed options: $Parsedoptions"
       command -v "xpra" >/dev/null 2>&1 || { 
         [ "$Autochooseserver" = "no" ] && note "could not find executable 'xpra'. 
   Fallback: x11docker will try to use nxagent or Xephyr."
-        command -v nxagent && Xserver="Nxagent" || Xserver="Xephyr"
+        command -v nxagent >/dev/null && Xserver="Nxagent" || Xserver="Xephyr"
       }
     ;;
     Xpra-Xwayland)
@@ -1390,12 +1402,8 @@ Parsed options: $Parsedoptions"
     }
     [ "$Autochooseserver" = "yes" ] && [ "$Gpu" = "yes" ] && {
       case $Desktopmode in
-        yes) 
-          Xserver="Xorg"
-          ;;
-        no)  
-          Xserver="Hostdisplay"
-        ;;
+        yes) Xserver="Xorg" ;;
+        no)  Xserver="Hostdisplay" ;;
       esac
       warning "Did not find a satisfying solution to provide hardware
   acceleration with option --gpu. Best solutions to provide security:
@@ -1495,14 +1503,21 @@ Parsed options: $Parsedoptions"
   [ "$Desktopmode" = "no" ] && [ -z "$Windowmanager" ] && case $Xserver in
     Xephyr|Weston-Xwayland|Kwin-Xwayland|Xorg|Xwayland) 
       Windowmanager="auto" 
-      [ "$Tty" = "no" ] && note "Did not find a nice solution to run a seamless
+      [ "$Autochooseserver" = "yes" ] && [ "$Tty" = "no" ] && {
+        case $Gpu in
+          no)  note "Did not find a nice solution to run a seamless
   application on your desktop. (Only insecure option --hostdisplay would work).
-  It is recommended to install xpra (www.xpra.org)."
+  It is recommended to install xpra (www.xpra.org) or nxagent." ;;
+          yes) note "Did not find a nice solution to run a seamless application with
+  option --gpu on your desktop. (Only insecure option --hostdisplay would work).
+  It is recommended to install xpra, weston, Xwayland and xdotool." ;;
+        esac
+      }
     ;;
   esac
   
   [ "$Xserver" = "Hostdisplay" ] && [ "$Autochooseserver" = "yes" ] && warning "To allow protection against X security leaks,
-  please install xpra and/or Xephyr (recommended),
+  please install xpra, nxagent and/or Xephyr (recommended),
   or run second Xorg server with options --xorg --wm=auto."
     
   [ "$Gpu" = "yes" ] && {
@@ -1517,8 +1532,8 @@ Parsed options: $Parsedoptions"
   Container gains access to GPU hardware.
   This allows reading host window content (palinopsia leak)
   and GPU rootkits (compare proof of concept: jellyfish)."
-    note "Hardware acceleration (option --gpu) works quite well with
-  open source drivers (mesa) on host and in image. 
+    note "Hardware acceleration (option --gpu) works quite well with open
+  source drivers (radeon, nouveau, intel ...) on host and OpenGL/MESA in image.
   If you have closed source drivers on your host, you need to install
   the very same driver version in your image to get hardware acceleration."
   }
@@ -3082,11 +3097,11 @@ done
         }
         echo ':> '$Xclientcookie
         [ "$Trusted" = "yes" ] && Trusted="trusted" || Trusted="untrusted" 
-        echo "xauth -v -f $Xclientcookie generate $Newdisplay . $Trusted timeout 3600"
-        echo "[ -s '$Xclientcookie' ] || { "
-        echo "  [ '$Trusted' = 'untrusted' ] && warning 'Could not create untrusted cookie. "
-        echo "  Maybe your X server misses extension SECURITY. "
-        echo "  Fallback: Will try to create a standard cookie.'"
+        echo     "xauth -v -f $Xclientcookie generate $Newdisplay . $Trusted timeout 3600"
+        echo     "[ -s '$Xclientcookie' ] || { "
+        echo     "  [ '$Trusted' = 'untrusted' ] && warning 'Could not create untrusted cookie. "
+        echo     "  Maybe your X server misses extension SECURITY. "
+        echo     "  Fallback: Will try to create a standard cookie.'"
         [ "$Shareipc" = "no" ] && case $Xserver in
           Hostdisplay|Kwin-Native) 
             echo "  warning 'Memory access failures may occur due to unrestricted cookie."
@@ -3094,17 +3109,21 @@ done
             echo "  or use another X server option'"
           ;;
         esac
-        echo "  xauth -f $Xclientcookie add $Newdisplay . $(mcookie)"
+        echo     "  xauth -f $Xclientcookie add $Newdisplay . $(mcookie)"
         [ "$Xserver" = "Hostdisplay" ] && {
-          echo "  warning 'SECURITY RISK! Keylogging and remote host control "
-          echo "  may be possible! Better avoid using option --hostdisplay.'"
+          echo   "  warning 'SECURITY RISK! Keylogging and remote host control "
+          echo   "  may be possible! Better avoid using option --hostdisplay.'"
           [ "$Shareipc" = "no" ] && {
             echo "  warning 'Rendering glitches may occur as cookie is not untrusted."
             echo "  Avoid this with insecure option --ipc, "
             echo "  or just avoid using option --hostdisplay.'"
           }
         }
-        echo "}"
+        echo     "}"
+        [ "$Xserver" = "Hostdisplay" ] && [ "$Hostsystem" = "fedora" ] && {
+          echo "# workaround, custom cookie does not work on fedora for --hostdisplay"
+          echo "cp $Hostxauthority $Xclientcookie"
+        }
         echo "# create prepared cookie with localhost identification disabled by ffff, needed if X socket is shared. ffff means 'familiy wild'"
         echo "Cookie=\$(xauth -f $Xclientcookie nlist | sed -e 's/^..../ffff/')"
         echo "echo \$Cookie | xauth -v -f $Xclientcookie nmerge -"
@@ -3260,6 +3279,7 @@ done
 } >> $Xinitrc
 
 { #### part: options --verbose, --stdout,--stderr and x11docker.log
+    verbose "Host system: $Hostsystem"
     [ "$Xserver" != "Nothing" ] && {
       verbose "X or Wayland server: $Xserver"
       verbose "Virtual screen size: $Screensize"
