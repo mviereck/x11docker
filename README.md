@@ -9,7 +9,7 @@
  - No obliging [dependencies](#dependencies) on host beside X and docker. Recommended: `xpra` and `Xephyr`.
  - [Wayland](#wayland) support.
  - Optional features: 
-   - Pulseaudio sound
+   - Sound with pulseaudio or ALSA
    - Hardware acceleration for OpenGL
    - Clipboard sharing
    - Shared host folder as /home in container
