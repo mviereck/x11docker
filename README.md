@@ -82,7 +82,7 @@ Most important:
     - If additionally using `--gpu` or `--clipboard`, option `--ipc` and trusted cookies are enabled and no protection against X security leaks is left. 
     - If you don't care about container isolation, `x11docker --hostdisplay --gpu` is an insecure, but quite fast setup without any overhead.
   - `--gpu` allows access to GPU hardware. This can be abused to get window content from host ([palinopsia bug](https://hsmr.cc/palinopsia/)) and makes [GPU rootkits](https://github.com/x0r1/jellyfish) possible.
-  - `--pulseaudio` allows catching audio output and microphone input from host.
+  - `--pulseaudio` and `--alsa` allow catching audio output and microphone input from host.
   
 Rather special options reducing security, but not needed for regular use:
   - `--sudouser` allows sudo without password for container user. If an application breaks out of container, it can do anything. Includes option `--cap-default`.
