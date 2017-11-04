@@ -114,7 +114,7 @@ Advanced usage:
  - For **clipboard** sharing with `--clipboard` install `xclip`. (Not needed for `--xpra`, `--nxagent` and `--hostdisplay`).
  - Rarer needed dependencies for special options:
    - `--nxagent` provides a fast and lightweight alternative to `xpra` and `Xephyr`. Needs [`nxagent`](https://packages.debian.org/experimental/nxagent) to be installed.
-   - `--kwin`, `--kwin-native` and `--kwin-xwayland` need `kwin_wayland`, included in modern `kwin` packages.
+   - `--kwin` and `--kwin-xwayland` need `kwin_wayland`, included in modern `kwin` packages.
    - `--xdummy` needs dummy video driver `xserver-xorg-video-dummy` (debian) or `xorg-x11-drv-dummy` (fedora).
    - `--xvfb` needs `Xvfb`
    - `--xfishtank` needs `xfishtank` to show a fish tank.
