@@ -255,6 +255,21 @@ Shortest way:
    - `wget https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker -O /tmp/x11docker`
  - Run as root: `bash /tmp/x11docker --update`
  - Remove temporary file: `rm /tmp/x11docker`
+ 
+# Simple but insecure alternative
+There is a short and simple but insecure alternative for x11docker. It is similar to x11docker option `--hostdisplay`.
+ - Share access to host X server with environment variable `DISPLAY` and X unix socket in `/tmp/.X11-unix`. 
+ - Allow access with `xhost` for current local user and create a similar container user.
+ - Allow shared memory with `--ipc=host` to avoid RAM access failures and rendering glitches due to extension `MIT-SHM`.
+```
+xhost +SI:localuser:$(id -un)
+docker run --rm -e DISPLAY=$DISPLAY \
+            -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+            --user $(id -u):$(id -g) \
+            --ipc=host \
+            IMAGENAME IMAGECOMMAND
+```
+This nice short solution has the disadvantage of breaking container isolation. X security leaks like keylogging and remote host control can be abused by container applications.
 
 # Examples
 Some example images can be found on docker hub: https://hub.docker.com/u/x11docker/
