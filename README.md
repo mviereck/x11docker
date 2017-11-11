@@ -12,6 +12,8 @@
 
 ![screenshot](screenshot-mate.png "Mate desktop running in Xnest window using x11docker")
 
+![screenshot](screenshot-lxqt.png "LXQT desktop running in Xnest window using x11docker")
+
 ![screenshot](screenshot-xfce-wine-playonlinux.png "xfce-wine-playonlinux desktop running in Xephyr window using x11docker")
 
 ![screenshot](screenshot-lxde-wine.png "lxde-wine desktop running in Xephyr window using x11docker")
