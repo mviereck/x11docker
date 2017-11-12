@@ -2,9 +2,9 @@
 
 ![screenshot](x11docker_klein.jpeg "x11docker logo") 
 
-![screenshot](screenshot-lxqt.png "LXQT desktop running in Xnest window using x11docker")
-
 ![screenshot](screenshot-xpra-pstree.png "xterm showing pstree in xpra window using x11docker")
+
+![screenshot](screenshot-lxqt.png "LXQT desktop running in Xnest window using x11docker")
 
 ![screenshot](screenshot-plasma.png "plasma desktop running in Xephyr window using x11docker")
 
