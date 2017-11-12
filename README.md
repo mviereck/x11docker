@@ -283,7 +283,11 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
  - Desktop in container: 
    - Xfce: `x11docker --desktop x11docker/xfce`
    - LXDE: `x11docker --desktop x11docker/lxde`
-   - LXDE with wine and a persistent home folder to preserve settings and installed Windows applications: `x11docker --desktop --home x11docker/lxde-wine`
+   - Mate: `x11docker --desktop x11docker/mate`
+   - LXQT: `x11docker --desktop x11docker/lxqt`
+   - Trinity: `x11docker --desktop x11docker/trinity`
+   - Plasma: `x11docker --desktop kdeneon/plasma:user-lts`
+   - LXDE desktop with wine and a persistent home folder to preserve settings and installed Windows applications: `x11docker --desktop --home x11docker/lxde-wine`
   
 ## Screenshots
 Sample screenshots can be found in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
