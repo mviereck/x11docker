@@ -258,7 +258,7 @@ Shortest way:
  - Run as root: `bash /tmp/x11docker --update`
  - Remove temporary file: `rm /tmp/x11docker`
  
-# Simple but insecure alternative
+## Simple but insecure alternative
 There is a short and simple but insecure alternative for x11docker. It is similar to x11docker option `--hostdisplay`.
  - Share access to host X server with environment variable `DISPLAY` and X unix socket in `/tmp/.X11-unix`. 
  - Allow access with `xhost` for current local user and create a similar container user.
