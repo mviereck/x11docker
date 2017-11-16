@@ -295,8 +295,10 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
 Sample screenshots can be found in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
 
 `x11docker --desktop x11docker/lxde-wine`:
-
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxde-wine.png "LXDE desktop in docker")
 
 `x11docker --desktop x11docker/mate`:
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-mate.png "Mate desktop in docker")
+
+`x11docker --desktop x11docker/lxqt`:
+![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxqt.png "LXQT desktop in docker")
