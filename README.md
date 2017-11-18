@@ -259,7 +259,9 @@ Shortest way:
  - Remove temporary file: `rm /tmp/x11docker`
  
 ## Simple but insecure alternative
-There is a short and simple but insecure alternative for x11docker. It is similar to x11docker option `--hostdisplay`.
+There are short and simple but insecure alternatives for x11docker. 
+### Alternative for single applications
+This is similar to x11docker option `--hostdisplay`:
  - Share access to host X server with environment variable `DISPLAY` and X unix socket in `/tmp/.X11-unix`. 
  - Allow access with `xhost` for current local user and create a similar container user.
  - Allow shared memory with `--ipc=host` to avoid RAM access failures and rendering glitches due to extension `MIT-SHM`.
@@ -272,6 +274,20 @@ docker run --rm -e DISPLAY=$DISPLAY \
             IMAGENAME IMAGECOMMAND
 ```
 This nice short solution has the disadvantage of breaking container isolation. X security leaks like keylogging and remote host control can be abused by container applications.
+
+### Alternative for desktop environments
+This is similar to x1docker option `--xephyr`
+ - Run Xephyr with disabled shared memory.
+ - Share access to its unix socket `/tmp/.X11-unix/X1`.
+ - Create unprivileged container user to avoid root in container.
+```
+Xephyr :1 -extension MIT-SHM &
+docker run --rm -e DISPLAY=:1 \
+            -v /tmp/.X11-unix/X1:/tmp/.X11-unix/X1:rw \
+            --user $(id -u):$(id -g) \
+            IMAGENAME IMAGECOMMAND
+```
+This solution is more secure than the above one as it does not give access to display :0 with host applications and does not need `--ipc=host`.
 
 # Examples
 Some example images can be found on docker hub: https://hub.docker.com/u/x11docker/
