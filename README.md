@@ -56,7 +56,7 @@ Running x11docker as root:
  - Unfortunately, some systems do not provide `DISPLAY` and `XAUTHORITY` for root, but needed for nested X servers like Xephyr. In that case, tools like `gksu` or `gksudo` can help. 
 
 # Security 
-Main purpose of x11docker is to run dockered GUI applications while preserving and improving container isolation.
+Scope of x11docker is to run dockered GUI applications while preserving and improving container isolation.
 Core concept is:
    - Run a second X server to avoid [X security leaks](http://www.windowsecurity.com/whitepapers/unix_security/Securing_X_Windows.html).
      - This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control. (x11docker provides this with option `--hostdisplay`).
