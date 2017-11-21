@@ -276,18 +276,18 @@ docker run --rm -e DISPLAY=$DISPLAY \
 This nice short solution has the disadvantage of breaking container isolation. X security leaks like keylogging and remote host control can be abused by container applications.
 
 ### Alternative for desktop environments
-This is similar to x1docker option `--xephyr`
- - Run Xephyr with disabled shared memory.
- - Share access to its unix socket `/tmp/.X11-unix/X1`.
+This is similar to x11docker option `--xephyr`:
+ - Run Xephyr with disabled shared memory (extension MIT-SHM) and disabled extension XTEST.
+ - Set `DISPLAY` and share access to new unix socket `/tmp/.X11-unix/X1`.
  - Create unprivileged container user to avoid root in container.
 ```
-Xephyr :1 -extension MIT-SHM &
+Xephyr :1 -extension MIT-SHM -extension XTEST &
 docker run --rm -e DISPLAY=:1 \
             -v /tmp/.X11-unix/X1:/tmp/.X11-unix/X1:rw \
             --user $(id -u):$(id -g) \
             IMAGENAME IMAGECOMMAND
 ```
-This solution is more secure than the above one as it does not give access to display :0 with host applications and does not need `--ipc=host`.
+This solution is more secure than the above one as it does not give access to display :0 with host applications and does not need `--ipc=host`. To use this with single applications you can run a host window manager on it, too, for example with `env DISPLAY=:1 xfwm4`.
 
 # Examples
 Some example images can be found on docker hub: https://hub.docker.com/u/x11docker/
