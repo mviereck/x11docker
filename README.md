@@ -305,7 +305,7 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
    - LXQt: `x11docker --desktop x11docker/lxqt`
    - Trinity: `x11docker --desktop x11docker/trinity`
    - KDE Plasma: `x11docker --desktop kdeneon/plasma:user-lts`
-   - LXDE desktop with wine and a persistent home folder to preserve settings and installed Windows applications, pulseaudio sound and hardware acceleration: `x11docker --desktop --home --pulseaudio --gpu x11docker/lxde-wine`
+   - LXDE desktop with wine and a persistent home folder to preserve installed Windows applications, with pulseaudio sound and hardware acceleration: `x11docker --desktop --home --pulseaudio --gpu x11docker/lxde-wine`
   
 ## Screenshots
 Sample screenshots can be found in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
