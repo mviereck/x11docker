@@ -287,7 +287,7 @@ docker run --rm -e DISPLAY=:1 \
             --user $(id -u):$(id -g) \
             IMAGENAME IMAGECOMMAND
 ```
-This solution is more secure than the above one as it does not give access to display :0 with host applications and does not need `--ipc=host`. To use this with single applications you can run a host window manager on it, too, for example with `env DISPLAY=:1 xfwm4`.
+This solution is more secure than the above one as it does not give access to display :0 with host applications and does not need `--ipc=host`. To use this with single applications you can run a host window manager on Xephyr display, too, for example with `env DISPLAY=:1 x-window-manager`.
 
 # Examples
 Some example images can be found on docker hub: https://hub.docker.com/u/x11docker/
