@@ -8,6 +8,8 @@
 
 ![screenshot](screenshot-plasma.png "plasma desktop running in Xephyr window using x11docker")
 
+![screenshot](screenshot-fluxbox.png "fluxbox window manager running in Xephyr window using x11docker")
+
 ![screenshot](screenshot-xfce.png "Xfce desktop running in Xephyr window using x11docker")
 
 ![screenshot](screenshot-lxde.png "LXDE desktop running in Xephyr window using x11docker")
