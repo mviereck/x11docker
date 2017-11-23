@@ -301,8 +301,9 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
  - Desktop in container: 
    - Xfce: `x11docker --desktop x11docker/xfce`
    - LXDE: `x11docker --desktop x11docker/lxde`
-   - Mate: `x11docker --desktop x11docker/mate`
    - LXQt: `x11docker --desktop x11docker/lxqt`
+   - fluxbox: `x11docker --desktop x11docker/fluxbox` (quite small image!)
+   - Mate: `x11docker --desktop x11docker/mate`
    - Trinity: `x11docker --desktop x11docker/trinity`
    - KDE Plasma: `x11docker --desktop kdeneon/plasma:user-lts`
    - LXDE desktop with wine and a persistent home folder to preserve installed Windows applications, with pulseaudio sound and hardware acceleration: `x11docker --desktop --home --pulseaudio --gpu x11docker/lxde-wine`
