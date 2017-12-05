@@ -116,8 +116,8 @@ Advanced usage:
  - **Sound**:
    - Option `--alsa` has no dependencies. 
      - You can install ALSA libraries in image to support virtual devices (debian images: `libasound2`).
-   - For option `--pulseaudio`, install `pulseaudio` on host and in image. 
- - For **clipboard** sharing with `--clipboard` install `xclip`. (Not needed for `--xpra`, `--nxagent` and `--hostdisplay`).
+   - Option `--pulseaudio` needs `pulseaudio` on host _and_ in image. 
+ - **Clipboard** sharing with `--clipboard` needs `xclip`. (Not needed for `--xpra`, `--nxagent` and `--hostdisplay`).
  - Rarer needed dependencies for special options:
    - `--nxagent` provides a fast and lightweight alternative to `xpra` and `Xephyr`. Needs [`nxagent`](https://packages.debian.org/experimental/nxagent) to be installed.
    - `--kwin` and `--kwin-xwayland` need `kwin_wayland`, included in modern `kwin` packages.
