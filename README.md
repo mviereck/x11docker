@@ -113,7 +113,10 @@ Advanced usage:
      - debian and Ubuntu images: `mesa-utils mesa-utils-extra`.
      - CentOS and fedora images: `glx-utils mesa-dri-drivers`
      - Arch Linux images: `mesa-demos`
- - For **sound** with option `--pulseaudio`, install `pulseaudio` on host and in image. Sound with `--alsa` has no dependencies. You can install ALSA libraries in image to support virtual devices (debian images: `libasound2`).
+ - **Sound**:
+   - Option `--alsa` has no dependencies. 
+     - You can install ALSA libraries in image to support virtual devices (debian images: `libasound2`).
+   - For option `--pulseaudio`, install `pulseaudio` on host and in image. 
  - For **clipboard** sharing with `--clipboard` install `xclip`. (Not needed for `--xpra`, `--nxagent` and `--hostdisplay`).
  - Rarer needed dependencies for special options:
    - `--nxagent` provides a fast and lightweight alternative to `xpra` and `Xephyr`. Needs [`nxagent`](https://packages.debian.org/experimental/nxagent) to be installed.
