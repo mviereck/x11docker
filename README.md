@@ -15,6 +15,7 @@
    - Shared host folder as /home in container
  - [Network setup](#network-setup) with [SSH](#ssh-x-forwarding), [VNC](#vnc) or [HTML5](#html5-web-applications) possible.
  - Developed on debian 9. Tested on fedora 25, CentOS 7, openSUSE 42.3, Ubuntu 16.04, Manjaro 17, Mageia 6 and Arch Linux.
+ - Supports [init systems](#init-system) `tini`, `runit` and `systemd` in container.
  - Easy to use. [Examples](#examples): 
     - `x11docker jess/cathode`
     - `x11docker --desktop --size 320x240 x11docker/lxde`
@@ -199,6 +200,14 @@ read Xenv < <(x11docker --xephyr --showenv x11docker/lxde)  # LXDE desktop in Xe
 echo $Xenv && export $Xenv
 x11docker --hostdisplay x11docker/xfce thunar  # Thunar from another image appears on LXDE desktop
 ```
+
+# Init system
+x11docker supports init systems as PID 1 in container.
+ - `--tini`: As default, x11docker uses docker built-in `tini` with docker run option `--init`.
+ - `--systemd`: systemd in container works best with fedora and CentOS images. 
+   - debian images additionally need quite insecure option `--sys-admin` to add capability SYS_ADMIN.
+ - `--runit`: runit in container, so far testet with Void linux images.
+ - `--no-init`: to run image command as PID 1 without an init system.
 
 # Developer options
 Collection of rarer needed but sometimes useful options.
