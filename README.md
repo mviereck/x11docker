@@ -69,13 +69,15 @@ Core concept is:
      - Uses docker run options `--read-only --volume=/tmp` to restrict write access in container to `/tmp` only. 
      - To allow read/write access to whole container file system, use option `--rw`. 
      - This restriction is disabled for options `--sudouser` and `--user=root`.
-
+     
 Weaknesses / ToDo: 
  - If docker daemon runs with `--selinux-enabled`, SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. A more restrictive solution is desirable.
    Compare: [SELinux and docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
  - User namespace remapping is disabled for options `--home` and `--homedir` to avoid file ownership issues. (Though, this is less a problem as x11docker already avoids root in container).
 
 ### Options degrading container isolation
+x11docker shows warning messages in terminal if chosen options degrade container isolation.
+
 Most important:
   - `--hostdisplay` shares host X socket of display :0 instead of running a second X server. 
     - Danger of abuse is reduced providing so-called untrusted cookies, but do not rely on this. 
@@ -85,7 +87,8 @@ Most important:
   - `--pulseaudio` and `--alsa` allow catching audio output and microphone input from host.
   
 Rather special options reducing security, but not needed for regular use:
-  - `--sudouser` allows sudo without password for container user. If an application breaks out of container, it can do anything. Includes option `--cap-default`.
+  - `--sudouser` allows sudo with password `x11docker`for container user. If an application breaks out of container, it can do anything. Allows some container capabilties that x11docker would drop otherwise.
+  - `--systemd` and `--runit` allow some container capabilities that x11docker would drop otherwise. `--systemd` also shares access to `/sys/fs/cgroup`.
   - `--cap-default` disables x11docker's container hardening and falls back to default docker container privileges.
   - `--ipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory. Disables IPC namespacing.)
   - `--net` sets docker run option `--net=host`. (Allows dbus connection to host, Shares host network stack.)
@@ -132,28 +135,35 @@ Advanced usage:
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
 
 # X servers and Wayland compositors to choose from
-If no X server option is specified, x11docker automatically chooses one depending on installed dependencies and on given or missing options `--desktop` and `--gpu`. 
+If no X server option is specified, x11docker automatically chooses one depending on installed dependencies and on given or missing options `--desktop`, `--gpu` and `--wayland`. 
  - For single applications, x11docker prefers `--xpra`. Alternativly, it tries `--nxagent`.
  - With option `--desktop`, x11docker assumes a desktop environment in image and prefers `--xephyr`. 
  - With option `--gpu` for hardware acceleration, x11docker prefers `--xpra-xwayland` for single applications, or `--weston-xwayland` for desktop environments. 
  - If none of above can be started due to missing dependencies, x11docker uses `--hostdisplay` or `--xorg`.
+ - With option `--wayland`, x11docker creates a Wayland environment without X. See also chapter [Wayland](#wayland).
  
 ![x11docker-gui server screenshot](/../screenshots/x11docker-server.png?raw=true)
 
 ## Wayland
-Beside the X servers to choose from there are options `--weston`, `--kwin` and `--hostwayland` to run pure [Wayland](https://wayland.freedesktop.org/) applications without X. QT5 applications (most of KDE) also need options `--dbus` and `--waylandenv` to use Wayland instead of X. (Option `--waylandenv` sets some environment variables to summon toolkits GTK3, QT5, Clutter, SDL, Elementary and Evas to use Wayland.) 
-With combination `--kwin-native --sharewayland --dbus --waylandenv` you can run Wayland and X applications side by side.
- - Example: xfce4-terminal (GTK3) in Weston: 
+Beside the X servers to choose from there are options `--wayland`, `--weston`, `--kwin` and `--hostwayland` to run pure [Wayland](https://wayland.freedesktop.org/) applications without X.
+ - Option `--wayland` tries to automatically set up a Wayland environment. It regards option `--desktop`.
+   - QT5 applications (most of KDE) also need option `--dbus`. (GTK3 applications must run _without_ `--dbus`).
+ - Options `--kwin` and `--weston` run Wayland compositors `Kwin` or `Weston`. 
+   - For QT5 applications you may need to manually add options `--waylandenv`  and `--dbus` to set some environment variables.
+ - Option `--hostwayland` can run single applications on host Wayland desktops like Gnome 3 and KDE 5.
+
+Examples:
+ - xfce4-terminal (GTK3) in Wayland: 
  
-  `x11docker --weston x11docker/xfce xfce4-terminal`
+  `x11docker --wayland x11docker/xfce xfce4-terminal`
   
- - Example: KDE plasma shell (QT5) in a pure Wayland environment with hardware acceleration:
+ - KDE plasma shell (QT5) in a pure Wayland environment with hardware acceleration:
  
   `x11docker --kwin --waylandenv --dbus --gpu -- kdeneon/plasma:user-lts plasmashell`
   
 You can also run Wayland applications from host with option `--exe`. 
 
- - Examples: gnome-calculator (GTK3) and neverball (SDL) from host in Weston without X:
+ - gnome-calculator (GTK3) and neverball (SDL) from host in Weston without X:
 
   `x11docker --weston --exe gnome-calculator`
   
