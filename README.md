@@ -20,6 +20,8 @@
 
 ![screenshot](screenshot-trinity.png "Trinity desktop")
 
+![screenshot](screenshot-cinnamon.png "Cinnamon desktop started with systemd")
+
 ![screenshot](screenshot-xfce-wine-playonlinux.png "xfce-wine-playonlinux desktop running in Xephyr window using x11docker")
 
 ![screenshot](screenshot-lxde-wine.png "lxde-wine desktop running in Xephyr window using x11docker")
@@ -36,8 +38,8 @@
 
 ![screenshot](x11docker-security.png "x11docker GUI security")
 
-![screenshot](x11docker-server.png "x11docker GUI security")
+![screenshot](x11docker-server.png "x11docker GUI x server options")
 
-![screenshot](x11docker-dependencies.png "x11docker GUI security")
+![screenshot](x11docker-dependencies.png "x11docker GUI dependencies")
 
 ![screenshot](x11docker.jpeg "x11docker logo")
