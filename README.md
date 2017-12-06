@@ -206,7 +206,9 @@ x11docker supports init systems as PID 1 in container.
  - `--tini`: As default, x11docker uses docker built-in `tini` with docker run option `--init`.
  - `--systemd`: systemd in container works best with fedora and CentOS images. 
    - debian images additionally need quite insecure option `--sys-admin` to add capability SYS_ADMIN.
+   - Image example, based on fedora: [x11docker/cinnamon](https://hub.docker.com/r/x11docker/cinnamon/)
  - `--runit`: runit in container, so far testet with Void linux images.
+   - Image example, based on Void Linux: [x11docker/enlightenment](https://hub.docker.com/r/x11docker/enlightenment/)
  - `--no-init`: to run image command as PID 1 without an init system.
 
 # Developer options
@@ -332,6 +334,7 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
    - LXDE desktop with wine and a persistent home folder to preserve installed Windows applications, with pulseaudio sound and hardware acceleration: `x11docker --desktop --home --pulseaudio --gpu x11docker/lxde-wine`
  - Some desktops run better or only with an [init system](#init-system) in container:
    - enlightenment with init system runit: `x11docker --desktop --runit --gpu x11docker/enlightenment`
+   - Cinnamon with init system systemd: `x11docker --desktop --systemd --gpu x11docker/cinnamon`
   
 ## Screenshots
 Sample screenshots can be found in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
