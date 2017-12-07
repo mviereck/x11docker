@@ -55,47 +55,7 @@ Running x11docker as unprivileged user:
 Running x11docker as root:
  - Commands other than `docker` are executed as unprivileged user determined with [`logname`](http://pubs.opengroup.org/onlinepubs/9699919799/utilities/logname.html). (You  can specify another host user with `--hostuser USER`).
  - Unfortunately, some systems do not provide `DISPLAY` and `XAUTHORITY` for root, but needed for nested X servers like Xephyr. In that case, tools like `gksu` or `gksudo` can help. 
-
-# Security 
-Scope of x11docker is to run dockered GUI applications while preserving and improving container isolation.
-Core concept is:
-   - Run a second X server to avoid [X security leaks](http://www.windowsecurity.com/whitepapers/unix_security/Securing_X_Windows.html).
-     - This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control. (x11docker provides this with option `--hostdisplay`).
-     - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.
-   - Create container user similar to host user to [avoid root in container](http://blog.dscpl.com.au/2015/12/don-run-as-root-inside-of-docker.html).
-   - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
-     - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. 
-     - This restriction can be disabled with x11docker options `--cap-default` or `--sudouser`.
-   - Disallow write access to container root filesystem except `/tmp`.
-     - Uses docker run options `--read-only --volume=/tmp` to restrict write access in container to `/tmp` only. 
-     - To allow read/write access to whole container file system, use option `--rw`. 
-     - This restriction is disabled for options `--sudouser` and `--user=root`.
-     
-Weaknesses / ToDo: 
- - If docker daemon runs with `--selinux-enabled`, SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. A more restrictive solution is desirable.
-   Compare: [SELinux and docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
- - User namespace remapping is disabled for options `--home` and `--homedir` to avoid file ownership issues. (Though, this is less a problem as x11docker already avoids root in container).
-
-### Options degrading container isolation
-x11docker shows warning messages in terminal if chosen options degrade container isolation.
-
-Most important:
-  - `--hostdisplay` shares host X socket of display :0 instead of running a second X server. 
-    - Danger of abuse is reduced providing so-called untrusted cookies, but do not rely on this. 
-    - If additionally using `--gpu` or `--clipboard`, option `--ipc` and trusted cookies are enabled and no protection against X security leaks is left. 
-    - If you don't care about container isolation, `x11docker --hostdisplay --gpu` is an insecure, but quite fast setup without any overhead.
-  - `--gpu` allows access to GPU hardware. This can be abused to get window content from host ([palinopsia bug](https://hsmr.cc/palinopsia/)) and makes [GPU rootkits](https://github.com/x0r1/jellyfish) possible.
-  - `--pulseaudio` and `--alsa` allow catching audio output and microphone input from host.
-  
-Rather special options reducing security, but not needed for regular use:
-  - `--sudouser` allows sudo with password `x11docker`for container user. If an application breaks out of container, it can do anything. Allows some container capabilties that x11docker would drop otherwise.
-  - `--systemd` and `--runit` allow some container capabilities that x11docker would drop otherwise. `--systemd` also shares access to `/sys/fs/cgroup`.
-  - `--cap-default` disables x11docker's container hardening and falls back to default docker container privileges.
-  - `--ipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory. Disables IPC namespacing.)
-  - `--net` sets docker run option `--net=host`. (Allows dbus connection to host, Shares host network stack.)
-   
-![x11docker-gui security screenshot](/../screenshots/x11docker-security.png?raw=true)
-
+ 
 # Dependencies
 x11docker can run with standard system utilities without additional dependencies on host or in image. As a core, it only needs an `X` server and, of course, [`docker`](https://www.docker.com/) to run docker images on X.
 
@@ -135,6 +95,44 @@ Advanced usage:
 
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
 
+# Security 
+Scope of x11docker is to run dockered GUI applications while preserving and improving container isolation.
+Core concept is:
+   - Run a second X server to avoid [X security leaks](http://www.windowsecurity.com/whitepapers/unix_security/Securing_X_Windows.html).
+     - This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control. (x11docker provides this with option `--hostdisplay`).
+     - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.
+   - Create container user similar to host user to [avoid root in container](http://blog.dscpl.com.au/2015/12/don-run-as-root-inside-of-docker.html).
+   - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
+     - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. 
+     - This restriction can be disabled with x11docker options `--cap-default` or `--sudouser`.
+   - Disallow write access to container root filesystem except `/tmp`.
+     - Uses docker run options `--read-only --volume=/tmp` to restrict write access in container to `/tmp` only. 
+     - To allow read/write access to whole container file system, use option `--rw`. 
+     - This restriction is disabled for options `--sudouser` and `--user=root`.
+     
+Weaknesses / ToDo: 
+ - If docker daemon runs with `--selinux-enabled`, SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. A more restrictive solution is desirable.
+   Compare: [SELinux and docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
+ - User namespace remapping is disabled for options `--home` and `--homedir` to avoid file ownership issues. (Though, this is less a problem as x11docker already avoids root in container).
+
+### Options degrading container isolation
+x11docker shows warning messages in terminal if chosen options degrade container isolation.
+
+Most important:
+  - `--hostdisplay` shares host X socket of display :0 instead of running a second X server. 
+    - Danger of abuse is reduced providing so-called untrusted cookies, but do not rely on this. 
+    - If additionally using `--gpu` or `--clipboard`, option `--ipc` and trusted cookies are enabled and no protection against X security leaks is left. 
+    - If you don't care about container isolation, `x11docker --hostdisplay --gpu` is an insecure, but quite fast setup without any overhead.
+  - `--gpu` allows access to GPU hardware. This can be abused to get window content from host ([palinopsia bug](https://hsmr.cc/palinopsia/)) and makes [GPU rootkits](https://github.com/x0r1/jellyfish) possible.
+  - `--pulseaudio` and `--alsa` allow catching audio output and microphone input from host.
+  
+Rather special options reducing security, but not needed for regular use:
+  - `--sudouser` allows sudo with password `x11docker`for container user. If an application breaks out of container, it can do anything. Allows some container capabilties that x11docker would drop otherwise.
+  - `--systemd` and `--runit` allow some container capabilities that x11docker would drop otherwise. `--systemd` also shares access to `/sys/fs/cgroup`.
+  - `--cap-default` disables x11docker's container hardening and falls back to default docker container privileges.
+  - `--ipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory. Disables IPC namespacing.)
+  - `--net` sets docker run option `--net=host`. (Allows dbus connection to host, Shares host network stack.)
+   
 # X servers and Wayland compositors to choose from
 If no X server option is specified, x11docker automatically chooses one depending on installed dependencies and on given or missing options `--desktop`, `--gpu` and `--wayland`. 
  - For single applications, x11docker prefers `--xpra`. Alternativly, it tries `--nxagent`.
