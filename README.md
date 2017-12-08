@@ -339,7 +339,7 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
    - KDE Plasma: `x11docker --desktop kdeneon/plasma:user-lts`
    - LXDE desktop with wine and a persistent home folder to preserve installed Windows applications, with pulseaudio sound and hardware acceleration: `x11docker --desktop --home --pulseaudio --gpu x11docker/lxde-wine`
  - Some desktops run better or only with an [init system](#init-system) in container:
-   - enlightenment with init system runit: `x11docker --desktop --runit --gpu x11docker/enlightenment`
+   - Enlightenment with init system runit: `x11docker --desktop --runit --gpu x11docker/enlightenment`
    - Cinnamon with init system systemd: `x11docker --desktop --systemd --gpu x11docker/cinnamon`
   
 ## Screenshots
