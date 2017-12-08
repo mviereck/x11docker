@@ -153,21 +153,23 @@ Beside the X servers to choose from there are options `--wayland`, `--weston`, `
 
 Examples:
  - xfce4-terminal (GTK3) in Wayland: 
- 
-  `x11docker --wayland x11docker/xfce xfce4-terminal`
-  
+ ```
+x11docker --wayland x11docker/xfce xfce4-terminal
+```  
  - KDE plasma shell (QT5) in a pure Wayland environment with hardware acceleration:
- 
-  `x11docker --kwin --waylandenv --dbus --gpu -- kdeneon/plasma:user-lts plasmashell`
-  
+ ```
+x11docker --kwin --waylandenv --dbus --gpu -- kdeneon/plasma:user-lts plasmashell
+```
+
 You can also run Wayland applications from host with option `--exe`. 
-
  - gnome-calculator (GTK3) and neverball (SDL) from host in Weston without X:
+```
+x11docker --weston --exe gnome-calculator
+```
+```
+x11docker --weston --exe neverball
+```
 
-  `x11docker --weston --exe gnome-calculator`
-  
-  `x11docker --weston --exe neverball`
-  
 ## Setup for option --xorg
  - Option `--xorg` runs from console without additional setup. 
  - To run a second core Xorg server from within an already running X session, you have to edit or create file `/etc/X11/Xwrapper.config` and replace line:
