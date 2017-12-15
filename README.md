@@ -15,7 +15,7 @@
    - Shared host folder as /home in container
  - [Network setup](#network-setup) with [SSH](#ssh-x-forwarding), [VNC](#vnc) or [HTML5](#html5-web-applications) possible.
  - Developed on debian 9. Tested on fedora 25, CentOS 7, openSUSE 42.3, Ubuntu 16.04, Manjaro 17, Mageia 6 and Arch Linux.
- - Supports [init systems](#init-system) `tini`, `runit` and `systemd` in container.
+ - Supports [init systems](#init-system) `tini`, `runit`, `openrc` and `systemd` in container.
  - Easy to use. [Examples](#examples): 
     - `x11docker jess/cathode`
     - `x11docker --desktop --size 320x240 x11docker/lxde`
@@ -128,7 +128,7 @@ Most important:
   
 Rather special options reducing security, but not needed for regular use:
   - `--sudouser` allows sudo with password `x11docker`for container user. If an application breaks out of container, it can do anything. Allows some container capabilties that x11docker would drop otherwise.
-  - `--systemd` and `--runit` allow some container capabilities that x11docker would drop otherwise. `--systemd` also shares access to `/sys/fs/cgroup`.
+  - `--systemd`, `--openrc` and `--runit` allow some container capabilities that x11docker would drop otherwise. `--systemd` also shares access to `/sys/fs/cgroup`.
   - `--cap-default` disables x11docker's container hardening and falls back to default docker container privileges.
   - `--ipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory. Disables IPC namespacing.)
   - `--net` sets docker run option `--net=host`. (Allows dbus connection to host, Shares host network stack.)
@@ -209,12 +209,14 @@ x11docker supports init systems as PID 1 in container.
    - No special setup is needed in image, only `systemd` must be installed. To get a faster startup, it helps to look for services that fail to start in container and to mask them in image with `systemctl mask servicename`.
    - x11docker sets up the container to run the image command as a service.
    - Image example based on fedora: [x11docker/cinnamon](https://hub.docker.com/r/x11docker/cinnamon/)
- - `--runit`: runit in container, so far testet with Void Linux images.
+ - `--runit`: runit in container, so far testet with [Void Linux](https://www.voidlinux.eu/) images.
    - No special setup is needed in image, only `runit` must be installed. For a bit faster startup, failing services can be disabled by deleting their softlinks in `/etc/runit/runsvdir/default`.
    - x11docker sets up the container to run the image command as a service.
    - For most use cases, `dbus` should be installed in image and enabled with 
      - `ln -s /etc/sv/dbus /etc/runit/runsvdir/default`.
    - Image example based on Void Linux: [x11docker/enlightenment](https://hub.docker.com/r/x11docker/enlightenment/)
+ - `--openrc`: openrc in container, so far tested with [Alpine Linux](https://alpinelinux.org/) images.
+   - No special setup is needed in image, only `openrc` must be installed. 
  - `--no-init`: to run image command as PID 1 without an init system.
 
 # Developer options
