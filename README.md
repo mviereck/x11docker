@@ -2,17 +2,13 @@
 
 ![screenshot](x11docker_klein.jpeg "x11docker logo") 
 
-![screenshot](screenshot-xpra-pstree.png "xterm showing pstree in xpra window using x11docker")
-
 ![screenshot](screenshot-lxqt.png "LXQT desktop running in Xnest window using x11docker")
+
+![screenshot](screenshot-deepin.png "deepin desktop running in Weston and Xwayland window using x11docker")
 
 ![screenshot](screenshot-plasma.png "plasma desktop running in Xephyr window using x11docker")
 
 ![screenshot](screenshot-fluxbox.png "fluxbox window manager running in Xephyr window using x11docker")
-
-![screenshot](screenshot-xfce.png "Xfce desktop running in Xephyr window using x11docker")
-
-![screenshot](screenshot-lxde.png "LXDE desktop running in Xephyr window using x11docker")
 
 ![screenshot](screenshot-mate.png "Mate desktop running in Xnest window using x11docker")
 
@@ -22,6 +18,10 @@
 
 ![screenshot](screenshot-cinnamon.png "Cinnamon desktop started with systemd")
 
+![screenshot](screenshot-xfce.png "Xfce desktop running in Xephyr window using x11docker")
+
+![screenshot](screenshot-lxde.png "LXDE desktop running in Xephyr window using x11docker")
+
 ![screenshot](screenshot-xfce-wine-playonlinux.png "xfce-wine-playonlinux desktop running in Xephyr window using x11docker")
 
 ![screenshot](screenshot-lxde-wine.png "lxde-wine desktop running in Xephyr window using x11docker")
@@ -29,6 +29,8 @@
 ![screenshot](screenshot-retroterm.png "cool retro term running in Xpra window using x11docker")
 
 ![screenshot](screenshot-lxde-small.png "LXDE desktop in xpra window using x11docker")
+
+![screenshot](screenshot-xpra-pstree.png "xterm showing pstree in xpra window using x11docker")
 
 # x11docker-gui
 
