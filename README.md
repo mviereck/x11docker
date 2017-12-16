@@ -105,11 +105,7 @@ Core concept is:
    - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
      - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. 
      - This restriction can be disabled with x11docker options `--cap-default` or `--sudouser`.
-   - Disallow write access to container root filesystem except `/tmp`.
-     - Uses docker run options `--read-only --volume=/tmp` to restrict write access in container to `/tmp` only. 
-     - To allow read/write access to whole container file system, use option `--rw`. 
-     - This restriction is disabled for options `--sudouser` and `--user=root`.
-     
+
 Weaknesses / ToDo: 
  - If docker daemon runs with `--selinux-enabled`, SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. A more restrictive solution is desirable.
    Compare: [SELinux and docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
