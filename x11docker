@@ -9,9 +9,11 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.0.1"
+Version="3.9.0.2"
 
 changelog() {
+# 16.12.2017 V3.9.0.2   /etc/sudoers[.d/]: replace completly to avoid possible evil image setups
+#                       --cap-add CHOWN as default to allow /home/$Benutzer with --sharedir
 # 16.12.2017 V3.9.0.1   bugfix: --systemd: do not set $HOME globally, root may write into it
 #                       use /home/$Benutzer instead of /tmp/fakehome
 # 15.12.2017 V3.9.0     /etc/shadow: disable possible root password
@@ -112,6 +114,7 @@ changelog() {
   : 
 }
 todo() {
+# --weston-xwayland: set window width to multiple of 8, avoid grey border
 # --systemd: try to avoid xhost +SI:localuser:$Benutzer
 # check Xorg version for +iglx, check security implications, maybe option --iglx?
 # check --xwayland in Gnome 3 again (#19)
@@ -153,7 +156,7 @@ x11docker: Run GUI applications and desktop environments in docker.
  Focus on security:
    * Avoids X security leaks using additional X servers.
    * Container user is same as host user to avoid root in container.
-   * Default docker container capabilities are dropped.
+   * Default docker container capabilities are dropped (except 'chown').
  Features:
    * Hardware acceleration for OpenGL
    * Pulseaudio sound
@@ -893,7 +896,6 @@ Imagecommandscript=x11docker.CMD.sh             # name of shared script containi
 Dockerlogfile=docker.log                        # file to log output of docker
 Dockerpidfile=docker.pid                        # file to store process ID of docker
 Containerip=container.ip                        # IP adress of container
-Etcpasswd=passwd                                # created /etc/passwd for container
 
 # X server config files, log files and such stuff
 Xinitrc=xinitrc                                 # file to store xinitrc commands
@@ -2049,7 +2051,6 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   Imagecommandscript="$Sharefolder/$Imagecommandscript"     && mkfile $Imagecommandscript
   Shareclipboardscript="$Cachefolder/$Shareclipboardscript" && mkfile $Shareclipboardscript
   #Newxlock="/tmp/.X$Newdisplaynumber-lock"
-  Etcpasswd="$Cachefolder/$Etcpasswd"                       && mkfile $Etcpasswd
   Westonini="$Cachefolder/$Westonini"                       && mkfile $Westonini
   Xdummyconf="$Cachefolder/$Xdummyconf"                     && mkfile $Xdummyconf
   Xdummywrapper="$Cachefolder/$Xdummywrapper"               && mkfile $Xdummywrapper
@@ -3066,13 +3067,6 @@ done
     Benutzerpasswdentry="$(getent passwd $Benutzer)"
     Benutzerpasswdentry="$(echo $Benutzerpasswdentry | cut -d: -f1-5):$Benutzerhome:$(echo $Benutzerpasswdentry | cut -d: -f7)"
   }
-
-  echo "$Benutzerpasswdentry" >> $Etcpasswd
-  
-  Etcshadow="shadow"
-  Etcshadow=$Cachefolder/$Etcshadow
-  mkfile $Etcshadow
-  echo "$Benutzer:$Benutzerpasswort:17293:0:99999:7:::" >> $Etcshadow
 }
 
 { #### part: create init service files (options --systemd, --runit)
@@ -3229,7 +3223,7 @@ start() {
       esac
 
       [ "$Capdropall" = "yes" ] && Dockercommand="$Dockercommand \\
-  --cap-drop=ALL"
+  --cap-drop=ALL    --cap-add CHOWN"
       
       # option --sys-admin
       [ "$Capsysadmin" = "yes" ] && Dockercommand="$Dockercommand \\
@@ -3266,7 +3260,7 @@ start() {
           Switchusercaps="yes"
           [ "$Capdropall" = "yes" ] && [ "$Adminusercaps" = "no" ] && Dockercommand="$Dockercommand \\
   --cap-add FOWNER \\
-  --cap-add CHOWN   --cap-add FSETID"
+  --cap-add FSETID"
           Dockercommand="$Dockercommand \\
   --cap-add SYS_BOOT \\
   -v $Openrcservice:/etc/init.d/x11docker.service:rw \\
@@ -3279,7 +3273,7 @@ start() {
           Switchusercaps="yes"
           Dockercommand="$Dockercommand \\
   --cap-add FOWNER  --cap-add KILL    --cap-add DAC_OVERRIDE \\
-  --cap-add CHOWN   --cap-add FSETID  --cap-add SETPCAP"
+  --cap-add FSETID  --cap-add SETPCAP"
         }
         case $Switchusercaps in
           yes) 
@@ -3450,7 +3444,7 @@ start() {
     *) echo "  echo 'export XDG_SESSION_TYPE=x11'" ;;
   esac
   echo "  echo ''"
-  echo "  echo 'which bash && export SHELL=/bin/bash || export SHELL=/bin/sh'"
+  echo "  echo 'which bash >/dev/null && export SHELL=/bin/bash || export SHELL=/bin/sh'"
   echo "  echo 'export TERM=xterm'"
   [ "$Pulseaudio" = "yes" ]    && echo "  echo 'export PULSE_SERVER=tcp:$Dockerip:$Pulseaudiotcpport'"
   while read -r Line; do
@@ -3500,9 +3494,12 @@ start() {
                                                        getent group | grep -v \$(getent group $Benutzergid || echo USERNOTFOUND) > /tmp/group;
                                                                                            echo $Benutzergruppe:x:$Benutzergid: >> /tmp/group ;
                                                        mv /tmp/group /etc/group ;
-                                                       touch /tmp/chowncheck && chown $Benutzer /tmp/chowncheck && rm /tmp/chowncheck && mkdir -p $Benutzerhome && chown $Benutzer $Benutzerhome ;
+                                                       mkdir -p $Benutzerhome && chown $Benutzer $Benutzerhome ;
                                                      \" " 
-
+  echo "# create /etc/sudoers"
+  echo "docker exec -u root $Containername sh -c \"echo 'root ALL=(ALL) ALL' > /etc/sudoers ; rm -R /etc/sudoers.d\""
+  [ "$Sudouser" = "yes" ] && echo "docker exec -u root $Containername sh -c \"echo '$Benutzer ALL=(ALL) ALL' >> /etc/sudoers\""
+  
   case $Initsystem in # FIXME: would rather like to enable with shared volumes, but docker does not like symlinks
     tini|none)
      [ "$Dbusdaemon" = "yes" ] && {
@@ -3525,9 +3522,7 @@ start() {
       echo "docker exec $Containername sh -c 'chmod +x /etc/init.d/x11docker.service ; rc-update add x11docker.service default'"
     ;;
   esac
-  # --sudouser: create entry in sudoers.d/
-  [ "$Sudouser" = "yes" ] && echo "docker exec -u root $Containername sh -c \"echo '$Benutzer ALL=(ALL) ALL' > /etc/sudoers.d/$Benutzer\""
-
+  
   #[ "$Pulseaudio" = "yes" ] && {
     echo "sleep 1 # wait a moment until IP is available. Currently, IP is only needed for --pulseaudio"
     echo "docker inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername >> $Containerip"
