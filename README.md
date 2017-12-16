@@ -339,6 +339,7 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
    - Mate: `x11docker --desktop x11docker/mate`
    - Trinity: `x11docker --desktop x11docker/trinity`
    - KDE Plasma: `x11docker --desktop kdeneon/plasma:user-lts`
+   - deepin: `x11docker --desktop --systemd --sys-admin --pulseaudio x11docker/deepin`
    - LXDE desktop with wine and a persistent home folder to preserve installed Windows applications, with pulseaudio sound and hardware acceleration: `x11docker --desktop --home --pulseaudio --gpu x11docker/lxde-wine`
  - Some desktops run better or only with an [init system](#init-system) in container:
    - Enlightenment with init system runit: `x11docker --desktop --runit --gpu x11docker/enlightenment`
@@ -354,4 +355,7 @@ Sample screenshots can be found in [screenshot branch](https://github.com/mviere
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-mate.png "Mate desktop in docker")
 
 `x11docker --desktop x11docker/lxqt`:
-![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxqt.png "LXQT desktop in docker")
+![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxqt.png "LXQT desktop in docker"))
+
+`x11docker --desktop --systemd --sys-admin --pulseaudio x11docker/deepin`:
+![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-deepin.png "deepin desktop in docker")
