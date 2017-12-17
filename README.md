@@ -104,8 +104,8 @@ Core concept is:
    - Create container user similar to host user to [avoid root in container](http://blog.dscpl.com.au/2015/12/don-run-as-root-inside-of-docker.html).
    - Disables possible root password and entries in `/etc/sudoers`.
    - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
-     - Uses docker run options `--cap-drop=ALL --cap-add=CHOWN --security-opt=no-new-privileges`. 
-     - This restriction can be disabled with x11docker options `--cap-default` or `--sudouser`.
+     - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. 
+     - This restriction can be disabled with x11docker option `--cap-default` or reduced with option `--sudouser`.
 
 Weaknesses / ToDo: 
  - If docker daemon runs with `--selinux-enabled`, SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. A more restrictive solution is desirable.
