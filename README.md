@@ -105,7 +105,7 @@ Core concept is:
    - Disables possible root password and entries in `/etc/sudoers`.
    - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
      - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. 
-     - This restriction can be disabled with x11docker option `--cap-default` or reduced with option `--sudouser`.
+     - This restriction can be disabled with x11docker option `--cap-default` or reduced with `--sudouser`.
 
 Weaknesses / ToDo: 
  - If docker daemon runs with `--selinux-enabled`, SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. A more restrictive solution is desirable.
