@@ -9,9 +9,17 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.0.2"
+Version="3.9.0.3"
 
 changelog() {
+# 17.12.2017 V3.9.0.3   switched back to /tmp/fakehome to avoid CHOWN and issues with --sharedir
+#                       drop --cap-add CHOWN
+#                       bugfix --sudouser, failed to start
+#                       --sharedir: without --home[dir], create softlinks to /tmp/fakehome
+#                       --home: avoid conflict with --sharedir=$HOME, mount as $HOME/$(basename $HOME)
+# 16.12.2017            only chown $Benutzerhome if --home[dir] is not used. Change non-writeable error in warning only
+#                       --hostdisplay: warning if host has no own cookie
+#                       avoid grey edge with Xwayland, Xaxis must be dividable by 8
 # 16.12.2017 V3.9.0.2   /etc/sudoers[.d/]: replace completly to avoid possible evil image setups
 #                       --cap-add CHOWN as default to allow /home/$Benutzer with --sharedir
 # 16.12.2017 V3.9.0.1   bugfix: --systemd: do not set $HOME globally, root may write into it
@@ -114,11 +122,8 @@ changelog() {
   : 
 }
 todo() {
-# --weston-xwayland: set window width to multiple of 8, avoid grey border
 # --systemd: try to avoid xhost +SI:localuser:$Benutzer
 # check Xorg version for +iglx, check security implications, maybe option --iglx?
-# check --xwayland in Gnome 3 again (#19)
-# check failing xauth, see #1 in xfce-wine
 # GTK3 in Wayland: --dbus once worked with $Dbusdaemon=yes
 # --wayland --user/--hostuser: wayland socket access denied
 # check all FIXME 
@@ -138,7 +143,6 @@ todo() {
 ### BUG collection: x11docker bugs:
 # BUG check whether VT is not in use with --xorg/--xpra/--xdummy, bug if accidently using vt that is already in use
 ### BUG collection: non x11docker bugs
-# BUG kdeneon/all:user-lts plasmashell: no kwin?
 # BUG Xwayland does not always sit at 0:0 on multiple outputs. 
 #     bugreport: https://bugzilla.redhat.com/show_bug.cgi?id=1498665
 # BUG nxagent with x11docker/lxde: segmentation fault of lxpanel with --userns-remap. bug in nxagent, lxpanel or x11docker?
@@ -986,7 +990,8 @@ Terminallist=""                                 # list of possible terminal emul
 # regular options
 Adduserhome="no"                                # option '-m, --home' (or '--homedir'): share a folder ~/.local/share/x11docker/Imagename with created container
 Adduserhomefolder=""                            #   "        "   : path to shared folder. 
-Sharevolumes=""                                 # option --volume: host folders to share
+Sharevolumes=""                                 # option --volume: host folders to share, array
+Sharevolumesnumber="0"                          # counts shared folders in array
 Shareclipboard="no"                             # option '-c, --clipboard' enable clipboard sharing
 Shareclipboardscript=clipboard.bash             #    "              "      script used for text clipboard sharing
 Showdisplayenvironment="no"                     # option -E, --env: Show environment variables of new display
@@ -1196,7 +1201,8 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
          --homedir)    Adduserhomefolder="${2:-}" ; Adduserhome="yes" ; shift ;; # set host folder to share as home folder instead of ~/x11docker/NAME
          --cachedir)   Cacherootfolder="${2:-}" ; shift ;; # set cache folder instead of default $Cacherootfolder
          --sharedir)   [ -e "${2:-}" ] && {                # share host folder at same location in container with rw access
-                         Sharevolumes="$Sharevolumes -v '${2:-}':'${2:-}':rw"
+                         Sharevolumesnumber=$(($Sharevolumesnumber + 1))
+                         Sharevolumes[$Sharevolumesnumber]="${2:-}"
                        } || warning "Option --sharedir: file or folder not found.
   ${2:-}" ;            shift ;;
          
@@ -1800,8 +1806,9 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   
   [ "$Trusted" = "no" ] && warning "$Xserver runs with untrusted cookies restricting
   access to X resources. Some applications may misbehave, especially those 
-  needing OpenGL. Also, some keys like AltGr  may not work. 
-  (Insecure options  --trusted, --ipc or --gpu change this.) 
+  needing OpenGL. Also, some keys like AltGr may not work. 
+  You can degrade isolation and allow trusted cookies with option --trusted.
+  (Options --gpu and --clipboard use trusted cookies, too).
   It is recommended to use another X server option like --xpra or --nxagent."
   
   [ "$Xserver" = "--hostdisplay" ] && {
@@ -2077,13 +2084,7 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
 
 { #### part: create $Hostxenv: Environment variables for host X display
   [ -n "$Hostdisplay" ] && [ -e "$Hostxsocket" ] && {
-    # check and copy host cookie
-    [ -s "$XAUTHORITY" ] && {
-      cp $XAUTHORITY $Hostxauthority
-    } || {
-      Cookie=$($Mksu "xauth nlist")
-      [ -n "$Cookie" ] && echo $Cookie | xauth -f $Hostxauthority nmerge -
-    }
+    $Mksu "xauth nlist $Hostdisplay 2>/dev/null | xauth -f $Hostxauthority nmerge - 2>/dev/null"
     chown $Hostuser $Hostxauthority
     chmod 600 $Hostxauthority
     [ -s "$Hostxauthority" ] && export XAUTHORITY=$Hostxauthority || Hostxauthority= 
@@ -2094,6 +2095,7 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   }
   Hostxenv="DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority XSOCKET=$Hostxsocket"  
   Hostxenv="$Hostxenv WAYLAND_DISPLAY=$Hostwayland XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+  [ "$Xserver" = "--hostdisplay" ] && [ -z "$Hostxauthority" ] && warning "Your host X server seems to run without any cookies."
 }
 
 { #### part: check physical and virtual screen size
@@ -2163,16 +2165,18 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
     Yaxis=$(awk -v a=$Yaxis -v b=$Scaling 'BEGIN {print (a / b)}')
     Yaxis=${Yaxis%.*}
   }
-  
-  [ -z "$Screensize" ] && case $Xserver in
-    --xorg) ;;  # Xorg autodetects screen size, preset only with option --size
-    *) [ "$Tty" = "no" ] && Screensize="${Xaxis}x${Yaxis}" ;;
-  esac
-
   [ -n "$Screensize" ] && {  # regard --size, overwriting Xaxis/Yaxis from above
     Xaxis=${Screensize%x*}
     Yaxis=${Screensize#*x}
   }
+  case $Xserver in
+    # avoid grey edge, Xwayland needs full byte x width
+    --weston-xwayland|--kwin-xwayland) Xaxis=$(( $(( $Xaxis / 8 )) * 8 )) ;;
+  esac
+  case $Xserver in
+    --xorg) ;;  # Xorg autodetects screen size, preset only with option --size
+    *) [ "$Tty" = "no" ] && Screensize="${Xaxis}x${Yaxis}" ;;
+  esac
   [ -z "$Maxxaxis" ] && {
     Maxxaxis=$Xaxis
     Maxyaxis=$Yaxis
@@ -2995,7 +2999,7 @@ done
     Benutzeruid=$Benutzer
     Benutzer="unknown$Benutzer"
     [ -z "$Benutzergid" ] && Benutzergid=100
-    Benutzerhome=/"home/$Benutzer"
+    Benutzerhome="/tmp/fakehome"
     [ -z "$Adduserhomefolder" ] && [ "$Adduserhome" = "yes" ] && { 
       warning "Will not create a persistent home folder on host
   for a non-existing user. (Instead, you can specify --homedir to a location
@@ -3054,10 +3058,10 @@ done
   3.) Run x11docker one time as user 'root'."
         }
       }
-      writeaccess $Benutzeruid "$Adduserhomefolder" || error "User '$Benutzer' does not have write access to
+      writeaccess $Benutzeruid "$Adduserhomefolder" || warning "User '$Benutzer' does not have write access to
   $Adduserhomefolder."
     ;;
-    no) [ -z "$Benutzerhome" ] && Benutzerhome="/home/$Benutzer" ;;
+    no) Benutzerhome="/tmp/fakehome" ;;
   esac
   
   # create /etc/passwd. only needed to provide user name in container
@@ -3206,7 +3210,7 @@ start() {
       
       
       [ "$Benutzeruid" = "0" ]  && Adminusercaps="yes"
-      [ "$Sudouser" = "yes" ]   && Adminusercaps="yes"
+      [ "$Sudouser" = "yes" ]   && Adminusercaps="yes" && Switchusercaps="yes"
       [ "$Dbusdaemon" = "yes" ] && Switchusercaps="yes"
       
       case $Initsystem in
@@ -3223,7 +3227,7 @@ start() {
       esac
 
       [ "$Capdropall" = "yes" ] && Dockercommand="$Dockercommand \\
-  --cap-drop=ALL    --cap-add CHOWN"
+  --cap-drop=ALL"
       
       # option --sys-admin
       [ "$Capsysadmin" = "yes" ] && Dockercommand="$Dockercommand \\
@@ -3260,7 +3264,7 @@ start() {
           Switchusercaps="yes"
           [ "$Capdropall" = "yes" ] && [ "$Adminusercaps" = "no" ] && Dockercommand="$Dockercommand \\
   --cap-add FOWNER \\
-  --cap-add FSETID"
+  --cap-add FSETID  --cap-add CHOWN"
           Dockercommand="$Dockercommand \\
   --cap-add SYS_BOOT \\
   -v $Openrcservice:/etc/init.d/x11docker.service:rw \\
@@ -3273,7 +3277,7 @@ start() {
           Switchusercaps="yes"
           Dockercommand="$Dockercommand \\
   --cap-add FOWNER  --cap-add KILL    --cap-add DAC_OVERRIDE \\
-  --cap-add FSETID  --cap-add SETPCAP"
+  --cap-add FSETID  --cap-add CHOWN   --cap-add SETPCAP"
         }
         case $Switchusercaps in
           yes) 
@@ -3286,7 +3290,6 @@ start() {
           ;;
         esac
       }
-      
       
       [ "$Sharecgroup" = "yes" ] && Dockercommand="$Dockercommand \\
   -v /sys/fs/cgroup:/sys/fs/cgroup:ro"
@@ -3313,8 +3316,16 @@ start() {
   -v $Sharefolder:$Cshare:rw"
       [ "$Adduserhome" = "yes" ] && [ -n "$Adduserhomefolder" ] && Dockercommand="$Dockercommand \\
   -v '$Adduserhomefolder':'$Benutzerhome':rw"
-      [ -n "$Sharevolumes" ] && Dockercommand="$Dockercommand \\
-  $Sharevolumes"
+      for Count in $(seq -s' ' $Sharevolumesnumber) ; do
+        case "${Sharevolumes[$Count]}" in
+          "$Benutzerhome") Dockercommand="$Dockercommand \\
+  -v '${Sharevolumes[$Count]}':'${Sharevolumes[$Count]}/$(basename $Benutzerhome)':rw" 
+          ;;
+          *) Dockercommand="$Dockercommand \\
+  -v '${Sharevolumes[$Count]}':'${Sharevolumes[$Count]}':rw" 
+          ;;
+        esac
+      done
       
       # X socket will be softlinked to /tmp/.X11-unix in x11docker.CMD.sh
       case $Xserver in
@@ -3403,7 +3414,6 @@ start() {
   
   [ "$Dbuslaunch" = "yes" ] && echo "Dbus='\$(which dbus-launch)' || echo Dbus="
   [ "$Dbusdaemon" = "yes" ] && echo "Dbus=\"\\\$(which ck-launch-session) \$Dbus\""
-  echo " echo \$Dbus"
   
   echo "# create x11docker.CMD.sh (shared with container and given as image command on docker run)"
   echo "{ echo '#! /bin/sh'"
@@ -3413,8 +3423,6 @@ start() {
   echo "  echo ''"
   echo "  echo export USER=$Benutzer"
   echo "  echo export HOME=\"\\\"$Benutzerhome\\\"\""
-  echo "  echo 'mkdir -p  \"\$HOME\" && cd \"\$HOME\"'"
-  echo "  echo 'touch \"\$HOME/.xinitrc\" '"
   echo "  echo ''"
   echo "  echo '# link X socket into right folder /tmp/.X11-unix.'"
   echo "  echo '# Was not directly shared to provide .X11-unix with rw-access. '"
@@ -3493,9 +3501,18 @@ start() {
                                                        cp /tmp/group /etc/group ;
                                                        getent group | grep -v \$(getent group $Benutzergid || echo USERNOTFOUND) > /tmp/group;
                                                                                            echo $Benutzergruppe:x:$Benutzergid: >> /tmp/group ;
-                                                       mv /tmp/group /etc/group ;
-                                                       mkdir -p $Benutzerhome && chown $Benutzer $Benutzerhome ;
+                                                       mv /tmp/group /etc/group
                                                      \" " 
+  [ "$Adduserhome" = "no" ] && {
+    echo "# create home folder in container"
+    echo "docker exec -u root $Containername /bin/sh -c \"mkdir --mode 777 -p $Benutzerhome\""
+    for Count in $(seq -s' ' $Sharevolumesnumber) ; do
+      case "${Sharevolumes[$Count]}" in
+        "$Benutzerhome") echo "docker exec -u root $Containername /bin/sh -c \"ln -s '${Sharevolumes[$Count]}/$(basename $Benutzerhome)' $Benutzerhome\"" ;;
+        *) echo "docker exec -u root $Containername /bin/sh -c \"ln -s ${Sharevolumes[$Count]} $Benutzerhome\"" ;;
+      esac
+    done
+  }
   echo "# create /etc/sudoers"
   echo "docker exec -u root $Containername sh -c \"echo 'root ALL=(ALL) ALL' > /etc/sudoers ; rm -R /etc/sudoers.d\""
   [ "$Sudouser" = "yes" ] && echo "docker exec -u root $Containername sh -c \"echo '$Benutzer ALL=(ALL) ALL' >> /etc/sudoers\""
