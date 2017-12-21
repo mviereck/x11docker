@@ -201,8 +201,8 @@ x11docker --hostdisplay x11docker/xfce thunar  # Thunar from another image appea
 # Init system
 x11docker supports init systems as PID 1 in container.
  - `--tini`: As default, x11docker uses docker built-in `tini` with docker run option `--init`.
- - `--systemd`: systemd in container works best with fedora and CentOS images. 
-   - debian images additionally need quite insecure option `--sys-admin` to add capability SYS_ADMIN.
+ - `--systemd`: systemd in container works best with Arch Linux, fedora and CentOS images. 
+   - debian images additionally need quite insecure option `--sys-admin` to add capability `SYS_ADMIN`. 
    - No special setup is needed in image, only `systemd` must be installed. To get a faster startup, it helps to look for services that fail to start in container and to mask them in image with `systemctl mask servicename`.
    - x11docker sets up the container to run the image command as a service.
    - Image example based on fedora: [x11docker/cinnamon](https://hub.docker.com/r/x11docker/cinnamon/)
