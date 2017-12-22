@@ -9,9 +9,12 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.0.4"
+Version="3.9.0.5"
 
 changelog() {
+# 21.12.2017 V3.9.0.5   add capability DAC_OVERRIDE if user switching is allowed -> needed to change /etc/sudoers if ro
+#                       bugfix: only create XDG_RUNTIME_DIR if not already existing
+#                       --systemd: adding --tmpfs=/run/lock allows to drop --sys-admin !
 # 20.12.2017 V3.9.0.4   docker run --workdir=/tmp, avoids issues with WORKDIR in image (seen with lirios/unstable)
 # 19.12.2017            bugfix --dbus: check for dbus-launch in x11docker.CMD.sh, not in dockerrc on host
 # 18.12.2017            changes to satisfy lirios: 
@@ -130,7 +133,6 @@ changelog() {
 todo() {
 # check current xpra, freezes with qupzilla
 # drop capabilities inside of container? need DAC_OVERRIDE to delete ro /etc/sudoers in mate
-# doku: --systemd on arch needs no --sys-admin
 # --systemd: try to avoid xhost +SI:localuser:$Benutzer
 # check Xorg version for +iglx, check security implications, maybe option --iglx?
 # GTK3 in Wayland: --dbus once worked with $Dbusdaemon=yes
@@ -323,11 +325,7 @@ Init system:
      --openrc          Init system OpenRC. Degrades container isolation a bit,
                        but needs less capabilities than --runit and --systemd.
      --systemd         Init system systemd. Degrades container isolation.
-                       Works best with Arch, fedora and CentOS based images. 
                        For faster startup mask services that fail in container.
-                       Debian based images need option --sys-admin, too.
-     --sys-admin       Advanced container privileges (--cap-add SYS_ADMIN).
-                       Do not use with security in mind.
      --sharecgroup     Share /sys/fs/cgroup. Default for --systemd.
                        Can be used with --openrc.
                        
@@ -364,6 +362,9 @@ Developer options:
                        Shares host network stack, allows dbus communication.
      --cap-default     Allow default docker container capabilities and 
                        disable container security hardening of x11docker.
+     --sys-admin       Advanced container privileges (--cap-add SYS_ADMIN).
+                       Use only for troubleshooting with --systemd.
+                       Do not use with security in mind.
      --cachedir DIR    Custom cache folder. (Default: \$HOME/.cache/x11docker)
      --ps              Preserve container and cache files on exit.
                        
@@ -1185,7 +1186,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
          --runit)      Initsystem="runit" ;;               # run runit as init system and image command as a service
          --openrc)     Initsystem="openrc" ;;
          --systemd)    Initsystem="systemd" ;;             # run systemd as init system and image command as a service
-         --sys-admin)  Capsysadmin="yes" ;;                   # --cap-add SYS_ADMIN, needed for systemd in debian buster images
+         --sys-admin)  Capsysadmin="yes" ;;                # --cap-add SYS_ADMIN, troubleshooting with systemd
          --sharecgroup)Sharecgroup="yes" ;;                # share /sys/fs/cgroup. default for --systemd, possible use with --openrc
          
        ## Environment
@@ -1405,9 +1406,7 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   [ "$Capsysadmin" = "yes" ] && warning "Option --sys-admin allows quite extensive privileges
   to container! Applications could try to become root on host.
   Do not use --sys-admin with security in mind.
-  It adds highly privileged linux capabilitiy --cap-add=SYS_ADMIN.
-  It allows --systemd with debian images.
-  Images based on fedora, CentOS or Arch Linux do not need --sys-admin."
+  It adds highly privileged linux capabilitiy --cap-add=SYS_ADMIN."
   
   [ "$Sudouser" = "yes" ] && warning "You allow $Benutzer sudo permissions (password: x11docker).
   Also, the container gains additional capabilities to allow sudo.
@@ -3092,10 +3091,6 @@ done
   It allows some docker container capabilities (nearly like --cap-default).
   It shares access to host cgroups in /sys/fs/cgroup."
   
-      note "Option --systemd works best with images based on
-  fedora, CentOS or Arch Linux.
-  Images based on debian need quite insecure option --sys-admin."
-  
       Systemdtarget=$Cachefolder/x11docker.target             && mkfile $Systemdtarget
       Systemdstartcmd=$Cachefolder/x11docker-startcmd.service && mkfile $Systemdstartcmd
       Systemdwatch=$Cachefolder/x11docker-watch.service       && mkfile $Systemdwatch
@@ -3266,7 +3261,7 @@ start() {
         runit)
           Switchusercaps="yes"
           [ "$Capdropall" = "yes" ] && [ "$Adminusercaps" = "no" ] && Dockercommand="$Dockercommand \\
-  --cap-add FOWNER  --cap-add KILL    --cap-add DAC_OVERRIDE"
+  --cap-add FOWNER      --cap-add KILL"
           Dockercommand="$Dockercommand \\
   --cap-add SYS_BOOT \\
   --stop-signal HUP --env VIRTUALIZATION=container \\
@@ -3277,7 +3272,7 @@ start() {
           Switchusercaps="yes"
           [ "$Capdropall" = "yes" ] && [ "$Adminusercaps" = "no" ] && Dockercommand="$Dockercommand \\
   --cap-add FOWNER \\
-  --cap-add FSETID  --cap-add CHOWN"
+  --cap-add FSETID      --cap-add CHOWN"
           Dockercommand="$Dockercommand \\
   --cap-add SYS_BOOT \\
   -v $Openrcservice:/etc/init.d/x11docker.service:rw \\
@@ -3289,19 +3284,22 @@ start() {
         [ "$Adminusercaps" = "yes" ] && {
           Switchusercaps="yes"
           Dockercommand="$Dockercommand \\
-  --cap-add FOWNER  --cap-add KILL    --cap-add DAC_OVERRIDE \\
-  --cap-add FSETID  --cap-add CHOWN   --cap-add SETPCAP"
+  --cap-add FOWNER      --cap-add KILL\\
+  --cap-add FSETID      --cap-add CHOWN   --cap-add SETPCAP"
         }
         case $Switchusercaps in
           yes) 
             Dockercommand="$Dockercommand \\
-  --cap-add SETUID  --cap-add SETGID  --cap-add AUDIT_WRITE" 
+  --cap-add SETUID      --cap-add SETGID  --cap-add DAC_OVERRIDE\\
+  --cap-add AUDIT_WRITE" 
           ;;
           no)
             Dockercommand="$Dockercommand \\
   --security-opt=no-new-privileges" 
           ;;
         esac
+        
+        # option --dbusdaemon: dbus needs CHOWN for XDG_RUNTIME_DIR
         [ "$Dbusdaemon" = "yes" ] && Dockercommand="$Dockercommand \\
   --cap-add CHOWN"
       }
@@ -3320,7 +3318,7 @@ start() {
       
       # allows writing even with --read-only. --systemd needs tmpfs at all
       Dockercommand="$Dockercommand \\
-  --tmpfs /tmp --tmpfs /run --tmpfs /var/tmp --tmpfs /var/run" 
+  --tmpfs /tmp --tmpfs /var/tmp --tmpfs /run --tmpfs /var/run --tmpfs /run/lock" 
       
       # entrypoint is checked in dockerrc
       Dockercommand="$Dockercommand \\
@@ -3439,7 +3437,7 @@ start() {
   [ "$Dbuslaunch" = "yes" ] && echo "echo 'Dbus=\"\$(dbus-launch --help >/dev/null 2>&1 && echo dbus-launch)\"'"
   [ "$Dbuslaunch" = "yes" ] && echo "echo '[ -z \"\$Dbus\" ] && Dbus=\"\$(dbus-run-session --help >/dev/null 2>&1 && echo dbus-run-session)\"'"
   [ "$Dbusdaemon" = "yes" ] && echo "echo 'Dbus=\"\$([ -e /usr/bin/ck-launch-session ] && echo ck-launch-session) \$Dbus\"'" ### FIXME
-  echo "  echo echo x11docker: dbus command: \\\$Dbus"
+  [ "$Dbuslaunch" = "yes" ] && echo "  echo echo x11docker: dbus command: \\\$Dbus"
   echo "  echo ''"
   [ -n "$Newdisplay" ]           && echo "  echo 'export DISPLAY=$Newdisplay'"
   [ "$Xauthentication" = "yes" ] && echo "  echo 'export XAUTHORITY=$Cshare/Xclientcookie'"
@@ -3448,8 +3446,10 @@ start() {
   echo "  echo 'export UBUNTU_MENUPROXY= QT_X11_NO_NATIVE_MENUBAR=1 MWNOCAPTURE=true MWNO_RIT=true MWWM=allwm'"
   echo "  echo ''"
   [ "$Xserver" = "--nothing" ] && echo "  echo 'unset DISPLAY WAYLAND_DISPLAY XAUTHORITY'"
+  echo '  echo "[ -e \"\$XDG_RUNTIME_DIR\" ] || {"'
   echo "  echo '  mkdir -v -m 700 -p /tmp/XDG_RUNTIME_DIR'"
   echo "  echo '  export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR'"
+  echo "  echo '}'"
   [ "$Sharewayland" = "yes" ] && {
     echo "  echo 'export WAYLAND_DISPLAY=$Waylandsocket'"
     echo "  echo 'ln -s $Cshare/$Waylandsocket \$XDG_RUNTIME_DIR/$Waylandsocket'"
@@ -3489,7 +3489,7 @@ start() {
   echo ""
   echo "# wait for container to be ready"
   echo "for Count in $(seq -s' ' 20); do"
-  echo "  sleep 0.1"
+  echo "  sleep 0.2"
   echo "  docker exec $Containername sh -c : && { verbose 'container is ready: $Containername' ; break ; } || verbose \"container not ready on \$Count. attempt, trying again\" "
   echo "done"
   echo ""
@@ -3502,7 +3502,8 @@ start() {
   echo "#  - create home folder if not existing already"
   echo "#  - delete possible root password entry in /etc/shadow"
   echo "docker exec -u root $Containername /bin/sh -c \"mkdir -v -p /var/lib/dbus /var/run/dbus ; 
-                                                       mkdir -v -m 1777 -p /tmp/.ICE-unix /tmp/.X11-unix /tmp/.font-unix;
+                                                       mkdir -v -p -m 1777 /tmp/.ICE-unix /tmp/.X11-unix /tmp/.font-unix;
+                                                       chmod 1777 /tmp/.ICE-unix /tmp/.X11-unix /tmp/.font-unix ;
                                                        ln -s $Cshare/X$Newdisplaynumber $Newxsocket ;
                                                        getent passwd | grep -v \$(getent passwd $Benutzeruid || echo USERNOTFOUND) > /tmp/passwd ;
                                                                                                         echo $Benutzerpasswdentry >> /tmp/passwd ;
@@ -3521,7 +3522,6 @@ start() {
                                                      \" " 
   [ "$Adduserhome" = "no" ] && {
     echo "# create home folder /home/fakehome in container"
-#    echo "docker exec -u root $Containername /bin/sh -c \"mkdir -v -m 777 -p $Benutzerhome\""
     echo "docker exec -u root $Containername /bin/sh -c \"mkdir -v -m 777 -p $Benutzerhome && chown $Benutzer:$Benutzergruppe $Benutzerhome\""
     for Count in $(seq -s' ' $Sharevolumesnumber) ; do
       echo "# create soft links of shared folders to fake home"
@@ -3542,7 +3542,7 @@ start() {
     ;;
     systemd)
       [ "$Dbusdaemon" = "yes" ] && echo "docker exec -u root $Containername sh -c 'systemctl unmask dbus.service systemd-logind.service'" 
-      echo "docker exec $Containername sh -c 'for Count in $(seq -s' ' 10); do systemctl enable --now x11docker.target && break || { echo \"x11docker: systemd dbus not available, trying again\" ; sleep 1 ; } ; done'"
+      echo "docker exec $Containername sh -c 'for Count in $(seq -s' ' 10); do systemctl enable x11docker.target && systemctl start x11docker.target && break || { echo \"x11docker: systemd dbus not available, trying again\" ; sleep 1 ; } ; done'"
     ;;
     runit)
       [ "$Dbusdaemon" = "yes" ] && echo "docker exec -u root $Containername sh -c 'echo \"x11docker: starting console kit daemon\" ; console-kit-daemon ; 
