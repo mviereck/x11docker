@@ -153,9 +153,9 @@ Examples:
  ```
 x11docker --wayland x11docker/xfce xfce4-terminal
 ```  
- - KDE plasma shell (QT5) in a pure Wayland environment with hardware acceleration:
+ - KDE plasma shell (QT5) in a pure Wayland environment with hardware acceleration. Option `--kwin` is used as `kwin_wayland` on host supports plasma panel placing while default `--weston` does not:
  ```
-x11docker --kwin --waylandenv --dbus --gpu -- kdeneon/plasma:user-lts plasmashell
+x11docker --kwin --wayland --dbus --gpu -- kdeneon/plasma:user-lts plasmashell
 ```
 
 You can also run Wayland applications from host with option `--exe`. 
