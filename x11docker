@@ -9,9 +9,13 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.1.1"
+Version="3.9.1.2"
 
 changelog() {
+# 28.12.2017            --sudouser: root gets password 'x11docker', too
+#                       check environment variables in image and set them in x11docker.CMD.sh. Allows PATH of x11docker/trinity again.
+#                       bugfix parsing host XAUTHORITY if running from gksu
+#                       cut image command at '#'
 # 28.12.2017 V3.9.1.1   bugfix --systemd: directly share X socket as systemd can have issues with soft links
 # 25.12.2017 V3.9.1     run in detached mode, drop mess of nohup/setsid/script
 # 24.12.2017            --dbusdaemon: dropped consolekit, not really useful
@@ -138,6 +142,8 @@ changelog() {
   : 
 }
 todo() {
+# --nothing: do no show error message on fast exit
+
 # check detached mode on mageia
 # --systemd: try to avoid xhost +SI:localuser:$Benutzer
 # check Xorg version for +iglx, check security implications, maybe option --iglx?
@@ -347,7 +353,7 @@ Container user:
      --user N          Create container user N (N=name or N=uid). Default: 
                        same as host user. N can also be an unknown user id.
                        You can specify a group id with N being 'user:gid'.
-     --sudouser        Add user to group sudo, password:  x11docker
+     --sudouser        Add user to group sudo. root password:  x11docker
                        Severe reduction of default x11docker security!
      --hostuser USER   Run X (and container user) as user USER. Default is
                        result of \$(logname). (x11docker must run as root).
@@ -1041,7 +1047,7 @@ Silent="no"                                     # option --silent: do not show m
 Verbosecolors="no"                              # colored output for --verbose and deleting some systemd error messages. currently without option.
 
 # developer options
-Sudouser="no"                                   # option --sudouser: Create user with sudo permissions without a password
+Sudouser="no"                                   # option --sudouser: Create user and root with sudo permissions with password 'x11docker'
 Capdropall="yes"                                # option --cap-default: (don't) drop all container capabilities
 Adminusercaps="no"                              # options --sudouser, --systemd: add capabilities for general sys administration
 Switchusercaps="no"                             # options --dbus, --sudouser and initsystems: add capabilities for su/sudo user switching
@@ -1288,7 +1294,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
           shift
         done
         Imagename=$(echo $Imagecommand | cut -d ' ' -f1)
-        Imagecommand=$(echo $Imagecommand | cut -s -d ' ' -f2-)
+        Imagecommand=$(echo $Imagecommand | cut -s -d ' ' -f2- | cut -d'#' -f1)
         [ -z "$Imagename$Imagecommand" ] && X11dockermode="xonly"
       ;;
       '') ;;
@@ -1426,7 +1432,7 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   }
   
   [ "$Sudouser" = "yes" ] && warning "You allow $Benutzer sudo permissions (password: x11docker).
-  Also, the container gains additional capabilities to allow sudo.
+  Also, the container gains additional capabilities to allow sudo and su.
   This is a severe reduction of default x11docker security.
   If an application breaks out of container, it can harm your system
   in every way without you noticing."
@@ -2110,7 +2116,7 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
 
 { #### part: create $Hostxenv: Environment variables for host X display
   [ -n "$Hostdisplay" ] && [ -e "$Hostxsocket" ] && {
-    $Mksu "xauth nlist $Hostdisplay 2>/dev/null | xauth -f $Hostxauthority nmerge - 2>/dev/null"
+    xauth nlist $Hostdisplay 2>/dev/null | $Mksu "xauth -f $Hostxauthority nmerge - 2>/dev/null"
     chown $Hostuser $Hostxauthority
     chmod 600 $Hostxauthority
     [ -s "$Hostxauthority" ] && export XAUTHORITY=$Hostxauthority || Hostxauthority= 
@@ -3421,7 +3427,10 @@ start() {
   echo ""
   echo "# make sure root has no password in /etc/shadow"
   echo "sed -i /root.*/d /etc/shadow"
-  echo "echo 'root:*:17219:0:99999:7:::' >> /etc/shadow"
+  case $Sudouser in
+    no)  echo "echo 'root:*:17219:0:99999:7:::' >> /etc/shadow" ;;
+    yes) echo "echo 'root:$Benutzerpasswort:17219:0:99999:7:::' >> /etc/shadow  # with option --sudouser, set root password 'x11docker'" ;;
+  esac
   echo ""
   echo "# create password entry for container user in /etc/shadow"
   echo "sed -i /$Benutzer.*/d /etc/shadow # delete user entry if already existing"
@@ -3495,7 +3504,7 @@ start() {
   # create script that needs root permissions or docker group membership to use docker.
   # This is the part the password prompt / $Getroot is needed for.
   echo "#! /bin/bash"
-  declare -f waitforfilecreation
+  declare -f waitforfilecreation verbose
 
   echo "Imagename='$Imagename'"
   echo "Imagecommand='$Imagecommand'"
@@ -3503,6 +3512,9 @@ start() {
   echo "# check if image is available locally"
   echo "docker inspect --type=image $Imagename > /dev/null 2>&1 || {"
   [ "$Pullterminal" = "$Passwordterminal" ] && Pullterminal=""
+  [ -n "$Hostxenv" ]&& echo "  export $Hostxenv"
+  [ -n "$Newxenv" ] && [ "$Tty" = "yes" ] && echo "  export $Newxenv"
+  [ "$Xserver" = "--xorg" ] && echo "  export $Newxenv"
   echo "  $Pullterminal /bin/bash $Pullrc"
   echo "  waitforfilecreation $Cachefolder/pullready"
   echo "  docker inspect --type=image $Imagename > /dev/null 2>&1 || {"
@@ -3511,7 +3523,6 @@ start() {
   echo "    exit 1"
   echo "  }"
   echo "}"  
-  
   echo "# check CMD"
   echo "[ -z \"\$Imagecommand\" ] && {"
   echo "  # extract image command from image if not given on cli"
@@ -3529,11 +3540,19 @@ start() {
   }
   echo "[ -z \"\$Imagecommand\$Entrypoint\" ] && echo 'x11docker WARNING: No image command specified and no CMD or ENTRYPOINT found in image.'|tee -a $Logfile"
   
+  echo "# check image environment variables"
+  echo "Environment=\$(docker inspect --format='{{.Config.Env}}' $Imagename)"
+  echo "Environment=\${Environment#[}"
+  echo "Environment=\${Environment%]}"
+  
   echo "# create x11docker.CMD.sh (shared with container and given as image command on docker run)"
   echo "{ echo '#! /bin/sh'"
   echo "  echo '# created startscript for docker run: x11docker.CMD.sh'"
   echo '  echo Imagecommand="\"$Imagecommand\""'
   echo '  echo Entrypoint="\"$Entrypoint\""'
+  echo "  echo ''"
+  echo "  echo '# Environment variables found in image'"
+  echo "  echo \"export \$Environment\""
   echo "  echo ''"
   echo "  echo export USER=$Benutzer"
   echo "  echo export HOME=\"\\\"$Benutzerhome\\\"\""
