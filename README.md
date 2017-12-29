@@ -26,6 +26,8 @@
 
 ![screenshot](screenshot-lxde-wine.png "lxde-wine desktop running in Xephyr window using x11docker")
 
+![screenshot](screenshot-lumina.png "lumina desktop running in Xephyr window using x11docker")
+
 ![screenshot](screenshot-retroterm.png "cool retro term running in Xpra window using x11docker")
 
 ![screenshot](screenshot-lxde-small.png "LXDE desktop in xpra window using x11docker")
