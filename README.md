@@ -204,7 +204,7 @@ x11docker supports init systems as PID 1 in container.
  - `--systemd`: systemd in container, tested with fedora, debian and Arch Linux images.
    - No special setup is needed in image, only `systemd` must be installed. To get a faster startup, it helps to look for services that fail to start in container and to mask them in image with `systemctl mask servicename`.
    - x11docker sets up the container to run the image command as a service.
-   - Image example based on fedora: [x11docker/cinnamon](https://hub.docker.com/r/x11docker/cinnamon/)
+   - Image example based on debian stretch: [x11docker/cinnamon](https://hub.docker.com/r/x11docker/cinnamon/)
  - `--runit`: runit in container, so far testet with [Void Linux](https://www.voidlinux.eu/) images.
    - No special setup is needed in image, only `runit` must be installed. For a bit faster startup, failing services can be disabled by deleting their softlinks in `/etc/runit/runsvdir/default`.
    - x11docker sets up the container to run the image command as a service.
