@@ -328,20 +328,25 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
    - Firefox with your host Firefox profile and shared download folder (with `--rw` to allow read/write access due to special setup in image): `x11docker --rw --env HOME=$HOME --sharedir $HOME/.mozilla --sharedir $HOME/.cache/mozilla --sharedir $HOME/Downloads -- jess/firefox`
 
  - Desktop in container: 
-   - Xfce: `x11docker --desktop x11docker/xfce`
-   - LXDE: `x11docker --desktop x11docker/lxde`
-   - LXQt: `x11docker --desktop x11docker/lxqt`
-   - fluxbox: `x11docker --desktop x11docker/fluxbox` (quite small image!)
-   - Mate: `x11docker --desktop x11docker/mate`
-   - Trinity: `x11docker --desktop x11docker/trinity`
-   - KDE Plasma: `x11docker --desktop kdeneon/plasma:user-lts`
-   - deepin: `x11docker --desktop --systemd --sys-admin --pulseaudio x11docker/deepin`
-   - LiriOS: `x11docker --desktop lirios/unstable`
+   - Lightweight, small image:
+     - fluxbox: `x11docker --desktop x11docker/fluxbox` (quite small image!)
+     - Lumina: `x11docker --desktop x11docker/lumina`
+     - LXDE: `x11docker --desktop x11docker/lxde`
+     - LXQt: `x11docker --desktop x11docker/lxqt`
+     - Xfce: `x11docker --desktop x11docker/xfce`
+     
+   - Medium:
+     - Enlightenment: `x11docker --desktop --runit x11docker/enlightenment`
+     - Mate: `x11docker --desktop x11docker/mate`
+     - Trinity: `x11docker --desktop x11docker/trinity` (full dsktop environmet with all Trinity/KDE3 applications)
+     
+   - Heavy, option `--gpu` recommended
+     - Cinnamon: `x11docker --desktop --systemd x11docker/cinnamon`
+     - deepin: `x11docker --desktop --systemd --sys-admin --pulseaudio x11docker/deepin`
+     - KDE Plasma: `x11docker --desktop kdeneon/plasma:user-lts`
+     - LiriOS: `x11docker --desktop lirios/unstable`
+     
    - LXDE desktop with wine and a persistent home folder to preserve installed Windows applications, with pulseaudio sound and hardware acceleration: `x11docker --desktop --home --pulseaudio --gpu x11docker/lxde-wine`
-   
- - Some desktops run better or only with an [init system](#init-system) in container:
-   - Enlightenment with init system runit: `x11docker --desktop --runit --gpu x11docker/enlightenment`
-   - Cinnamon with init system systemd: `x11docker --desktop --systemd --gpu x11docker/cinnamon`
   
 ## Screenshots
 Sample screenshots can be found in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
