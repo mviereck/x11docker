@@ -40,21 +40,27 @@ To run a host application on a new X server:
   x11docker [OPTIONS] --exe COMMAND
   x11docker [OPTIONS] --exe -- COMMAND [ARG1 ARG2 ...]
 ```
-Make x11docker executable with `chmod +x x11docker` or just run it with `bash x11docker` respective `bash x11docker-gui`. Or install it on your system (see below at chapter [Installation](#installation)).
 
+# Installation
+### Minimal installation
+For a first test, you can run with `bash x11docker` respective `bash x11docker-gui`. 
+For manual installation, make x11docker executable with `chmod +x x11docker` and move it to `/usr/bin`.
+### Installation options
+As root, you can install, update and remove x11docker on your system:
+ - `x11docker --install` : install x11docker and x11docker-gui. 
+ - `x11docker --update` : download and install latest version from github.
+ - `x11docker --remove` : remove all files installed by x11docker.
+ 
+Copies `x11docker` and `x11docker-gui` to `/usr/bin`. Creates an icon in `/usr/share/icons`. Creates `x11docker.desktop` in `/usr/share/applications`. Copies `README.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
+### Shortest way for first installation:
+```
+wget https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker -O /tmp/x11docker
+bash /tmp/x11docker --update
+rm /tmp/x11docker
+```
+ 
 # Troubleshooting
 For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. x11docker shows warnings if something is insecure, missing or going wrong. Use option `--verbose` to see logfile output, too. Get help in the [issue tracker](https://github.com/mviereck/x11docker/issues).
-
-# Password prompt
-root permissions are needed only to run docker. X servers run as unprivileged user.
-
-Running x11docker as unprivileged user:
- - x11docker checks whether docker needs a password to run and whether `su` or `sudo` are needed to get root privileges. A password prompt appears, if needed.
- - If that check fails and does not match your setup, use option `--pw FRONTEND`. `FRONTEND` can be one of `su sudo gksu gksudo lxsu lxsudo kdesu kdesudo beesu pkexec` or `none`.  
-
-Running x11docker as root:
- - Commands other than `docker` are executed as unprivileged user determined with [`logname`](http://pubs.opengroup.org/onlinepubs/9699919799/utilities/logname.html). (You  can specify another host user with `--hostuser USER`).
- - Unfortunately, some systems do not provide `DISPLAY` and `XAUTHORITY` for root, but needed for nested X servers like Xephyr. In that case, tools like `gksu` or `gksudo` can help. 
  
 # Dependencies
 x11docker can run with standard system utilities without additional dependencies on host or in image. As a core, it only needs an `X` server and, of course, [`docker`](https://www.docker.com/) to run docker images on X.
@@ -95,6 +101,17 @@ Advanced usage:
 
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
 
+# Password prompt
+root permissions are needed only to run docker. X servers run as unprivileged user.
+
+Running x11docker as unprivileged user:
+ - x11docker checks whether docker needs a password to run and whether `su` or `sudo` are needed to get root privileges. A password prompt appears, if needed.
+ - If that check fails and does not match your setup, use option `--pw FRONTEND`. `FRONTEND` can be one of `su sudo gksu gksudo lxsu lxsudo kdesu kdesudo beesu pkexec` or `none`.  
+
+Running x11docker as root:
+ - Commands other than `docker` are executed as unprivileged user determined with [`logname`](http://pubs.opengroup.org/onlinepubs/9699919799/utilities/logname.html). (You  can specify another host user with `--hostuser USER`).
+ - Unfortunately, some systems do not provide `DISPLAY` and `XAUTHORITY` for root, but needed for nested X servers like Xephyr. In that case, tools like `gksu` or `gksudo` can help. 
+ 
 # Security 
 Scope of x11docker is to run dockered GUI applications while preserving and improving container isolation.
 Core concept is:
@@ -271,23 +288,8 @@ x11vnc -localhost -noshm
 In another terminal, start VNC viewer with `vncviewer localhost:0`.
 See `man x11vnc`  for many details and further infos.
 Option `-noshm` disables shared memory (MIT-SHM). To allow shared memory, remove `-noshm` and use isolation breaking x11docker option `--ipc`.
-
-
-# Installation
-As root, you can install, update and remove x11docker on your system:
- - `x11docker --install` : install x11docker and x11docker-gui. 
- - `x11docker --update` : download and install latest version from github.
- - `x11docker --remove` : remove all files installed by x11docker.
  
-Copies `x11docker` and `x11docker-gui` to `/usr/bin`. Creates an icon in `/usr/share/icons`. Creates `x11docker.desktop` in `/usr/share/applications`. Copies `README.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
-
-Shortest way:
- - Download x11docker script only: 
-   - `wget https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker -O /tmp/x11docker`
- - Run as root: `bash /tmp/x11docker --update`
- - Remove temporary file: `rm /tmp/x11docker`
- 
-## Simple but insecure alternative
+# Simple but insecure alternative
 There are short and simple but insecure alternatives for x11docker. 
 ### Alternative for single applications
 This is similar to x11docker option `--hostdisplay`:
@@ -303,7 +305,6 @@ docker run --rm -e DISPLAY=$DISPLAY \
             IMAGENAME IMAGECOMMAND
 ```
 This nice short solution has the disadvantage of breaking container isolation. X security leaks like keylogging and remote host control can be abused by container applications.
-
 ### Alternative for desktop environments
 This is similar to x11docker option `--xephyr`:
  - Run Xephyr with disabled shared memory (extension MIT-SHM) and disabled extension XTEST.
