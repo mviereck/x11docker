@@ -9,10 +9,16 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.1.2"
+Version="3.9.1.3"
 
 changelog() {
-# 28.12.2017            --sudouser: root gets password 'x11docker', too
+# 04.01.2017 V3.9.1.3   --dbus-daemon: set xhost +SI:localuser:$USER, needed for deepin
+# 03.01.2017            bugfix --systemd: global XAUTHORITY setting was wrong, removed at all
+#                       faster startup of pulseaudio, no sleep 1
+#                       bugfix: pull terminal did not appear if running from terminal
+#                       create fake homedir and softlinks to sharedirs in CMD.sh, base is /fakehome now
+# 29.12.2017            extension XTEST: more restrictive defaults
+# 28.12.2017 V3.9.1.2   --sudouser: root gets password 'x11docker', too
 #                       check environment variables in image and set them in x11docker.CMD.sh. Allows PATH of x11docker/trinity again.
 #                       bugfix parsing host XAUTHORITY if running from gksu
 #                       cut image command at '#'
@@ -142,8 +148,10 @@ changelog() {
   : 
 }
 todo() {
-# --nothing: do no show error message on fast exit
+# deepin: check dockerfile again, ddesession-daemon no longer running
+# --pulseaudio: stopping container with pulseaudio disables sound of other containers, too
 
+# --nothing: do no show error message on fast exit
 # check detached mode on mageia
 # --systemd: try to avoid xhost +SI:localuser:$Benutzer
 # check Xorg version for +iglx, check security implications, maybe option --iglx?
@@ -926,14 +934,14 @@ Dockeroptions=""                                # options for docker after -- an
 Containername=""                                # name of container set by x11docker to make --cleanup able to find orphaned containers
 Dockerip=""                                     # IP adress of docker interface
 Dockeriprange=""                                # IP adress of docker interface including suffix /16
-Dockerpid=""                                    # process ID of script process with docker container
+Containerpid=""                                    # process ID of script process with docker container
 Dockerdaemon="$(pgrep -xa $(ps -e -o comm | grep dockerd) 2>/dev/null)"  # how docker daemon has been started
 
 # docker related files
 Dockerrc=dockerrc                               # init script run by docker. Creates $Imagecommandscript
 Imagecommandscript=x11docker.CMD.sh             # name of shared script containing image command
 Dockerlogfile=docker.log                        # file to log output of docker
-Dockerpidfile=docker.pid                        # file to store process ID of script -c docker
+Containerpidfile=docker.pid                     # file to store process ID of script -c docker
 Containerip=container.ip                        # IP adress of container
 Setupscript=containersetup.sh
 
@@ -1294,7 +1302,8 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
           shift
         done
         Imagename=$(echo $Imagecommand | cut -d ' ' -f1)
-        Imagecommand=$(echo $Imagecommand | cut -s -d ' ' -f2- | cut -d'#' -f1)
+        Imagecommand=$(echo $Imagecommand | cut -s -d ' ' -f2- )
+#        Imagecommand=$(echo $Imagecommand | cut -s -d ' ' -f2- | cut -d'#' -f1)
         [ -z "$Imagename$Imagecommand" ] && X11dockermode="xonly"
       ;;
       '') ;;
@@ -2086,7 +2095,7 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   Pullrc="$Cachefolder/$Pullrc"                             && mkfile $Pullrc
   Xtermlogfile="$Cachefolder/$Xtermlogfile"                 && mkfile $Xtermlogfile
   Dockerlogfile="$Cachefolder/$Dockerlogfile"               && mkfile $Dockerlogfile
-  Dockerpidfile="$Cachefolder/$Dockerpidfile"               && mkfile $Dockerpidfile
+  Containerpidfile="$Cachefolder/$Containerpidfile"               && mkfile $Containerpidfile
   Dockerrc="$Cachefolder/$Dockerrc"                         && mkfile $Dockerrc
   Setupscript="$Sharefolder/$Setupscript"                   && mkfile $Setupscript
   Containerip="$Cachefolder/$Containerip"                   && mkfile $Containerip
@@ -2464,26 +2473,34 @@ fi
   esac
   [ "$Xauthentication" = "yes" ] && Xserveroptions="$Xserveroptions \\
   -auth $Xservercookie"
-
-  [ -n "$Windowmanager" ] && {
-    case $Xserver in
-      --xpra|--xpra-xwayland) [ "$Desktopmode" = "yes" ] && warning "Can not disable XTEST on new X server as Xpra needs it.
+  
+  # exension XTEST
+  case $Xserver in
+    --xpra|--xpra-xwayland) 
+      [ -n "$Windowmanager" ] && [ "$Desktopmode" = "yes" ] && {  
+        Xserveroptions="$Xserveroptions \\
+  +extension XTEST"
+        warning "Can not disable XTEST on new X server as Xpra needs it.
   If your host window manager $Windowmanager can start applications
   on its own (for example, with a context menu), container applications
   could abuse this to run and remotly control host applications."
-        ;;
-      --xdummy|--xdummy-xwayland|--xvfb) Xserveroptions="$Xserveroptions \\
-  +extension XTEST" && warning "Did not disable XTEST for invisible X server.
+      }
+    ;;
+    --xdummy|--xdummy-xwayland|--xvfb) 
+      [ -n "$Windowmanager" ] && {
+        Xserveroptions="$Xserveroptions \\
+  +extension XTEST"
+        warning "Did not disable XTEST for invisible X server.
   If your host window manager $Windowmanager can start applications
   on its own (for example, with a context menu), container applications
   could abuse this to run and remotly control host applications.
   If you provide content of X server $Xserver over network to others,
   they may take control over your computer!"
-        ;;
-      *) Xserveroptions="$Xserveroptions \\
-  -tst -extension XTEST" ;;
-    esac
-  }
+      }
+    ;;
+    *) Xserveroptions="$Xserveroptions \\
+  -extension XTEST -tst" ;;
+  esac
   
   # check DPI
   case $Xserver in
@@ -3031,7 +3048,7 @@ done
     Benutzeruid=$Benutzer
     Benutzer="unknown$Benutzer"
     [ -z "$Benutzergid" ] && Benutzergid=100
-    Benutzerhome="/home/fakehome"
+    Benutzerhome="/fakehome/$Benutzer"
     [ -z "$Benutzerhosthomefolder" ] && [ "$Benutzerhosthome" = "yes" ] && { 
       warning "Will not create a persistent home folder on host
   for a non-existing user. (Instead, you can specify --homedir to a location
@@ -3093,7 +3110,7 @@ done
       writeaccess $Benutzeruid "$Benutzerhosthomefolder" || warning "User '$Benutzer' does not have write access to
   $Benutzerhosthomefolder."
     ;;
-    no) Benutzerhome="/home/fakehome" ;;
+    no) Benutzerhome="/fakehome/$Benutzer" ;;
   esac
   
   # create entry for /etc/passwd
@@ -3161,8 +3178,9 @@ WantedBy=x11docker.target
 " >> $Systemdjournal
 
       echo "[Manager]
-DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Customenvironment
+DefaultEnvironment=DISPLAY=$Newdisplay $Customenvironment
 " >> $Systemdenvironment
+#DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $Customenvironment
     ;;
     
     runit)
@@ -3447,14 +3465,7 @@ start() {
   echo "echo $Benutzergruppe:x:$Benutzergid: >> /tmp/group"
   echo "mv /tmp/group /etc/group"
   echo ""
-  [ "$Benutzerhosthome" = "no" ] && {
-    echo "# create fake home folder $Benutzerhome in container"
-    echo "mkdir -v -m 777 -p $Benutzerhome && chown $Benutzer:$Benutzergruppe $Benutzerhome"
-    for Count in $(seq -s' ' $Sharevolumescount) ; do
-      echo "# create soft links of shared folders to fake home"
-      echo "ln -s ${Sharevolumes[$Count]} $Benutzerhome"
-    done
-  }
+  [ "$Benutzerhosthome" = "no" ] && echo "mkdir -v -m 777 /fakehome"
   echo ""
   [ "$Switchusercaps" = "yes" ] && {
     echo "# create /etc/sudoers, remove /etc/sudoers.d. Delete possible sudo setups in image."
@@ -3511,7 +3522,7 @@ start() {
   
   echo "# check if image is available locally"
   echo "docker inspect --type=image $Imagename > /dev/null 2>&1 || {"
-  [ "$Pullterminal" = "$Passwordterminal" ] && Pullterminal=""
+  #[ "$Pullterminal" = "$Passwordterminal" ] && Pullterminal=""
   [ -n "$Hostxenv" ]&& echo "  export $Hostxenv"
   [ -n "$Newxenv" ] && [ "$Tty" = "yes" ] && echo "  export $Newxenv"
   [ "$Xserver" = "--xorg" ] && echo "  export $Newxenv"
@@ -3556,6 +3567,14 @@ start() {
   echo "  echo ''"
   echo "  echo export USER=$Benutzer"
   echo "  echo export HOME=\"\\\"$Benutzerhome\\\"\""
+
+  [ "$Benutzerhosthome" = "no" ] && {
+    echo "  echo mkdir -p -v $Benutzerhome"
+    for Count in $(seq -s' ' $Sharevolumescount) ; do
+      echo "  echo '# create soft links of shared folders to fake home'"
+      echo "  echo 'ln -s ${Sharevolumes[$Count]} $Benutzerhome'"
+    done
+  }
   echo "  echo ''"
   [ -n "$Newdisplay" ]           && echo "  echo 'export DISPLAY=$Newdisplay'"
   [ "$Xauthentication" = "yes" ] && echo "  echo 'export XAUTHORITY=$Cshare/Xclientcookie'"
@@ -3614,17 +3633,23 @@ start() {
   echo "# wait for container to be ready"
   echo "for Count in $(seq -s' ' 20); do"
   echo "  sleep 0.1"
-  echo "  docker exec $Containername sh -c : && { echo 'x11docker: container is ready.' ; break ; } || echo \"x11docker: container not ready on \$Count. attempt, trying again.\" "
+  echo "  docker exec $Containername sh -c : && { echo 'x11docker: container is up and running.' ; break ; } || echo \"x11docker: container not ready on \$Count. attempt, trying again.\" "
   echo "done"
   echo ""
   [ "$Initsystem" = "systemd" ] && echo "mkdir -v -p /sys/fs/cgroup/systemd   # make sure this folder exists on non-systemd hosts, too" 
+  
+  #echo "sleep 1 # wait a moment until IP is available. Currently, IP is only needed for --pulseaudio"
+  echo "docker inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername >> $Containerip"
+  echo "echo x11docker: container IP: \$(cat $Containerip)"
+  echo ""
+  echo "# get PID of container"
+  echo "Containerpid=\$(ps ax | grep \$Containerhostname | grep -v grep | awk '{print \$1}')"
+  echo "echo x11docker: container PID: \$Containerpid"
+  echo "echo \$Containerpid >> $Containerpidfile"
+  
   echo ""
   echo "docker exec -u root $Containername sh $Cshare/containersetup.sh"  
   echo ""
-  echo "sleep 1 # wait a moment until IP is available. Currently, IP is only needed for --pulseaudio"
-  echo "docker inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername >> $Containerip"
-  echo "# get PID of container"
-  echo "ps ax | grep \$Containerhostname | grep -v grep | awk '{print \$1}' >> $Dockerpidfile"
 } >> $Dockerrc
 
 { #### part: create pullrc: interactive script to pull image from docker hub
@@ -3731,8 +3756,8 @@ start() {
         [ "$Xserver" = "--nxagent" ] && echo "rm $Xclientcookie.bak"
       }
 
-      [ "$Benutzeruid" = "$Hostuseruid" ]   || echo "setfacl -m u:$Benutzeruid:r $Xclientcookie"  # read permissions for option --user
-      [ "$nsBenutzeruid" = "$Benutzeruid" ] || echo "chmod 444 $Xclientcookie"                    # read permissions for user namespace remapping
+      #[ "$Benutzeruid" = "$Hostuseruid" ]   || echo "setfacl -m u:$Benutzeruid:r $Xclientcookie"  # read permissions for option --user
+      #[ "$nsBenutzeruid" = "$Benutzeruid" ] || echo "chmod 444 $Xclientcookie"                    # read permissions for user namespace remapping
       echo "chmod 644 $Xclientcookie"
       
       [ "$Xserver" = "--hostdisplay" ] || {
@@ -3742,10 +3767,10 @@ start() {
           echo "verbose 'custom xhost setting (option --xhost): $Xhost'"
           echo "$Xhost" 
         }
-        [ "$Initsystem" = "systemd" ] && {
+        [ "$Initsystem" = "systemd" ] || [ "$Dbusdaemon" = "yes" ] && {
           echo "note 'Allowing xhost access for $Benutzer on display $Newdisplay with" 
           echo "  xhost +SI:localuser:$Benutzer"
-          echo "to avoid systemd startup issues. (option --systemd)'"
+          echo "to avoid service issues with X access. (option --systemd or --dbus-daemon)'"
           echo "xhost +SI:localuser:$Benutzer"
         }
       }
@@ -4128,9 +4153,9 @@ $(tail $Compositorlogfile)"
       esac
       waitforfilecreation $Cachefolder/xtermready infinity
       
-      [ -s "$Dockerpidfile" ] && { 
-        Dockerpid=$(cat $Dockerpidfile)
-        ps -p $Dockerpid >/dev/null 2>&1 || {
+      [ -s "$Containerpidfile" ] && { 
+        Containerpid=$(cat $Containerpidfile)
+        ps -p $Containerpid >/dev/null 2>&1 || {
           [ "$Xserver" = "--nothing" ] && saygoodbye || error "Docker startup seems to have failed! 
 
   Last lines of docker.log:
@@ -4139,7 +4164,7 @@ $(tail -n7 $Dockerlogfile)
   Last lines of xterm.log:
 $(tail -n7 $Xtermlogfile)"
         }
-        storepid $Dockerpid docker
+        storepid $Containerpid docker
         
         [ "$Pulseaudio" = "yes" ] && {  # option '--pulseaudio': enable pulseaudio sound over tcp
           # load pulseaudio tcp module, authenticated to container ip on specified port
@@ -4147,7 +4172,7 @@ $(tail -n7 $Xtermlogfile)"
         }
         
         # wait for docker until it terminates. bash builtin wait does not work in this case
-        ps -p $Dockerpid >/dev/null 2>&1 && mywatch "ls $Timetosaygoodbye ; ps -p $Dockerpid -o pid" 
+        ps -p $Containerpid >/dev/null 2>&1 && mywatch "ls $Timetosaygoodbye ; ps -p $Containerpid -o pid" 
         :
       } || { 
         error "docker startup was not successfull.
