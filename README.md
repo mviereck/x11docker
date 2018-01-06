@@ -343,7 +343,7 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
      
    - Heavy, option `--gpu` recommended
      - Cinnamon: `x11docker --desktop --systemd x11docker/cinnamon`
-     - deepin: `x11docker --desktop --systemd --sys-admin --pulseaudio x11docker/deepin`
+     - deepin: `x11docker --desktop --systemd --pulseaudio x11docker/deepin`
      - KDE Plasma: `x11docker --desktop kdeneon/plasma:user-lts`
      - LiriOS: `x11docker --desktop lirios/unstable`
      
