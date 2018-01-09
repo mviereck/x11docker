@@ -160,7 +160,7 @@ If no X server option is specified, x11docker automatically chooses one dependin
 ## Wayland
 Beside the X servers to choose from there are options `--wayland`, `--weston`, `--kwin` and `--hostwayland` to run pure [Wayland](https://wayland.freedesktop.org/) applications without X.
  - Option `--wayland` tries to automatically set up a Wayland environment. It regards option `--desktop`.
-   - QT5 applications (most of KDE) also need option `--dbus`. (GTK3 applications must run _without_ `--dbus`).
+   - QT5 applications (most of KDE) also need option `--dbus`. (GTK3 applications must run _without_ option `--dbus`).
  - Options `--kwin` and `--weston` run Wayland compositors `Kwin` or `Weston`. 
    - For QT5 applications you may need to manually add options `--waylandenv`  and `--dbus` to set some environment variables.
  - Option `--hostwayland` can run single applications on host Wayland desktops like Gnome 3 and KDE 5.
@@ -326,7 +326,7 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
    - Terminal: `x11docker x11docker/xfce xfce4-terminal`
    - Fractal generator XaoS: `x11docker patricknw/xaos` (xaos command defined in image with CMD)
    - glxgears with hardware acceleration: `x11docker --gpu x11docker/xfce glxgears`
-   - Firefox with your host Firefox profile and shared download folder (with `--rw` to allow read/write access due to special setup in image): `x11docker --rw --env HOME=$HOME --sharedir $HOME/.mozilla --sharedir $HOME/.cache/mozilla --sharedir $HOME/Downloads -- jess/firefox`
+   - Firefox with your host Firefox profile and shared download folder: `x11docker --env HOME=$HOME --sharedir $HOME/.mozilla --sharedir $HOME/.cache/mozilla --sharedir $HOME/Downloads -- jess/firefox`
 
  - Desktop in container: 
    - Lightweight, small image:
