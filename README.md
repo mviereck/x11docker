@@ -361,5 +361,5 @@ Sample screenshots can be found in [screenshot branch](https://github.com/mviere
 `x11docker --desktop x11docker/lxqt`
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxqt.png "LXQT desktop in docker"))
 
-`x11docker --desktop --systemd --sys-admin --pulseaudio x11docker/deepin`
+`x11docker --desktop --systemd --pulseaudio --gpu x11docker/deepin`
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-deepin.png "deepin desktop in docker")
