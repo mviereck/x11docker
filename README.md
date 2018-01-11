@@ -222,15 +222,15 @@ x11docker supports init systems as PID 1 in container.
    - No special setup is needed in image, only `systemd` must be installed. To get a faster startup, it helps to look for services that fail to start in container and to mask them in image with `systemctl mask servicename`.
    - x11docker sets up the container to run the image command as a service.
    - Image example based on debian stretch: [x11docker/cinnamon](https://hub.docker.com/r/x11docker/cinnamon/)
- - `--runit`: runit in container, so far testet with [Void Linux](https://www.voidlinux.eu/) images.
+ - `--runit`: runit in container, tested with [Void Linux](https://www.voidlinux.eu/) images.
    - No special setup is needed in image, only `runit` must be installed. For a bit faster startup, failing services can be disabled by deleting their softlinks in `/etc/runit/runsvdir/default`.
    - x11docker sets up the container to run the image command as a service.
    - For most use cases, `dbus` should be installed in image and enabled with 
      - `ln -s /etc/sv/dbus /etc/runit/runsvdir/default`.
    - Image example based on Void Linux: [x11docker/enlightenment](https://hub.docker.com/r/x11docker/enlightenment/)
- - `--openrc`: openrc in container, so far tested with [Alpine Linux](https://alpinelinux.org/) images.
+ - `--openrc`: openrc in container, tested with [Alpine Linux](https://alpinelinux.org/) images.
    - No special setup is needed in image, only `openrc` must be installed. 
- - `--no-init`: to run image command as PID 1 without an init system.
+ - `--no-init`: to run image command as PID 1 without an init system (docker default).
 
 # Developer options
 Collection of rarer needed but sometimes useful options.
