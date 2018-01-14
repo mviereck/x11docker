@@ -326,8 +326,7 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
    - Terminal: `x11docker x11docker/xfce xfce4-terminal`
    - Fractal generator [XaoS](https://github.com/patrick-nw/xaos): `x11docker patricknw/xaos` (xaos command defined in image with CMD)
    - glxgears with hardware acceleration: `x11docker --gpu x11docker/xfce glxgears`
-   - Firefox with your host Firefox profile and shared download folder: `x11docker --env HOME=$HOME --sharedir $HOME/.mozilla --sharedir $HOME/.cache/mozilla --sharedir $HOME/Downloads -- jess/firefox`
-
+   
  - Desktop in container: 
    - Lightweight, small image:
      - fluxbox: `x11docker --desktop x11docker/fluxbox` (quite small image!)
