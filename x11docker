@@ -9,9 +9,10 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.1.5"
+Version="3.9.1.6"
 
 changelog() {
+# 15.01.2017 V3.9.1.6   restart xpra server if it crashes (can happen with xpra 2.2, reason unknown)
 # 13.01.2017 V3.9.1.5   bugfix xpra: reconnect to server after timeout (60s) if switching to console 
 # 12.01.2017 V3.9.1.4   --help: some usage updates
 # 10.01.2017            --xorg: create virtual framebuffer if no monitor is connected (headless server setup)
@@ -740,10 +741,13 @@ finish() {              # trap routine, clean up background processes and cache
       if [ -n "$Pid" ] && [ -n "$(ps -p $Pid --no-headers)" ] ; then
         verbose "terminating background pid $Pid of $Name"
         case $Name in
-          weston|kwin_wayland|compositor|xpraserver|xpraclient|windowmanager|shareclipboard|hostexe|xfishtank) kill -s KILL $Pid || {
+          weston|kwin_wayland|compositor|windowmanager|shareclipboard|hostexe|xfishtank) kill -s KILL $Pid || {
               sleep 1
               [ -n "$(ps -p $Pid --no-headers)" ] && warning "error terminating $Pid $Name"
             }
+          ;;
+          xpraserver|xpraclient)
+            ps -p $Pid | grep xpra >/dev/null && kill $Pid
           ;;
           docker) 
             [ -n "$Sudo" ] && Sudo="sudo -n" # no password prompt here, rather fail
@@ -3124,11 +3128,12 @@ done
           # errors can occur if specifying a user with --user different from current user
           error "Can not create persistent home folder for 
   user '$Benutzer' on host (option --home or --homedir). 
-  Three possibilities to solve issue: 
+  Four possibilities to solve issue: 
   1.) Create folder with write access for user '$Benutzer'
   $Benutzerhosthomefolder
   2.) Run x11docker one time as user '$Benutzer'.
-  3.) Run x11docker one time as user 'root'."
+  3.) Run x11docker one time as user 'root'.
+  4.) Use option --homedir=DIR with DIR pointing to a writeable folder."
         }
       }
       writeaccess $Benutzeruid "$Benutzerhosthomefolder" || warning "User '$Benutzer' does not have write access to
@@ -4012,11 +4017,15 @@ After finish: $Logfile3"
     Verbosecolors="yes"
     Esc="$(printf '\033')"
     [ "$Verbose" = "yes" ] && { 
+      [ "$Initsystem" = "systemd" ] && note "x11docker deletes some systemd error messages
+  that are harmless but numerous to get a better readable output.
+  It deletes all lines with: 'Failed to add fd to store', 
+  'Failed to set invocation ID' and 'Failed to reset devices.list'."
       case $Verbosecolors in
         no)  tail --pid=$$ --retry -n +1 -F $Logfile 2>/dev/null >&3 & ;;
         yes) tail --pid=$$ --retry -n +1 -F $Logfile 2>/dev/null | sed "
                                       /\(Failed to add fd to store\|Failed to set invocation ID\|Failed to reset devices.list\)/d;
-                                      s/\(ERROR\|Error\|error\|FAILURE\)/${Esc}[41m\1${Esc}[0m/g;
+                                      s/\(ERROR\|Error\|error\|FAILURE\|FATAL\|Fatal\|fatal\)/${Esc}[41m\1${Esc}[0m/g;
                                       s/\(Failed\|failed\|Failure\|failure\)/${Esc}[31m\1${Esc}[0m/g;
                                       s/\(WARNING\|Warning\|warning\)/${Esc}[33m\1${Esc}[0m/g;
                                       s/^==>.*/${Esc}[4m\0${Esc}[0m/;
@@ -4068,7 +4077,7 @@ Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' '
   fi
 }
 
-{ #### part: wait for and watch X server, [start xpra] and run xtermrc-> dockerrc-> docker run x11docker.CMD.sh
+{ #### part: wait for and watch X server, [start xpra] and run xtermrc-> dockerrc-> docker run
   # wait for X server
   waitforfilecreation $Cachefolder/Xready || error "Startup of X server $Xserver failed. 
   Last lines of xinit logfile:
@@ -4093,29 +4102,38 @@ $(tail $Xinitlogfile)"
   $Xpraclientcommand"
   
       [ -e "/run/user/$Hostuseruid" ] || {
-        # can miss with option --hostuser
+        # can miss with option --hostuser, xpra needs it for socket
         verbose "Creating /run/user/$Hostuseruid"
         mkdir -p /run/user/$Hostuseruid
         chown $Hostuser /run/user/$Hostuseruid
         chmod 700 /run/user/$Hostuseruid
       }
       
-      verbose "starting Xpra server"
-      $Mksu "env $Newxenv XPRA_OPENGL_DOUBLE_BUFFERED=1 $Xpraservercommand" >> $Xpraserverlogfile 2>&1 &
-      Xpraserverpid=$!
-      storepid $Xpraserverpid xpraserver
-      waitforlogentry "xpra server" $Xpraserverlogfile 'xpra is ready' && verbose "Xpra server is ready" || error "Xpra server startup failed.
+      while [ ! -e "$Timetosaygoodbye" ] && [ -e "$Cachefolder" ] ; do
+        ps -p $Xpraserverpid >/dev/null 2>&1 || {
+          [ -n "$Xpraserverpid" ] && warning "xpra server seems to have crashed.
+  Will restart xpra now. Last lines of xpra server log:
+$(tail $Xpraserverlogfile)"
+          verbose "starting Xpra server"
+          #$Mksu "sed -i 's/xpra is ready/xpra is [x11docker: was] ready/' $Xpraserverlogfile"
+          $Mksubenutzer "rm $Xpraserverlogfile"
+          $Mksu "env $Newxenv XPRA_OPENGL_DOUBLE_BUFFERED=1 $Xpraservercommand" >> $Xpraserverlogfile 2>&1 &
+          Xpraserverpid=$!
+          storepid $Xpraserverpid xpraserver
+          waitforlogentry "xpra server" $Xpraserverlogfile 'xpra is ready' && verbose "Xpra server is ready" || error "Xpra server startup failed.
   Last lines of Xpra server log:
 $(tail $Xpraserverlogfile)"
-
-      while ps -p $Xpraserverpid >/dev/null 2>&1 ; do
-        # need a loop as xpra server disconnects after 60 sec timeout. Can happen with console switching.
+        }
+        ps -p $Xpraclientpid >/dev/null 2>&1 && kill $Xpraclientpid
         verbose "starting Xpra client"
+        [ -n "$Xpraclientpid" ] && note "Restarting Xpra client."
         $Mksu "env $Hostxenv XPRA_PADDING_COLORS='0,0.2,1' $Xpraclientcommand" >> $Xpraclientlogfile 2>&1 &
         Xpraclientpid=$!
         storepid $Xpraclientpid xpraclient
+
         sleep 1
-        ps -p $Xpraclientpid >/dev/null 2>&1 && mywatch "ls $Timetosaygoodbye ; ps -p $Xpraclientpid -o pid"
+        ps -p $Xpraclientpid >/dev/null 2>&1 && mywatch "ls $Timetosaygoodbye ; ps -p $Xpraclientpid -o pid ; ps -p $Xpraserverpid -o pid"
+        sleep 1
       done &
     ;;
   esac
