@@ -97,6 +97,9 @@ Advanced usage:
    - `--dbus` is needed only for QT5 application in Wayland. It needs `dbus-launch` (package `dbus-x11`) in image.
    - `--starter` needs `xdg-user-dir` to locate your `Desktop` folder for starter icons.
    - `--install`, `--update` and `--remove` need `unzip` and `xdg-icon-resource`.
+ - **Language**: You can specify the locale/language setting in container with option `--env LANG=de_DE.UTF-8` or matching to your host with `--env LANG=$LANG`.
+   - Your image needs the matching locales to be installed. All locales in debian images are contained in package `locales-all`.
+   - Example for chinese setup in a debian image: Install `locales-all` and font `fonts-arphic-uming` in image. Either set `ENV zh_CN.UTF-8` in image or use x11docker option `--env LANG=zh_CN.UTF8`.
  - List of all host packages for all possible x11docker options (debian package names): `xpra xserver-xephyr xvfb weston xwayland nxagent kwin xserver-xorg-video-dummy xfishtank xclip xdg-utils xauth xdotool xrandr unzip`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
 
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
