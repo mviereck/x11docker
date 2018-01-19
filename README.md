@@ -47,7 +47,7 @@ For a first test, you can run with `bash x11docker` respective `bash x11docker-g
 For manual installation, make x11docker executable with `chmod +x x11docker` and move it to `/usr/bin`.
 ### Installation options
 As root, you can install, update and remove x11docker on your system:
- - `x11docker --install` : install x11docker and x11docker-gui. 
+ - `x11docker --install` : install x11docker and x11docker-gui from current directory. 
  - `x11docker --update` : download and install latest version from github.
  - `x11docker --remove` : remove all files installed by x11docker.
  
