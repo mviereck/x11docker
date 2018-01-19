@@ -90,7 +90,7 @@ Advanced usage:
  - **Clipboard** sharing with `--clipboard` needs `xclip`. (Not needed for `--xpra`, `--nxagent` and `--hostdisplay`).
  - **Language**: You can specify the locale/language setting in container with option `--env LANG=de_DE.UTF-8` or matching to your host with `--env LANG=$LANG`.
    - Your image needs the matching locales to be installed. All locales in debian images are contained in package `locales-all`.
-   - Example for chinese setup in a debian image: Install `locales-all` and font `fonts-arphic-uming` in image. Either set `ENV zh_CN.UTF-8` in image or use x11docker option `--env LANG=zh_CN.UTF-8`.
+   - Example for chinese setup in a debian image: Install `locales-all` and font `fonts-arphic-uming` in image. Either set `ENV LANG zh_CN.UTF-8` in image or use x11docker option `--env LANG=zh_CN.UTF-8`.
  - Rarer needed dependencies for special options:
    - `--nxagent` provides a fast and lightweight alternative to `xpra` and `Xephyr`. Needs [`nxagent`](https://packages.debian.org/experimental/nxagent) to be installed.
    - `--kwin` and `--kwin-xwayland` need `kwin_wayland`, included in modern `kwin` packages.
