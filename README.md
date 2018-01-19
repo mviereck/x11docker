@@ -234,6 +234,10 @@ x11docker supports init systems as PID 1 in container.
  - `--openrc`: openrc in container, tested with [Alpine Linux](https://alpinelinux.org/) images.
    - No special setup is needed in image, only `openrc` must be installed. 
  - `--no-init`: to run image command as PID 1 without an init system (docker default).
+## dbus
+Some desktop environments need `dbus`.
+ - use `--dbus-daemon` to run dbus system daemon. This includes option `--dbus`.
+ - use `--dbus` to run image command with `dbus-launch` (fallback: `dbus-run-session`) for a dbus user session.
 
 # Developer options
 Collection of rarer needed but sometimes useful options.
