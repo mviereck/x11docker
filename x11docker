@@ -9,9 +9,11 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.1.9"
+Version="3.9.2"
 
 changelog() {
+# 21.01.2017 V3.9.2     bugfix: add groups video and audio if su is not used in container. /etc/group changes by dockerrc seem to be not regarded in that case.
+#                       finish(): more precise check with pid and name before killing background pids
 # 17.01.2017 V3.9.1.9   --xpra: if server crashes, use xpra option --mmap=no on restart
 # 16.01.2017 V3.9.1.8   --xpra: stop x11docker if xpra server crashes multiple times
 # 15.01.2017 V3.9.1.7   --gpu: share /dev/vga_arbiter and /dev/nvidia*
@@ -160,10 +162,8 @@ changelog() {
 }
 todo() {
 # deepin: check dockerfile again, dde-session-daemon is no longer running
-# BUG: --pulseaudio: stopping container with pulseaudio disables sound of other containers, too. Seems to be an pulseaudio bug. Check moduleid.
-# headless server: check if xrandr framebuffer works now
-# check issues with xpra 2.2
-# check xpra server crashes with jess/atom and jess/firefox. --mmap=no avoids the bug
+# BUG: --pulseaudio: stopping container with pulseaudio disables sound of other containers, too. Seems to be an pulseaudio bug.
+# further check of xpra server crashes with jess/atom and chromium. --mmap=no avoids the bug: xpra bug report?
 
 # --xorg: getty and autologin to avoid Xwrapper.config changes?
 # gnome3 based desktop failing due to gnome bugs: pantheon budgie gnome3
@@ -428,8 +428,8 @@ Miscellaneous:
      --cleanup         Clean up orphaned containers and cache files.
 
 Installation options (need root permissions):
-     --install         Install x11docker and x11docker-gui on your system.
-     --update          Update x11docker with latest version from github.
+     --install         Install x11docker and x11docker-gui from current folder.
+     --update          Download and install latest version from github.
      --remove          Remove x11docker from your system.
 
 x11docker version: $Version
@@ -742,16 +742,24 @@ finish() {              # trap routine, clean up background processes and cache
     while read -r Line ; do 
       Pid=$(echo $Line | awk '{print $1}')
       Name=$(echo $Line | awk '{print $2}')
-      if [ -n "$Pid" ] && [ -n "$(ps -p $Pid --no-headers)" ] ; then
+      ps -p $Pid --no-headers >/dev/null && {
         verbose "terminating background pid $Pid of $Name"
         case $Name in
-          weston|kwin_wayland|compositor|windowmanager|shareclipboard|hostexe|xfishtank) kill -s KILL $Pid || {
-              sleep 1
-              [ -n "$(ps -p $Pid --no-headers)" ] && warning "error terminating $Pid $Name"
-            }
+          windowmanager) 
+            Windowmanager="$(basename "$Windowmanager" | cut -d' ' -f1)"
+            ps -p $Pid | grep $Windowmanager >/dev/null           && kill $Pid
           ;;
           xpraserver|xpraclient)
-            ps -p $Pid | grep xpra >/dev/null && kill $Pid
+            ps -p $Pid | grep 'xpra' >/dev/null                   && kill $Pid
+          ;;
+          compositor)
+            ps -p $Pid | grep -E 'weston|kwin_wayland' >/dev/null && kill $Pid
+          ;;
+          hostexe|shareclipboard)
+            ps -p $Pid | grep 'bash' >/dev/null                   && kill $Pid
+          ;;
+          xfishtank)
+            ps -p $Pid | grep 'xfishtank' >/dev/null              && kill $Pid
           ;;
           docker) 
             [ -n "$Sudo" ] && Sudo="sudo -n" # no password prompt here, rather fail
@@ -782,13 +790,16 @@ x11docker --cleanup"
               }
             }
           ;;
-          *) note "Found remaining background process.
+          *) # should never happen (tm)
+            note "Found remaining background process.
   Will send signal KILL to process tree of $Line
   $(ps -p $Pid --no-headers)"
             pkill -KILL -P $Pid || warning "error terminating $Pid $Name"
           ;;
         esac
-      fi
+        sleep 1
+        ps -p $Pid --no-headers || warning "error terminating $Pid $Name"
+      }
     done < <(tac $Bgpidfile)
   }
 
@@ -965,7 +976,7 @@ Dockeroptions=""                                # options for docker after -- an
 Containername=""                                # name of container set by x11docker to make --cleanup able to find orphaned containers
 Dockerip=""                                     # IP adress of docker interface
 Dockeriprange=""                                # IP adress of docker interface including suffix /16
-Containerpid=""                                    # process ID of script process with docker container
+Containerpid=""                                 # process ID of script process with docker container
 Dockerdaemon="$(pgrep -xa $(ps -e -o comm | grep dockerd) 2>/dev/null)"  # how docker daemon has been started
 
 # docker related files
@@ -1090,7 +1101,7 @@ Verbosecolors="no"                              # colored output for --verbose a
 Sudouser="no"                                   # option --sudouser: Create user and root with sudo permissions with password 'x11docker'
 Capdropall="yes"                                # option --cap-default: (don't) drop all container capabilities
 Adminusercaps="no"                              # options --sudouser, --systemd: add capabilities for general sys administration
-Switchusercaps="no"                             # options --dbus, --sudouser and initsystems: add capabilities for su/sudo user switching
+Switchcontaineruser="no"                             # options --dbus, --sudouser and initsystems: add capabilities for su/sudo user switching
 Shareipc="no"                                   # option --ipc, set --ipc=host.
 Sharenet="no"                                   # option --net, set --ipc=net
 Preservecachefiles="no"                         # if yes, dont delete cache files
@@ -1705,10 +1716,6 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
       } || {
         Xpraoptions="$Xpraoptions --webcam=no"
       }
-      verlt "$Xpraversion" "xpra v2.2" || {
-        note "If you have issues with your current version '$Xpraversion',
-  try to downgrade to 2.1.x series as it seems to be more stable than 2.2.x."
-      }
 
       [ "$Desktopmode" = "yes" ] && verlt "$Xpraversion" "xpra v2.2-r17117" && note "Xpra desktop mode works best since xpra v2.2-r17117.
   You have installed lower version $Xpraversion.
@@ -1837,6 +1844,12 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   source drivers (radeon, nouveau, intel ...) on host and OpenGL/MESA in image.
   If you have closed source drivers on your host, you need to install
   the very same driver version in your image to get hardware acceleration."
+    ls /dev/nvidia* >/dev/null 2>&1 && warning "It seems you are using proprietary NVIDIA drivers on host. 
+  GPU acceleration will only work if you have the very same driver version 
+  installed in image. That makes images less portable.
+  It is recommended to use the free nouveau driver on host instead.
+  Insist that NVIDIA corporation at least publishes their closed source API,
+  or even better supports open source drivers at all."
     Forcetrusted="yes"
   }
   
@@ -3290,12 +3303,12 @@ start() {
       
       [ "$Benutzeruid" = "0" ]     && Adminusercaps="yes"
       [ "$Sudouser" = "yes" ]      && Adminusercaps="yes"
-      [ "$Adminusercaps" = "yes" ] && Switchusercaps="yes"
-      [ "$Dbusdaemon" = "yes" ]    && Switchusercaps="yes"
+      [ "$Adminusercaps" = "yes" ] && Switchcontaineruser="yes"
+      [ "$Dbusdaemon" = "yes" ]    && Switchcontaineruser="yes"
       
       case $Initsystem in
         none|tini) 
-          case $Switchusercaps in
+          case $Switchcontaineruser in
             no) Dockercommand="$Dockercommand \\
   --user $Benutzeruid:$Benutzergid --env USER=$Benutzer" ;;
             yes) Dockercommand="$Dockercommand \\
@@ -3331,7 +3344,7 @@ start() {
         ;;
         
         runit)
-          Switchusercaps="yes"
+          Switchcontaineruser="yes"
           [ "$Capdropall" = "yes" ] && [ "$Adminusercaps" = "no" ] && Dockercommand="$Dockercommand \\
   --cap-add FOWNER      --cap-add KILL"
           Dockercommand="$Dockercommand \\
@@ -3341,7 +3354,7 @@ start() {
         ;;
         
         openrc)
-          Switchusercaps="yes"
+          Switchcontaineruser="yes"
           [ "$Capdropall" = "yes" ] && [ "$Adminusercaps" = "no" ] && Dockercommand="$Dockercommand \\
   --cap-add FOWNER \\
   --cap-add FSETID      --cap-add CHOWN"
@@ -3354,12 +3367,12 @@ start() {
       
       [ "$Capdropall" = "yes" ] && {
         [ "$Adminusercaps" = "yes" ] && {
-          Switchusercaps="yes"
+          Switchcontaineruser="yes"
           Dockercommand="$Dockercommand \\
   --cap-add FOWNER      --cap-add KILL\\
   --cap-add FSETID      --cap-add CHOWN   --cap-add SETPCAP"
         }
-        case $Switchusercaps in
+        case $Switchcontaineruser in
           yes) 
             Dockercommand="$Dockercommand \\
   --cap-add SETUID      --cap-add SETGID  --cap-add DAC_OVERRIDE\\
@@ -3387,6 +3400,10 @@ start() {
   with option '--security-opt label=type:container_runtime_t' to allow access
   to X unix socket $Newxsocket. A more precise restriction is desirable."
       }
+      
+      # entries in /etc/group are not regarded without user switching in container
+      [ "$Switchcontaineruser" = "no" ] && Dockercommand="$Dockercommand \\
+  --group-add video --group-add audio"
       
       # allows writing even with --read-only. --systemd needs tmpfs at all
       Dockercommand="$Dockercommand \\
@@ -3460,7 +3477,7 @@ start() {
         systemd)      Dockercommand="$Dockercommand  --  $Imagename /bin/sh -c 'sleep 1 ; exec /lib/systemd/systemd'" ;;
         runit|openrc) Dockercommand="$Dockercommand  --  $Imagename /bin/sh -c 'sleep 1 ; exec /sbin/init'" ;;
         tini|none)
-          case $Switchusercaps in
+          case $Switchcontaineruser in
             no)  Dockercommand="$Dockercommand  --  $Imagename /bin/sh -c 'sleep 1 ; exec /bin/sh - $Cshare/x11docker.CMD.sh'" ;;
             yes) Dockercommand="$Dockercommand  --  $Imagename /bin/sh -c 'sleep 1 ; exec /bin/su - $Benutzer -c \"/bin/sh - $Cshare/x11docker.CMD.sh\"'" ;;
           esac
@@ -3511,7 +3528,7 @@ start() {
   echo ""
   [ "$Benutzerhosthome" = "no" ] && echo "mkdir -v -m 777 /fakehome"
   echo ""
-  [ "$Switchusercaps" = "yes" ] && {
+  [ "$Switchcontaineruser" = "yes" ] && {
     echo "# create /etc/sudoers, remove /etc/sudoers.d. Delete possible sudo setups in image."
     echo "echo 'root ALL=(ALL) ALL' > /etc/sudoers"
     echo "rm -R /etc/sudoers.d"
@@ -3669,10 +3686,10 @@ start() {
   echo "cat $Imagecommandscript | nl -ba >> $Dockerlogfile"
   echo ""
   
-  echo "read Containerhostname < <($Dockercommand)" # <- docker run is here!
+  echo "read Containerid < <($Dockercommand)" # <- docker run is here!
   
-  echo "[ -z \"\$Containerhostname\" ] && echo 'x11docker ERROR: Startup of docker failed.' && exit 1"
-  echo "echo x11docker: container hostname: \$Containerhostname"
+  echo "[ -z \"\$Containerid\" ] && echo 'x11docker ERROR: Startup of docker failed.' && exit 1"
+  echo "echo x11docker: container ID: \$Containerid"
   echo ""
   echo "# wait for container to be ready"
   echo "for Count in $(seq -s' ' 20); do"
@@ -3687,7 +3704,7 @@ start() {
   echo "echo x11docker: container IP: \$(cat $Containerip)"
   echo ""
   echo "# get PID of container"
-  echo "Containerpid=\$(ps ax | grep \$Containerhostname | grep -v grep | awk '{print \$1}')"
+  echo "Containerpid=\$(ps ax | grep \$Containerid | grep -v grep | awk '{print \$1}')"
   echo "echo x11docker: container PID: \$Containerpid"
   echo "echo \$Containerpid >> $Containerpidfile"
   
@@ -3798,11 +3815,8 @@ start() {
         echo "export \$Newxenv"
         echo "verbose \"Created cookie: \$(xauth list)\""
         [ "$Xserver" = "--nxagent" ] && echo "rm $Xclientcookie.bak"
+        echo "chmod 644 $Xclientcookie"
       }
-
-      #[ "$Benutzeruid" = "$Hostuseruid" ]   || echo "setfacl -m u:$Benutzeruid:r $Xclientcookie"  # read permissions for option --user
-      #[ "$nsBenutzeruid" = "$Benutzeruid" ] || echo "chmod 444 $Xclientcookie"                    # read permissions for user namespace remapping
-      echo "chmod 644 $Xclientcookie"
       
       [ "$Xserver" = "--hostdisplay" ] || {
         echo "verbose 'disabling any possible access to new X server possibly granted by xhost'"
@@ -3821,8 +3835,8 @@ start() {
       
       [ "$Shareclipboard" = "yes" ] && [ -n "$Hostdisplay" ] && {
         case $Xserver in
-          --xpra|--xpra-xwayland|--nxagent) ;;           # have their own clipboard management
-          --hostdisplay) ;;                          # already same clipboard
+          --xpra|--xpra-xwayland|--nxagent) ;;     # have their own clipboard management
+          --hostdisplay) ;;                        # already same clipboard
           *)                                       # synchronizing between different X servers
             echo "# option '-c, --clipboard': Run clipboard script "
             echo "# (text copy only) (xpra has its own clipboard managment including images)"
@@ -4146,15 +4160,17 @@ $(tail $Xinitlogfile)"
   Will restart xpra now. Last lines of xpra server log:
 $(tail $Xpraserverlogfile)"
             notify-send "x11docker: xpra server crashed. Restarting xpra now."
+            rm $Xpraserverlogfile && mkfile $Xpraserverlogfile
           }
           verbose "starting Xpra server"
-          $Mksubenutzer "rm $Xpraserverlogfile"
           $Mksu "env $Newxenv XPRA_OPENGL_DOUBLE_BUFFERED=1 $Xpraservercommand" >> $Xpraserverlogfile 2>&1 &
           Xpraserverpid=$!
           storepid $Xpraserverpid xpraserver
-          waitforlogentry "xpra server" $Xpraserverlogfile 'xpra is ready' && verbose "Xpra server is ready" || error "Xpra server startup failed.
+          waitforlogentry "xpra server" $Xpraserverlogfile 'xpra is ready' && verbose "Xpra server is ready" || {
+            [ -e "$Xpraserverlogfile" ] && error "Xpra server startup failed.
   Last lines of Xpra server log:
 $(tail $Xpraserverlogfile)"
+          }
         }
         ps -p $Xpraclientpid >/dev/null 2>&1 && kill $Xpraclientpid
         verbose "starting Xpra client"
