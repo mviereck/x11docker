@@ -331,12 +331,13 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
 
  - Single GUI application in container: 
    - Terminal: `x11docker x11docker/xfce xfce4-terminal`
-   - Fractal generator [XaoS](https://github.com/patrick-nw/xaos): `x11docker patricknw/xaos` (xaos command defined in image with CMD)
-   - glxgears with hardware acceleration: `x11docker --gpu x11docker/xfce glxgears`
+   - Fractal generator [XaoS](https://github.com/patrick-nw/xaos): `x11docker patricknw/xaos`
+   - Glxgears with hardware acceleration: `x11docker --gpu x11docker/xfce glxgears`
    - Firefox with shared Download folder: `x11docker --ipc --sharedir $HOME/Downloads jess/firefox`
    - Chromium browser: `x11docker -- jess/chromium --no-sandbox`
    - Tor browser: `x11docker jess/tor-browser`
    - Atom editor with your host home as container home: `x11docker --homedir=$HOME jess/atom`
+   - VLC media player with shared Video folder and pulseaudio sound: `x11docker --pulseaudio --sharedir=$HOME/Videos jess/vlc`
    
  - Desktop in container: 
    - Lightweight, small image:
