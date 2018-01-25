@@ -348,9 +348,9 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
      - Xfce: `x11docker --desktop x11docker/xfce`
      
    - Medium:
-     - Enlightenment: `x11docker --desktop --runit x11docker/enlightenment`
+     - Enlightenment: `x11docker --desktop --runit x11docker/enlightenment` (option `--gpu` recommended)
      - Mate: `x11docker --desktop x11docker/mate`
-     - Trinity: `x11docker --desktop x11docker/trinity` (full dsktop environmet with all Trinity/KDE3 applications)
+     - Trinity (successor of KDE 3): `x11docker --desktop x11docker/trinity`
      
    - Heavy, option `--gpu` recommended
      - Cinnamon: `x11docker --desktop --systemd x11docker/cinnamon`
