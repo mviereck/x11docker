@@ -122,6 +122,8 @@ Core concept is:
      - This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control. (x11docker provides this with option `--hostdisplay`).
      - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.
    - Create container user similar to host user to [avoid root in container](http://blog.dscpl.com.au/2015/12/don-run-as-root-inside-of-docker.html).
+     - If you want to be root in container, use option `--user=root`. 
+     - You can also specify another user with `--user=USERNAME` or a non-existing one with `--user=UID:GID`.
    - Disables possible root password and entries in `/etc/sudoers`.
    - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
      - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. 
