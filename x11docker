@@ -9,9 +9,14 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.2.1"
+Version="3.9.2.2"
 
 changelog() {
+# 09.02.2018 V3.9.2.2   minor bugfix --exe: avoid possible hostexe options with basename for $Hostexebasename
+#                       minor bugfix: typo checking /tmp/.Xn-lock
+#                       check free display and cache folder with find only
+#                       bugfix checking free display number: race condition if starting two x11docker instances, second one failed because display number already in use
+# 04.02.2018            plasmashell added to possible window managers
 # 29.01.2018 V3.9.2.1   correct date/year in changelog (issue #21)
 # 27.01.2018            finish(): minor bugfix: wrong warning although terminating bgpid was successfull
 # 23.01.2018            create /x11docker/environment to store and provide container environment variables
@@ -164,6 +169,8 @@ changelog() {
   : 
 }
 todo() {
+# --xpra --desktop restarts client if closing desktop window
+
 # BUG: --pulseaudio: stopping container with pulseaudio disables sound of other containers, too. Seems to be an pulseaudio bug.
 # further check of xpra server crashes with jess/atom and chromium. --mmap=no avoids the bug: xpra bug report?
 
@@ -1143,7 +1150,7 @@ Wm_recommended_nodesktop_heavy="kwin compiz"
 # these wm's are recommended, lightweight AND desktop independent. best first:
 Wm_recommended_desktop_light="flwm blackbox fluxbox jwm mwm wmaker afterstep amiwm fvwm ctwm pekwm olwm olvwm openbox" 
 # these wm's are recommended, heavy AND desktop independent. best first:
-Wm_recommended_desktop_heavy="lxsession mate-session enlightenment cinnamon cinnamon-session"
+Wm_recommended_desktop_heavy="lxsession mate-session enlightenment cinnamon cinnamon-session plasmashell"
 # these wm's are not really useful (please don't hit me) (best first):
 Wm_not_recommended="awesome evilwm herbstluftwm i3 lwm matchbox miwm spectrwm subtle windowlab wmii wm2"
 # these wm's cannot be autodetected by wmctrl if they are already running
@@ -2116,21 +2123,24 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
       --kwin-xwayland)                   Newdisplaynumber="750" ;;
       --nothing)                         Newdisplaynumber="900" ;; # dummy number to look for free cache folder
     esac
-    # search unused X socket, passing already used cache folder numbers
-    while [ -e "/tmp/.X11-unix/X$Newdisplaynumber" ] || [ -h "/tmp/.X11-unix/X$Newdisplaynumber" ] || [ -e "/tmp/,X$Newdisplaynumber-lock" ]  || [ -d "$Cacherootfolder/X$Newdisplaynumber-$(echo $Imagename | tr / - | cut -d: -f1)" ] || [ -e "$XDG_RUNTIME_DIR/wayland-$Newdisplaynumber" ] ; do
+    # search free X socket number, passing already used cache folders
+    while [ -n "$(find /tmp/.X11-unix/X$Newdisplaynumber /tmp/.X$Newdisplaynumber-lock /tmp/.X11-unix/X$Newdisplaynumber $XDG_RUNTIME_DIR/wayland-$Newdisplaynumber $Cacherootfolder/X$Newdisplaynumber-* 2>/dev/null)" ] ; do
       Newdisplaynumber=$(($Newdisplaynumber + 1))
     done
-  } || {
-    [ -e "/tmp/.X11-unix/X$Newdisplaynumber" ] || [ -h "/tmp/.X11-unix/X$Newdisplaynumber" ]  || [ -d "$Cacherootfolder/X$Newdisplaynumber-$(echo $Imagename | tr / - | cut -d: -f1)" ] && error "Display :$Newdisplaynumber is already in use"
   }
   
-  Newxsocket="/tmp/.X11-unix/X$Newdisplaynumber"
-  [ -z "$Newxvt" ] && Newxvt="vt$Newdisplaynumber"     # FIXME: assuming instead of knowing whether VT is free
   Newdisplay=":$Newdisplaynumber"
+  Newxsocket="/tmp/.X11-unix/X$Newdisplaynumber"
+  Newxlock="/tmp/.X$Newdisplaynumber-lock"
+  [ -z "$Newxvt" ] && Newxvt="vt$Newdisplaynumber"     # FIXME: assuming instead of knowing whether VT is free
+  [ "$Xserver" != "--hostdisplay" ] && [ -n "$(find $Newxsocket $Newxlock 2>/dev/null)" ] && error "Display $Newdisplay is already in use."
   
-  Cachefolder="$Cacherootfolder/X$Newdisplaynumber-$(echo $Imagename | tr / - | cut -d: -f1)" && $Mksu "mkdir $Cachefolder"
-  Sharefolder="$Cachefolder/$Sharefolder"                                                     && $Mksu "mkdir $Sharefolder"
-  export Cachefolder=$Cachefolder Sharefolder=$Sharefolder
+  Cachefolder="$Cacherootfolder/X$Newdisplaynumber-$(echo $Imagename | tr / - | cut -d: -f1)"
+  [ -d "$Cachefolder" ] && error "Cache folder already exists:
+  $Cachefolder"
+  Sharefolder="$Cachefolder/$Sharefolder"
+  $Mksu "mkdir -p $Sharefolder"
+  export Cachefolder Sharefolder
   
   case $Xserver in
     --hostdisplay)
@@ -2162,7 +2172,6 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   Bgpidfile="$Cachefolder/$Bgpidfile"                       && mkfile $Bgpidfile
   Imagecommandscript="$Sharefolder/$Imagecommandscript"     && mkfile $Imagecommandscript
   Shareclipboardscript="$Cachefolder/$Shareclipboardscript" && mkfile $Shareclipboardscript
-  Newxlock="/tmp/.X$Newdisplaynumber-lock"
   Westonini="$Cachefolder/$Westonini"                       && mkfile $Westonini
   Xdummyconf="$Cachefolder/$Xdummyconf"                     && mkfile $Xdummyconf
   Xdummywrapper="$Cachefolder/$Xdummywrapper"               && mkfile $Xdummywrapper
@@ -2963,7 +2972,7 @@ done
       Imagecommand=""
       [ -z "$Hostexe" ]              && error "No host executable defined"
       command -v $Hostexe >/dev/null || error "Command '$Hostexe' not found."
-      Hostexebasename="$(basename $Hostexe)"
+      Hostexebasename="$(basename $(echo $Hostexe | cut -d' ' -f1))"
       [ -n "$Windowmanager" ] && {
         Hostexe="$Windowmanager & $Hostexe"
         Windowmanager=""
