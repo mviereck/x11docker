@@ -39,6 +39,8 @@ To run a docker image with new X server (auto-choosing X server):
 To run a host application on a new X server:
   x11docker [OPTIONS] --exe COMMAND
   x11docker [OPTIONS] --exe -- COMMAND [ARG1 ARG2 ...]
+To run only a new empty X server:
+  x11docker [OPTIONS]
 ```
 
 # Installation
