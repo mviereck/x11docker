@@ -89,7 +89,7 @@ Advanced usage:
    - Option `--alsa` has no dependencies. 
      - You can install ALSA libraries in image to support virtual devices (debian images: `libasound2`).
    - Option `--pulseaudio` needs `pulseaudio` on host _and_ in image. 
- - **Clipboard** sharing with `--clipboard` needs `xclip`. (Not needed for `--xpra`, `--nxagent` and `--hostdisplay`).
+ - **Clipboard** sharing with option `--clipboard` needs `xclip`. (Not needed for `--xpra`, `--nxagent` and `--hostdisplay`). Image clipboard sharing is possible with `--xpra` and `--hostdisplay`.
  - **Language**: You can specify the locale/language setting in container with option `--env LANG=de_DE.UTF-8` or matching to your host with `--env LANG=$LANG`.
    - Your image needs the matching locales to be installed. All locales in debian images are contained in package `locales-all`.
    - Example for chinese setup in a debian image: Install `locales-all` and font `fonts-arphic-uming` in image. Either set `ENV LANG zh_CN.UTF-8` in image or use x11docker option `--env LANG=zh_CN.UTF-8`.
