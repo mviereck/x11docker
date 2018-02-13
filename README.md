@@ -1,6 +1,7 @@
 # x11docker: Run GUI applications in docker ![x11docker logo](/../screenshots/x11docker_klein.jpeg?raw=true "Optional Title") 
 ## Avoiding X security leaks and hardening container security
 
+Running graphical applications or desktop environments in docker images is effectively similar to a snapshot of a virtual machine that is always set back to it origin state. Advantage: It uses much less resources than a virtual machine, and it is easier to share host resources like hardware acceleration.
  - Avoids X security leaks by running [additional X servers](#x-servers-and-wayland-compositors-to-choose-from).
  - Improves container [security](#security):
    - Restricts container capabilities to bare minimum.
@@ -9,10 +10,10 @@
  - No obliging [dependencies](#dependencies) on host beside X and docker. Recommended: `xpra` and `Xephyr`.
  - [Wayland](#wayland) support.
  - Optional features: 
+   - [Persistent data storage](#persistent-data-storage) with shared host folders.
    - Sound with pulseaudio or ALSA
    - Hardware acceleration for OpenGL
    - Clipboard sharing
-   - Shared host folder as /home in container
  - [Network setup](#network-setup) with [SSH](#ssh-x-forwarding), [VNC](#vnc) or [HTML5](#html5-web-applications) possible.
  - Developed on debian 9. Tested on fedora 25, CentOS 7, openSUSE 42.3, Ubuntu 16.04, Manjaro 17, Mageia 6 and Arch Linux.
  - Supports [init systems](#init-system) `tini`, `runit`, `openrc` and `systemd` in container.
@@ -116,6 +117,12 @@ Running x11docker as unprivileged user:
 Running x11docker as root:
  - Commands other than `docker` are executed as unprivileged user determined with [`logname`](http://pubs.opengroup.org/onlinepubs/9699919799/utilities/logname.html). (You  can specify another host user with `--hostuser USER`).
  - Unfortunately, some systems do not provide `DISPLAY` and `XAUTHORITY` for root, but needed for nested X servers like Xephyr. In that case, tools like `gksu` or `gksudo` can help. 
+ 
+# Persistent data storage
+Changes in a running docker image are lost, the created docker container will be discarded. For persistent data storage you can share host directories:
+ - Option `--home` creates a host directory in `~/x11docker/IMAGENAME` that is shared with the container and mounted as home directory. Files in container home and configuration changes will persist. 
+ - Option `--homedir DIR` is similar to `--home` but allows you to specify a custom host directory for data storage.
+ - Option `sharedir DIR` mounts a host directory at the same location in container without influencing `HOME`.
  
 # Security 
 Scope of x11docker is to run dockered GUI applications while preserving and improving container isolation.
