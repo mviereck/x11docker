@@ -122,7 +122,7 @@ Running x11docker as root:
 Changes in a running docker image are lost, the created docker container will be discarded. For persistent data storage you can share host directories:
  - Option `--home` creates a host directory in `~/x11docker/IMAGENAME` that is shared with the container and mounted as home directory. Files in container home and configuration changes will persist. 
  - Option `--homedir DIR` is similar to `--home` but allows you to specify a custom host directory for data storage.
- - Option `sharedir DIR` mounts a host directory at the same location in container without influencing `HOME`.
+ - Option `--sharedir DIR` mounts a host directory at the same location in container without setting `HOME`.
  
 # Security 
 Scope of x11docker is to run dockered GUI applications while preserving and improving container isolation.
