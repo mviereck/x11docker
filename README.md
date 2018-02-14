@@ -1,7 +1,7 @@
 # x11docker: Run GUI applications in docker ![x11docker logo](/../screenshots/x11docker_klein.jpeg?raw=true "Optional Title") 
 ## Avoiding X security leaks and hardening container security
 
-Running graphical applications or desktop environments in docker images is effectively similar to a snapshot of a virtual machine that is always set back to it origin state. Advantage: It uses much less resources than a virtual machine, and it is easier to share host resources like hardware acceleration.
+Running graphical applications or desktop environments in docker images is effectively similar to a snapshot of a virtual machine that is always set back to it origin state. Advantage: It needs much less resources than a virtual machine, and it is easier to share host resources like hardware acceleration. Persistant storage is possible with shared host folders. Persistant system changes are possible in Dockerfile.
  - Avoids X security leaks by running [additional X servers](#x-servers-and-wayland-compositors-to-choose-from).
  - Improves container [security](#security):
    - Restricts container capabilities to bare minimum.
