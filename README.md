@@ -123,6 +123,9 @@ Changes in a running docker image are lost, the created docker container will be
  - Option `--home` creates a host directory in `~/x11docker/IMAGENAME` that is shared with the container and mounted as home directory. Files in container home and configuration changes will persist. 
  - Option `--homedir DIR` is similar to `--home` but allows you to specify a custom host directory for data storage.
  - Option `--sharedir DIR` mounts a host directory at the same location in container without setting `HOME`.
+ - Special cases for `$HOME`:
+   - `--homedir $HOME` will use your host home as container home. Discouraged, use with care.
+   - `--sharedir $HOME` will mount your host home as a subfolder of container home. 
  
 For persistant changes of image system, adjust Dockerfile and rebuild. To add custom applications to x11docker example images, you can create a new Dockerfile based on them. Example:
 ```
