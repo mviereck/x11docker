@@ -1,7 +1,7 @@
 # x11docker: Run GUI applications in docker ![x11docker logo](/../screenshots/x11docker_klein.jpeg?raw=true "Optional Title") 
 ## Avoiding X security leaks and hardening container security
 
-Running graphical applications or desktop environments in docker images is effectively similar to a snapshot of a virtual machine that is always set back to it origin state. Advantage: It needs much less resources than a virtual machine, and it is easier to share host resources like hardware acceleration. Persistant storage is possible with shared host folders. Persistant system changes are possible in Dockerfile.
+Running graphical applications or desktop environments in docker images is effectively similar to running a snapshot of a virtual machine that is set back to it origin state on every restart. Advantage: It needs much less resources than a virtual machine, and it is easier to share host resources like hardware acceleration, sound and clipboard. Persistant data storage is possible with shared host folders. Persistant system changes can be done in Dockerfile.
  - Avoids X security leaks by running [additional X servers](#x-servers-and-wayland-compositors-to-choose-from).
  - Improves container [security](#security):
    - Restricts container capabilities to bare minimum.
@@ -123,6 +123,13 @@ Changes in a running docker image are lost, the created docker container will be
  - Option `--home` creates a host directory in `~/x11docker/IMAGENAME` that is shared with the container and mounted as home directory. Files in container home and configuration changes will persist. 
  - Option `--homedir DIR` is similar to `--home` but allows you to specify a custom host directory for data storage.
  - Option `--sharedir DIR` mounts a host directory at the same location in container without setting `HOME`.
+ 
+For persistant changes of image system, adjust Dockerfile and rebuild. To add custom applications to x11docker example images, you can create a new Dockerfile based on them. Example:
+```
+# xfce desktop with Midori internet browser
+FROM x11docker/xfce
+RUN apt-get update && apt-get install -y midori
+```
  
 # Security 
 Scope of x11docker is to run dockered GUI applications while preserving and improving container isolation.
