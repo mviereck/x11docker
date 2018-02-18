@@ -358,29 +358,33 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
    - Chromium browser: `x11docker -- jess/chromium --no-sandbox`
    - Tor browser: `x11docker jess/tor-browser`
    - Atom editor with your host home as container home: `x11docker --homedir=$HOME jess/atom`
-   - VLC media player with shared Video folder and pulseaudio sound: `x11docker --pulseaudio --sharedir=$HOME/Videos jess/vlc`
+   - VLC media player with shared Video folder and pulseaudio sound: 
+     - `x11docker --pulseaudio --sharedir=$HOME/Videos jess/vlc`
    
  - Desktop in container: 
    - Lightweight, small image:
      - fluxbox: `x11docker --desktop x11docker/fluxbox` (quite small image!)
-     - Lumina: `x11docker --desktop x11docker/lumina`
+     - [Lumina](https://lumina-desktop.org): `x11docker --desktop x11docker/lumina`
      - LXDE: `x11docker --desktop x11docker/lxde`
      - LXQt: `x11docker --desktop x11docker/lxqt`
      - Xfce: `x11docker --desktop x11docker/xfce`
-     - CDE Common Desktop Environment: `x11docker --desktop --net x11docker/cde`
+     - [CDE Common Desktop Environment](https://en.wikipedia.org/wiki/Common_Desktop_Environment): `x11docker --desktop --net x11docker/cde`
      
    - Medium:
      - Enlightenment: `x11docker --desktop --runit x11docker/enlightenment` (option `--gpu` recommended)
      - Mate: `x11docker --desktop x11docker/mate`
-     - Trinity (successor of KDE 3): `x11docker --desktop x11docker/trinity`
+     - [Trinity](https://www.trinitydesktop.org/) (successor of KDE 3): `x11docker --desktop x11docker/trinity`
      
    - Heavy, option `--gpu` recommended
      - Cinnamon: `x11docker --desktop --systemd x11docker/cinnamon`
-     - deepin: `x11docker --desktop --systemd --pulseaudio x11docker/deepin`
-     - KDE Plasma: `x11docker --desktop kdeneon/plasma:user-lts`
-     - LiriOS: `x11docker --desktop lirios/unstable`
+     - [deepin](https://www.deepin.org/en/dde/): `x11docker --desktop --systemd --pulseaudio x11docker/deepin`
+     - KDE Plasma: `x11docker --desktop x11docker/kde-plasma`
+     - KDE Plasma as nested Wayland compositor: 
+       - `x11docker --hostdisplay --gpu x11docker/kde-plasma startplasmacompositor`
+     - [LiriOS](https://liri.io/): `x11docker --desktop lirios/unstable`
      
-   - LXDE desktop with wine and a persistent home folder to preserve installed Windows applications, with pulseaudio sound and hardware acceleration: `x11docker --desktop --home --pulseaudio --gpu x11docker/lxde-wine`
+   - LXDE desktop with wine and a persistent home folder to preserve installed Windows applications, with pulseaudio sound and hardware acceleration: 
+     - `x11docker --desktop --home --pulseaudio --gpu x11docker/lxde-wine`
   
 ## Screenshots
 Sample screenshots can be found in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
