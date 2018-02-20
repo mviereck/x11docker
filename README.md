@@ -378,9 +378,9 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
    - Heavy, option `--gpu` recommended
      - Cinnamon: `x11docker --desktop --systemd x11docker/cinnamon`
      - [deepin](https://www.deepin.org/en/dde/): `x11docker --desktop --systemd --pulseaudio x11docker/deepin`
-     - KDE Plasma: `x11docker --desktop x11docker/kde-plasma`
+     - KDE Plasma: `x11docker --desktop x11docker/plasma`
      - KDE Plasma as nested Wayland compositor: 
-       - `x11docker --hostdisplay --gpu x11docker/kde-plasma startplasmacompositor`
+       - `x11docker --hostdisplay --gpu x11docker/plasma startplasmacompositor`
      - [LiriOS](https://liri.io/): `x11docker --desktop lirios/unstable`
      
    - LXDE desktop with wine and a persistent home folder to preserve installed Windows applications, with pulseaudio sound and hardware acceleration: 
