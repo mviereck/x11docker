@@ -8,7 +8,7 @@
 `x11docker --desktop --gpu --systemd --pulseaudio x11docker/deepin`
 ![screenshot](screenshot-deepin.png "deepin desktop running in Weston and Xwayland window using x11docker")
 
-`x11docker --desktop --gpu kdeneon/plasma:user-lts`
+`x11docker --desktop --gpu x11docker/plasma`
 ![screenshot](screenshot-plasma.png "plasma desktop running in Weston window using x11docker")
 
 `x11docker --desktop x11docker/fluxbox`
