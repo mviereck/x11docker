@@ -2,7 +2,7 @@
 ## Avoiding X security leaks and hardening container security
 
 Running graphical applications or desktop environments in docker images is effectively similar to running a snapshot of a virtual machine that is set back to it origin state on every restart. Advantage: It needs much less resources than a virtual machine, and it is easier to share host resources like hardware acceleration, sound and clipboard. Persistant data storage is possible with shared host folders. Persistant system changes can be done in Dockerfile.
- - Avoids X security leaks by running [additional X servers](#x-servers-and-wayland-compositors-to-choose-from).
+ - Avoids X security leaks by running [additional X servers](#choice-of-x-servers-and-wayland-compositors).
  - Improves container [security](#security):
    - Restricts container capabilities to bare minimum.
    - Container user is same as host user to avoid root in container.
@@ -171,7 +171,7 @@ Rather special options reducing security, but not needed for regular use:
   - `--ipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory. Disables IPC namespacing.)
   - `--net` sets docker run option `--net=host`. (Allows dbus connection to host, Shares host network stack.)
    
-# X servers and Wayland compositors to choose from
+# Choice of X servers and Wayland compositors
 If no X server option is specified, x11docker automatically chooses one depending on installed dependencies and on given or missing options `--desktop`, `--gpu` and `--wayland`. 
  - For single applications, x11docker prefers `--xpra`. Alternativly, it tries `--nxagent`.
  - With option `--desktop`, x11docker assumes a desktop environment in image and prefers `--xephyr`. 
