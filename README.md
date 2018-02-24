@@ -31,7 +31,7 @@ Running graphical applications or desktop environments in docker images is effec
 ![x11docker-gui screenshot](/../screenshots/x11docker-gui.png?raw=true "GUI for x11docker")
 
 # Terminal usage
-Just type `x11docker IMAGENAME [IMAGECOMMAND]`. Get an [overview of options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`. For desktop environments in image add option `--desktop`.
+Just type `x11docker IMAGENAME [IMAGECOMMAND]`. Get an [overview of options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`. For desktop environments in image add option `--desktop` (or short option `-d`).
 General syntax:
 ```
 To run a docker image with new X server (auto-choosing X server):
