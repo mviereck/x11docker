@@ -58,7 +58,7 @@ Copies `x11docker` and `x11docker-gui` to `/usr/bin`. Creates an icon in `/usr/s
 ### Shortest way for first installation:
 ```
 wget https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker -O /tmp/x11docker
-bash /tmp/x11docker --update
+sudo bash /tmp/x11docker --update
 rm /tmp/x11docker
 ```
  
