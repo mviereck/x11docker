@@ -9,13 +9,21 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.2.2"
+Version="3.9.2.3"
 
 changelog() {
+# 25.02.2018 V3.9.2.3   set container GID of video and audio to same as on host
+#                       cat docker daemon messages for startup error message
+# 24.02.2018            bugfix --kwin: kwin_wayland seems to need dbus-launch now
+# 15.02.2018            mywatch(): replaced watch with custom sleep loop, watch failed in --hostdisplay (xinitrc) setups
+# 10.02.2018            --exe: only forward stdin if not empty
+#                       finish(): use pkill in most cases instead of kill to avoid kill success messages
+#                       bugfix --weston/--kwin: wait for file creation of wayland socket, checking logfile is not enough
+#                       mywatch(): verbose output
 # 09.02.2018 V3.9.2.2   minor bugfix --exe: avoid possible hostexe options with basename for $Hostexebasename
 #                       minor bugfix: typo checking /tmp/.Xn-lock
 #                       check free display and cache folder with find only
-#                       bugfix checking free display number: race condition if starting two x11docker instances, second one failed because display number already in use
+#                       bugfix checking free display number: race condition if starting two x11docker instances at same time, second one failed because display number already in use
 # 04.02.2018            plasmashell added to possible window managers
 # 29.01.2018 V3.9.2.1   correct date/year in changelog (issue #21)
 # 27.01.2018            finish(): minor bugfix: wrong warning although terminating bgpid was successfull
@@ -169,25 +177,26 @@ changelog() {
   : 
 }
 todo() {
+# try to use watch in mywatch() again to avoid sleep flooding of process monitors. watch fails sometimes in watching ls $Timetosaygoodbye for unkown reasons
 # --xpra --desktop restarts client if closing desktop window
-
-# BUG: --pulseaudio: stopping container with pulseaudio disables sound of other containers, too. Seems to be an pulseaudio bug.
+# BUG --weston,--kwin: docker sometimes fails although socket exists: "stat /run/user/1000/wayland-607: no such file or directory"
+# BUG: --pulseaudio: stopping container with pulseaudio disables sound of other containers, too. Seems to be a pulseaudio bug.
 # further check of xpra server crashes with jess/atom and chromium. --mmap=no avoids the bug: xpra bug report?
 
 # check out possibilities to allow 'sudo docker' directly again.
+# check detached mode on mageia
+# --xpra-xwayland, xdummy-xwayland: use kwin-wayland as fallback for missing weston? 
 # deepin: check dockerfile again, dde-session-daemon is no longer running
 # --xorg: getty and autologin to avoid Xwrapper.config changes?
 # gnome3 based desktop failing due to gnome bugs: pantheon budgie gnome3
-# check detached mode on mageia
 # --systemd: try to avoid xhost +SI:localuser:$Benutzer
 # check Xorg version for +iglx, check security implications, maybe option --iglx?
 # GTK3 in Wayland: --dbus once worked with $Dbusdaemon=yes
-# --wayland --user/--hostuser: wayland socket access denied
+# --wayland --user/--hostuser: wayland socket access denied due to XDG_RUNTIME_DIR
 # check all FIXME 
 # --nxagent 3.5.0: Mageia 6: seamless mode fails
 # new option --printer: xpra printer forwarding?
 # xpra: --file-transfer? How to set folder?
-# --xpra-xwayland, xdummy-xwayland: use kwin-wayland as fallback for missing weston? 
 # fedora: SElinux issue: '--security-opt label=type:container_runtime_t': need more restrictive setting
 #         https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix
 # multimonitor support for --scale and --size
@@ -473,7 +482,7 @@ alertbox() {            # X alert box with title $1 and message $2
   Title=${1:-}
   Message=${2:-}
   
-  Message="$(echo "$Message" | LANG=C sed "s/[\x80-\xFF]//g")" # remove UTF-8 special chars
+  Message="$(echo "$Message" | LANG=C sed "s/[\x80-\xFF]//g" | fold -w120 )" # remove UTF-8 special chars; line folding at 120 chars
 
   # try some tools to show alert message. If all tools fail, return 1
   command -v   xmessage     >/dev/null && [ -n "$DISPLAY" ] && {
@@ -756,19 +765,22 @@ finish() {              # trap routine, clean up background processes and cache
         case $Name in
           windowmanager) 
             Windowmanager="$(basename "$Windowmanager" | cut -d' ' -f1)"
-            ps -p $Pid | grep $Windowmanager >/dev/null           && kill $Pid
+            ps -p $Pid | grep $Windowmanager >/dev/null           && pkill $Pid
           ;;
           xpraserver|xpraclient)
-            ps -p $Pid | grep 'xpra' >/dev/null                   && kill $Pid
+            ps -p $Pid | grep 'xpra' >/dev/null                   && pkill $Pid
           ;;
           compositor)
             ps -p $Pid | grep -E 'weston|kwin_wayland' >/dev/null && kill $Pid
           ;;
+          x11docker-run|mywatch|xpraloop)
+            ps -p $Pid | grep x11docker >/dev/null                && pkill $Pid
+          ;;
           hostexe|shareclipboard)
-            ps -p $Pid | grep 'bash' >/dev/null                   && kill $Pid
+            ps -p $Pid | grep 'bash' >/dev/null                   && pkill $Pid
           ;;
           xfishtank)
-            ps -p $Pid | grep 'xfishtank' >/dev/null              && kill $Pid
+            ps -p $Pid | grep 'xfishtank' >/dev/null              && pkill $Pid
           ;;
           container) 
             [ -n "$Sudo" ] && Sudo="sudo -n" # no password prompt here, rather fail
@@ -801,13 +813,14 @@ x11docker --cleanup"
           ;;
           *) # should never happen (tm)
             note "Found remaining background process.
-  Will send signal KILL to process tree of $Line
+  Will send signal KILL to $Line
   $(ps -p $Pid --no-headers)"
-            pkill -KILL -P $Pid || warning "error terminating $Pid $Name"
+            pkill -KILL $Pid
+            ps -p $Pid --no-headers && warning "error terminating $Pid $Name"
           ;;
         esac
         sleep 1
-        ps -p $Pid --no-headers && warning "error terminating $Pid $Name"
+        ps -p $Pid --no-headers >/dev/null && warning "error terminating $Pid $Name"
       }
     done < <(tac $Bgpidfile)
   }
@@ -832,11 +845,17 @@ verlt() {               # version number check $1 less than $2
 mywatch() {             # repeat $1 untils its output changes
   local Watchoutput
   # --interval must be integer for centos and fedora depite contrary documentation in manpage
-  env TERM=linux watch --interval 1 --chgexit --no-title -- "sh -c '${1:-}'" >/dev/null 2>&1
-  #Watchoutput="$(sh -c "${1:-}" 2>&1)"
-  #while sleep 1 ; do
-  #  [ "$Watchoutput" = "$(sh -c "${1:-}" 2>&1)" ] || break
-  #done
+  verbose "Watching: sh -c '${1:-}'
+  Current output:
+$(sh -c "${1:-}")"
+  #env TERM=linux watch --interval 1 --chgexit --no-title -- "sh -c '${1:-}'" >/dev/null 2>&1
+  Watchoutput="$(sh -c "${1:-}" 2>&1)"
+  while sleep 1 ; do
+    [ "$Watchoutput" = "$(sh -c "${1:-}" 2>&1)" ] || break
+  done
+  verbose "Stopped watching: sh -c '${1:-}'
+  Current output:
+$(sh -c "${1:-}")"
 }
 isnum() {               # check if $1 is a number
   [ "1" = "$(awk -v a="${1:-}" 'BEGIN {print (a == a + 0)}')" ]
@@ -869,10 +888,15 @@ waitforfilecreation() { # similar to inotify-wait: wait up to 15s for file $1 to
   esac
   while [ ! "$(find  "${1:-}" 2>/dev/null)" ] ; do
     sleep 0.2
-    [ $Warten -lt $(expr $(date +%s) - $Zeit) ] && return 1
+    [ $Warten -lt $(expr $(date +%s) - $Zeit) ] && {
+      warning "Failed to wait for file creation of
+  ${1:-}"
+      return 1
+    }
     [ -e "$Timetosaygoodbye" ] && return 1
   done
-  verbose "Found newly created file ${1:-}"
+  verbose "Found new created file $(ls ${1:-})"
+  sleep 0.1
   return 0
 }
 waitforfilecontent() {  # wait for file $1 to be not empty
@@ -897,7 +921,7 @@ waitforlogentry() {     # wait for entry $3 in logfile $2 of application $1
   while [ -z "$(cat "${2:-}" | grep "${3:-}")" ] ; do
     verbose "waiting since $(expr $(date +%s) - $Zeit)s for ${1:-} to be ready..."
     sleep 0.2
-    [ 15 -lt $(expr $(date +%s) - $Zeit) ] && return 1
+    [ 20 -lt $(expr $(date +%s) - $Zeit) ] && return 1
     [ -e "$Timetosaygoodbye" ] && return 1
   done
   return 0
@@ -960,6 +984,8 @@ Benutzerpasswdentry=""
 Benutzerpasswort="sac19FwGGTx/A"                # encrypted password "x11docker", suits /etc/shadow. Created with: perl -e 'print crypt("x11docker", "salt"),"\n"'
 Mksu=""                                         # prefix to run unprivileged commands (auto or --hostuser)
 Mksubenutzer=""                                 # prefix to run commands as user defined by --user
+Hostgidaudio=""                                 # host GID of group audio. Can differ from container GID
+Hostgidvideo=""                                 # host GID of group video. Can differ from container GID
 
 # Gaining root privileges to run docker
 Passwordprompt=""                               # way to ask for password. one of pkexec, su, sudo, gksu, gksudo, auto
@@ -1419,6 +1445,10 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
   (Also specify --homedir if you want to use option --home)."
   
   [ -z "$Cacherootfolder" ] && Cacherootfolder="$Hostuserhome/.cache/x11docker"
+  
+  # Need host GIDs to use in container
+  Hostgidaudio=$(getent group audio | cut -d: -f3)
+  Hostgidvideo=$(getent group video | cut -d: -f3)
 }
 
 { #### part: some init
@@ -1833,7 +1863,7 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   
   [ "$Xserver" = "--hostdisplay" ] && [ "$Autochooseserver" = "yes" ] && note "To allow protection against X security leaks,
   please install xpra, nxagent and/or Xephyr (recommended),
-  or run second Xorg server with options --xorg --wm=auto."
+  or run a second Xorg server with options --xorg --wm=auto."
     
   [ "$Gpu" = "yes" ] && {
     case $Xserver in
@@ -1905,8 +1935,9 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   [ "$Trusted" = "no" ] && warning "$Xserver runs with untrusted cookies restricting
   access to X resources. Some applications may misbehave, especially those 
   needing OpenGL. Also, some keys like AltGr may not work. 
+  Some applications crash if using the X clipboard.
   You can degrade isolation and allow trusted cookies with option --trusted.
-  (Options --gpu and --clipboard use trusted cookies, too).
+  (Options --gpu and --clipboard enable trusted cookies, too).
   It is recommended to use another X server option like --xpra or --nxagent."
   
   [ "$Xserver" = "--hostdisplay" ] && {
@@ -2040,7 +2071,8 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
      note "You are running a pure Wayland environment.
   X applications without Wayland support will fail."
     [ "$Dbuslaunch" = "no" ] || [ "$Setwaylandenv" = "no" ] && note "QT5 / KDE applications need 
-  options --dbus --waylandenv to run in Wayland."
+  options --dbus --wayland to run in Wayland.
+  GTK3 applications often fail with option --dbus."
     [ "$Xserver" = "--kwin" ] && note "kwin_wayland (option --kwin) does not support the xdg_shell
   interface in all versions. Some GTK3 Wayland applications depend on it.
   If application startup fails, try --weston instead."
@@ -2622,7 +2654,7 @@ fi
     Xpraoptions="$Xpraoptions --dpi $Dpi"
   }
   
-  Waitforgoodbye="mywatch 'ls $Timetosaygoodbye'" 
+  Waitforgoodbye="mywatch 'ls $Timetosaygoodbye 2>/dev/null'" 
 
   # Prepare weston.ini: config file for Weston
   case $Xserver in
@@ -2986,7 +3018,7 @@ done
         ;;
         *)
           case $Windowmanager in
-            "") Hostexe="mywatch 'ls $Timetosaygoodbye'" ;;
+            "") Hostexe="mywatch 'ls $Timetosaygoodbye 2>/dev/null'" ;;
             *)  Hostexe="$Windowmanager" ; Windowmanager="" 
             ;;
           esac
@@ -3412,9 +3444,17 @@ start() {
   to X unix socket $Newxsocket. A more precise restriction is desirable."
       }
       
+      # Add video group for GPU access, needed by some systems
+      # Add audio group for ALSA
+      # Does only have real effect if /dev/dri or /dev/snd is shared
+      # Use GID instead of group name as they can differ from container GIDs
       # entries in /etc/group are not regarded without user switching in container
-      [ "$Switchcontaineruser" = "no" ] && Dockercommand="$Dockercommand \\
-  --group-add video --group-add audio"
+      [ "$Switchcontaineruser" = "no" ] && {
+        [ $Hostgidaudio ] && Dockercommand="$Dockercommand \\
+  --group-add $Hostgidaudio"
+        [ $Hostgidvideo ] && Dockercommand="$Dockercommand \\
+  --group-add $Hostgidvideo"
+      }
       
       # allows writing even with --read-only. --systemd needs tmpfs at all
       Dockercommand="$Dockercommand \\
@@ -3489,8 +3529,8 @@ start() {
         runit|openrc) Dockercommand="$Dockercommand  --  $Imagename /bin/sh -c 'sleep 1 ; exec /sbin/init'" ;;
         tini|none)
           case $Switchcontaineruser in
-            no)  Dockercommand="$Dockercommand  --  $Imagename /bin/sh -c 'sleep 1 ; exec /bin/sh - $Cshare/x11docker.CMD.sh'" ;;
-            yes) Dockercommand="$Dockercommand  --  $Imagename /bin/sh -c 'sleep 1 ; exec /bin/su - $Benutzer -c \"/bin/sh - $Cshare/x11docker.CMD.sh\"'" ;;
+            no)       Dockercommand="$Dockercommand  --  $Imagename /bin/sh -c 'sleep 1 ; exec /bin/sh - $Cshare/x11docker.CMD.sh'" ;;
+            yes)      Dockercommand="$Dockercommand  --  $Imagename /bin/sh -c 'sleep 1 ; exec /bin/su - $Benutzer -c \"/bin/sh - $Cshare/x11docker.CMD.sh\"'" ;;
           esac
         ;;
       esac
@@ -3501,7 +3541,7 @@ start() {
 { #### part: create container setup script
   echo "#! /bin/sh"
   echo "# set up docker container in 'sleep 1' phase of 'docker run'"
-  echo "# commands in this script are executed as root inside of container"
+  echo "# commands in this script are executed as root in container"
   echo ""
   echo "# create some system dirs with needed permissions"
   echo "mkdir -v -p /var/lib/dbus /var/run/dbus"
@@ -3527,9 +3567,14 @@ start() {
   echo "echo \"$Benutzer:$Benutzerpasswort:17293:0:99999:7:::\" >> /etc/shadow"
   echo ""
   echo "# add user to groups video, audio, systemd-journal"
-  echo "getent group | sed 's/^video.*/\0,$Benutzer/ ;"
-  echo "                    s/^audio.*/\0,$Benutzer/ ;"
-  echo "                    s/^systemd-journal.*/\0,$Benutzer/ ' | sed 's/:,/:/' > /tmp/group"
+  echo "# replace container GIDs of video and audio with host GIDs"
+  echo "Gidvideo=$Hostgidvideo"
+  echo "Gidaudio=$Hostgidaudio"
+  echo "[ \$Gidvideo ] || Gidvideo=\$(getent group | grep video: | cut -d: -f3)"
+  echo "[ \$Gidaudio ] || Gidaudio=\$(getent group | grep audio: | cut -d: -f3)"
+  echo "getent group | sed \"s/^video.*/video:x:\$Gidvideo:\$(getent group | grep video: | cut -d: -f4 ),$Benutzer/ ;"
+  echo "                     s/^audio.*/audio:x:\$Gidaudio:\$(getent group | grep audio: | cut -d: -f4 ),$Benutzer/ ;;"
+  echo "                     s/^systemd-journal.*/\0,$Benutzer/ \" | sed 's/:,/:/' > /tmp/group"
   echo "cp /tmp/group /etc/group"
   echo ""
   echo "# create user group entry (and delete possibly existing same gid)"
@@ -3563,7 +3608,7 @@ start() {
       echo "systemctl mask cgproxy"
       echo "for Count in $(seq -s' ' 10); do "
       echo "  systemctl enable x11docker.target && systemctl start x11docker.target && echo 'x11docker: systemd is up and running' && break \\"
-      echo "  || { echo 'x11docker: cannot connect to systemd, trying again' ; sleep 1 ; }"
+      echo "  || { echo 'x11docker: cannot connect to systemd, trying again' ; sleep 0.1 ; }"
       echo "done"
     ;;
     runit)
@@ -3709,7 +3754,7 @@ start() {
   echo "echo x11docker: container ID: \$Containerid"
   echo ""
   echo "# wait for container to be ready"
-  echo "for Count in $(seq -s' ' 20); do"
+  echo "for Count in $(seq -s' ' 10); do"
   echo "  sleep 0.1"
   echo "  docker exec $Containername sh -c : && { echo 'x11docker: container is up and running.' ; break ; } || echo \"x11docker: container not ready on \$Count. attempt, trying again.\" "
   echo "done"
@@ -3724,10 +3769,8 @@ start() {
   echo "Containerpid=\$(ps ax | grep \$Containerid | grep -v grep | awk '{print \$1}')"
   echo "echo x11docker: container PID: \$Containerpid"
   echo "echo \$Containerpid >> $Containerpidfile"
-  
   echo ""
-  echo "docker exec -u root $Containername sh $Cshare/containersetup.sh"  
-  echo ""
+  echo "docker exec -u root $Containername sh $Cshare/containersetup.sh"
 } >> $Dockerrc
 
 { #### part: create pullrc: interactive script to pull image from docker hub
@@ -3987,12 +4030,12 @@ start() {
 
   [ "$Xfishtank" = "yes" ] && echo "xfishtank & storepid \$! xfishtank"
   [ -n "$Windowmanager" ] && {
-    echo "verbose 'starting host window manager $Windowmanager on new display'"
+    echo "verbose 'starting host window manager $Windowmanager on new display $Newdisplay'"
     echo "$Windowmanager & storepid \$! windowmanager"
   }
   
   echo "touch $Cachefolder/Xready"
-  echo "mywatch 'ls $Timetosaygoodbye'"
+  echo "mywatch 'ls $Timetosaygoodbye 2>/dev/null #xinitrc'"
 } >> $Xinitrc
 
 { #### part: options --verbose, --stdout,--stderr and x11docker.log
@@ -4200,9 +4243,9 @@ $(tail $Dockerlogfile)"
         storepid $Xpraclientpid xpraclient
 
         sleep 1
-        ps -p $Xpraclientpid >/dev/null 2>&1 && mywatch "ls $Timetosaygoodbye ; ps -p $Xpraclientpid -o pid ; ps -p $Xpraserverpid -o pid"
+        ps -p $Xpraclientpid >/dev/null 2>&1 && mywatch "ls $Timetosaygoodbye 2>/dev/null; ps -p $Xpraclientpid -o pid ; ps -p $Xpraserverpid -o pid #xpra"
         sleep 1
-      done &
+      done & storepid $! xpraloop
     ;;
   esac
   
@@ -4219,29 +4262,29 @@ $(tail $Dockerlogfile)"
       {  # catch closing compositor window
         sleep 1
         ps -p $Compositorpid >/dev/null 2>&1 && {
-          mywatch "ls $Timetosaygoodbye ; ps -p $Compositorpid -o pid" ||:
+          mywatch "ls $Timetosaygoodbye 2>/dev/null; ps -p $Compositorpid -o pid #compositor" ||:
         } || error "Startup of compositor failed.
   Last lines of compositor log:
 $(tail $Compositorlogfile)"
         saygoodbye
-      } &
+      } & storepid $! mywatch
     ;;
     --weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland)
       {  # catch closing X server or compositor window
         sleep 1
         ps -p $Compositorpid >/dev/null 2>&1 && {
-          mywatch "ls $Timetosaygoodbye ; ls $Newxsocket ; ps -p $Compositorpid -o pid" ||:
+          mywatch "ls $Timetosaygoodbye $Newxsocket 2>/dev/null ; ps -p $Compositorpid -o pid #compositor+Xserver" ||:
         } || error "Startup of compositor or X failed.
   Last lines of compositor log:
 $(tail $Compositorlogfile)"
         saygoodbye
-      } &
+      } & storepid $! mywatch
     ;;
     *)
       {  # catch closing X server
-        mywatch "ls $Timetosaygoodbye ; ls $Newxsocket"
+        mywatch "ls $Timetosaygoodbye $Nexsocket 2>/dev/null #Xserver"
         saygoodbye
-      } &
+      } & storepid $! mywatch
     ;;
   esac
   
@@ -4265,9 +4308,7 @@ $(tail $Compositorlogfile)"
             yes) $Passwordterminal /bin/bash $Xtermrc ;;
           esac
         ;;
-        *)
-          $Passwordterminal "/bin/bash $Xtermrc"
-        ;;
+        *) $Passwordterminal "/bin/bash $Xtermrc" ;;
       esac
       waitforfilecreation $Cachefolder/xtermready infinity
       
@@ -4280,7 +4321,10 @@ $(tail $Compositorlogfile)"
 $(tail $Dockerlogfile)
 
   Last lines of xterm.log:
-$(tail $Xtermlogfile)"
+$(tail $Xtermlogfile)
+
+  Docker daemon messages:
+$(cat $Xtermlogfile | grep 'Error response from daemon')"
         }
         storepid $Containerpid container
         
@@ -4292,7 +4336,7 @@ $(tail $Xtermlogfile)"
         }
         
         # wait for docker until it terminates. bash builtin wait does not work in this case
-        ps -p $Containerpid >/dev/null 2>&1 && mywatch "ls $Timetosaygoodbye ; ps -p $Containerpid -o pid" 
+        ps -p $Containerpid >/dev/null 2>&1 && mywatch "ls $Timetosaygoodbye 2>/dev/null; ps -p $Containerpid -o pid #container" 
         :
       } || { 
         error "docker startup was not successfull.
@@ -4311,19 +4355,23 @@ $(tail $Xtermlogfile)"
         echo "export HOME='$Benutzerhosthomefolder'"
         echo "cd '$Benutzerhosthomefolder'"
       } >>  $Imagecommandscript
-      echo "cat $Cmdstdinfile | $Hostexe" >> $Imagecommandscript
+      [ -s $Cmdstdinfile ] && {
+        echo "cat $Cmdstdinfile | $Hostexe" >> $Imagecommandscript
+      } || {
+        echo "$Hostexe" >> $Imagecommandscript
+      }
       cat $Imagecommandscript | nl -ba >> $Dockerlogfile
       $Mksubenutzer "bash $Imagecommandscript" >> $Cmdstdoutlogfile 2>>$Cmdstderrlogfile & Hostexepid=$! && storepid $! hostexe
       sleep 1 # wait for possible startup failure
       ps -p $Hostexepid >/dev/null 2>&1 && {
-        mywatch "ls $Timetosaygoodbye ; ps -p $Hostexepid -o pid" ||:
+        mywatch "ls $Timetosaygoodbye 2>/dev/null; ps -p $Hostexepid -o pid #hostexe" ||:
       } || error "Startup of '$Hostexe' failed.
   Last lines of log:
 $(tail $Dockerlogfile)"
     ;;
   esac
   saygoodbye
-} &
+} & storepid $! x11docker-run
 
 { #### part: start X server
   case $Xserver in
@@ -4338,6 +4386,7 @@ $(tail $Dockerlogfile)"
         # Weston is needed for Xwayland if no Wayland is running already, and also 
         # if option scale has a value smaller than 1 to provide a virtual display larger than monitor
         $Mksu "$Compositorcommand                                                              >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
+        waitforfilecreation $XDG_RUNTIME_DIR/$Waylandsocket
         waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                       || error "Weston startup failed. Can not run $Xserver.
   Last lines of weston log:
 $(tail $Compositorlogfile)"
@@ -4348,6 +4397,7 @@ $(tail $Compositorlogfile)"
     ;;
     --weston-xwayland)
       $Mksu "$Compositorcommand                                                                >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
+      waitforfilecreation $XDG_RUNTIME_DIR/$Waylandsocket
       waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                         || error "Weston startup failed. Can not run $Xserver.
   Last lines of weston log:
 $(tail $Compositorlogfile)"      
@@ -4355,6 +4405,7 @@ $(tail $Compositorlogfile)"
     ;;
     --weston)
       $Mksu "$Compositorcommand                                                                >> $Compositorlogfile 2>&1  & echo \$! >>$Compositorpidfile"
+      waitforfilecreation $XDG_RUNTIME_DIR/$Waylandsocket
       waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                         || error "Weston startup failed. Can not run $Xserver.
   Last lines of weston log:
 $(tail $Compositorlogfile)"
@@ -4362,13 +4413,15 @@ $(tail $Compositorlogfile)"
     ;;
     --kwin-xwayland)
       $Mksu "$Compositorcommand --exit-with-session='$Waitforgoodbye'                          >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
+      waitforfilecreation $XDG_RUNTIME_DIR/$Waylandsocket
       waitforlogentry kwin   $Compositorlogfile "X-Server"                                     || error "Kwin startup failed. Can not run $Xserver.
   Last lines of kwin log:
 $(tail $Compositorlogfile)"
       $Mksu "env WAYLAND_DISPLAY=$Waylandsocket           xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
     ;;
     --kwin)
-      $Mksu "$Compositorcommand --exit-with-session='$Waitforgoodbye'                          >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
+      $Mksu "dbus-launch $Compositorcommand --exit-with-session='$Waitforgoodbye'              >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
+      waitforfilecreation $XDG_RUNTIME_DIR/$Waylandsocket
       waitforlogentry kwin   $Compositorlogfile "X-Server"                                     || error "Kwin startup failed. Can not run $Xserver.
   Last lines of kwin log:
 $(tail $Compositorlogfile)"
