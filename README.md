@@ -294,9 +294,9 @@ To provide dockered applications as HTML5 web applications, you need `xpra` and 
 read Xenv < <(x11docker --xdummy  x11docker/lxde pcmanfm)
 echo $Xenv && export $Xenv
 # replace "start" with "start-desktop" to forward a desktop environment
-xpra start $DISPLAY --use-display --html=on --bind-tcp=localhost:14500 --start-via-proxy=no
+xpra start $DISPLAY --use-display --html=on --bind-tcp=localhost:14501 --start-via-proxy=no
 ```
-Now you can access your application at [http://localhost:14500](http://localhost:14500). Further infos at [xpra wiki: HTML5 clients](https://xpra.org/trac/wiki/Clients/HTML5).
+Now you can access your application at http://localhost:14501. Option settings are possible at http://localhost:14501/connect.html. Further infos at [xpra wiki: HTML5 clients](https://xpra.org/trac/wiki/Clients/HTML5).
 
 ### HTML5 web applications with GTK3 broadway
 [Broadway](https://developer.gnome.org/gtk3/stable/gtk-broadway.html) is a GTK3 specific feature to allow HTML5 web applications. The image needs `libgtk-3-bin` (debian) or `gtk3` (Arch Linux) to be installed. A possible setup with x11docker:
