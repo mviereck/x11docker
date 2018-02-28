@@ -9,9 +9,12 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.2.3"
+Version="3.9.3"
 
 changelog() {
+# 01.03.2018 V3.9.3     --tini: show warning for outdated docker versions without option --init and fall back to --no-init, issue #23
+# 26.02.2018            --xtest: new option to enable X extension XTEST. Default for --xdummy, --xvfb, --xpra
+#                       --pulseaudio with --net: fallback to --alsa, disabling --pulseaudio
 # 25.02.2018 V3.9.2.3   set container GID of video and audio to same as on host
 #                       cat docker daemon messages for startup error message
 # 24.02.2018            bugfix --kwin: kwin_wayland seems to need dbus-launch now
@@ -177,6 +180,7 @@ changelog() {
   : 
 }
 todo() {
+# --pulseaudio --net: fails as TCP connection is not possible this way. Maybe another pulse connection type?
 # try to use watch in mywatch() again to avoid sleep flooding of process monitors. watch fails sometimes in watching ls $Timetosaygoodbye for unkown reasons
 # --xpra --desktop restarts client if closing desktop window
 # BUG --weston,--kwin: docker sometimes fails although socket exists: "stat /run/user/1000/wayland-607: no such file or directory"
@@ -424,6 +428,7 @@ X authentication:
 X and Wayland configuration:
      --vt N            Use vt / tty N (affects --xorg, --xdummy, --xpra).
      --display N       Use display number N for new X server.
+     --xtest           Enable XTEST. Default for --xvfb, --xdummy, --xpra.
      --westonini FILE  Custom weston.ini for --weston and --weston-xwayland.
 
 Container capabilities:
@@ -1070,6 +1075,7 @@ Nxagentoptions=""                               # options for nxagent
 Xephyroptions=""                                # options for Xephyr
 Xephyrglamor="yes"                              # former option '--glamor': enable Xephyr glamor 2D acceleration (deprecated, now always yes)
 Xfishtank="no"                                  # --fish: xfishtank on new X server
+Xtest="no"                                      # enable extension Xtest yes/no
 
 # Main X server options
 Autochooseserver="yes"                          # option '--auto': automated choosing server
@@ -1199,7 +1205,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
   Longoptions="$Longoptions,verbose,no-xhost,trusted,untrusted,dbus,waylandenv,pw:,no-internet"                            # advanced options
   Longoptions="$Longoptions,tini,no-init,systemd,runit,openrc,sys-admin,sharecgroup"                                       # init system options
   Longoptions="$Longoptions,starter,cleanup,license,licence,help,version,install,update,remove,wmlist"                     # special options without starting X server
-  Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,env:,showenv,sharewayland,stdout,stderr,silent"                    # developer options
+  Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,xtest,env:,showenv,sharewayland,stdout,stderr,silent"              # developer options
   Longoptions="$Longoptions,ipc,net,ps,cache,cap-default,no-entrypoint,sudouser,hostuser:,dbusdaemon,dbus-daemon"          # developer options
   Longoptions="$Longoptions,cachedir:,homedir:,westonini:,sharedir:"                                                       # developer options
   Longoptions="$Longoptions,xsocket,tcp,tcpxsocket,virtualgl,glamor,volume:,xhost+,resizeable,orphaned,rw"                 # deprecated
@@ -1308,6 +1314,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
                        [ "$(echo $Newdisplaynumber | cut -c1)" = ":" ] && Newdisplaynumber="$(echo $Newdisplaynumber | cut -c2-)"
                        shift ;;
          --dbus-daemon|--dbusdaemon) Dbusdaemon="yes"; Dbuslaunch="yes" ;; # set up dbus system daemon and consolekit
+         --xtest)      Xtest="yes" ;;                      # allow extension XTEST. default for xvfb, xdummy and xpra
          
        ## X Authentication
          --xhost)      Xhost="xhost $2" ; shift ;;         # set 'xhost +' on both X servers
@@ -1556,6 +1563,17 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   ## Get inet adress of docker0 interface
   Dockeriprange=$(ip -4 -o a | grep docker0 | awk '{print $4}')
   Dockerip=$(echo $Dockeriprange | cut -d/ -f1)
+  
+  
+  [ "$Initsystem" = "tini" ] && {
+    docker run --help | grep ' --init' > /dev/null || {
+      warning "Your docker version seems to be outdated
+  and does not support \"docker run --init\".
+  It is recommended to update docker to have a minimal container init system.
+  Fallback: disabling init system in container with x11docker optin --no-init."
+      Initsystem="none"
+    }
+  }
   
   [ "$Capdropall" = "no" ] && warning "Option --cap-default disables security hardening
   for containers. Granting docker's default capabilities is considered insecure."
@@ -1955,6 +1973,13 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   Can be interesting though, having two overlapping desktops."
   }
   
+  [ "$Sharenet" = "yes" ] && [ "$Pulseaudio" = "yes" ] && {
+    warning "Option --pulseaudio fails if used along with option --net.
+    Fallback: enabling option --alsa instead of --pulseaudio."
+    Pulseaudio="no"
+    Alsa="yes"
+  }
+
   [ "$Sharenet" = "yes" ] && [ "$Internetaccess" = "no" ] && {
     note "You have chosen --net and --no-internet. That does not work.
   You can not share host network stack (--net) and forbid internet access
@@ -2570,30 +2595,32 @@ fi
   # exension XTEST
   case $Xserver in
     --xpra|--xpra-xwayland) 
-      [ -n "$Windowmanager" ] && [ "$Desktopmode" = "yes" ] && {  
-        Xserveroptions="$Xserveroptions \\
+      Xserveroptions="$Xserveroptions \\
   +extension XTEST"
-        warning "Can not disable XTEST on new X server as Xpra needs it.
+      #[ -n "$Windowmanager" ] && [ "$Desktopmode" = "yes" ] && {  
+      [ "$Xtest" = "no" ] && warning "Can not disable XTEST on new X server as Xpra needs it.
   If your host window manager $Windowmanager can start applications
   on its own (for example, with a context menu), container applications
   could abuse this to run and remotly control host applications."
-      }
+      Xtest="yes"
+      #}
     ;;
-    --xdummy|--xdummy-xwayland|--xvfb) 
+    --xdummy|--xdummy-xwayland|--xvfb)
+      Xserveroptions="$Xserveroptions \\
+  +extension XTEST" 
       [ -n "$Windowmanager" ] && {
-        Xserveroptions="$Xserveroptions \\
-  +extension XTEST"
-        warning "Did not disable XTEST for invisible X server.
+       [ "$Xtest" = "no" ] &&  warning "Did not disable XTEST for invisible X server.
   If your host window manager $Windowmanager can start applications
   on its own (for example, with a context menu), container applications
   could abuse this to run and remotly control host applications.
   If you provide content of X server $Xserver over network to others,
   they may take control over your computer!"
       }
+      Xtest="yes"
     ;;
-    *) Xserveroptions="$Xserveroptions \\
-  -extension XTEST -tst" ;;
   esac
+  [ "$Xtest" = "no" ] && Xserveroptions="$Xserveroptions \\
+  -extension XTEST -tst" 
   
   # check DPI
   case $Xserver in
@@ -3034,6 +3061,7 @@ done
 
 { #### part: check password prompt frontend (pkexec, su, sudo, ...) 
   # check if x11docker can run docker without prompting for password
+  [ "$Passwordprompt" = "none" ] && Needpassword="no"
   [ -z "$Passwordprompt" ] && docker images >/dev/null 2>&1 && Passwordprompt="none" && Needpassword="no"
   [ -z "$Passwordprompt" ] && sudo -n env   >/dev/null 2>&1 && Passwordprompt="sudo" && Needpassword="no"
 
@@ -3350,7 +3378,7 @@ start() {
       [ "$Dbusdaemon" = "yes" ]    && Switchcontaineruser="yes"
       
       case $Initsystem in
-        none|tini) 
+        none|tini)
           case $Switchcontaineruser in
             no) Dockercommand="$Dockercommand \\
   --user $Benutzeruid:$Benutzergid --env USER=$Benutzer" ;;
@@ -3632,7 +3660,7 @@ start() {
   # create script that needs root permissions or docker group membership to use docker.
   # This is the part the password prompt / $Getroot is needed for.
   echo "#! /bin/bash"
-  declare -f waitforfilecreation verbose
+  declare -f waitforfilecreation verbose warning
 
   echo "Imagename='$Imagename'"
   echo "Imagecommand='$Imagecommand'"
