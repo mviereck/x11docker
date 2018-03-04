@@ -120,8 +120,8 @@ Description of some commonly used options. Get an [overview of all options](http
 ## Desktop or seamless mode
 x11docker assumes that you want to run a single application in seamless mode, i.e. a single window on your regular desktop. If you want to run a desktop environment in image, add option `--desktop`. If you don't specify a [desired X server](#choice-of-X-servers-and-wayland-compositors), x11docker chooses the best matching one depending on chosen options and installed dependencies.
   - Seamless mode is supported with options `--xpra` and `--nxagent`. As a fallback insecure option `--hostdisplay` is possible.
-    - If neither `xpra` nor `nxagent` are installed, but x11docker founds a desktop capable X server like `Xephyr`, it avoids insecure option `--hostdisplay` and runs Xephyr with a host window manager.
-    - You can specify a host window manager with option `--wm WINDOWMANAGER`, for example `--wm=xfwm4`.
+    - If neither `xpra` nor `nxagent` are installed, but x11docker finds a desktop capable X server like `Xephyr`, it avoids insecure option `--hostdisplay` and runs Xephyr with a host window manager.
+    - You can specify a host window manager with option `--wm WINDOWMANAGER`, for example `--wm openbox`.
   - Desktop mode is supported with all X server options except `--hostdisplay`.
 ## Shared folders
 Changes in a running docker image are lost, the created docker container will be discarded. For persistent data storage you can share host directories:
