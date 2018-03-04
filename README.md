@@ -9,11 +9,11 @@ Running graphical applications or desktop environments in docker images is effec
  - No dependencies inside of docker images.
  - No obliging [dependencies](#dependencies) on host beside X and docker. Recommended: `xpra` and `Xephyr`.
  - [Wayland](#wayland) support.
- - Optional features: 
-   - [Persistent data storage](#persistent-data-storage) with shared host folders.
-   - Sound with pulseaudio or ALSA
-   - Hardware acceleration for OpenGL
-   - Clipboard sharing
+ - [Optional features](#options): 
+   - [Persistent data storage](#shared-folders) with shared host folders.
+   - [Sound](#sound) with pulseaudio or ALSA
+   - [Hardware acceleration](#hardware-acceleration) for OpenGL
+   - [Clipboard](#clipboard) sharing
  - [Network setup](#network-setup) with [SSH](#ssh-x-forwarding), [VNC](#vnc) or [HTML5](#html5-web-applications) possible.
  - Developed on debian 9. Tested on fedora 25, CentOS 7, openSUSE 42.3, Ubuntu 16.04, Manjaro 17, Mageia 6 and Arch Linux.
  - Supports [init systems](#init-system) `tini`, `runit`, `openrc` and `systemd` in container.
@@ -91,9 +91,6 @@ Advanced usage:
      - You can install ALSA libraries in image to support virtual devices (debian images: `libasound2`).
    - Option `--pulseaudio` needs `pulseaudio` on host _and_ in image. 
  - **Clipboard** sharing with option `--clipboard` needs `xclip`. (Not needed for `--xpra`, `--nxagent` and `--hostdisplay`). Image clipboard sharing is possible with `--xpra` and `--hostdisplay`.
- - **Language**: You can specify the locale/language setting in container with option `--env LANG=de_DE.UTF-8` or matching to your host with `--env LANG=$LANG`.
-   - Your image needs the matching locales to be installed. All locales in debian images are contained in package `locales-all`.
-   - Example for chinese setup in a debian image: Install `locales-all` and font `fonts-arphic-uming` in image. Either set `ENV LANG zh_CN.UTF-8` in image or use x11docker option `--env LANG=zh_CN.UTF-8`.
  - Rarer needed dependencies for special options:
    - `--nxagent` provides a fast and lightweight alternative to `xpra` and `Xephyr`. Needs [`nxagent`](https://packages.debian.org/experimental/nxagent) to be installed.
    - `--kwin` and `--kwin-xwayland` need `kwin_wayland`, included in modern `kwin` packages.
@@ -117,8 +114,10 @@ Running x11docker as unprivileged user:
 Running x11docker as root:
  - Commands other than `docker` are executed as unprivileged user determined with [`logname`](http://pubs.opengroup.org/onlinepubs/9699919799/utilities/logname.html). (You  can specify another host user with `--hostuser USER`).
  - Unfortunately, some systems do not provide `DISPLAY` and `XAUTHORITY` for root, but needed for nested X servers like Xephyr. In that case, tools like `gksu` or `gksudo` can help. 
- 
-# Persistent data storage
+
+# Options
+Description of some commonly used options. Get an [overview of all options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`.
+## Shared folders
 Changes in a running docker image are lost, the created docker container will be discarded. For persistent data storage you can share host directories:
  - Option `--home` creates a host directory in `~/x11docker/IMAGENAME` that is shared with the container and mounted as home directory. Files in container home and configuration changes will persist. 
  - Option `--homedir DIR` is similar to `--home` but allows you to specify a custom host directory for data storage.
@@ -133,7 +132,26 @@ For persistant changes of image system, adjust Dockerfile and rebuild. To add cu
 FROM x11docker/xfce
 RUN apt-get update && apt-get install -y midori
 ```
- 
+## Hardware acceleration
+Hardware acceleration for OpenGL is possible with option `--gpu`. This will work out of the box in most cases with open source drivers on host. Otherwise have a look at [Dependencies](#Dependencies).
+## Clipboard
+Clipboard sharing is possible with option `--clipboard`. Image clips are possible with `--xpra` and `--hostdisplay`. Some X server options need package `xclip` on host.
+## Sound
+Sound is possible with options `--pulseaudio` and `--alsa`.
+ - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on hst and in image.
+ - For ALSA sound with `--alsa` you can specify the desired sound card with `--env ALSA_CARD=Generic`. Get a list of available sound cards with `aplay -l`.
+## Language and locale settings
+You can specify the locale/language setting in container with option `--env LANG=en_US.UTF-8` or matching to your host with `--env LANG=$LANG`. The image needs the matching locales to be installed. 
+ - To install a single locale, include this in your image: 
+```
+# replace en_US by your desired locale setting, for example de_DE for german.
+ENV LANG en_US.UTF-8
+RUN echo $LANG UTF-8 > /etc/locale.gen
+RUN apt-get install -y locales && update-locale --reset LANG=$LANG
+```
+ - All locales in debian images are contained in package `locales-all`.
+ - For support of chinese, japanese and korean install a font like `fonts-arphic-uming` in image.
+   
 # Security 
 Scope of x11docker is to run dockered GUI applications while preserving and improving container isolation.
 Core concept is:
