@@ -119,11 +119,15 @@ Running x11docker as root:
 Description of some commonly used options. Get an [overview of all options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`.
 ## Desktop or seamless mode
 x11docker assumes that you want to run a single application in seamless mode, i.e. a single window on your regular desktop. If you want to run a desktop environment in image, add option `--desktop`. If you don't specify a [desired X server](#choice-of-X-servers-and-wayland-compositors), x11docker chooses the best matching one depending on chosen options and installed dependencies.
+  - Seamless mode is supported with options `--xpra` and `--nxagent`. As a fallback insecure option `--hostdisplay` is possible.
+    - If neither `xpra` nor `nxagent` are installed, but x11docker founds a desktop capable X server like `Xephyr`, it avoids insecure option `--hostdisplay` and runs Xephyr with a host window manager.
+    - You can specify a host window manager with option `--wm WINDOWMANAGER`, for example `--wm=xfwm4`.
+  - Desktop mode is supported with all X server options except `--hostdisplay`.
 ## Shared folders
 Changes in a running docker image are lost, the created docker container will be discarded. For persistent data storage you can share host directories:
  - Option `--home` creates a host directory in `~/x11docker/IMAGENAME` that is shared with the container and mounted as home directory. Files in container home and configuration changes will persist. 
- - Option `--homedir DIR` is similar to `--home` but allows you to specify a custom host directory for data storage.
  - Option `--sharedir DIR` mounts a host directory at the same location in container without setting `HOME`.
+ - Option `--homedir DIR` is similar to `--home` but allows you to specify a custom host directory for data storage.
  - Special cases for `$HOME`:
    - `--homedir $HOME` will use your host home as container home. Discouraged, use with care.
    - `--sharedir $HOME` will mount your host home as a subfolder of container home. 
