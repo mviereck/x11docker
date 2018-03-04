@@ -144,7 +144,7 @@ Hardware acceleration for OpenGL is possible with option `--gpu`. This will work
 Clipboard sharing is possible with option `--clipboard`. Image clips are possible with `--xpra` and `--hostdisplay`. Some X server options need package `xclip` on host.
 ## Sound
 Sound is possible with options `--pulseaudio` and `--alsa`.
- - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on hst and in image.
+ - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and in image.
  - For ALSA sound with `--alsa` you can specify the desired sound card with `--env ALSA_CARD=Generic`. Get a list of available sound cards with `aplay -l`.
 ## Language and locale settings
 You can specify the locale/language setting in container with option `--env LANG=en_US.UTF-8` or matching to your host with `--env LANG=$LANG`. The image needs the matching locales to be installed. 
