@@ -117,6 +117,8 @@ Running x11docker as root:
 
 # Options
 Description of some commonly used options. Get an [overview of all options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`.
+## Desktop or seamless mode
+x11docker assumes that you want to run a single application in seamless mode, i.e. a single window on your regular desktop. If you want to run a desktop in environment in image, add option `--desktop`. If you don't specify a [desired X server](#choice-of-X-servers-and-wayland-compositors), x11docker chooses the best matching one depending on chosen options and installed dependencies.
 ## Shared folders
 Changes in a running docker image are lost, the created docker container will be discarded. For persistent data storage you can share host directories:
  - Option `--home` creates a host directory in `~/x11docker/IMAGENAME` that is shared with the container and mounted as home directory. Files in container home and configuration changes will persist. 
