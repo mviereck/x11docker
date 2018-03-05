@@ -9,10 +9,23 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.3.1"
+Version="3.9.4.0"
 
 changelog() {
-# 01.03.2018            --no-xtest: disable extension XTEST. Default for most options.
+# 05.03.2017            --pulseaudio --hostnet: no fallback to alsa, use localhost IP instead
+#                       --pulseaudio --no-internet: fallback to --alsa
+# 04.03.2017            clean up error message on docker startup failure, remove multiple error lines
+#                       --systemd: bugfix: terminate x11docker if systemd startup fails
+#                       stdout and stderr of image command outsourced of docker.log 
+#                       docker log -f > docker.log to get output in detached mode
+#                       --sys-admin: no longer deprecated, needed for debian 9 images (but not debian 10).
+#                       --net and --ipc changed to --hostnet and --hostipc
+#                       --dbus-daemon changed to --dbus-system
+#                       --auto --gpu: fallback to --hostdisplay for seamless mode if xpra and weston not found (#23)
+# 02.03.2018            #24 mount /dev/dri and /dev/snd not only with --device, but also --volume to keep ownership+group
+#                       --hostdisplay: minor bugfix: Use correct display number to share /tmp/.X0-lock, only share if it exists
+#                       more verbose messages in waiting routines
+# 01.03.2018 V3.9.3.2   --no-xtest: disable extension XTEST. Default for most options.
 #                       openSUSE docker package misses init binary, show warnings for --tini, issue #23
 # 01.03.2018 V3.9.3.1   fix XTEST warning messages
 # 01.03.2018 V3.9.3     --tini: show warning for outdated docker versions without option --init and fall back to --no-init, issue #23
@@ -183,15 +196,13 @@ changelog() {
   : 
 }
 todo() {
-# --pulseaudio --net: fails as TCP connection is not possible this way. Maybe another pulse connection type?
+# avoid possible confusions --home --sharedir. --sharedir mounts can overlap --home folder. What about softlinks with existing target in --home? Maybe avoid /home/$USER at all
 # try to use watch in mywatch() again to avoid sleep flooding of process monitors. watch fails sometimes in watching ls $Timetosaygoodbye for unkown reasons
 # --xpra --desktop restarts client if closing desktop window
 # BUG --weston,--kwin: docker sometimes fails although socket exists: "stat /run/user/1000/wayland-607: no such file or directory"
 # BUG: --pulseaudio: stopping container with pulseaudio disables sound of other containers, too. Seems to be a pulseaudio bug.
 # further check of xpra server crashes with jess/atom and chromium. --mmap=no avoids the bug: xpra bug report?
 # --hostdisplay: default to --ipc --trusted --clipboard? Give a note about --untrusted?
-# --pulseaudio --net fallback: ALSA notes should be visible
-# --pulseaudio --net: other pulseaudio connection possible? try pax11publish?
 # minor BUG: warnings in dockerrc not visible in terminal if password prompt in xterm
 
 # check out possibilities to allow 'sudo docker' directly again.
@@ -399,10 +410,11 @@ Init system and dbus daemon:
      --systemd         Init system systemd. Degrades container isolation.
                        For faster startup mask services that fail in container.
                        Needs 'systemd' installed in image.
+                       Old systemd versions in image need --sys-admin, too.
      --sharecgroup     Share /sys/fs/cgroup. Default for --systemd.
                        Can be used with --openrc.
-     --dbus-daemon     Run dbus system daemon in container. (includes --dbus)
- -b, --dbus            Run image command with dbus-launch.
+     --dbus-system     Run dbus system daemon in container. (includes --dbus)
+ -b, --dbus            Run dbus session daemon for image command.
                        
 User settings:
      --user N          Create container user N (N=name or N=uid). Default: 
@@ -440,15 +452,16 @@ X and Wayland configuration:
      --westonini FILE  Custom weston.ini for --weston and --weston-xwayland.
 
 Container capabilities:
-     --ipc             Sets docker option --ipc=host, disables IPC namespacing.
+     --hostipc         Sets docker option --ipc=host, disables IPC namespacing.
                        Severe reduction of container isolation! Shares 
                        host interprocess communication and shared memory. 
                        Allows MIT-SHM extension of X servers.
-     --net             Set docker run option --net=host, disables network
+     --hostnet         Set docker run option --net=host, disables network
                        namespacing. Severe reduction of container isolation!
                        Shares host network stack, allows dbus communication.
      --cap-default     Allow default docker container capabilities and 
                        disable container security hardening of x11docker.
+     --sys-admin       Add capability SYS_ADMIN. Please avoid that.
        Custom capabilities can be added with --cap-add=CAP after  --
      
 Miscellaneous:
@@ -906,22 +919,30 @@ waitforfilecreation() { # similar to inotify-wait: wait up to 15s for file $1 to
   ${1:-}"
       return 1
     }
-    [ -e "$Timetosaygoodbye" ] && return 1
+    verbose "waiting since $(expr $(date +%s) - $Zeit)s for ${1:-} to be created, will wait up to $Warten seconds."
+    [ -e "$Timetosaygoodbye" ] && {
+      verbose "stopped waiting for ${1:-} due to terminating signal."
+      return 1
+    }
   done
   verbose "Found new created file $(ls ${1:-})"
   sleep 0.1
   return 0
 }
 waitforfilecontent() {  # wait for file $1 to be not empty
-  local Zeit
+  local Zeit Warten
   # $1 file to look at
   Zeit=$(date +%s)
+  Warten=15
   verbose "Waiting for file content in ${1:-}"
   while [ ! -s "${1:-}" ] ; do
-    sleep 0.1
-    [ 15 -lt $(expr $(date +%s) - $Zeit) ]  && return 1
-    [ -e "$Timetosaygoodbye" ] && return 1
-  done
+    sleep 0.2
+    [ $Warten -lt $(expr $(date +%s) - $Zeit) ]  && return 1
+    verbose "waiting since $(expr $(date +%s) - $Zeit)s for ${1:-} to have content, will wait up to $Warten seconds."
+    [ -e "$Timetosaygoodbye" ] && {
+      verbose "stopped waiting for file content of ${1:-} due to terminating signal."
+      return 1
+    }  done
   verbose "Found file content in ${1:-}"
   return 0
 }
@@ -929,14 +950,18 @@ waitforlogentry() {     # wait for entry $3 in logfile $2 of application $1
   # $1 is the application we are waiting for to be ready
   # $2 points to logfile
   # $3 keyword to wait for 
-  local Zeit
+  local Zeit Warten
   Zeit=$(date +%s)
+  Warten=24
   while [ -z "$(cat "${2:-}" | grep "${3:-}")" ] ; do
     verbose "waiting since $(expr $(date +%s) - $Zeit)s for ${1:-} to be ready..."
     sleep 0.2
-    [ 20 -lt $(expr $(date +%s) - $Zeit) ] && return 1
-    [ -e "$Timetosaygoodbye" ] && return 1
-  done
+    [ $Warten -lt $(expr $(date +%s) - $Zeit) ] && return 1
+    [ -e "$Timetosaygoodbye" ] && {
+      verbose "stopped waiting for logentry in ${2:-} of ${1:-} due to terminating signal."
+      return 1
+    }  done
+  verbose "${1:-} is ready."
   return 0
 }
 no_xhost() {            # remove any access to X server granted by xhost
@@ -1136,6 +1161,7 @@ Alsa="no"                                       # option --alsa: enable ALSA sou
 Pulseaudiotcpport=""                            # option '--pulseaudio': pulseaudio tcp port to use
 Pulseaudiomoduleid=""
 Pulseaudiomoduleidfile="pulseaudiotcpmodule.id" #   "                    file with number of customized pulseaudio tcp module, output of pactl
+Pulseaudioip=""                                 # either same as local container IP or 127.0.0.1 with --hostnet
 Noentrypoint="no"                               # option --no-entrypoint: disable entrypoint in image
 Internetaccess="yes"                            # option --no-internet: disable internet access
 
@@ -1150,9 +1176,9 @@ Verbosecolors="no"                              # colored output for --verbose a
 Sudouser="no"                                   # option --sudouser: Create user and root with sudo permissions with password 'x11docker'
 Capdropall="yes"                                # option --cap-default: (don't) drop all container capabilities
 Adminusercaps="no"                              # options --sudouser, --systemd: add capabilities for general sys administration
-Switchcontaineruser="no"                             # options --dbus, --sudouser and initsystems: add capabilities for su/sudo user switching
-Shareipc="no"                                   # option --ipc, set --ipc=host.
-Sharenet="no"                                   # option --net, set --ipc=net
+Switchcontaineruser="no"                        # options --dbus, --sudouser and initsystems: add capabilities for su/sudo user switching
+Sharehostipc="no"                               # option --hostipc, set --ipc=host.
+Sharehostnet="no"                               # option --hostnet, set --ipc=net
 Preservecachefiles="no"                         # if yes, dont delete cache files
 Preservecontainer="no"                          # option '-p, --ps': if yes, preserve container instead of removing it with 'docker run --rm'
 Initsystem="tini"
@@ -1214,10 +1240,11 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
   Longoptions="$Longoptions,tini,no-init,systemd,runit,openrc,sys-admin,sharecgroup"                                       # init system options
   Longoptions="$Longoptions,starter,cleanup,license,licence,help,version,install,update,remove,wmlist"                     # special options without starting X server
   Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,xtest,no-xtest,env:,showenv,sharewayland,stdout,stderr,silent"     # developer options
-  Longoptions="$Longoptions,ipc,net,ps,cache,cap-default,no-entrypoint,sudouser,hostuser:,dbusdaemon,dbus-daemon"          # developer options
+  Longoptions="$Longoptions,hostipc,hostnet,ps,cache,cap-default,no-entrypoint,sudouser,hostuser:,dbus-system"             # developer options
   Longoptions="$Longoptions,cachedir:,homedir:,westonini:,sharedir:"                                                       # developer options
   Longoptions="$Longoptions,xsocket,tcp,tcpxsocket,virtualgl,glamor,volume:,xhost+,resizeable,orphaned,rw"                 # deprecated
   Longoptions="$Longoptions,xpra-image,xpra-attach,xorg-image,xdummy-image,kwin-native,nopwd,no-password,root,sudo"        # deprecated
+  Longoptions="$Longoptions,ipc,net,dbus-daemon,dbusdaemon"                                                                # deprecated
 
   Parsedoptions="$(getopt --options $Shortoptions --longoptions $Longoptions --name "$0" -- "$@" 2>/tmp/x11docker_parsererror)"
   [ -e /tmp/x11docker_parsererror ] && Parsererror=$(cat /tmp/x11docker_parsererror) && rm /tmp/x11docker_parsererror
@@ -1312,6 +1339,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
          --openrc)     Initsystem="openrc" ;;
          --systemd)    Initsystem="systemd" ;;             # run systemd as init system and image command as a service
          --sharecgroup)Sharecgroup="yes" ;;                # share /sys/fs/cgroup. default for --systemd, possible use with --openrc
+         --sys-admin)  Capsysadmin="yes" ;;                # add capability SYS_ADMIN for older systemd versions in image (i.e. debian 9 needs it, debian 10 runs well)
          
        ## Environment
          --showenv)    Showdisplayenvironment="yes" ;;     # output of display number and cookie file on stdout. Catch with  ~$ read xdenv < <(x11docker --showenv)
@@ -1321,7 +1349,9 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
          --display)    Newdisplaynumber=${2:-}             # display number to use
                        [ "$(echo $Newdisplaynumber | cut -c1)" = ":" ] && Newdisplaynumber="$(echo $Newdisplaynumber | cut -c2-)"
                        shift ;;
-         --dbus-daemon|--dbusdaemon) Dbusdaemon="yes"; Dbuslaunch="yes" ;; # set up dbus system daemon and consolekit
+         --dbus-system|--dbus-daemon|--dbusdaemon) Dbusdaemon="yes"; Dbuslaunch="yes" # set up dbus system daemon
+                       { [ "${1:-}" = "--dbus-daemon" ] || [ "${1:-}" = "--dbusdaemon" ] ;} && warning "Option --dbus-daemon changed to --dbus-system.
+  Please use --dbus-system in future." ;;                  
          --xtest)      Xtest="yes" ;;                      # allow extension XTEST. default for xvfb, xdummy and xpra
          --no-xtest)   Xtest="no" ;;                       # disable extension XTEST. default for most X server options
          
@@ -1344,8 +1374,12 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
   ${2:-}" ;            shift ;;
          
        ## docker options
-         --ipc)        Shareipc="yes" ;;                   # docker run option --ipc=host
-         --net)        Sharenet="yes" ;;                   # docker run option --net=host
+         --hostipc|--ipc) Sharehostipc="yes"                   # docker run option --ipc=host
+                       [ "${1:-}" = "--ipc" ] && warning "Option --ipc changed to --hostipc.
+  Please use --hostipc in future." ;; 
+         --hostnet|--net) Sharehostnet="yes"                   # docker run option --net=host 
+                       [ "${1:-}" = "--net" ] && warning "Option --net changed to --hostnet.
+  Please use --hostnet in future." ;; 
          --cap-default) Capdropall="no" ;;                 # don't use --cap-drop=ALL
 
        ## miscellaneous
@@ -1381,10 +1415,6 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
   Fallback: Setting discouraged option --hostuser=root" ;;
       -N|--kwin-native)      Xserver="--kwin-xwayland" ; Autochooseserver="no" ;  note "Option --kwin-native is deprecated.
   Fallback: using option --kwin-xwayland." ;;
-         --sys-admin)  Capsysadmin="yes" ;                                     warning "Option --sys-admin is deprecated.
-  It adds insecure capability SYS_ADMIN to container.
-  This was formerly needed for option --systemd with debian based images,
-  but that is not longer the case. Please drop this option." ;;
 
 
       ##### custom docker options / image name + image command
@@ -1468,7 +1498,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
 }
 
 { #### part: some init
-  verbose "$(date) $(source /etc/os-release ; echo $PRETTY_NAME) $(Xorg -version 2>&1 | grep X.Org)
+  verbose "$(date) $(source /etc/os-release ; echo "$PRETTY_NAME") $(Xorg -version 2>&1 | grep X.Org)
 Command: $0 $X11dockerargs
 Parsed options: $Parsedoptions"
   
@@ -1510,6 +1540,13 @@ Parsed options: $Parsedoptions"
       Pulseaudio="no"
       Alsa="yes"
     }
+    [ "$Internetaccess" = "no" ] && {
+      note "Option --pulseaudio does not work with --no-internet.
+  --pulseaudio works with a local TCP connection.
+  Fallback: enabling option --alsa"
+      Pulseaudio="no"
+      Alsa="yes"
+    }
     # find a free tcp port
     read -r Lowerport Upperport < /proc/sys/net/ipv4/ip_local_port_range
     while : ; do
@@ -1519,6 +1556,7 @@ Parsed options: $Parsedoptions"
     warning "Option --pulseaudio allows container applications
   to catch your audio output and microphone input."
   }
+  
   
   # option --alsa
   [ "$Alsa" = "yes" ] && {
@@ -1589,6 +1627,11 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   
   [ "$Capdropall" = "no" ] && warning "Option --cap-default disables security hardening
   for containers. Granting docker's default capabilities is considered insecure."
+  
+  [ "$Capsysadmin" = "yes" ] && warning "Option --sys-admin may be dangerous.
+  It adds insecure capability SYS_ADMIN to container.
+  It is needed to run debian 9 images with option --systemd.
+  Debian 10 images run well without --sys-admin."
 }
 
 { #### part: check X server dependencies, use fallbacks if needed, auto-choose X server
@@ -1679,9 +1722,15 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   case $Xserver in 
     --xpra-xwayland)
       command -v weston >/dev/null || { 
-        [ "$Autochooseserver" = "no" ] && note "Could not find executeable weston.
+        [ "$Autochooseserver" = "no" ] && case $Desktopmode in
+          yes) note "Could not find executeable weston.
   Fallback: Will try kwin_wayland with xwayland (option --kwin-xwayland)."
-        Xserver="--kwin-xwayland"
+            Xserver="--kwin-xwayland" ;;
+          no) note "Could not find executeable weston.
+  Fallback: Will use insecure option --hostdisplay instead.
+  If you have kwin_wayland installed, you can try --kwin-xwayland instead."
+            Xserver="--hostdisplay" ;;
+        esac
       }
     ;;
   esac
@@ -1925,21 +1974,21 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   [ "$Xserver" = "--hostdisplay" ] && Trusted="no"
   [ "$Forcetrusted" = "yes" ]      && Trusted="yes"
   
- [ "$Xserver" = "--hostdisplay" ] &&  [ "$Shareipc" = "no" ] && [ "$Gpu" = "yes" ] && {
+ [ "$Xserver" = "--hostdisplay" ] &&  [ "$Sharehostipc" = "no" ] && [ "$Gpu" = "yes" ] && {
     note "To allow GPU acceleration (option --gpu) with --hostdisplay,
-  x11docker will share host resources with insecure option --ipc 
+  x11docker will share host resources with insecure option --hostipc 
   and allow trusted cookies with option --trusted."
-    Shareipc="yes"
+    Sharehostipc="yes"
   }
   
   [ "$Xserver" = "--hostdisplay" ] && [ "$Trusted" = "no" ] && {
     command -v xdpyinfo >/dev/null && {
       xdpyinfo | grep -q SECURITY || {
         note "Your X server does not support untrusted cookies.
-  Have to use trusted cookies and to enable insecure option --ipc.
+  Have to use trusted cookies and to enable insecure option --hostipc.
   Consider to use options --xpra or --nxagent instead of --hostdisplay."
         Trusted="yes"
-        Shareipc="yes"
+        Sharehostipc="yes"
       } 
     } || note "'xdpyinfo' not found. Need it to check
   whether Xorg supports untrusted cookies for --hostdisplay.
@@ -1953,11 +2002,11 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   Cannot enable or disable it, it depends on your Wayland compositor." ;;
       --hostdisplay) 
         warning "To allow clipboard sharing with option --hostdisplay,
-  trusted cookies and insecure option --ipc will be enabled.
+  trusted cookies and insecure option --hostipc will be enabled.
   No protection against X security leaks is left!
   Please consider to use another X server option."
         Trusted="yes"
-        Shareipc="yes"
+        Sharehostipc="yes"
       ;;
     esac
   }
@@ -1984,28 +2033,21 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   You may get strange interferences with your host desktop.
   Can be interesting though, having two overlapping desktops."
   }
-  
-  [ "$Sharenet" = "yes" ] && [ "$Pulseaudio" = "yes" ] && {
-    warning "Option --pulseaudio fails if used along with option --net.
-    Fallback: enabling option --alsa instead of --pulseaudio."
-    Pulseaudio="no"
-    Alsa="yes"
-  }
 
-  [ "$Sharenet" = "yes" ] && [ "$Internetaccess" = "no" ] && {
-    note "You have chosen --net and --no-internet. That does not work.
-  You can not share host network stack (--net) and forbid internet access
+  [ "$Sharehostnet" = "yes" ] && [ "$Internetaccess" = "no" ] && {
+    note "You have chosen --hostnet and --no-internet. That does not work.
+  You can not share host network stack (--hostnet) and forbid internet access
   at the same time (except you disconnect your host from internet).
-  Fallback: disabling option --net, keeping --no-internet."
-    Sharenet="no"
+  Fallback: disabling option --hostnet, keeping --no-internet."
+    Sharehostnet="no"
   }
   
-  [ "$Shareipc" = "yes" ] && warning "Security risk:
-  Option --ipc causes severe reduction of container isolation!
+  [ "$Sharehostipc" = "yes" ] && warning "Security risk:
+  Option --hostipc causes severe reduction of container isolation!
   Drawback: IPC namespace remapping is disabled.
   Advantage: X extension MIT-SHM is possible."
-  [ "$Sharenet" = "yes" ] && warning "Security risk: 
-  Option --net causes severe reduction of container isolation!
+  [ "$Sharehostnet" = "yes" ] && warning "Security risk: 
+  Option --hostnet causes severe reduction of container isolation!
   Network namespacing is disabled.
   Drawback: Container shares host network stack.
   Advantage: dbus communication between host and container is possible."
@@ -2216,6 +2258,8 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
       Newdisplay=$Hostdisplay
       Newdisplaynumber=$(echo $Newdisplay | cut -d: -f2 | cut -d. -f1)
       Newxsocket=$Hostxsocket
+      Newxlock="/tmp/.X$Newdisplaynumber-lock"
+      [ -e "$Newxlock" ] || Newxlock=""
     ;;
   esac
   
@@ -2582,7 +2626,7 @@ fi
   Xserveroptions="-nolisten tcp -dpms"
   case $Xserver in
     --nxagent)
-      { [ "$Shareipc" = "yes" ] || [ "$X11dockermode" = "exe" ] ; } && Xserveroptions="$Xserveroptions -shmem -shpix" || Xserveroptions="$Xserveroptions -noshmem -noshpix"
+      { [ "$Sharehostipc" = "yes" ] || [ "$X11dockermode" = "exe" ] ; } && Xserveroptions="$Xserveroptions -shmem -shpix" || Xserveroptions="$Xserveroptions -noshmem -noshpix"
       Xserveroptions="$Xserveroptions \\
   +extension Composite"
     ;;
@@ -2595,7 +2639,7 @@ fi
   -extension X-Resource +extension SECURITY +extension DAMAGE"
       Xserveroptions="$Xserveroptions \\
   -extension XINERAMA -xinerama"
-      { [ "$Shareipc" = "yes" ] || [ "$X11dockermode" = "exe" ] ; } && {
+      { [ "$Sharehostipc" = "yes" ] || [ "$X11dockermode" = "exe" ] ; } && {
         Xserveroptions="$Xserveroptions +extension MIT-SHM"
       } || { 
         Xserveroptions="$Xserveroptions -extension MIT-SHM"
@@ -2682,7 +2726,7 @@ fi
       # disable sound transfer, --pulseaudio works different
       Xpraoptions="$Xpraoptions -z0 --no-speaker --no-pulseaudio"
       # disable possibly leaking options
-      Xpraoptions="$Xpraoptions --daemon=no --fake-xinerama=no --notifications=no --file-transfer=off --printing=no"
+      Xpraoptions="$Xpraoptions --daemon=no --fake-xinerama=no --notifications=no --file-transfer=off --printing=no --html=off --systemd-run=no --mdns=no"
       [ "$Fullscreen" = "yes" ]  && Xpraoptions="$Xpraoptions --desktop-fullscreen=yes"
       [ "$Desktopmode" = "yes" ] && Xpraoptions="$Xpraoptions --title='$Imagename on $Newdisplay (shift+F11 toggles fullscreen)'"
       # version check for scaling already done above
@@ -3257,7 +3301,7 @@ done
 
 { #### part: create init service files (options --systemd, --runit)
   case $Initsystem in
-    none|tini) [ "$Dbusdaemon" = "yes" ] && [ "$Capdropall" = "yes" ] && warning "Option --dbus-daemon allows capabilities
+    none|tini) [ "$Dbusdaemon" = "yes" ] && [ "$Capdropall" = "yes" ] && warning "Option --dbus-system allows capabilities
   for user switching in container." ;;
     systemd)
       warning "Option --systemd degrades container isolation.
@@ -3480,7 +3524,7 @@ start() {
   -v /sys/fs/cgroup:/sys/fs/cgroup:ro"
       
       # check SELinux
-      [ -n "$(echo "$Dockerdaemon" | grep 'selinux-enabled')" ] && [ "$Shareipc" = "no" ] && {
+      [ -n "$(echo "$Dockerdaemon" | grep 'selinux-enabled')" ] && [ "$Sharehostipc" = "no" ] && {
         Dockercommand="$Dockercommand \\
   --security-opt label=type:container_runtime_t" 
         note "SELinux restrictions for this container are decreased
@@ -3494,9 +3538,9 @@ start() {
       # Use GID instead of group name as they can differ from container GIDs
       # entries in /etc/group are not regarded without user switching in container
       [ "$Switchcontaineruser" = "no" ] && {
-        [ $Hostgidaudio ] && Dockercommand="$Dockercommand \\
+        [ "$Hostgidaudio" ] && Dockercommand="$Dockercommand \\
   --group-add $Hostgidaudio"
-        [ $Hostgidvideo ] && Dockercommand="$Dockercommand \\
+        [ "$Hostgidvideo" ] && Dockercommand="$Dockercommand \\
   --group-add $Hostgidvideo"
       }
       
@@ -3528,7 +3572,7 @@ start() {
       case $Xserver in
         --nothing) ;;
         --weston|--hostwayland|--kwin) ;;
-        *) Dockercommand="$Dockercommand \\
+        *) [ "$Newxlock" ] && Dockercommand="$Dockercommand \\
   -v $Newxlock:$Newxlock:rw"
           case $Adminusercaps in # especially systemd can have issues with soft linked X socket, avoiding that here
             no)  Dockercommand="$Dockercommand \\
@@ -3545,24 +3589,26 @@ start() {
       ## option --gpu : share graphics adapter device files
       [ "$Gpu" = "yes" ] && {
         Dockercommand="$Dockercommand \\
-  --device=/dev/dri:/dev/dri:rw -v /dev/dri:/dev/dri"
+  --device=/dev/dri:/dev/dri:rw \\
+  -v /dev/dri:/dev/dri:rw"
         for Line in $(find /dev/nvidia* /dev/vga_arbiter -maxdepth 0 2>/dev/null) ; do
           Dockercommand="$Dockercommand \\
-  --device=$Line:$Line:rw -v $Line:$Line"
+  --device=$Line:$Line:rw \\
+  -v $Line:$Line:rw"
         done
       }
       
-      ## options --ipc and --net
-      [ "$Shareipc" = "yes" ]      && Dockercommand="$Dockercommand \\
+      ## options --hostipc and --hostnet
+      [ "$Sharehostipc" = "yes" ]      && Dockercommand="$Dockercommand \\
   --ipc=host"
-      [ "$Sharenet" = "yes" ]      && Dockercommand="$Dockercommand \\
+      [ "$Sharehostnet" = "yes" ]      && Dockercommand="$Dockercommand \\
   --net=host"
       ## option --no-internet
       [ "$Internetaccess" = "no" ] && Dockercommand="$Dockercommand \\
   --net=none"
       ## option --alsa      
       [ "$Alsa" = "yes" ]          && Dockercommand="$Dockercommand \\
-  --device=/dev/snd:/dev/snd:rw -v /dev/snd:/dev/snd"
+  --device=/dev/snd:/dev/snd:rw -v /dev/snd:/dev/snd:rw"
         
       # add custom docker arguments, imagename and imagecommand
       Dockercommand="$Dockercommand \\
@@ -3614,8 +3660,8 @@ start() {
   echo "# replace container GIDs of video and audio with host GIDs"
   echo "Gidvideo=$Hostgidvideo"
   echo "Gidaudio=$Hostgidaudio"
-  echo "[ \$Gidvideo ] || Gidvideo=\$(getent group | grep video: | cut -d: -f3)"
-  echo "[ \$Gidaudio ] || Gidaudio=\$(getent group | grep audio: | cut -d: -f3)"
+  echo "[ \"\$Gidvideo\" ] || Gidvideo=\$(getent group | grep video: | cut -d: -f3)"
+  echo "[ \"\$Gidaudio\" ] || Gidaudio=\$(getent group | grep audio: | cut -d: -f3)"
   echo "getent group | sed \"s/^video.*/video:x:\$Gidvideo:\$(getent group | grep video: | cut -d: -f4 ),$Benutzer/ ;"
   echo "                     s/^audio.*/audio:x:\$Gidaudio:\$(getent group | grep audio: | cut -d: -f4 ),$Benutzer/ ;;"
   echo "                     s/^systemd-journal.*/\0,$Benutzer/ \" | sed 's/:,/:/' > /tmp/group"
@@ -3652,8 +3698,9 @@ start() {
       echo "systemctl mask cgproxy"
       echo "for Count in $(seq -s' ' 10); do "
       echo "  systemctl enable x11docker.target && systemctl start x11docker.target && echo 'x11docker: systemd is up and running' && break \\"
-      echo "  || { echo 'x11docker: cannot connect to systemd, trying again' ; sleep 0.1 ; }"
+      echo "  || { echo 'x11docker: cannot connect to systemd, trying again' ; sleep 0.2 ; }"
       echo "done"
+      echo '[ "$Count" = "10" ] && echo "x11docker ERROR: systemd startup failed" && touch /x11docker/timetosaygoodbye && chmod 666 /x11docker/timetosaygoodbye'
     ;;
     runit)
       echo "echo 'x11docker: enabling dbus service'"
@@ -3717,13 +3764,13 @@ start() {
   echo "Environment=\${Environment#[}"
   echo "Environment=\${Environment%]}"
   
-  echo "# create x11docker.CMD.sh (shared with container and given as image command on docker run)"
+  echo "# create x11docker.CMD.sh (shared with container and given as image command to docker run)"
   echo "{ echo '#! /bin/sh'"
   echo "  echo '# created startscript for docker run: x11docker.CMD.sh'"
   echo '  echo Imagecommand="\"$Imagecommand\""'
   echo '  echo Entrypoint="\"$Entrypoint\""'
   echo "  echo ''"
-  echo "  [ \$Environment ] && {"
+  echo "  [ \"\$Environment\" ] && {"
   echo "    echo '# Environment variables found in image'"
   echo "    echo \"export \$Environment\""
   echo "  }"
@@ -3746,7 +3793,9 @@ start() {
     echo "  echo ''"
     echo "  echo 'Dbus=\"\$(dbus-launch --help >/dev/null 2>&1 && echo dbus-launch)\"'"
     echo "  echo '[ -z \"\$Dbus\" ] && Dbus=\"\$(dbus-run-session --help >/dev/null 2>&1 && echo dbus-run-session)\"'"
-  } || echo "  echo Dbus="
+    echo "  echo '[ -z \"\$Dbus\" ] && echo x11docker WARNING: Did not find dbus-launch or dbus-run-session. >&2'"
+  } 
+  echo "  echo 'echo x11docker note: running dbus session with: \${Dbus:-(none)} >&2'"
   echo "  echo ''"
   echo "  echo '# xpra environment settings'"
   echo "  echo 'export UBUNTU_MENUPROXY= QT_X11_NO_NATIVE_MENUBAR=1 MWNOCAPTURE=true MWNO_RIT=true MWWM=allwm'"
@@ -3770,18 +3819,21 @@ start() {
   echo "  echo ''"
   echo "  echo 'bash --version >/dev/null 2>&1 && export SHELL=/bin/bash || export SHELL=/bin/sh'"
   echo "  echo 'export TERM=xterm'"
-  [ "$Pulseaudio" = "yes" ]    && echo "  echo 'export PULSE_SERVER=tcp:$Dockerip:$Pulseaudiotcpport'"
+  [ "$Pulseaudio" = "yes" ] && [ "$Sharehostnet" = "no" ]  && echo "  echo 'export PULSE_SERVER=tcp:$Dockerip:$Pulseaudiotcpport'"
+  [ "$Pulseaudio" = "yes" ] && [ "$Sharehostnet" = "yes" ] && echo "  echo 'export PULSE_SERVER=tcp:127.0.0.1:$Pulseaudiotcpport'"
+  echo "  echo '# custom environment'"
   while read -r Line; do
     [ -z "$Line" ] || {
       Line="$(echo $Line | cut -d= -f1)=\"$(echo $Line | cut -d= -f2-)\""
       echo "  echo \"export $Line\"" 
     }
   done < <(echo -e $Customenvironment)
-  
-  echo "  echo ''"
+
+  echo "  echo 'echo'"
+  echo "  echo 'echo x11docker: container environment:'"
   echo "  echo 'env > $Cshare/environment'"
   echo "  echo 'sed -i \"/\(PWD=\|_=\)/d\" $Cshare/environment'"
- 
+  echo "  echo 'env | sort'"
   echo "  echo ''"
   echo "  echo 'cd \"\$HOME\"'"
   echo "  echo ''"
@@ -3795,10 +3847,13 @@ start() {
   echo ""
   
   [ "$Initsystem" = "tini" ] && {
-    echo "docker info | grep 'Init Binary: docker-init' >/dev/null || warning 'Your docker installation does not have an init binary"
+    echo "docker info | grep 'Init Binary: docker-init' >/dev/null || {"
+    echo "  echo 'x11docker ERROR: Your docker installation does not have an init binary"
     echo "  although option --init is listed in \"docker run --help\"."
-    echo "  Most probably docker startup will fail."
-    echo "  Use x11docker option --no-init to avoid a startup failure.'"
+    echo "  This docker package issue is at least known for openSUSE."
+    echo "  Use x11docker option --no-init to avoid this error.'"
+    echo "  exit 1"
+    echo "}"
     echo ""
   }
 
@@ -3806,10 +3861,11 @@ start() {
   
   echo "[ -z \"\$Containerid\" ] && echo 'x11docker ERROR: Startup of docker failed.' && exit 1"
   echo "echo x11docker: container ID: \$Containerid"
+  echo "docker logs -f \$Containerid >>$Dockerlogfile 2>&1 &"
   echo ""
   echo "# wait for container to be ready"
   echo "for Count in $(seq -s' ' 10); do"
-  echo "  sleep 0.1"
+  echo "  sleep 0.2"
   echo "  docker exec $Containername sh -c : && { echo 'x11docker: container is up and running.' ; break ; } || echo \"x11docker: container not ready on \$Count. attempt, trying again.\" "
   echo "done"
   echo ""
@@ -3820,7 +3876,7 @@ start() {
   echo "echo x11docker: container IP: \$(cat $Containerip)"
   echo ""
   echo "# get PID of container"
-  echo "Containerpid=\$(ps ax | grep \$Containerid | grep -v grep | awk '{print \$1}')"
+  echo "Containerpid=\$(ps ax | grep \$Containerid | grep -v grep | grep -v 'docker logs' | awk '{print \$1}')"
   echo "echo x11docker: container PID: \$Containerpid"
   echo "echo \$Containerpid >> $Containerpidfile"
   echo ""
@@ -3905,10 +3961,10 @@ start() {
         echo     "  [ '$Trusted' = 'untrusted' ] && note 'Could not create untrusted cookie. "
         echo     "  Maybe your X server misses extension SECURITY.'"
         [ "$Xserver" = "--hostdisplay" ] && {
-          [ "$Shareipc" = "no" ] && { 
+          [ "$Sharehostipc" = "no" ] && { 
             echo "  warning 'Memory access failures and rendering glitches may occur "
             echo "  due to unrestricted cookie."
-            echo "  Avoid them with isolation breaking option --ipc,"
+            echo "  Avoid them with isolation breaking option --hostipc,"
             echo "  or use another X server option like --xpra or --nxagent.'"
           } 
           echo   "  warning 'SECURITY RISK! Keylogging and remote host control "
@@ -3942,7 +3998,7 @@ start() {
         [ "$Initsystem" = "systemd" ] || [ "$Dbusdaemon" = "yes" ] && {
           echo "note 'Allowing xhost access for $Benutzer on display $Newdisplay with" 
           echo "  xhost +SI:localuser:$Benutzer"
-          echo "to avoid service issues with X access. (option --systemd or --dbus-daemon)'"
+          echo "to avoid service issues with X access. (option --systemd or --dbus-system)'"
           echo "xhost +SI:localuser:$Benutzer"
         }
       }
@@ -4155,8 +4211,10 @@ After finish: $Logfile3"
     verbose "Running X server $Xserver on display $Newdisplay now ..."
 
     # create summary logfile
-    tail --pid=$$ --retry -n +1 -F $Cmdstdoutlogfile $Cmdstderrlogfile $Journallogfile 2>/dev/null >> $Dockerlogfile &
-    tail --pid=$$ --retry -n +1 -F $Xtermlogfile $Dockerlogfile $Xpraserverlogfile $Xpraclientlogfile $Xinitlogfile $Compositorlogfile 2>/dev/null >> $Logfile &
+    tail --pid=$$ --retry -n +1 -F $Xtermlogfile $Dockerlogfile \
+                                   $Cmdstdoutlogfile $Cmdstderrlogfile $Journallogfile \
+                                   $Xpraserverlogfile $Xpraclientlogfile \
+                                   $Xinitlogfile $Compositorlogfile 2>/dev/null >> $Logfile &
     tail --pid=$$ --retry -n +1 -F $Logfile 2>/dev/null >> $Logfile2 &
     # option --verbose
     Verbosecolors="yes"
@@ -4224,7 +4282,7 @@ Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' '
 
 { #### part: wait for and watch X server, [start xpra] and run xtermrc-> dockerrc-> docker run
   # wait for X server
-  waitforfilecreation $Cachefolder/Xready || error "Startup of X server $Xserver failed. 
+  waitforfilecreation $Cachefolder/Xready 24 || error "Startup of X server $Xserver failed. 
   Last lines of xinit logfile:
 $(tail $Xinitlogfile)"
   
@@ -4367,25 +4425,30 @@ $(tail $Compositorlogfile)"
       esac
       waitforfilecreation $Cachefolder/xtermready infinity
       
+      sleep 1 # wait for late messages of docker daemon
       [ -s "$Containerpidfile" ] && { 
         Containerpid=$(cat $Containerpidfile)
         ps -p $Containerpid >/dev/null 2>&1 || {
-          [ "$Xserver" = "--nothing" ] && saygoodbye || error "Docker startup seems to have failed! 
+          [ "$Xserver" = "--nothing" ] && saygoodbye || {
+            error "Docker startup seems to have failed! 
 
   Last lines of docker.log:
-$(tail $Dockerlogfile)
+$(tail -n5 $Dockerlogfile)
 
   Last lines of xterm.log:
-$(tail $Xtermlogfile)
+$(cat  $Xtermlogfile | sed '/container not ready/d' | uniq | tail -n7)
 
-  Docker daemon messages:
-$(cat $Xtermlogfile | grep 'Error response from daemon')"
+  Last lines of command stderr:
+$(cat $Cmdstderrlogfile | tail)"
+          }
         }
         storepid $Containerpid container
         
         [ "$Pulseaudio" = "yes" ] && {  # option '--pulseaudio': enable pulseaudio sound over tcp
           # load pulseaudio tcp module, authenticated to container ip on specified port
-          $Mksu "pactl load-module module-native-protocol-tcp port=$Pulseaudiotcpport auth-ip-acl=$(cat $Containerip) >> $Pulseaudiomoduleidfile"
+          Pulseaudioip=$(cat $Containerip)
+          [ "$Sharehostnet" = "yes" ] && Pulseaudioip=127.0.0.1
+          $Mksu "pactl load-module module-native-protocol-tcp port=$Pulseaudiotcpport auth-ip-acl=Pulseaudioip >> $Pulseaudiomoduleidfile"
           Pulseaudiomoduleid=$(cat $Pulseaudiomoduleidfile)
           verbose "pulseaudio module id for TCP port $Pulseaudiotcpport: $Pulseaudiomoduleid)"
         }
