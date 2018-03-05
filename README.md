@@ -395,7 +395,7 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
      - LXDE: `x11docker --desktop x11docker/lxde`
      - LXQt: `x11docker --desktop x11docker/lxqt`
      - Xfce: `x11docker --desktop x11docker/xfce`
-     - [CDE Common Desktop Environment](https://en.wikipedia.org/wiki/Common_Desktop_Environment): `x11docker --desktop --net x11docker/cde`
+     - [CDE Common Desktop Environment](https://en.wikipedia.org/wiki/Common_Desktop_Environment): `x11docker --desktop --hostnet x11docker/cde`
      
    - Medium:
      - Enlightenment: `x11docker --desktop --runit x11docker/enlightenment` (option `--gpu` recommended)
