@@ -183,7 +183,7 @@ x11docker shows warning messages in terminal if chosen options degrade container
 Most important:
   - `--hostdisplay` shares host X socket of display :0 instead of running a second X server. 
     - Danger of abuse is reduced providing so-called untrusted cookies, but do not rely on this. 
-    - If additionally using `--gpu` or `--clipboard`, option `--ipc` and trusted cookies are enabled and no protection against X security leaks is left. 
+    - If additionally using `--gpu` or `--clipboard`, option `--hostipc` and trusted cookies are enabled and no protection against X security leaks is left. 
     - If you don't care about container isolation, `x11docker --hostdisplay --gpu` is an insecure, but quite fast setup without any overhead.
   - `--gpu` allows access to GPU hardware. This can be abused to get window content from host ([palinopsia bug](https://hsmr.cc/palinopsia/)) and makes [GPU rootkits](https://github.com/x0r1/jellyfish) possible.
   - `--pulseaudio` and `--alsa` allow catching audio output and microphone input from host.
@@ -192,7 +192,7 @@ Rather special options reducing security, but not needed for regular use:
   - `--sudouser` allows sudo with password `x11docker`for container user. If an application breaks out of container, it can do anything. Allows some container capabilties that x11docker would drop otherwise.
   - `--systemd`, `--openrc` and `--runit` allow some container capabilities that x11docker would drop otherwise. `--systemd` also shares access to `/sys/fs/cgroup`.
   - `--cap-default` disables x11docker's container hardening and falls back to default docker container privileges.
-  - `--ipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory. Disables IPC namespacing.)
+  - `--hostipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory. Disables IPC namespacing.)
   - `--net` sets docker run option `--net=host`. (Allows dbus connection to host, Shares host network stack.)
    
 # Choice of X servers and Wayland compositors
@@ -284,7 +284,7 @@ x11docker supports init systems as PID 1 in container.
  - `--no-init`: to run image command as PID 1 without an init system (docker default).
 ## dbus
 Some desktop environments and applications need a running dbus daemon and/or dbus user session. 
- - use `--dbus-daemon` to run dbus system daemon. This includes option `--dbus`. Some desktops depend rather on dbus system daemon than on a running init system.
+ - use `--dbus-system` to run dbus system daemon. This includes option `--dbus`. Some desktops depend rather on dbus system daemon than on a running init system.
  - use `--dbus` to run image command with `dbus-launch` (fallback: `dbus-run-session`) for a dbus user session.
 
 # Developer options
@@ -342,7 +342,7 @@ x11vnc -localhost -noshm
 ```
 In another terminal, start VNC viewer with `vncviewer localhost:0`.
 See `man x11vnc`  for many details and further infos.
-Option `-noshm` disables shared memory (MIT-SHM). To allow shared memory, remove `-noshm` and use isolation breaking x11docker option `--ipc`.
+Option `-noshm` disables shared memory (MIT-SHM). To allow shared memory, remove `-noshm` and use isolation breaking x11docker option `--hostipc`.
  
 # Simple but insecure alternative
 There are short and simple but insecure alternatives for x11docker. 
@@ -381,7 +381,7 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
    - Terminal: `x11docker x11docker/xfce xfce4-terminal`
    - Fractal generator [XaoS](https://github.com/patrick-nw/xaos): `x11docker patricknw/xaos`
    - Glxgears with hardware acceleration: `x11docker --gpu x11docker/xfce glxgears`
-   - Firefox with shared Download folder: `x11docker --ipc --sharedir $HOME/Downloads jess/firefox`
+   - Firefox with shared Download folder: `x11docker --hostipc --sharedir $HOME/Downloads jess/firefox`
    - Chromium browser: `x11docker -- jess/chromium --no-sandbox`
    - Tor browser: `x11docker jess/tor-browser`
    - Atom editor with your host home as container home: `x11docker --homedir=$HOME jess/atom`
@@ -403,8 +403,8 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
      - [Trinity](https://www.trinitydesktop.org/) (successor of KDE 3): `x11docker --desktop x11docker/trinity`
      
    - Heavy, option `--gpu` recommended
-     - Cinnamon: `x11docker --desktop --systemd x11docker/cinnamon`
-     - [deepin](https://www.deepin.org/en/dde/): `x11docker --desktop --systemd --pulseaudio x11docker/deepin`
+     - Cinnamon: `x11docker --desktop --dbus-system x11docker/cinnamon`
+     - [deepin](https://www.deepin.org/en/dde/): `x11docker --desktop --dbus-system --pulseaudio x11docker/deepin`
      - KDE Plasma: `x11docker --desktop x11docker/plasma`
      - KDE Plasma as nested Wayland compositor: 
        - `x11docker --hostdisplay --gpu x11docker/plasma startplasmacompositor`
