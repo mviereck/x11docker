@@ -147,17 +147,29 @@ Sound is possible with options `--pulseaudio` and `--alsa`.
  - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and in image.
  - For ALSA sound with `--alsa` you can specify the desired sound card with `--env ALSA_CARD=Generic`. Get a list of available sound cards with `aplay -l`.
 ## Language and locale settings
-You can specify the locale/language setting in container with option `--env LANG=en_US.UTF-8` or matching to your host with `--env LANG=$LANG`. The image needs the matching locales to be installed. 
- - To install a single locale, include this in your image: 
+You have two possibilities to set language locale in docker image. 
+ - A good explanation in general provides [arch wiki: locale](https://wiki.archlinux.org/index.php/locale). 
+ - Debian images need package `locales`. 
+ - Already installed locales in image can be checked with `docker run IMAGENAME locale -a`. 
+ - For support of chinese, japanese and korean characters install a font like `fonts-arphic-uming` in image.
+### runtime creation of desired language locale
+x11docker provides option `--lang $LANG` for flexible language locale settings. 
+ - x11docker will check on container startup if the desired locale is already present in image and enable it. 
+ - If x11docker does not find the locale, it creates it on container startup. 
+ - x11docker will only look for or create `UTF-8`/`utf8` locales. 
+ - Examples: `--lang de` for german, `--lang zh_CN` for chinese, `--lang ru` for russian, `--lang $LANG` for your host locale.
+### precompiled locale in image only
+You can choose between already installed language locales in image setting environment variable `LANG`, e.g. in image with `ENV LANG=en_US.utf8` or with x11docker option `--env LANG=en_US.utf8`.  
+Example to create a language locale in image:
 ```
-# replace en_US by your desired locale setting, for example de_DE for german.
-ENV LANG en_US.UTF-8
-RUN echo $LANG UTF-8 > /etc/locale.gen
-RUN apt-get install -y locales && update-locale --reset LANG=$LANG
+# change LANG to your desired language locale.
+ENV LANG=en_US.utf8
+RUN apt-get install -y locales
+# You can add more than one language locale to have a choice later
+RUN echo "$LANG UTF-8" >> /etc/locale.gen
+RUN locale-gen && update-locale --reset LANG=$LANG
 ```
- - All locales in debian images are contained in package `locales-all`.
- - For support of chinese, japanese and korean install a font like `fonts-arphic-uming` in image.
-   
+
 # Security 
 Scope of x11docker is to run dockered GUI applications while preserving and improving container isolation.
 Core concept is:
