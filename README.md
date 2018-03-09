@@ -11,9 +11,10 @@ Running graphical applications or desktop environments in docker images is effec
  - [Wayland](#wayland) support.
  - [Optional features](#options): 
    - [Persistent data storage](#shared-folders) with shared host folders.
-   - [Sound](#sound) with pulseaudio or ALSA
-   - [Hardware acceleration](#hardware-acceleration) for OpenGL
-   - [Clipboard](#clipboard) sharing
+   - [Sound](#sound) with pulseaudio or ALSA.
+   - [Hardware acceleration](#hardware-acceleration) for OpenGL.
+   - [Clipboard](#clipboard) sharing.
+   - [Language locale](#language-locale) creation.
  - [Network setup](#network-setup) with [SSH](#ssh-x-forwarding), [VNC](#vnc) or [HTML5](#html5-web-applications) possible.
  - Developed on debian 9. Tested on fedora 25, CentOS 7, openSUSE 42.3, Ubuntu 16.04, Manjaro 17, Mageia 6 and Arch Linux.
  - Supports [init systems](#init-system) `tini`, `runit`, `openrc` and `systemd` in container.
@@ -146,7 +147,7 @@ Clipboard sharing is possible with option `--clipboard`. Image clips are possibl
 Sound is possible with options `--pulseaudio` and `--alsa`.
  - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and in image.
  - For ALSA sound with `--alsa` you can specify the desired sound card with `--env ALSA_CARD=Generic`. Get a list of available sound cards with `aplay -l`.
-## Language and locale settings
+## Language locale
 You have two possibilities to set language locale in docker image. 
  - A good explanation in general provides [arch wiki: locale](https://wiki.archlinux.org/index.php/locale). 
  - Debian images need package `locales`. 
