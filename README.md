@@ -148,20 +148,19 @@ Sound is possible with options `--pulseaudio` and `--alsa`.
  - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and in image.
  - For ALSA sound with `--alsa` you can specify the desired sound card with `--env ALSA_CARD=Generic`. Get a list of available sound cards with `aplay -l`.
 ## Language locale
-You have two possibilities to set language locale in docker image. 
- - A good explanation in general provides [arch wiki: locale](https://wiki.archlinux.org/index.php/locale). 
- - Debian images need package `locales`. 
- - Already installed locales in image can be checked with `docker run IMAGENAME locale -a`. 
+You have two possibilities to set [language locale](https://wiki.archlinux.org/index.php/locale) in docker image. 
  - For support of chinese, japanese and korean characters install a font like `fonts-arphic-uming` in image.
 ### runtime creation of desired language locale
 x11docker provides option `--lang $LANG` for flexible language locale settings. 
  - x11docker will check on container startup if the desired locale is already present in image and enable it. 
- - If x11docker does not find the locale, it creates it on container startup. 
- - x11docker will only look for or create `UTF-8`/`utf8` locales. 
+ - If x11docker does not find the locale, it creates it on container startup.
+   - Debian images need package `locales`. 
+   - x11docker will only look for or create `UTF-8`/`utf8` locales. 
  - Examples: `--lang de` for german, `--lang zh_CN` for chinese, `--lang ru` for russian, `--lang $LANG` for your host locale.
 ### precompiled locale in image only
 You can choose between already installed language locales in image setting environment variable `LANG`, e.g. in image with `ENV LANG=en_US.utf8` or with x11docker option `--env LANG=en_US.utf8`.  
-Example to create a language locale in image:
+ - Already installed locales in image can be checked with `docker run IMAGENAME locale -a`. 
+ - Example to create a language locale in image:
 ```
 # change LANG to your desired language locale.
 ENV LANG=en_US.utf8
