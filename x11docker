@@ -9,9 +9,10 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.5"
+Version="3.9.6"
 
 changelog() {
+# 09.03.2018 V3.9.6     --lang: new option to set language locale in utf8, create it if missing.
 # 06.03.2018 V3.9.5     --keymap: new option to set keyboard layout
 # 06.03.2018 V3.9.4.2   store keyboard layout (xkb_keymap) in separate file, not in xinitrc. Set on all X servers. #25
 # 06.03.2018 V3.9.4.1   --pulseaudio: bugfix/typo
@@ -200,6 +201,9 @@ changelog() {
   : 
 }
 todo() {
+# BUG x11docker/lxde and others: need locale-gen, too? found en_US.utf8 instead of en_US.UTF-8.deepin:UTF8 missing -
+# check echo especially in sh scripts, replace with printf if needed (#25)
+# systemctl --user show-environment to get missing DISPLAY and XAUTHORITY
 # avoid possible confusions --home --sharedir. --sharedir mounts can overlap --home folder. What about softlinks with existing target in --home? Maybe avoid /home/$USER at all
 # try to use watch in mywatch() again to avoid sleep flooding of process monitors. watch fails sometimes in watching ls $Timetosaygoodbye for unkown reasons
 # --xpra --desktop restarts client if closing desktop window
@@ -318,7 +322,7 @@ Shared folders:
      --sharedir DIR    Share host folder (or file) DIR with r/w access.
                        (can be specified multiple times for multiple folders).
                        
-Clipboard and sound options:
+Clipboard, sound, language:
  -c, --clipboard       Share clipboard between X servers (works best with xpra.
                        Most other X servers need xclip to be installed).
  -p, --pulseaudio      Sound with pulseaudio over tcp. Degrades isolation.
@@ -326,6 +330,10 @@ Clipboard and sound options:
      --alsa            Sound with ALSA. Shares devices in /dev/snd. You can
                        define desired sound card with: --env ALSA_CARD=cardname
                        Degrades isolation. Container access to sound hardware.
+     --lang LOCALE     Language setting: search for utf8 LOCALE in image, 
+                       create it if missing, set LANG. Needs package 'locale'
+                       in image. LOCALE can be e.g. ru, en, de, zh_CN, cs_CZ.
+                       Same as host: --lang=\$LANG. 
 
 X server options: 
      --auto            Auto choose X server for docker applications (default).
@@ -439,6 +447,7 @@ Container environment:
                        For custom access to new X server. Get environment
                        with:  read xenv < <(x11docker --showenv [...])
      --sharewayland    Share Wayland socket and set WAYLAND_DISPLAY.
+                       See also --waylandenv above.
 
 X authentication: 
      --xhost STR       Set \"xhost STR\" on new X server (see 'man xhost').
@@ -1175,6 +1184,7 @@ Pulseaudiomoduleidfile="pulseaudiotcpmodule.id" #   "                    file wi
 Pulseaudioip=""                                 # either same as local container IP or 127.0.0.1 with --hostnet
 Noentrypoint="no"                               # option --no-entrypoint: disable entrypoint in image
 Internetaccess="yes"                            # option --no-internet: disable internet access
+Langwunsch=""                                   # option --lang: search or create UTF-8 locale and set LANG
 
 # verbosity options
 Verbose="no"                                    # option '-v, --verbose': if "yes", be verbose
@@ -1245,8 +1255,8 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
   Longoptions="auto,x,X,xpra,xephyr,x11,xorg,hostdisplay,xwayland,weston-xwayland,xpra-xwayland,nxagent,wayland"           # X servers
   Longoptions="$Longoptions,weston,hostwayland,kwin,kwin-xwayland,xdummy,xvfb,nothing"                                     # more X/Wayland servers
   Longoptions="$Longoptions,wm:,desktop,exe,xonly"
-  Longoptions="$Longoptions,fullscreen,size:,glamor,scale:,rotate:,dpi:,output-count:,gpu"                                 # screen options
-  Longoptions="$Longoptions,user:,home,clipboard,pulseaudio,alsa,xfishtank"                                                # comfort options
+  Longoptions="$Longoptions,fullscreen,size:,glamor,scale:,rotate:,dpi:,output-count:,gpu,xfishtank"                       # screen options
+  Longoptions="$Longoptions,user:,home,clipboard,pulseaudio,alsa,lang:"                                                    # comfort options
   Longoptions="$Longoptions,verbose,no-xhost,trusted,untrusted,dbus,waylandenv,pw:,no-internet"                            # advanced options
   Longoptions="$Longoptions,tini,no-init,systemd,runit,openrc,sys-admin,sharecgroup"                                       # init system options
   Longoptions="$Longoptions,starter,cleanup,license,licence,help,version,install,update,remove,wmlist"                     # special options without starting X server
@@ -1318,6 +1328,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
       -c|--clipboard)  Shareclipboard="yes"  ;;            # share host clipboard with dockered applications (xpra only)
          --alsa)       Alsa="yes" ;;                       # enable ALSA sound (shares /dev/snd)
       -p|--pulseaudio) Pulseaudio="yes"  ;;                # enable pulseaudio connection / sound support over tcp
+         --lang)       Langwunsch=${2:-} ; shift ;;        # locale/language setting
       
      #### Advanced options
       -v|--verbose)    Verbose="yes"  ;;                   # be verbose
@@ -3668,6 +3679,7 @@ start() {
   echo "ln -s $Cshare/X$Newdisplaynumber $Newxsocket"
   echo "ls -l $Newxsocket"
   echo ""
+  
   echo "# create user entry in /etc/passwd (and delete possibly existing same uid)"
   echo "getent passwd | grep -v \$(getent passwd $Benutzeruid || echo USERNOTFOUND) > /tmp/passwd"
   echo "echo $Benutzerpasswdentry >> /tmp/passwd"
@@ -3745,6 +3757,52 @@ start() {
       echo "rc-update add x11docker.service default"
     ;;
   esac
+  
+  [ "$Langwunsch" ] && {
+    echo "Locales=\"\$(locale -a)\""
+    echo "Langall=\"\$(cat /usr/share/i18n/SUPPORTED | grep -E 'UTF-8|utf8' | cut -d' ' -f1 | cut -d. -f1 | cut -d@ -f1 | sort | uniq)\""
+    echo "Langland=\$(echo $Langwunsch | cut -d. -f1)"
+    echo "echo \$Langland | grep -q '_' || {"
+    echo "  Langland=\"\$(echo \$Langland | tr '[:upper:]' '[:lower:]')_\$(echo \$Langland | tr '[:lower:]' '[:upper:]')\""
+    echo "  echo \"\$Langall\" | grep -q \$Langland || {"
+    echo "    echo \"\$Langall\" | grep -i -q $Langwunsch && {"
+    echo "      Langland=\$(echo \"\$Langall\" | grep -i -m1 $Langwunsch)"
+    echo "    }"
+    echo "  }"
+    echo "}"
+    echo "Langland=\$(echo \$Langland | cut -d_ -f1 | tr '[:upper:]' '[:lower:]')_\$(echo \$Langland | cut -d_ -f2 | tr '[:lower:]' '[:upper:]')"
+    echo "echo \"\$Locales\" | grep -q \$Langland.utf8  && Langcontainer=\$Langland.utf8"
+    echo "echo \"\$Locales\" | grep -q \$Langland.UTF-8 && Langcontainer=\$Langland.UTF-8"
+    echo "[ -z \"\$Langcontainer\" ] && {"
+    echo "  Langcontainer=\$Langland.UTF-8"
+    echo "  echo \"x11docker: locale \$Langcontainer not found in image."
+    echo "  Will try to create it; that costs time and CPU power."
+    echo "  For permanent usage, consider to install locale \$Langcontainer"
+    echo "  in image with:"
+    echo "ENV LANG=\$Langcontainer"
+    echo "RUN echo \\\$LANG UTF-8 >> /etc/locale.gen"
+    echo "RUN locale-gen && update-locale --reset LANG=\\\$LANG\""
+    echo "  echo \"\$Langcontainer UTF-8\" > /etc/locale.gen"
+    echo "  Langbackup=\$LANG"
+    echo "  export LANG=\$Langcontainer"
+    echo "  locale-gen"
+    echo "  update-locale --reset LANG=\$Langcontainer || {"
+    echo "    echo \"x11docker ERROR: Could not find or create \$Langcontainer."
+    echo "  Fallback to previous locale: LANG=\$Langbackup"
+    echo "  Is package 'locales' installed in image?"
+    echo "  Locales found in image:"
+    echo "\$Locales"
+    echo "  UTF-8 locales supported by your image:"
+    echo "\$(echo \$Langall)\""
+    echo "    Langcontainer=\$Langbackup"
+    echo "    export LANG=\$Langbackup"
+    echo "  }"
+    echo "} || {"
+    echo "  echo \"x11docker: Found locale in image: \$Langcontainer\""
+    echo "  update-locale --reset LANG=\$Langcontainer"
+    echo "}"
+    echo "[ \"\$Langcontainer\" ] && echo \$Langcontainer > /tmp/LANG || echo \"x11docker WARNING: desired locale for $Langwunsch not found and not created.\""
+  }
 } >> $Setupscript
 
 { #### part: create dockerrc: inspect image, create x11docker.CMD.sh and run docker
@@ -3825,15 +3883,14 @@ start() {
   } 
   echo "  echo 'echo x11docker note: running dbus session with: \${Dbus:-(none)} >&2'"
   echo "  echo ''"
-  echo "  echo '# xpra environment settings'"
-  echo "  echo 'export UBUNTU_MENUPROXY= QT_X11_NO_NATIVE_MENUBAR=1 MWNOCAPTURE=true MWNO_RIT=true MWWM=allwm'"
-  [ -n "$Xprashm" ] && echo "  echo 'export $Xprashm'"
-  echo "  echo ''"
   echo '  echo "[ -e \"\$XDG_RUNTIME_DIR\" ] || {"'
   echo "  echo '  mkdir -v -m 700 -p /tmp/XDG_RUNTIME_DIR'"
   echo "  echo '  export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR'"
   echo "  echo '}'"
+  
   [ "$Sharewayland" = "yes" ] && {
+    echo "  echo ''"
+    echo "  echo '# Wayland environment'"
     echo "  echo 'export WAYLAND_DISPLAY=$Waylandsocket'"
     echo "  echo 'ln -s $Cshare/$Waylandsocket \$XDG_RUNTIME_DIR/$Waylandsocket'"
   }
@@ -3844,6 +3901,10 @@ start() {
     --nothing) ;;
     *)                             echo "  echo 'export XDG_SESSION_TYPE=x11'" ;;
   esac
+  echo "  echo ''"
+  echo "  echo '# xpra environment settings'"
+  echo "  echo 'export UBUNTU_MENUPROXY= QT_X11_NO_NATIVE_MENUBAR=1 MWNOCAPTURE=true MWNO_RIT=true MWWM=allwm'"
+  [ -n "$Xprashm" ] && echo "  echo 'export $Xprashm'"
   echo "  echo ''"
   echo "  echo 'bash --version >/dev/null 2>&1 && export SHELL=/bin/bash || export SHELL=/bin/sh'"
   echo "  echo 'export TERM=xterm'"
@@ -3856,12 +3917,22 @@ start() {
       echo "  echo \"export $Line\"" 
     }
   done < <(echo -e $Customenvironment)
-
+  
+  [ "$Langwunsch" ] && {
+    echo "  echo 'echo'"
+    echo "  echo 'for i in $(seq -s " " 20); do'"
+    echo "  echo '  [ -e /tmp/LANG ] && export LANG=\$(cat /tmp/LANG) && break'"
+    echo "  echo '  sleep 0.2'"
+    echo "  echo '  echo x11docker: Waiting for $Langwunsch locale generation.'"
+    echo "  echo 'done'"
+  }
+  
   echo "  echo 'echo'"
   echo "  echo 'echo x11docker: container environment:'"
   echo "  echo 'env > $Cshare/environment'"
   echo "  echo 'sed -i \"/\(PWD=\|_=\)/d\" $Cshare/environment'"
   echo "  echo 'env | sort'"
+  echo "  echo 'echo x11docker: copy of environment stored in $Cshare/environment'"
   echo "  echo ''"
   echo "  echo 'cd \"\$HOME\"'"
   echo "  echo ''"
@@ -4051,9 +4122,9 @@ start() {
       [ -s "$Xkbkeymapfile" ] && {
         echo "#"
         echo "# set keyboard layout on $Newdiplay to same as on host"
-        echo "xkbcomp $Xkbkeymapfile $Newdisplay"
         echo "echo 'x11docker: keyboard layout:'"
         echo "cat $Xkbkeymapfile"
+        echo "xkbcomp $Xkbkeymapfile $Newdisplay"
       }
     ;;
   esac
