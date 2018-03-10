@@ -12,6 +12,8 @@
 Version="3.9.6"
 
 changelog() {
+# 10.03.2018            --lang: replace locale-gen with more general available localedef
+#                       --tini: check for docker-init in PATH, disable if missing (#23)
 # 09.03.2018 V3.9.6     --lang: new option to set language locale in utf8, create it if missing.
 # 06.03.2018 V3.9.5     --keymap: new option to set keyboard layout
 # 06.03.2018 V3.9.4.2   store keyboard layout (xkb_keymap) in separate file, not in xinitrc. Set on all X servers. #25
@@ -201,6 +203,8 @@ changelog() {
   : 
 }
 todo() {
+# --lang: find out locale package names for several distris for documentation
+# opensuse tumbleweeed: declare output after error message, why?
 # BUG x11docker/lxde and others: need locale-gen, too? found en_US.utf8 instead of en_US.UTF-8.deepin:UTF8 missing -
 # check echo especially in sh scripts, replace with printf if needed (#25)
 # systemctl --user show-environment to get missing DISPLAY and XAUTHORITY
@@ -213,12 +217,10 @@ todo() {
 # --hostdisplay: default to --ipc --trusted --clipboard? Give a note about --untrusted?
 # minor BUG: warnings in dockerrc not visible in terminal if password prompt in xterm
 # check --clipboard --hostdisplay: --hostipc, too?
-# minor BUG: --keymap does not work on tty with --kwin and --kwin-xwayland
+# --keymap does not work on tty with --kwin and --kwin-xwayland
 
 # check out possibilities to allow 'sudo docker' directly again.
-# check detached mode on mageia
 # --xpra-xwayland, xdummy-xwayland: use kwin-wayland as fallback for missing weston? 
-# deepin: check dockerfile again, dde-session-daemon is no longer running
 # --xorg: getty and autologin to avoid Xwrapper.config changes?
 # gnome3 based desktop failing due to gnome bugs: pantheon budgie gnome3
 # --systemd: try to avoid xhost +SI:localuser:$Benutzer
@@ -227,8 +229,6 @@ todo() {
 # --wayland --user/--hostuser: wayland socket access denied due to XDG_RUNTIME_DIR
 # check all FIXME 
 # --nxagent 3.5.0: Mageia 6: seamless mode fails
-# new option --printer: xpra printer forwarding?
-# xpra: --file-transfer? How to set folder?
 # fedora: SElinux issue: '--security-opt label=type:container_runtime_t': need more restrictive setting
 #         https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix
 # multimonitor support for --scale and --size
@@ -293,7 +293,7 @@ Dependencies on host:
        
 Dependencies in image:
   Doesn't have dependencies inside of docker images, except for
-  options --gpu and --pulseaudio, see below at option descriptions.
+  options --gpu, --lang and --pulseaudio, see below at option descriptions.
    
 Options:
      --help            display this message and exit.
@@ -330,9 +330,9 @@ Clipboard, sound, language:
      --alsa            Sound with ALSA. Shares devices in /dev/snd. You can
                        define desired sound card with: --env ALSA_CARD=cardname
                        Degrades isolation. Container access to sound hardware.
-     --lang LOCALE     Language setting: search for utf8 LOCALE in image, 
-                       create it if missing, set LANG. Needs package 'locale'
-                       in image. LOCALE can be e.g. ru, en, de, zh_CN, cs_CZ.
+     --lang LOCALE     Language setting: search for utf8 LOCALE in image and 
+                       create it if missing. Needs package 'locale' im image.
+                       LOCALE can be e.g. ru, en, de, zh_CN, cz, fr, fr_BE.
                        Same as host: --lang=\$LANG. 
 
 X server options: 
@@ -1011,7 +1011,7 @@ exec 3>&2                                           # second stderr channel
 exec 4>&2                                           # stderr channel for --stderr
 tty | grep -q tty && Tty="yes" || Tty="no"          # check if running on X or on tty
 export PATH="$PATH:/usr/games:/usr/local/bin"       # may miss for root, but can be needed for --exe and --xfishtank
-export PATH="$PATH:/usr/sbin"                       # may miss for unprivileged users, but can be needed for `ip`
+export PATH="$PATH:/usr/sbin:/sbin"                 # may miss for unprivileged users, but can be needed for `ip`
 
 # Logfiles
 Mycookie=$(mcookie | cut -b1-6)
@@ -1636,16 +1636,19 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   
   
   [ "$Initsystem" = "tini" ] && {
-    docker run --help | grep ' --init' > /dev/null || {
+    docker run --help | grep -q ' --init' || {
       warning "Your docker version seems to be outdated
   and does not support \"docker run --init\".
   It is recommended to update docker to have a minimal container init system.
-  Fallback: disabling init system in container with x11docker optin --no-init."
+  Fallback: disabling init system in container with x11docker option --no-init."
       Initsystem="none"
     }
-    [ "$Hostsystem" = "opensuse" ] && warning "openSUSE is known to have a bug in its docker package.
-  It misses an init binary needed for docker run option --init.
-  If this startup fails, please try again with option --no-init."
+    command -v docker-init >/dev/null || { 
+      warning "docker-init not found in PATH.
+  This is probably a docker packaging error of your distribution.
+  Fallback: Running x11docker with option --no-init."
+      Initsystem="none"
+    }
   }
   
   [ "$Capdropall" = "no" ] && warning "Option --cap-default disables security hardening
@@ -3759,6 +3762,7 @@ start() {
   esac
   
   [ "$Langwunsch" ] && {
+    echo "echo \"x11docker: Searching for language locale matching $Langwunsch\""
     echo "Locales=\"\$(locale -a)\""
     echo "Langall=\"\$(cat /usr/share/i18n/SUPPORTED | grep -E 'UTF-8|utf8' | cut -d' ' -f1 | cut -d. -f1 | cut -d@ -f1 | sort | uniq)\""
     echo "Langland=\$(echo $Langwunsch | cut -d. -f1)"
@@ -3771,37 +3775,33 @@ start() {
     echo "  }"
     echo "}"
     echo "Langland=\$(echo \$Langland | cut -d_ -f1 | tr '[:upper:]' '[:lower:]')_\$(echo \$Langland | cut -d_ -f2 | tr '[:lower:]' '[:upper:]')"
-    echo "echo \"\$Locales\" | grep -q \$Langland.utf8  && Langcontainer=\$Langland.utf8"
     echo "echo \"\$Locales\" | grep -q \$Langland.UTF-8 && Langcontainer=\$Langland.UTF-8"
+    echo "echo \"\$Locales\" | grep -q \$Langland.utf8  && Langcontainer=\$Langland.utf8"
+    echo "echo $Langwunsch | grep -E 'C|C.UTF-8|C.utf8|POSIX' >/dev/null && Langcontainer=$Langwunsch"
     echo "[ -z \"\$Langcontainer\" ] && {"
-    echo "  Langcontainer=\$Langland.UTF-8"
-    echo "  echo \"x11docker: locale \$Langcontainer not found in image."
-    echo "  Will try to create it; that costs time and CPU power."
-    echo "  For permanent usage, consider to install locale \$Langcontainer"
-    echo "  in image with:"
-    echo "ENV LANG=\$Langcontainer"
-    echo "RUN echo \\\$LANG UTF-8 >> /etc/locale.gen"
-    echo "RUN locale-gen && update-locale --reset LANG=\\\$LANG\""
-    echo "  echo \"\$Langcontainer UTF-8\" > /etc/locale.gen"
-    echo "  Langbackup=\$LANG"
-    echo "  export LANG=\$Langcontainer"
-    echo "  locale-gen"
-    echo "  update-locale --reset LANG=\$Langcontainer || {"
-    echo "    echo \"x11docker ERROR: Could not find or create \$Langcontainer."
-    echo "  Fallback to previous locale: LANG=\$Langbackup"
-    echo "  Is package 'locales' installed in image?"
-    echo "  Locales found in image:"
-    echo "\$Locales"
-    echo "  UTF-8 locales supported by your image:"
-    echo "\$(echo \$Langall)\""
-    echo "    Langcontainer=\$Langbackup"
-    echo "    export LANG=\$Langbackup"
+    echo "  [ -e /usr/share/i18n/SUPPORTED ] || echo \"x11docker ERROR: /usr/share/i18n/SUPPORTED not found."
+    echo "  Please install locale package in image (belongs to glibc).\""
+    echo "  Langcontainer=\$Langland.utf8"
+    echo "  echo \"x11docker: Creating language locale \$Langcontainer\""
+    echo "  command -v localedef >/dev/null || echo \"x11docker ERROR: command localedef not found in image.\""
+    echo "  localedef --verbose --force -i \$Langland -f UTF-8 \$Langcontainer || echo \"x11docker: localedef exit code: \$?\""
+    echo "  locale -a | grep -q \"\$Langcontainer\" || {"
+    echo "    echo \"x11docker ERROR: locale creation of \$Langcontainer failed.\""
+    echo "    Langcontainer=''"
     echo "  }"
     echo "} || {"
     echo "  echo \"x11docker: Found locale in image: \$Langcontainer\""
-    echo "  update-locale --reset LANG=\$Langcontainer"
     echo "}"
-    echo "[ \"\$Langcontainer\" ] && echo \$Langcontainer > /tmp/LANG || echo \"x11docker WARNING: desired locale for $Langwunsch not found and not created.\""
+    echo "[ \"\$Langcontainer\" ] && {"
+    echo "  echo \"\$Langcontainer\" > /tmp/LANG"
+    echo "  echo \"LANG=\$Langcontainer\" > /etc/default/locale"
+    echo "} || echo \"x11docker WARNING: desired locale for $Langwunsch not found and not created.\""
+    echo "echo \"x11docker: Output of locale -a:\""
+    echo "locale -a"
+  }
+  
+  [ "$Pulseaudio" = "yes" ] && {
+    echo "command -v pulseaudio >/dev/null || echo \"x11docker ERROR: pulseaudio not found in image (option --pulseaudio)\""
   }
 } >> $Setupscript
 
@@ -3879,7 +3879,7 @@ start() {
     echo "  echo ''"
     echo "  echo 'Dbus=\"\$(dbus-launch --help >/dev/null 2>&1 && echo dbus-launch)\"'"
     echo "  echo '[ -z \"\$Dbus\" ] && Dbus=\"\$(dbus-run-session --help >/dev/null 2>&1 && echo dbus-run-session)\"'"
-    echo "  echo '[ -z \"\$Dbus\" ] && echo x11docker WARNING: Did not find dbus-launch or dbus-run-session. >&2'"
+    echo "  echo '[ -z \"\$Dbus\" ] && echo \"x11docker ERROR: Did not find dbus-launch or dbus-run-session (option --dbus).\" >&2'"
   } 
   echo "  echo 'echo x11docker note: running dbus session with: \${Dbus:-(none)} >&2'"
   echo "  echo ''"
@@ -3944,23 +3944,14 @@ start() {
   echo ""
   echo "cat $Imagecommandscript | nl -ba >> $Dockerlogfile"
   echo ""
-  
-  [ "$Initsystem" = "tini" ] && {
-    echo "docker info | grep 'Init Binary: docker-init' >/dev/null || {"
-    echo "  echo 'x11docker ERROR: Your docker installation does not have an init binary"
-    echo "  although option --init is listed in \"docker run --help\"."
-    echo "  This docker package issue is at least known for openSUSE."
-    echo "  Use x11docker option --no-init to avoid this error.'"
-    echo "  exit 1"
-    echo "}"
-    echo ""
-  }
 
+  
   echo "read Containerid < <($Dockercommand)" # <- docker run is here!
+  
   
   echo "[ -z \"\$Containerid\" ] && echo 'x11docker ERROR: Startup of docker failed.' && exit 1"
   echo "echo x11docker: container ID: \$Containerid"
-  echo "docker logs -f \$Containerid >>$Dockerlogfile 2>&1 &"
+  echo "docker logs -f \$Containerid >> $Dockerlogfile 2>&1 &"
   echo ""
   echo "# wait for container to be ready"
   echo "for Count in $(seq -s' ' 10); do"
