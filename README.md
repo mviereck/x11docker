@@ -14,7 +14,7 @@ Running graphical applications or desktop environments in docker images is effec
    - [Sound](#sound) with pulseaudio or ALSA.
    - [Hardware acceleration](#hardware-acceleration) for OpenGL.
    - [Clipboard](#clipboard) sharing.
-   - [Language locale](#language-locale) creation.
+   - [Language locale](#language-locales) creation.
  - [Network setup](#network-setup) with [SSH](#ssh-x-forwarding), [VNC](#vnc) or [HTML5](#html5-web-applications) possible.
  - Supports [init systems](#init-system) `tini`, `runit`, `openrc` and `systemd` in container.
  - Developed on debian 9. Tested on fedora 25, CentOS 7, openSUSE 42.3, Ubuntu 16.04, Manjaro 17, Mageia 6 and Arch Linux.
@@ -147,7 +147,7 @@ Clipboard sharing is possible with option `--clipboard`. Image clips are possibl
 Sound is possible with options `--pulseaudio` and `--alsa`.
  - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and in image.
  - For ALSA sound with `--alsa` you can specify the desired sound card with `--env ALSA_CARD=Generic`. Get a list of available sound cards with `aplay -l`.
-## Language locale
+## Language locales
 You have two possibilities to set [language locale](https://wiki.archlinux.org/index.php/locale) in docker image. 
  - For support of chinese, japanese and korean characters install a font like `fonts-arphic-uming` in image.
 ### language locale created offhand
