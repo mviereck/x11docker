@@ -162,12 +162,9 @@ You can choose between already installed language locales in image setting envir
  - Already installed locales in image can be checked with `docker run IMAGENAME locale -a`. 
  - Example to create a language locale in image:
 ```
-# change LANG to your desired language locale.
-ENV LANG=en_US.utf8
 RUN apt-get install -y locales
-# You can add more than one language locale to have a choice later
-RUN echo "$LANG UTF-8" >> /etc/locale.gen
-RUN locale-gen && update-locale --reset LANG=$LANG
+ENV LANG en_US.utf8
+RUN localedef --verbose --force -i en_US -f UTF-8 en_US.utf8
 ```
 
 # Security 
