@@ -202,7 +202,7 @@ Rather special options reducing security, but not needed for regular use:
   - `--systemd`, `--openrc` and `--runit` allow some container capabilities that x11docker would drop otherwise. `--systemd` also shares access to `/sys/fs/cgroup`.
   - `--cap-default` disables x11docker's container hardening and falls back to default docker container privileges.
   - `--hostipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory. Disables IPC namespacing.)
-  - `--net` sets docker run option `--net=host`. (Allows dbus connection to host, Shares host network stack.)
+  - `--hostnet` sets docker run option `--net=host`. (Allows dbus connection to host, Shares host network stack.)
    
 # Choice of X servers and Wayland compositors
 If no X server option is specified, x11docker automatically chooses one depending on installed dependencies and on given or missing options `--desktop`, `--gpu` and `--wayland`. 
