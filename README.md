@@ -281,14 +281,13 @@ x11docker supports init systems as PID 1 in container.
    - Tested with fedora, debian and Arch Linux images. Debian 10 images run well; debian 9 images additionally need insecure option `--sys-admin`.
    - Image example based on debian buster: [x11docker/cinnamon](https://hub.docker.com/r/x11docker/cinnamon/)
  - `--runit`: runit in container.
-   - No special setup is needed in image, only `runit` must be installed. For a bit faster startup, failing services can be disabled by deleting their softlinks in `/etc/runit/runsvdir/default`.
+   - No special setup is needed in image, only `runit` must be installed; `dbus` is recommended. 
    - x11docker sets up the container to run the image command as a service.
-   - For most use cases, `dbus` should be installed in image and enabled with 
-     - `ln -s /etc/sv/dbus /etc/runit/runsvdir/default`.
+   - For a bit faster startup, failing services can be disabled by deleting their softlinks in `/etc/runit/runsvdir/default`.
    - Tested with [Void Linux](https://www.voidlinux.eu/) images.
-   - Image example based on Void Linux: [x11docker/enlightenment](https://hub.docker.com/r/x11docker/enlightenment/)
+   - Image examples based on Void Linux: [x11docker/enlightenment](https://hub.docker.com/r/x11docker/enlightenment/) and [x11docker/lumina](https://hub.docker.com/r/x11docker/lumina/).
  - `--openrc`: openrc in container.
-   - No special setup is needed in image, only `openrc` must be installed. 
+   - No special setup is needed in image, only `openrc` must be installed; `dbus` is recommended. 
    - Tested with [Alpine Linux](https://alpinelinux.org/) images.
  - `--no-init`: to run image command as PID 1 without an init system (docker default).
 ## dbus
