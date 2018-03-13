@@ -116,7 +116,7 @@ Running x11docker as root:
  - Commands other than `docker` are executed as unprivileged user determined with [`logname`](http://pubs.opengroup.org/onlinepubs/9699919799/utilities/logname.html). (You  can specify another host user with `--hostuser USER`).
  - Unfortunately, some systems do not provide `DISPLAY` and `XAUTHORITY` for root, but needed for nested X servers like Xephyr.    
    - Tools like `gksu` or `gksudo` can help. 
-   - Some sudo implementations provide `-E` to keep the user environment: `sudo -E x11docker [...]`.
+   - Some `sudo` implementations provide `-E` to keep the user environment: `sudo -E x11docker [...]`.
 
 # Options
 Description of some commonly used options. Get an [overview of all options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`.
