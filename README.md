@@ -164,7 +164,7 @@ You can choose between already installed language locales in image setting envir
 ```
 RUN apt-get install -y locales
 ENV LANG en_US.utf8
-RUN localedef --verbose --force -i en_US -f UTF-8 en_US.utf8
+RUN localedef --verbose --force -i en_US -f UTF-8 en_US.utf8 || echo "localedef exit code: $?"
 ```
 
 # Security 
