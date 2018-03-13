@@ -214,6 +214,8 @@ If no X server option is specified, x11docker automatically chooses one dependin
  - If none of above can be started due to missing dependencies, x11docker uses `--hostdisplay` or `--xorg`.
  - With option `--wayland`, x11docker creates a Wayland environment without X. See also chapter [Wayland](#wayland).
  
+ To run an X server entirely in docker, look at [x11docker/xwayland](https://github.com/mviereck/dockerfile-x11docker-xwayland).
+ 
 ![x11docker-gui server screenshot](/../screenshots/x11docker-server.png?raw=true)
 
 ## Wayland
