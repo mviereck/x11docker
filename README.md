@@ -306,6 +306,8 @@ Collection of rarer needed but sometimes useful options.
 
 # Network setup
 ## SSH X forwarding
+You can run x11docker on remote servers with `ssh -X` like regular X applications. 
+### SSH with xpra
 Example for an SSH setup with xpra:
 ```
 read Xenv < <(x11docker --xdummy --display=30 x11docker/lxde pcmanfm)
