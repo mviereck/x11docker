@@ -9,9 +9,11 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.7"
+Version="3.9.7.1"
 
 changelog() {
+# 16.03.2018 V3.9.7.1   bugfix alpine images: /etc/shadow entry must be /bin/sh, --dbus-system -with su fails with /bin/bash
+# 15.03.2018            bugfix openSUSE: finish(): replace bc with bash-only calculation, bc misses on openSUSE
 # 15.03.2018 V3.9.7     bugfix openSUSE/fedora: ps check for container pid; fixed desktop logout issue, too.
 #                       structure change: don't sleep 1 for setup; instead wait for it in CMD.sh resp. run su or init in setup
 # 14.03.2018            SSH with --hostdisplay: set --hostipc, --hostnet and --trusted. Do not X-generate cookie, bake self.
@@ -211,7 +213,8 @@ changelog() {
   : 
 }
 todo() {
-# opensuse: issues with x11docker/fluxbox, background missing, sometimes no context menu
+# --openrc: consolekit service does not start, no message
+# opensuse/arch: issues with x11docker/fluxbox, background missing, sometimes no context menu
 # BUG --weston,--kwin: docker sometimes fails although socket exists: "stat /run/user/1000/wayland-607: no such file or directory"
 # minor BUG: some xtermrc log output gets lost with GUI password prompts, not sure why; maybe fds get lost when gui stops
 # check echo especially in sh scripts, replace with printf if needed (#25)
@@ -849,7 +852,7 @@ finish() {              # trap routine, clean up background processes and cache
                 while ps -p $Pid >/dev/null ; do
                   note "waiting for container to terminate ..."
                   sleep 1
-                  [ 10 -lt $(echo "$(date +%s) - $Zeit" | bc) ] && break ||:
+                  [ 10 -lt $(($(date +%s) - $Zeit)) ] && break ||:
                 done
                 if ps -p $Pid >/dev/null ; then
                   note "docker container didn't terminate as it should. 
@@ -3389,7 +3392,7 @@ done
   esac
   
   # create entry for /etc/passwd
-  Benutzerpasswdentry="$Benutzer:x:$Benutzeruid:$Benutzergid:$Benutzer,,,:$Benutzerhome:/bin/bash"
+  Benutzerpasswdentry="$Benutzer:x:$Benutzeruid:$Benutzergid:$Benutzer,,,:$Benutzerhome:/bin/sh"
 }
 
 { #### part: create init service files (options --systemd, --runit)
@@ -3491,8 +3494,9 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $Custome
       warning "Option --openrc slightly degrades container isolation.
   Beside some default container capabilities x11docker would disable otherwise
   it adds capability SYS_BOOT."
-      Openrcservice=$Cachefolder/x11docker.service && mkfile $Openrcservice
-      Openrcinittab=$Cachefolder/inittab           && mkfile $Openrcinittab
+      Openrcservice=$Cachefolder/x11docker.service     && mkfile $Openrcservice
+      Openrcinittab=$Cachefolder/inittab               && mkfile $Openrcinittab
+      Openrcconsolekit=$Cachefolder/consolekit         && mkfile $Openrcconsolekit
 
       echo "#!/sbin/openrc-run
 name=x11docker
@@ -3500,12 +3504,35 @@ depend() {
   after *
 }
 start() {
-  ebegin 'x11docker: openrc service startup'
-  su - --shell=/bin/sh $Benutzer $Cshare/x11docker.CMD.sh
+  ebegin 'Starting x11docker.CMD.sh'
+  su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh
   halt
   eend \$?
 }
 " >> $Openrcservice
+     
+     echo '#!/usr/bin/openrc-run
+# Copyright 1999-2011 Gentoo Foundation
+# Distributed under the terms of the GNU General Public License, v2 or later
+depend() {
+    after dbus
+    #need dbus
+    #use logger
+}
+start() {
+    ebegin "Starting ConsoleKit daemon"
+    checkpath -q -d -m 0755 /run/ConsoleKit
+    start-stop-daemon --start -q \
+		      --pidfile /run/ConsoleKit/pid \
+		      --exec /usr/bin/console-kit-daemon -- 
+    eend $?
+}
+stop() {
+    ebegin "Stopping ConsoleKit daemon"
+    start-stop-daemon --stop -q --pidfile /run/ConsoleKit/pid 
+    eend $?
+}
+' >> $Openrcconsolekit
 
       echo "# /etc/inittab
 ::sysinit:/sbin/openrc sysinit
@@ -3586,6 +3613,7 @@ start() {
           Dockercommand="$Dockercommand \\
   --cap-add SYS_BOOT \\
   -v $Openrcservice:/etc/init.d/x11docker.service:rw \\
+  -v $Openrcconsolekit:/etc/init.d/consolekit:rw \\
   -v $Openrcinittab:/etc/inittab:ro"
         ;;
       esac
@@ -3727,7 +3755,7 @@ start() {
   echo "# create some system dirs with needed permissions"
   echo "mkdir -v -p /var/lib/dbus /var/run/dbus"
   echo "mkdir -v -p -m 1777 /tmp/.ICE-unix /tmp/.X11-unix /tmp/.font-unix"
-  echo "chmod --changes 1777 /tmp/.ICE-unix /tmp/.X11-unix /tmp/.font-unix"
+  echo "chmod -c 1777 /tmp/.ICE-unix /tmp/.X11-unix /tmp/.font-unix"
   echo "ln -s $Cshare/X$Newdisplaynumber $Newxsocket"
   echo "ls -l $Newxsocket"
   echo ""
@@ -3801,6 +3829,9 @@ start() {
     openrc)
       echo "echo 'x11docker: enabling dbus service'"
       echo "rc-update add dbus default"
+      echo "echo 'x11docker: enabling consolekit'"
+      echo "chmod +x /etc/init.d/consolekit"
+      echo "rc-update add consolekit default"
       echo "# enable x11docker service containing image command"
       echo "chmod +x /etc/init.d/x11docker.service"
       echo "rc-update add x11docker.service default"
@@ -3839,9 +3870,9 @@ start() {
     echo "  echo \"x11docker: Found locale in image: \$Langcontainer\""
     echo "}"
     echo "[ \"\$Langcontainer\" ] && {"
-    echo "  echo \"\$Langcontainer\" > /tmp/LANG"
+    echo "  echo \"\$Langcontainer\" > /tmp/x11docker.LANG"
     echo "  echo \"LANG=\$Langcontainer\" > /etc/default/locale"
-    echo "} || echo \"x11docker WARNING: desired locale for $Langwunsch not found and not created.\""
+    echo "} || echo \"x11docker WARNING: desired locale for '--lang=$Langwunsch' not found and not created.\""
     echo "echo \"x11docker: Output of locale -a:\""
     echo "locale -a"
   }
@@ -3913,6 +3944,9 @@ start() {
   echo '  echo Imagecommand="\"$Imagecommand\""'
   echo '  echo Entrypoint="\"$Entrypoint\""'
   echo "  echo ''"
+  echo "  echo 'echo x11docker: container system:'"
+  echo "  echo 'cat /etc/os-release'"
+  echo "  echo ''"
   echo "  echo '# wait for container setup script do be ready'"
   echo "  echo 'for Count in $(seq -s' ' 30); do'"
   echo "  echo '  [ -e /tmp/x11docker.setupready ] && break'"
@@ -3944,7 +3978,7 @@ start() {
     echo "  echo '[ -z \"\$Dbus\" ] && Dbus=\"\$(dbus-run-session --help >/dev/null 2>&1 && echo dbus-run-session)\"'"
     echo "  echo '[ -z \"\$Dbus\" ] && echo \"x11docker ERROR: Did not find dbus-launch or dbus-run-session (option --dbus).\" >&2'"
   } 
-  echo "  echo 'echo x11docker note: running dbus session with: \${Dbus:-(none)} >&2'"
+  echo "  echo 'echo x11docker: running dbus user session with: \${Dbus:-(none)} >&2'"
   echo "  echo ''"
   echo '  echo "[ -e \"\$XDG_RUNTIME_DIR\" ] || {"'
   echo "  echo '  mkdir -v -m 700 -p /tmp/XDG_RUNTIME_DIR'"
@@ -3980,15 +4014,9 @@ start() {
       echo "  echo \"export $Line\"" 
     }
   done < <(echo -e $Customenvironment)
-  
-  [ "$Langwunsch" ] && {
-    echo "  echo 'echo'"
-    echo "  echo 'for i in $(seq -s " " 20); do'"
-    echo "  echo '  [ -e /tmp/LANG ] && export LANG=\$(cat /tmp/LANG) && break'"
-    echo "  echo '  sleep 0.2'"
-    echo "  echo '  echo x11docker: Waiting for $Langwunsch locale generation.'"
-    echo "  echo 'done'"
-  }
+
+  echo "  echo 'echo'"
+  echo "  echo '[ -e /tmp/x11docker.LANG ] && export LANG=\$(cat /tmp/x11docker.LANG) '"
   
   echo "  echo 'echo'"
   echo "  echo 'echo x11docker: container environment:'"
