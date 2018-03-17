@@ -293,6 +293,8 @@ x11docker supports init systems as PID 1 in container.
  - `--openrc`: openrc in container.
    - No special setup is needed in image, only `openrc` must be installed; `dbus` is recommended. 
    - Tested with [Alpine Linux](https://alpinelinux.org/) images.
+   - cgroup usage possible with option `--sharecgroup`.
+   - Image example based on alpine: [x11docker/fvwm](https://hub.docker.com/r/x11docker/fvwm/)
  - `--no-init`: to run image command as PID 1 without an init system (docker default).
 ## dbus
 Some desktop environments and applications need a running dbus daemon and/or dbus user session. 
@@ -403,17 +405,20 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
      - `x11docker --pulseaudio --sharedir=$HOME/Videos jess/vlc`
    
  - Desktop in container: 
+   - Minimal images:
+     - FVWM: `x11docker --desktop x11docker/fvwm` (based on [alpine](https://alpinelinux.org/), 22.5 MB)
+     - fluxbox: `x11docker --desktop x11docker/fluxbox` (based on debian, 87 MB)
+
    - Lightweight, small image:
-     - fluxbox: `x11docker --desktop x11docker/fluxbox` (quite small image!)
-     - [Lumina](https://lumina-desktop.org): `x11docker --desktop x11docker/lumina`
+     - [Lumina](https://lumina-desktop.org): `x11docker --desktop x11docker/lumina` (based on [Void Linux](https://www.voidlinux.eu/))
      - LXDE: `x11docker --desktop x11docker/lxde`
      - LXQt: `x11docker --desktop x11docker/lxqt`
      - Xfce: `x11docker --desktop x11docker/xfce`
      - [CDE Common Desktop Environment](https://en.wikipedia.org/wiki/Common_Desktop_Environment): `x11docker --desktop --hostnet x11docker/cde`
      
    - Medium:
-     - Enlightenment: `x11docker --desktop --runit x11docker/enlightenment` (option `--gpu` recommended)
      - Mate: `x11docker --desktop x11docker/mate`
+     - Enlightenment: `x11docker --desktop --gpu --runit x11docker/enlightenment` (Based on [Void Linux](https://www.voidlinux.eu/))
      - [Trinity](https://www.trinitydesktop.org/) (successor of KDE 3): `x11docker --desktop x11docker/trinity`
      
    - Heavy, option `--gpu` recommended
