@@ -423,7 +423,7 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
      
    - Heavy, option `--gpu` recommended
      - Cinnamon: `x11docker --desktop --dbus-system x11docker/cinnamon`
-     - [deepin](https://www.deepin.org/en/dde/): `x11docker --desktop --dbus-system --pulseaudio x11docker/deepin`
+     - [deepin](https://www.deepin.org/en/dde/): `x11docker --desktop --dbus-system x11docker/deepin`
      - KDE Plasma: `x11docker --desktop x11docker/plasma`
      - KDE Plasma as nested Wayland compositor: 
        - `x11docker --hostdisplay --gpu x11docker/plasma startplasmacompositor`
