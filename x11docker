@@ -9,9 +9,10 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.7.2"
+Version="3.9.7.3"
 
 changelog() {
+# 21.03.2018 V3.9.7.3   --pulseaudio: share XDG_RUNTIME_DIR/pulse instead of connection over tcp
 # 20.03.2018 V3.9.7.2   #30 Fix writeaccess() for user/group names with spaces in it
 # 19.03.2018            --wm: fall back to autodetection if specified window manager not found
 #                       bugfix --env: regard whitespace. Still need to handle special chars like"\'$.
@@ -223,7 +224,6 @@ changelog() {
   : 
 }
 todo() {
-# --pulseaudio: try with unix socket instead of tcp connection
 # check fgconsole
 # --env SHELL=/bin/bash fails in deepin with --dbus-system
 # --env: escape special chars
@@ -241,8 +241,6 @@ todo() {
 # --lang: find out locale package names for several distris for documentation
 # --keymap does not work on tty with --kwin and --kwin-xwayland. No idea how to set it.
 # further check of xpra server crashes with jess/atom and chromium. --mmap=no avoids the bug: xpra bug report?
-# BUG: --pulseaudio: stopping container with pulseaudio disables sound of other containers, too. Seems to be a pulseaudio bug.
-# x11docker/deepin fails with --pulseaudio since last major deepin update, some tcp issue?. Compare: https://github.com/golang/go/issues/10940
 
 # BUG check whether VT is not in use with --xorg/--xpra/--xdummy, bug if accidently using vt that is already in use
 # check all FIXME 
@@ -349,7 +347,7 @@ Shared folders:
 Clipboard, sound, language:
  -c, --clipboard       Share clipboard between X servers (works best with xpra.
                        Most other X servers need xclip to be installed).
- -p, --pulseaudio      Sound with pulseaudio over tcp. Degrades isolation.
+ -p, --pulseaudio      Sound with pulseaudio. Degrades isolation.
                        Needs 'pulseaudio' on host and in image.
      --alsa            Sound with ALSA. Shares devices in /dev/snd. You can
                        define desired sound card with: --env ALSA_CARD=cardname
@@ -900,9 +898,6 @@ x11docker --cleanup"
     done < <(tac $Bgpidfile)
   }
 
-  # option --pulseaudio: unload tcp module
-  [ -n "$Pulseaudiomoduleid" ] && pactl unload-module $Pulseaudiomoduleid
-
   sleep 0.5 # a bit time for all processes to finish log output
   [ -n "$Logfile2$Logfile3" ] && $Mksu "cp '$Logfile2' '$Logfile3'"
   rm "$Logfile"
@@ -1211,11 +1206,9 @@ Shareclipboardscript=clipboard.bash             #    "              "      scrip
 Showdisplayenvironment="no"                     # option -E, --env: Show environment variables of new display
 Customenvironment=""                            # option '--env': set custom environment variables 
 Pulseaudio="no"                                 #   "                    use pulseaudio yes/no
+Pulseaudioconf=pulseclient.conf
+Pulseaudiosocketdir=""
 Alsa="no"                                       # option --alsa: enable ALSA sound, share /dev/snd
-Pulseaudiotcpport=""                            # option '--pulseaudio': pulseaudio tcp port to use
-Pulseaudiomoduleid=""
-Pulseaudiomoduleidfile="pulseaudiotcpmodule.id" #   "                    file with number of customized pulseaudio tcp module, output of pactl
-Pulseaudioip=""                                 # either same as local container IP or 127.0.0.1 with --hostnet
 Noentrypoint="no"                               # option --no-entrypoint: disable entrypoint in image
 Internetaccess="yes"                            # option --no-internet: disable internet access
 Langwunsch=""                                   # option --lang: search or create UTF-8 locale and set LANG
@@ -1365,7 +1358,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
       -m|--home)       Benutzerhosthome="yes" ;;                # share folder ~/x11docker/Imagename with container
       -c|--clipboard)  Shareclipboard="yes"  ;;            # share host clipboard with dockered applications (xpra only)
          --alsa)       Alsa="yes" ;;                       # enable ALSA sound (shares /dev/snd)
-      -p|--pulseaudio) Pulseaudio="yes"  ;;                # enable pulseaudio connection / sound support over tcp
+      -p|--pulseaudio) Pulseaudio="yes"  ;;                # enable pulseaudio sound with shared pulse socket
          --lang)       Langwunsch=${2:-} ; shift ;;        # locale/language setting
       
      #### Advanced options
@@ -1596,53 +1589,6 @@ Parsed options: $Parsedoptions"
   If your system does not support 'sudo -E', you can try
     sudo env DISPLAY=\$DISPLAY XAUTHORITY=\$XAUTHORITY x11docker [...]
   Otherwise, you can use tools like gksu/gksudo/kdesu/kdesudo/lxsu/lxsudo."
-  
-  # option '--pulseaudio'
-  [ "$Pulseaudio" = "yes" ] && {
-    command -v pulseaudio >/dev/null || {
-      note "pulseaudio not found on your host.
-  Need pulseaudio to provide sound with --pulseaudio.
-  If you want to install pulseaudio, be aware that it may disturb 
-  an already working sound setup.
-  Fallback: Trying ALSA sound (option --alsa)."
-      Pulseaudio="no"
-      Alsa="yes"
-    }
-    [ "$Internetaccess" = "no" ] && {
-      note "Option --pulseaudio does not work with --no-internet.
-  --pulseaudio works with a local TCP connection.
-  Fallback: enabling option --alsa"
-      Pulseaudio="no"
-      Alsa="yes"
-    }
-    # find a free tcp port
-    read -r Lowerport Upperport < /proc/sys/net/ipv4/ip_local_port_range
-    while : ; do
-      Pulseaudiotcpport="$(shuf -i $Lowerport-$Upperport -n 1)"
-      ss -lpn | grep -q ":$Pulseaudiotcpport " || break
-    done
-    warning "Option --pulseaudio allows container applications
-  to catch your audio output and microphone input."
-  }
-  
-  
-  # option --alsa
-  [ "$Alsa" = "yes" ] && {
-    warning "ALSA sound with option --alsa degrades container isolation.
-  Shares device files in /dev/snd, container gains access to sound hardware.
-  Container applications can catch audio output and microphone input."
-    note "You can specify the sound card to use setting environment
-  variable ALSA_CARD. Example:  --env ALSA_CARD=Generic
-  Following sound cards found on your system:
-$(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
-  Option --alsa allows a general access to real sound cards. 
-  To use virtual ALSA devices like dmix, too, install ALSA libraries in image.
-  (Example: debian images would need package libasound2)."
-    [ "$(ps -aux | grep -c pulseaudio)" != "1" ] && note "It seems that pulseaudio is running on your host.
-  Pulseaudio can interfere with ALSA sound (option --alsa).
-  Host sound may not work while container is playing sound and vice versa.
-  Alternative: with pulseaudio on host and in image, use option --pulseaudio."
-  }
   
   [ "$Sudouser" = "yes" ] && warning "You allow $Benutzer sudo permissions (password: x11docker).
   Also, the container gains additional capabilities to allow sudo and su.
@@ -2382,7 +2328,7 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   Xpraclientlogfile="$Cachefolder/$Xpraclientlogfile"       && mkfile $Xpraclientlogfile
   Compositorlogfile="$Cachefolder/$Compositorlogfile"       && mkfile $Compositorlogfile
   Compositorpidfile="$Cachefolder/$Compositorpidfile"
-  Pulseaudiomoduleidfile="$Cachefolder/$Pulseaudiomoduleidfile" && mkfile $Pulseaudiomoduleidfile
+  Pulseaudioconf="$Cachefolder/$Pulseaudioconf"             && mkfile $Pulseaudioconf
   Bgpidfile="$Cachefolder/$Bgpidfile"                       && mkfile $Bgpidfile
   Imagecommandscript="$Sharefolder/$Imagecommandscript"     && mkfile $Imagecommandscript
   Shareclipboardscript="$Cachefolder/$Shareclipboardscript" && mkfile $Shareclipboardscript
@@ -3203,6 +3149,52 @@ done
   esac
 }
 
+{ #### part: check sound (options --pulseaudio and --alsa)
+  # option '--pulseaudio'
+  [ "$Pulseaudio" = "yes" ] && {
+    warning "Option --pulseaudio allows container applications
+  to catch your audio output and microphone input."
+    Pulseaudiosocketdir="$XDG_RUNTIME_DIR/pulse"
+    [ -d "$XDG_RUNTIME_DIR/pulse" ] || Pulseaudiosocketdir="$(pax11publish -d | grep Server | cut -d'}' -f2 | cut -d' ' -f1 | cut -d: -f2)"
+    [ -d "$Pulseaudiosocketdir" ] || {
+      warning "Did not find directory 'pulse' in XDG_RUNTIME_DIR.
+  Is pulseaudio up and running on your host?
+  Fallback: Will try to use ALSA (option --alsa) instead."
+      Pulseaudio="no"
+      Alsa="yes"
+    }
+    
+    echo "# Connect to the host's server using the mounted UNIX socket
+default-server = unix:/pulse/native
+# Prevent a server running in the container
+autospawn = no
+daemon-binary = /bin/true
+# Prevent the use of shared memory
+enable-shm = false
+" > $Pulseaudioconf
+  }
+  
+  # option --alsa
+  [ "$Alsa" = "yes" ] && {
+    warning "ALSA sound with option --alsa degrades container isolation.
+  Shares device files in /dev/snd, container gains access to sound hardware.
+  Container applications can catch audio output and microphone input."
+  
+    note "You can specify the sound card to use setting environment
+  variable ALSA_CARD. Example:  --env ALSA_CARD=Generic
+  Following sound cards found on your system:
+$(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
+  Option --alsa allows a general access to real sound cards. 
+  To use virtual ALSA devices like dmix, too, install ALSA libraries in image.
+  (Example: debian images would need package libasound2)."
+  
+    [ "$(ps -aux | grep -c pulseaudio)" != "1" ] && note "It seems that pulseaudio is running on your host.
+  Pulseaudio can interfere with ALSA sound (option --alsa).
+  Host sound may not work while container is playing sound and vice versa.
+  Alternative: with pulseaudio on host and in image, use option --pulseaudio."
+  }  
+}
+
 { #### part: check run/--exe/--xonly
   [ -z "$Imagename" ] && X11dockermode="xonly" && Showdisplayenvironment="yes"
   case $X11dockermode in
@@ -3742,6 +3734,9 @@ start() {
       ## synchronize time location from host and container
       [ -e /etc/localtime ] && Dockercommand="$Dockercommand \\
   -v /etc/localtime:/etc/localtime:ro"
+      [ "$Pulseaudio" = "yes" ]          && Dockercommand="$Dockercommand \\
+  -v $Pulseaudiosocketdir:/pulse:rw \\
+  -v $Cachefolder/pulseclient.conf:/etc/pulse/client.conf:rw"
         
       # add custom docker arguments, imagename and imagecommand
       Dockercommand="$Dockercommand \\
@@ -4021,8 +4016,6 @@ start() {
   echo "  echo ''"
   echo "  echo 'bash --version >/dev/null 2>&1 && export SHELL=/bin/bash || export SHELL=/bin/sh'"
   echo "  echo 'export TERM=xterm'"
-  [ "$Pulseaudio" = "yes" ] && [ "$Sharehostnet" = "no" ]  && echo "  echo 'export PULSE_SERVER=tcp:$Dockerip:$Pulseaudiotcpport'"
-  [ "$Pulseaudio" = "yes" ] && [ "$Sharehostnet" = "yes" ] && echo "  echo 'export PULSE_SERVER=tcp:127.0.0.1:$Pulseaudiotcpport'"
   echo "  echo '# custom environment'"
   while read -r Line; do
     [ -z "$Line" ] || {
@@ -4668,15 +4661,6 @@ $(cat $Cmdstderrlogfile | tail)"
           }
         }
         storepid $Containerpid container
-        
-        [ "$Pulseaudio" = "yes" ] && {  # option '--pulseaudio': enable pulseaudio sound over tcp
-          # load pulseaudio tcp module, authenticated to container ip on specified port
-          Pulseaudioip=$(cat $Containerip)
-          [ "$Sharehostnet" = "yes" ] && Pulseaudioip=127.0.0.1
-          $Mksu "pactl load-module module-native-protocol-tcp port=$Pulseaudiotcpport auth-ip-acl=$Pulseaudioip >> $Pulseaudiomoduleidfile"
-          Pulseaudiomoduleid=$(cat $Pulseaudiomoduleidfile)
-          verbose "pulseaudio module id for TCP port $Pulseaudiotcpport: $Pulseaudiomoduleid)"
-        }
         
         # wait for docker until it terminates. bash builtin wait does not work in this case
         ps -p $Containerpid >/dev/null 2>&1 && mywatch "ls $Timetosaygoodbye 2>/dev/null; ps -p $Containerpid -o pid #container" 
