@@ -9,9 +9,12 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.7.3"
+Version="3.9.7.4"
 
 changelog() {
+# 26.03.2018 V3.9.7.4   --sysvinit: new option for init system SysVinit in container. Tested with devuan.
+#                       --pulseaudio: bugfix: need to set env PULSE_SERVER
+# 23.03.2018            --runit: add softlink for X socket in x11docker.CMD.sh for compatibility with runit on debian
 # 21.03.2018 V3.9.7.3   --pulseaudio: share XDG_RUNTIME_DIR/pulse instead of connection over tcp
 # 20.03.2018 V3.9.7.2   #30 Fix writeaccess() for user/group names with spaces in it
 # 19.03.2018            --wm: fall back to autodetection if specified window manager not found
@@ -224,6 +227,7 @@ changelog() {
   : 
 }
 todo() {
+# BUG console-kit-daemon fails. fix it or drop it.
 # check fgconsole
 # --env SHELL=/bin/bash fails in deepin with --dbus-system
 # --env: escape special chars
@@ -472,16 +476,19 @@ Init system and dbus daemon:
      --openrc          Init system OpenRC. Degrades container isolation a bit,
                        but needs less capabilities than --runit and --systemd.
                        Needs 'openrc' installed in image. 'dbus' recommended.
+     --sysvinit        Init system SysVinit. Degrades container isolation a bit,
+                       but needs less capabilities than  others.
+                       Needs 'sysvinit' installed in image. 'dbus' recommended.
      --systemd         Init system systemd. Degrades container isolation.
                        For faster startup mask services that fail in container.
                        Needs 'systemd' installed in image.
                        Old systemd versions in image need --sys-admin, too.
      --sharecgroup     Share /sys/fs/cgroup. Default for --systemd.
                        Can be used with --openrc.
+ -b, --dbus            Run dbus user session daemon for image command.
      --dbus-system     Run dbus system daemon in container (includes --dbus).
                        Enables consolekit and ck-launch-session if available.
-                       Default for --systemd, --openrc and --runit. 
- -b, --dbus            Run dbus user session daemon for image command.
+                       Default for --systemd, --sysvinit, --openrc and --runit. 
 
 Container capabilities:
      --hostipc         Sets docker option --ipc=host, disables IPC namespacing.
@@ -997,7 +1004,8 @@ waitforlogentry() {     # wait for entry $3 in logfile $2 of application $1
   local Zeit Warten
   Zeit=$(date +%s)
   Warten=24
-  while [ -z "$(cat "${2:-}" | grep "${3:-}")" ] ; do
+  while ! cat "${2:-}" | grep -q "${3:-}" ; do
+#    verbose "waiting since $(expr $(date +%s) - $Zeit)s for ${1:-} to be ready..."
     verbose "waiting since $(expr $(date +%s) - $Zeit)s for ${1:-} to be ready..."
     sleep 0.2
     [ $Warten -lt $(expr $(date +%s) - $Zeit) ] && return 1
@@ -1093,8 +1101,6 @@ Dockeroptions=""                                # options for docker after -- an
 
 # docker variables
 Containername=""                                # name of container set by x11docker to make --cleanup able to find orphaned containers
-Dockerip=""                                     # IP adress of docker interface
-Dockeriprange=""                                # IP adress of docker interface including suffix /16
 Containerpid=""                                 # process ID of script process with docker container
 Dockerdaemon="$(pgrep -xa $(ps -e -o comm | grep dockerd) 2>/dev/null)"  # how docker daemon has been started
 
@@ -1208,6 +1214,7 @@ Customenvironment=""                            # option '--env': set custom env
 Pulseaudio="no"                                 #   "                    use pulseaudio yes/no
 Pulseaudioconf=pulseclient.conf
 Pulseaudiosocketdir=""
+Pulseaudiosocketname=""
 Alsa="no"                                       # option --alsa: enable ALSA sound, share /dev/snd
 Noentrypoint="no"                               # option --no-entrypoint: disable entrypoint in image
 Internetaccess="yes"                            # option --no-internet: disable internet access
@@ -1246,7 +1253,6 @@ Xhost=""                                        # option '--xhost': xhost + on n
 # special options not starting X or docker
 Checkorphaned="no"                              # option '--cleanup': check for non-removed containers and maybe root-owned files in cache
 Createdesktopstarter="no"                       # option '--starter': create desktop starter and exit yes/no
-Desktopfolder=""                                #              "    : Desktop folder of host user (xdg-user-dirs)
 Installermode=""                                # options --install/--update/--remove
 
 # some temporary or loop variables
@@ -1288,7 +1294,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
   Longoptions="$Longoptions,fullscreen,size:,glamor,scale:,rotate:,dpi:,output-count:,gpu,xfishtank"                       # screen options
   Longoptions="$Longoptions,user:,home,clipboard,pulseaudio,alsa,lang:"                                                    # comfort options
   Longoptions="$Longoptions,no-xhost,trusted,untrusted,dbus,dbus-system,pw:,no-internet"                                   # advanced options
-  Longoptions="$Longoptions,tini,no-init,systemd,runit,openrc,sys-admin,sharecgroup"                                       # init system options
+  Longoptions="$Longoptions,tini,no-init,systemd,runit,openrc,sysvinit,sys-admin,sharecgroup"                              # init system options
   Longoptions="$Longoptions,starter,cleanup,license,licence,help,version,install,update,remove,wmlist"                     # special options without starting X server
   Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,xtest,no-xtest,env:,showenv"                                       # X and environment options
   Longoptions="$Longoptions,verbose,stdout,stderr,silent,debug"                                                            # verbose options
@@ -1394,6 +1400,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
          --runit)      Initsystem="runit" ;;               # run runit as init system and image command as a service
          --openrc)     Initsystem="openrc" ;;
          --systemd)    Initsystem="systemd" ;;             # run systemd as init system and image command as a service
+         --sysvinit)   Initsystem="sysvinit" ;;
          --sharecgroup)Sharecgroup="yes" ;;                # share /sys/fs/cgroup. default for --systemd, possible use with --openrc
          --sys-admin)  Capsysadmin="yes" ;;                # add capability SYS_ADMIN for older systemd versions in image (i.e. debian 9 needs it, debian 10 runs well)
          --dbus-system|--dbus-daemon|--dbusdaemon) Dbusdaemon="yes"; Dbuslaunch="yes" # set up dbus system daemon
@@ -1623,11 +1630,6 @@ Parsed options: $Parsedoptions"
   $XDG_RUNTIME_DIR/$Hostwayland"
     Hostwayland=""
   }
-  
-  ## Get inet adress of docker0 interface
-  Dockeriprange=$(ip -4 -o a | grep docker0 | awk '{print $4}')
-  Dockerip=$(echo $Dockeriprange | cut -d/ -f1)
-  
   
   [ "$Initsystem" = "tini" ] && {
     docker run --help | grep -q ' --init' || {
@@ -2253,7 +2255,7 @@ Parsed options: $Parsedoptions"
   esac
   
   case $Initsystem in
-    runit|openrc|systemd) Dbusdaemon="yes"; Dbuslaunch="yes" ;;
+    runit|openrc|systemd|sysvinit) Dbusdaemon="yes"; Dbuslaunch="yes" ;;
   esac
 }
 
@@ -2407,7 +2409,7 @@ Parsed options: $Parsedoptions"
       [ "$Tty" = "yes" ] && {
         : # nothing to do on tty; maybe should check --size=$Screensize
       } || {
-        command -v xrandr > /dev/null 2>/dev/null && [ -n "$(xrandr 2>/dev/null | grep ' connected')" ] && { # reduce size to primary monitor for windowed desktop
+        command -v xrandr > /dev/null 2>/dev/null && xrandr 2>/dev/null | grep -q ' connected' && { # reduce size to primary monitor for windowed desktop
           Xaxis=$(xrandr 2>/dev/null | grep ' connected' | head -n1 | cut -dx -f1 | rev | cut -d' ' -f1 | rev)
           Yaxis=$(xrandr 2>/dev/null | grep ' connected' | head -n1 | cut -dx -f2 | cut -d' ' -f1 | cut -d+ -f1)
           Xaxis=$((Xaxis-100))
@@ -3155,7 +3157,7 @@ done
     warning "Option --pulseaudio allows container applications
   to catch your audio output and microphone input."
     Pulseaudiosocketdir="$XDG_RUNTIME_DIR/pulse"
-    [ -d "$XDG_RUNTIME_DIR/pulse" ] || Pulseaudiosocketdir="$(pax11publish -d | grep Server | cut -d'}' -f2 | cut -d' ' -f1 | cut -d: -f2)"
+    [ -d "$Pulseaudiosocketdir" ] || Pulseaudiosocketdir="$(pax11publish -d | grep Server | cut -d'}' -f2 | cut -d' ' -f1 | cut -d: -f2)"
     [ -d "$Pulseaudiosocketdir" ] || {
       warning "Did not find directory 'pulse' in XDG_RUNTIME_DIR.
   Is pulseaudio up and running on your host?
@@ -3163,15 +3165,24 @@ done
       Pulseaudio="no"
       Alsa="yes"
     }
-    
+    [ -s "$Pulseaudiosocketdir/native" ] && Pulseaudiosocketname="native"
+    [ -z "$Pulseaudiosocketname" ] && Pulseaudiosocketname="$(find "$Pulseaudiosocketdir" -type s | rev | cut -d/ -f1 | rev | head -n1)"
+    [ -z "$Pulseaudiosocketname" ] && {
+      warning "Did not find pulseaudio socket
+  in $Pulseaudiosocketdir
+  Fallback: Will try to use ALSA (option --alsa) instead."
+      Pulseaudio="no"
+      Alsa="yes"
+    }
+    [ "$Pulseaudio" = "yes" ] && Customenvironment="$Customenvironment\nPULSE_SERVER=unix:/pulse/$Pulseaudiosocketname"
     echo "# Connect to the host's server using the mounted UNIX socket
-default-server = unix:/pulse/native
+default-server = unix:/pulse/$Pulseaudiosocketname
 # Prevent a server running in the container
 autospawn = no
 daemon-binary = /bin/true
 # Prevent the use of shared memory
 enable-shm = false
-" > $Pulseaudioconf
+" >> $Pulseaudioconf
   }
   
   # option --alsa
@@ -3188,7 +3199,7 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   To use virtual ALSA devices like dmix, too, install ALSA libraries in image.
   (Example: debian images would need package libasound2)."
   
-    [ "$(ps -aux | grep -c pulseaudio)" != "1" ] && note "It seems that pulseaudio is running on your host.
+    pgrep pulseaudio >/dev/null && note "It seems that pulseaudio is running on your host.
   Pulseaudio can interfere with ALSA sound (option --alsa).
   Host sound may not work while container is playing sound and vice versa.
   Alternative: with pulseaudio on host and in image, use option --pulseaudio."
@@ -3246,9 +3257,9 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
 
   # check sudo. Check is not reliable, compare https://unix.stackexchange.com/questions/383918/su-or-sudo-how-to-know-which-one-will-work
   ### FIXME: just guessing that members of group sudo or wheel are allowed to run commands docker and env as root
-  [ -z "$Passwordprompt" ] && { sudo -ln docker >/dev/null 2>&1 || [ -n "$(id | grep '(sudo)')" ]|| [ -n "$(id | grep '(wheel)')" ] ; } && command -v sudo >/dev/null && {
+  [ -z "$Passwordprompt" ] && { sudo -ln docker >/dev/null 2>&1  ||  id | grep -q '(sudo)'  ||  id | grep -q '(wheel)' ; } && command -v sudo >/dev/null && {
     [ -z "$Hostdisplay$Newdisplay" ] && Passwordprompt="sudo"
-    sudo -ln env >/dev/null 2>&1 || [ -n "$(id | grep '(sudo)')" ] || [ -n "$(id | grep '(wheel)')" ] && { # check for command env, compare dockerrc
+    sudo -ln env >/dev/null 2>&1  ||  id | grep -q '(sudo)'  ||  id | grep -q '(wheel)'  && {
       [ -z "$Passwordprompt" ] && command -v gksudo  >/dev/null && Passwordprompt="gksudo" 
       [ -z "$Passwordprompt" ] && command -v lxsudo  >/dev/null && Passwordprompt="lxsudo"
       [ -z "$Passwordprompt" ] && command -v kdesudo >/dev/null && Passwordprompt="kdesudo"
@@ -3357,7 +3368,7 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
       Benutzerhosthome="no"
     }
   }
-  Benutzergruppe="$(echo $(getent group $Benutzergid || echo group_$Benutzer) | cut -d: -f1)"
+  Benutzergruppe="$(getent group $Benutzergid || echo group_$Benutzer | cut -d: -f1)"
 
   [ "$Benutzer" = "$Hostuser" ] && Mksubenutzer=$Mksu || { 
     Mksubenutzer="su $Benutzer -c"
@@ -3518,8 +3529,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $Custome
   Beside some default container capabilities x11docker would disable otherwise
   it adds capability SYS_BOOT."
       Openrcservice=$Cachefolder/x11docker.service     && mkfile $Openrcservice
-      Openrcinittab=$Cachefolder/inittab               && mkfile $Openrcinittab
-      Openrcconsolekit=$Cachefolder/consolekit         && mkfile $Openrcconsolekit
+      Inittab=$Cachefolder/inittab                     && mkfile $Inittab
 
       echo "#!/sbin/openrc-run
 name=x11docker
@@ -3539,7 +3549,52 @@ start() {
 ::sysinit:/sbin/openrc boot
 ::wait:/sbin/openrc default
 ::shutdown:/sbin/openrc shutdown
-" >> $Openrcinittab
+" >> $Inittab
+    ;;
+    
+    sysvinit)
+      warning "Option --sysvinit slightly degrades container isolation.
+  Beside some default container capabilities x11docker would disable otherwise
+  it adds capability SYS_BOOT."
+      Inittab=$Cachefolder/inittab  && mkfile $Inittab
+      Rclocal=$Cachefolder/rc.local && mkfile $Rclocal
+      echo "#!/bin/sh
+su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh
+shutdown -h 0
+exit 0
+" >> $Rclocal
+      $Mksu "chmod +x $Rclocal"
+      
+      echo "# /etc/inittab: init(8) configuration.
+# \$Id: inittab,v 1.91 2002/01/25 13:35:21 miquels Exp $
+
+# The default runlevel.
+id:2:initdefault:
+# What to do in single-user mode.
+~~:S:wait:/sbin/sulogin
+
+# Boot-time system configuration/initialization script.
+# This is run first except when booting in emergency (-b) mode.
+si::sysinit:/etc/init.d/rcS
+# /etc/init.d executes the S and K scripts upon change
+# of runlevel.
+#
+# Runlevel 0 is halt.
+# Runlevel 1 is single-user.
+# Runlevels 2-5 are multi-user.
+# Runlevel 6 is reboot.
+
+l0:0:wait:/etc/init.d/rc 0
+l1:1:wait:/etc/init.d/rc 1
+l2:2:wait:/etc/init.d/rc 2
+l3:3:wait:/etc/init.d/rc 3
+l4:4:wait:/etc/init.d/rc 4
+l5:5:wait:/etc/init.d/rc 5
+l6:6:wait:/etc/init.d/rc 6
+
+2:23:respawn:/sbin/getty 38400 tty2
+
+" >> $Inittab
     ;;
   esac
 }
@@ -3567,7 +3622,7 @@ start() {
   --user root" ;;
           esac
         ;;
-        systemd|runit|openrc) Dockercommand="$Dockercommand \\
+        systemd|runit|openrc|sysvinit) Dockercommand="$Dockercommand \\
   --user root" ;;
       esac
 
@@ -3613,7 +3668,15 @@ start() {
           Dockercommand="$Dockercommand \\
   --cap-add SYS_BOOT \\
   -v $Openrcservice:/etc/init.d/x11docker.service:rw \\
-  -v $Openrcinittab:/etc/inittab:ro"
+  -v $Inittab:/etc/inittab:ro"
+        ;;
+        
+        sysvinit)
+          Switchcontaineruser="yes"
+          Dockercommand="$Dockercommand \\
+  --cap-add SYS_BOOT \\
+  -v $Rclocal:/etc/rc.local \\
+  -v $Inittab:/etc/inittab:ro"
         ;;
       esac
       
@@ -3645,7 +3708,7 @@ start() {
   -v /sys/fs/cgroup:/sys/fs/cgroup:ro"
       
       # check SELinux
-      [ -n "$(echo "$Dockerdaemon" | grep 'selinux-enabled')" ] && [ "$Sharehostipc" = "no" ] && {
+      echo "$Dockerdaemon" | grep -q 'selinux-enabled' && [ "$Sharehostipc" = "no" ] && {
         Dockercommand="$Dockercommand \\
   --security-opt label=type:container_runtime_t" 
         note "SELinux restrictions for this container are decreased
@@ -3710,14 +3773,11 @@ start() {
       
       ## option --gpu : share graphics adapter device files
       [ "$Gpu" = "yes" ] && {
-        Dockercommand="$Dockercommand \\
-  --device=/dev/dri:/dev/dri:rw \\
-  -v /dev/dri:/dev/dri:rw"
-        for Line in $(find /dev/nvidia* /dev/vga_arbiter -maxdepth 0 2>/dev/null) ; do
+        while read -r Line ; do
           Dockercommand="$Dockercommand \\
   --device=$Line:$Line:rw \\
   -v $Line:$Line:rw"
-        done
+        done < <(find /dev/dri /dev/nvidia* /dev/vga_arbiter -maxdepth 0 2>/dev/null)
       }
       
       ## options --hostipc and --hostnet
@@ -3812,7 +3872,7 @@ start() {
     tini|none)
       [ "$Dbusdaemon" = "yes" ] && {
         echo "mkdir -p /etc/dbus-1/system-services"
-        echo "printf '[D-BUS Service]\nName=org.freedesktop.ConsoleKit\nExec=console-kit-daemon --no-daemon\nUser=root\n\n' > /etc/dbus-1/system-services/org.freedesktop.ConsoleKit.service"
+        echo "printf '[D-BUS Service]\nName=org.freedesktop.ConsoleKit\nExec=console-kit-daemon --debug --no-daemon\nUser=root\n\n' > /etc/dbus-1/system-services/org.freedesktop.ConsoleKit.service"
         echo "echo 'x11docker: starting dbus system daemon'"
         echo "dbus-daemon --system --fork"
       }
@@ -3827,7 +3887,7 @@ start() {
     ;;
     runit)
       echo "mkdir -p /etc/dbus-1/system-services"
-      echo "printf '[D-BUS Service]\nName=org.freedesktop.ConsoleKit\nExec=console-kit-daemon --no-daemon\nUser=root\n\n' > /etc/dbus-1/system-services/org.freedesktop.ConsoleKit.service"
+      echo "printf '[D-BUS Service]\nName=org.freedesktop.ConsoleKit\nExec=console-kit-daemon --debug --no-daemon\nUser=root\n\n' > /etc/dbus-1/system-services/org.freedesktop.ConsoleKit.service"
       echo "echo 'x11docker: enabling dbus service'"
       echo "ln -s /etc/sv/dbus  /etc/runit/runsvdir/default"
       echo "# enable x11docker service containing image command"
@@ -3836,12 +3896,18 @@ start() {
     ;;
     openrc)
       echo "mkdir -p /etc/dbus-1/system-services"
-      echo "printf '[D-BUS Service]\nName=org.freedesktop.ConsoleKit\nExec=console-kit-daemon --no-daemon\nUser=root\n\n' > /etc/dbus-1/system-services/org.freedesktop.ConsoleKit.service"
+      echo "printf '[D-BUS Service]\nName=org.freedesktop.ConsoleKit\nExec=console-kit-daemon --debug --no-daemon\nUser=root\n\n' > /etc/dbus-1/system-services/org.freedesktop.ConsoleKit.service"
       echo "echo 'x11docker: enabling dbus service'"
       echo "rc-update add dbus default"
       echo "# enable x11docker service containing image command"
       echo "chmod +x /etc/init.d/x11docker.service"
       echo "rc-update add x11docker.service default"
+    ;;
+    sysvinit)
+      echo "chmod +x /etc/rc.local"
+      ### FIXME: currently assuming that dbus service will be present. Should create service file to be sure.
+      echo "mkdir -p /etc/dbus-1/system-services"
+      echo "printf '[D-BUS Service]\nName=org.freedesktop.ConsoleKit\nExec=console-kit-daemon --debug --no-daemon\nUser=root\n\n' > /etc/dbus-1/system-services/org.freedesktop.ConsoleKit.service"
     ;;
   esac
   
@@ -3893,9 +3959,9 @@ start() {
   echo ":> /tmp/x11docker.setupready"
   [ "$Switchcontaineruser" = "yes" ] && {   # if "no", x11docker.CMD.sh is executed in command line $Dockercommand
     echo "case $Initsystem in"
-    echo "  systemd)      exec /lib/systemd/systemd ;;"
-    echo "  runit|openrc) exec /sbin/init ;;"
-    echo "  tini|none)    /bin/su - $Benutzer -c '/bin/sh - $Cshare/x11docker.CMD.sh' ;;"
+    echo "  systemd)               exec /lib/systemd/systemd ;;"
+    echo "  runit|openrc|sysvinit) exec /sbin/init ;;"
+    echo "  tini|none)             /bin/su - $Benutzer -c '/bin/sh - $Cshare/x11docker.CMD.sh' ;;"
     echo "esac"
   }
 } >> $Setupscript
@@ -3978,7 +4044,10 @@ start() {
     done
   }
   echo "  echo ''"
-  [ -n "$Newdisplay" ]           && echo "  echo 'export DISPLAY=$Newdisplay'"
+  [ -n "$Newdisplay" ]           && {
+    echo "  echo 'export DISPLAY=$Newdisplay'"
+    echo "  echo 'ln -s $Cshare/X$Newdisplaynumber /tmp/.X11-unix/'" 
+  }
   [ "$Xauthentication" = "yes" ] && echo "  echo 'export XAUTHORITY=$Cshare/Xclientcookie'"
   [ "$Xserver" = "--nothing" ]   && echo "  echo 'unset DISPLAY WAYLAND_DISPLAY XAUTHORITY'"
   [ "$Dbuslaunch" = "yes" ] && {
@@ -4188,7 +4257,7 @@ start() {
         echo     "[ -s '$Xclientcookie' ] || warning 'Cookie creation failed!'" 
         echo     "verbose \"Created cookie: \$(xauth list)\""
         echo     "chmod 644 $Xclientcookie"
-        [ "$Xserver" = "--hostdisplay" ] && echo "[ '$Xhostentry' = 'yes' ] || env XAUTHORITY=$Hostxauthority xhost -SI:localuser:$Hostuser"
+        [ "$Xserver" = "--hostdisplay" ] && echo "[ '\$Xhostentry' = 'yes' ] || env XAUTHORITY=$Hostxauthority xhost -SI:localuser:$Hostuser"
         [ "$Xserver" = "--nxagent" ]     && echo "rm $Xclientcookie.bak"
       }
       
@@ -4217,7 +4286,7 @@ start() {
           esac
           [ -s "$Xkbkeymapfile" ] && {
             echo "#"
-            echo "# set keyboard layout on $Newdiplay to same as on host"
+            echo "# set keyboard layout on $Newdisplay to same as on host"
             echo "echo 'x11docker: keyboard layout:'"
             echo "cat $Xkbkeymapfile"
             echo "xkbcomp $Xkbkeymapfile $Newdisplay"
@@ -4402,7 +4471,6 @@ $(cowsay $(fortune -s 2>/dev/null || echo "The quick brown fox jumps over the la
   with container as its home directory $Benutzerhome"
         verbose "Created docker command:
   $Dockercommand"
-        verbose "IP of docker interface: $Dockeriprange"
         verbose "Created containersetup.sh:
 $(cat $Setupscript | nl -ba)"
         verbose "Created dockerrc:
@@ -4613,7 +4681,7 @@ $(tail $Compositorlogfile)"
     ;;
     *)
       {  # catch closing X server
-        mywatch "ls $Timetosaygoodbye $Nexsocket 2>/dev/null #Xserver"
+        mywatch "ls $Timetosaygoodbye $Newxsocket 2>/dev/null #Xserver"
         saygoodbye
       } & storepid $! mywatch
     ;;
