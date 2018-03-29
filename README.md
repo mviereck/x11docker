@@ -64,8 +64,14 @@ rm /tmp/x11docker
 ```
  
 # Troubleshooting
-For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. x11docker shows warnings if something is insecure, missing or going wrong. Use option `--verbose` to see logfile output, too. Get help in the [issue tracker](https://github.com/mviereck/x11docker/issues).
- 
+For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. 
+ - x11docker shows warnings if something is insecure, missing or going wrong. 
+ - Use option `--verbose` to see logfile output, too. 
+   - Use options `--stdout --stderr` without `--verbose` to see only application output. 
+ - Some applications need more privileges or capabilities than x11docker provides as default.
+   - Reduce container isolation with options `--hostipc --hostnet --cap-default` and try again. If the application runs, reduce this options to encircle the issue.
+ - Get help in the [issue tracker](https://github.com/mviereck/x11docker/issues).
+
 # Dependencies
 x11docker can run with standard system utilities without additional dependencies on host or in image. As a core, it only needs an `X` server and, of course, [`docker`](https://www.docker.com/) to run docker images on X.
 
