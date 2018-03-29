@@ -301,6 +301,9 @@ x11docker supports init systems as PID 1 in container.
    - Tested with [Alpine Linux](https://alpinelinux.org/) images.
    - cgroup usage possible with option `--sharecgroup`.
    - Image example based on alpine: [x11docker/fvwm](https://hub.docker.com/r/x11docker/fvwm/)
+ - `--sysvinit`: SysVinit in container.
+   - x11docker adds image command to `/etc/rc.local`.
+   - Tested with [devuan](https://devuan.org/) images from [gitlab/paddy-hack](https://gitlab.com/paddy-hack/devuan/container_registry).
  - `--no-init`: to run image command as PID 1 without an init system (docker default).
 ## dbus
 Some desktop environments and applications need a running dbus daemon and/or dbus user session. 
