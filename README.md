@@ -191,7 +191,7 @@ Core concept is:
      - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. 
      - This restriction can be disabled with x11docker option `--cap-default` or reduced with `--sudouser`.
 
-_Weaknesses / ToDo: _
+_Weaknesses / ToDo:_
  - If docker daemon runs with `--selinux-enabled`, SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. A more restrictive solution is desirable.
    Compare: [SELinux and docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
  - User namespace remapping is disabled for options `--home` and `--homedir` to avoid file ownership issues. (Though, this is less a problem as x11docker already avoids root in container).
@@ -286,10 +286,11 @@ x11docker --hostdisplay x11docker/xfce thunar  # Thunar from another image appea
 
 # Init system
 x11docker supports init systems as PID 1 in container.
+ - As default, x11docker uses docker built-in `tini` with docker run option `--init`.
+ - You can disable init in container with option `--no-init`. 
  - This solves the [zombie reaping issue](https://blog.phusion.nl/2015/01/20/docker-and-the-pid-1-zombie-reaping-problem/).
  - Installing `dbus` in image is recommended for `--systemd`, `--runit`, `--openrc`, `--sysvinit`.
- 
- - `--tini`: As default, x11docker uses docker built-in `tini` with docker run option `--init`.
+## systemd, sysvinit, runit, openrc
  - `--systemd`: systemd in container.
    - To get a faster startup, it helps to look for services that fail to start in container and to mask them in image with `systemctl mask servicename`.
    - Tested with fedora, debian and Arch Linux images. Debian 10 images run well; debian 9 images additionally need insecure option `--sys-admin`.
@@ -304,10 +305,10 @@ x11docker supports init systems as PID 1 in container.
    - Image example based on alpine: [x11docker/fvwm](https://hub.docker.com/r/x11docker/fvwm/)
  - `--sysvinit`: SysVinit in container.
    - Tested with [devuan](https://devuan.org/) images from [gitlab/paddy-hack](https://gitlab.com/paddy-hack/devuan/container_registry).
- - `--no-init`: to run image command as PID 1 without an init system (docker default).
+
 ## dbus
-Some desktop environments and applications need a running dbus daemon and/or dbus user session. Installing `dbus` in image is recommended for init system options `--systemd`, `--sysvinit`, `--runit` and `--openrc`. 
- - use `--dbus-system` to run dbus system daemon. This includes option `--dbus`. Some desktops depend rather on dbus system daemon than on a running init system.
+Some desktop environments and applications need a running dbus daemon and/or dbus user session. 
+ - use `--dbus-system` to run dbus system daemon. This includes option `--dbus`. Some desktops like cinnamon or deepin depend more on dbus system daemon than on a running full blown init system.
  - use `--dbus` to run image command with `dbus-launch` (fallback: `dbus-run-session`) for a dbus user session.
 
 # Developer options
