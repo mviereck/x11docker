@@ -69,22 +69,24 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
  - Use option `--verbose` to see logfile output, too. 
    - Use options `--stdout --stderr` without `--verbose` to see only application output. 
  - Some applications need more privileges or capabilities than x11docker provides as default.
-   - Reduce container isolation with options `--hostipc --hostnet --cap-default` and try again. If the application runs, reduce this options to encircle the issue.
- - Get help in the [issue tracker](https://github.com/mviereck/x11docker/issues).
+   - Reduce container isolation with options `--hostipc --hostnet --cap-default --sys-admin` and try again. If the application runs, reduce this insecure options to encircle the issue.
+   - You can run container application as root with `--user=root`.
+ - Get help in the [issue tracker](https://github.com/mviereck/x11docker/issues). 
+   - Most times it makes sense to store the `--verbose`output at [pastebin](https://pastebin.com/).
 
 # Dependencies
-x11docker can run with standard system utilities without additional dependencies on host or in image. As a core, it only needs an `X` server and, of course, [`docker`](https://www.docker.com/) to run docker images on X.
+x11docker can run with standard system utilities without additional dependencies on host or in image. As a core it only needs an `X` server and, of course, [`docker`](https://www.docker.com/) to run docker images on X.
 
 x11docker checks dependencies for chosen options on startup and shows terminal messages if some are missing. 
 
-Basics:
+_Basics:_
  - If no additional X server is installed, only less isolated option `--hostdisplay` will work out of the box within X, and option `--xorg` from console. (To use `--xorg` within X, look at [setup for option --xorg](#setup-for-option---xorg)).
  - As a **well working base** for convenience and security, it is recommended to install `xpra` and `Xephyr`. 
    - It is recommended to use latest stable xpra version from [http://xpra.org](http://xpra.org/). 
    - Alternativly, you can install `nxagent` for both seamless and desktop mode.
  - Already installed on most systems with an X server: `xrandr`, `xauth` and `xdpyinfo`.
  
-Advanced usage:
+_Advanced usage:_
  - **Hardware acceleration** with option `--gpu`
    - Beside `xpra`, also install `Xwayland`, `weston` and `xdotool`. (Not needed for `--xorg` and `--hostdisplay`)
    - Works best with open source drivers on host and OpenGL/Mesa in image. 
@@ -114,11 +116,11 @@ Advanced usage:
 # Password prompt
 root permissions are needed only to run docker. X servers run as unprivileged user.
 
-Running x11docker as unprivileged user:
+_Running x11docker as unprivileged user:_
  - x11docker checks whether docker needs a password to run and whether `su` or `sudo` are needed to get root privileges. A password prompt appears, if needed.
  - If that check fails and does not match your setup, use option `--pw FRONTEND`. `FRONTEND` can be one of `su sudo gksu gksudo lxsu lxsudo kdesu kdesudo beesu pkexec` or `none`.  
 
-Running x11docker as root:
+_Running x11docker as root:_
  - Commands other than `docker` are executed as unprivileged user determined with [`logname`](http://pubs.opengroup.org/onlinepubs/9699919799/utilities/logname.html). (You  can specify another host user with `--hostuser USER`).
  - Unfortunately, some systems do not provide `DISPLAY` and `XAUTHORITY` for root, but needed for nested X servers like Xephyr.    
    - Tools like `gksu` or `gksudo` can help. 
@@ -189,7 +191,7 @@ Core concept is:
      - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. 
      - This restriction can be disabled with x11docker option `--cap-default` or reduced with `--sudouser`.
 
-Weaknesses / ToDo: 
+_Weaknesses / ToDo: _
  - If docker daemon runs with `--selinux-enabled`, SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. A more restrictive solution is desirable.
    Compare: [SELinux and docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
  - User namespace remapping is disabled for options `--home` and `--homedir` to avoid file ownership issues. (Though, this is less a problem as x11docker already avoids root in container).
@@ -197,7 +199,7 @@ Weaknesses / ToDo:
 ### Options degrading container isolation
 x11docker shows warning messages in terminal if chosen options degrade container isolation.
 
-Most important:
+_Most important:_
   - `--hostdisplay` shares host X socket of display :0 instead of running a second X server. 
     - Danger of abuse is reduced providing so-called untrusted cookies, but do not rely on this. 
     - If additionally using `--gpu` or `--clipboard`, option `--hostipc` and trusted cookies are enabled and no protection against X security leaks is left. 
@@ -205,7 +207,7 @@ Most important:
   - `--gpu` allows access to GPU hardware. This can be abused to get window content from host ([palinopsia bug](https://hsmr.cc/palinopsia/)) and makes [GPU rootkits](https://github.com/x0r1/jellyfish) possible.
   - `--pulseaudio` and `--alsa` allow catching audio output and microphone input from host.
   
-Rather special options reducing security, but not needed for regular use:
+_Rather special options reducing security, but not needed for regular use:_
   - `--sudouser` allows sudo with password `x11docker`for container user. If an application breaks out of container, it can do anything. Allows some container capabilties that x11docker would drop otherwise.
   - `--systemd`, `--openrc` and `--runit` allow some container capabilities that x11docker would drop otherwise. `--systemd` also shares access to `/sys/fs/cgroup`.
   - `--cap-default` disables x11docker's container hardening and falls back to default docker container privileges.
@@ -232,7 +234,7 @@ Beside the X servers to choose from there are options `--wayland`, `--weston`, `
    - For QT5 applications you may need to manually add options `--waylandenv`  and `--dbus` to set some environment variables.
  - Option `--hostwayland` can run single applications on host Wayland desktops like Gnome 3 and KDE 5.
 
-Examples:
+_Examples:_
  - xfce4-terminal (GTK3) in Wayland: 
  ```
 x11docker --wayland x11docker/xfce xfce4-terminal
@@ -284,29 +286,27 @@ x11docker --hostdisplay x11docker/xfce thunar  # Thunar from another image appea
 
 # Init system
 x11docker supports init systems as PID 1 in container.
+ - This solves the [zombie reaping issue](https://blog.phusion.nl/2015/01/20/docker-and-the-pid-1-zombie-reaping-problem/).
+ - Installing `dbus` in image is recommended for `--systemd`, `--runit`, `--openrc`, `--sysvinit`.
+ 
  - `--tini`: As default, x11docker uses docker built-in `tini` with docker run option `--init`.
  - `--systemd`: systemd in container.
-   - No special setup is needed in image, only `systemd` must be installed. To get a faster startup, it helps to look for services that fail to start in container and to mask them in image with `systemctl mask servicename`.
-   - x11docker sets up the container to run the image command as a service.
+   - To get a faster startup, it helps to look for services that fail to start in container and to mask them in image with `systemctl mask servicename`.
    - Tested with fedora, debian and Arch Linux images. Debian 10 images run well; debian 9 images additionally need insecure option `--sys-admin`.
    - Image example based on debian buster: [x11docker/cinnamon](https://hub.docker.com/r/x11docker/cinnamon/)
  - `--runit`: runit in container.
-   - No special setup is needed in image, only `runit` must be installed; `dbus` is recommended. 
-   - x11docker sets up the container to run the image command as a service.
    - For a bit faster startup, failing services can be disabled by deleting their softlinks in `/etc/runit/runsvdir/default`.
    - Tested with [Void Linux](https://www.voidlinux.eu/) images.
    - Image examples based on Void Linux: [x11docker/enlightenment](https://hub.docker.com/r/x11docker/enlightenment/) and [x11docker/lumina](https://hub.docker.com/r/x11docker/lumina/).
  - `--openrc`: openrc in container.
-   - No special setup is needed in image, only `openrc` must be installed; `dbus` is recommended. 
    - Tested with [Alpine Linux](https://alpinelinux.org/) images.
    - cgroup usage possible with option `--sharecgroup`.
    - Image example based on alpine: [x11docker/fvwm](https://hub.docker.com/r/x11docker/fvwm/)
  - `--sysvinit`: SysVinit in container.
-   - x11docker adds image command to `/etc/rc.local`.
    - Tested with [devuan](https://devuan.org/) images from [gitlab/paddy-hack](https://gitlab.com/paddy-hack/devuan/container_registry).
  - `--no-init`: to run image command as PID 1 without an init system (docker default).
 ## dbus
-Some desktop environments and applications need a running dbus daemon and/or dbus user session. 
+Some desktop environments and applications need a running dbus daemon and/or dbus user session. Installing `dbus` in image is recommended for init system options `--systemd`, `--sysvinit`, `--runit` and `--openrc`. 
  - use `--dbus-system` to run dbus system daemon. This includes option `--dbus`. Some desktops depend rather on dbus system daemon than on a running init system.
  - use `--dbus` to run image command with `dbus-launch` (fallback: `dbus-run-session`) for a dbus user session.
 
