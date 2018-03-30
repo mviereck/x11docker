@@ -9,9 +9,13 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.7.4"
+Version="3.9.7.5"
 
 changelog() {
+# 30.03.2018 V3.9.7.5   --dbus-system: drop consolekit
+#                       --sysvinit,--openrc: disable getty in inittab instead of overwriting inittab with shared volume
+#                       --sysvinit: change rc.local in setupscript instead of overwriting it with shared volume
+#                       --openrc, --runit: create service in setupscript, drop some more capabilities
 # 26.03.2018 V3.9.7.4   --sysvinit: new option for init system SysVinit in container. Tested with devuan.
 #                       --pulseaudio: bugfix: need to set env PULSE_SERVER
 # 23.03.2018            --runit: add softlink for X socket in x11docker.CMD.sh for compatibility with runit on debian
@@ -227,6 +231,7 @@ changelog() {
   : 
 }
 todo() {
+# --wayland --dbus-system GTK3 seems to work now!?
 # BUG console-kit-daemon fails. fix it or drop it.
 # check fgconsole
 # --env SHELL=/bin/bash fails in deepin with --dbus-system
@@ -487,7 +492,6 @@ Init system and dbus daemon:
                        Can be used with --openrc.
  -b, --dbus            Run dbus user session daemon for image command.
      --dbus-system     Run dbus system daemon in container (includes --dbus).
-                       Enables consolekit and ck-launch-session if available.
                        Default for --systemd, --sysvinit, --openrc and --runit. 
 
 Container capabilities:
@@ -1194,7 +1198,7 @@ Westonoutput=""                                 # Xn, WLn or monitor identifier
 Sharewayland="no"                               # option --sharewayland: Share wayland socket and WAYLAND_DISPLAY
 Setwaylandenv="no"                              # option --setwaylandenv: Set environment variables $Waylandtoolkitenv
 Dbuslaunch="no"                                 # option '--dbus': run image command with dbus-launch
-Dbusdaemon="no"                                 # option '--dbus-dameon': set up dbus daemon in container (and consolekit, if  available)
+Dbusdaemon="no"                                 # option '--dbus-dameon': set up dbus daemon in container
 
 # Available terminal emulators
 Passwordterminal=""                             # terminal emulator to use for password prompt (if no terminal emulator is needed, it will be 'bash -c')
@@ -3174,7 +3178,7 @@ done
       Pulseaudio="no"
       Alsa="yes"
     }
-    [ "$Pulseaudio" = "yes" ] && Customenvironment="$Customenvironment\nPULSE_SERVER=unix:/pulse/$Pulseaudiosocketname"
+    [ "$Pulseaudio" = "yes" ] && Customenvironment="$Customenvironment PULSE_SERVER=unix:/pulse/$Pulseaudiosocketname\n"
     echo "# Connect to the host's server using the mounted UNIX socket
 default-server = unix:/pulse/$Pulseaudiosocketname
 # Prevent a server running in the container
@@ -3429,7 +3433,7 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
   Benutzerpasswdentry="$Benutzer:x:$Benutzeruid:$Benutzergid:$Benutzer,,,:$Benutzerhome:/bin/sh"
 }
 
-{ #### part: create init service files (options --systemd, --runit)
+{ #### part: create init service files (options --systemd, --runit, --openrc)
   case $Initsystem in
     none|tini) [ "$Dbusdaemon" = "yes" ] && [ "$Capdropall" = "yes" ] && warning "Option --dbus-system allows capabilities
   for user switching in container." ;;
@@ -3491,110 +3495,26 @@ WantedBy=x11docker.target
 " >> $Systemdjournal
 
       echo "[Manager]
-DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $Customenvironment
+DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(for Line in $Customenvironment ; do echo -n "$Line " ; done)
 " >> $Systemdenvironment
     ;;
     
     runit)
       warning "Option --runit slightly degrades container isolation.
-  Beside some default container capabilities x11docker would disable otherwise
+  Beside some uer switching capabilities x11docker would disable otherwise
   it adds capability SYS_BOOT."
-  
-      Runitservice=$Cachefolder/runit.service  && mkfile $Runitservice
-      { echo "#! /bin/sh"
-        echo "waitforservice() {"
-        echo "  Service=\$1"
-        echo "  [ \"\$(sv check \$Service | cut -d: -f1)\" = 'ok' ] && {"
-        echo "    echo \"x11docker: waiting for service \$Service ...\""
-        echo "    for Count in $(seq -s' ' 20); do"
-        echo "      [ \"\$(sv status \$Service | cut -d: -f1)\" = 'down' ] && sleep 0.2 || break"
-        echo "    done"
-        echo "  }"
-        echo "}"
-        echo "# make stderr visible"
-        echo "exec 2>&1"
-        echo "# wait for all other services"
-        echo "for Service in \$(ls /etc/runit/runsvdir/default/) ; do waitforservice \$Service ;done"
-        echo "echo 'Current status of runit services:'"
-        echo "for Service in \$(ls /etc/runit/runsvdir/default/) ; do sv status      \$Service ;done"
-        echo "# x11docker service should only run once"
-        echo "sv once x11docker"
-        echo "su - --shell=/bin/sh $Benutzer $Cshare/x11docker.CMD.sh"
-        echo "runit-init 0"
-      } >> $Runitservice
     ;;
     
     openrc)
       warning "Option --openrc slightly degrades container isolation.
-  Beside some default container capabilities x11docker would disable otherwise
+  Beside some user switching capabilities x11docker would disable otherwise
   it adds capability SYS_BOOT."
-      Openrcservice=$Cachefolder/x11docker.service     && mkfile $Openrcservice
-      Inittab=$Cachefolder/inittab                     && mkfile $Inittab
-
-      echo "#!/sbin/openrc-run
-name=x11docker
-depend() {
-  after *
-}
-start() {
-  ebegin 'Starting x11docker.CMD.sh'
-  su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh
-  halt
-  eend \$?
-}
-" >> $Openrcservice
-
-      echo "# /etc/inittab
-::sysinit:/sbin/openrc sysinit
-::sysinit:/sbin/openrc boot
-::wait:/sbin/openrc default
-::shutdown:/sbin/openrc shutdown
-" >> $Inittab
     ;;
     
     sysvinit)
       warning "Option --sysvinit slightly degrades container isolation.
-  Beside some default container capabilities x11docker would disable otherwise
+  Beside some user switching capabilities x11docker would disable otherwise
   it adds capability SYS_BOOT."
-      Inittab=$Cachefolder/inittab  && mkfile $Inittab
-      Rclocal=$Cachefolder/rc.local && mkfile $Rclocal
-      echo "#!/bin/sh
-su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh
-shutdown -h 0
-exit 0
-" >> $Rclocal
-      $Mksu "chmod +x $Rclocal"
-      
-      echo "# /etc/inittab: init(8) configuration.
-# \$Id: inittab,v 1.91 2002/01/25 13:35:21 miquels Exp $
-
-# The default runlevel.
-id:2:initdefault:
-# What to do in single-user mode.
-~~:S:wait:/sbin/sulogin
-
-# Boot-time system configuration/initialization script.
-# This is run first except when booting in emergency (-b) mode.
-si::sysinit:/etc/init.d/rcS
-# /etc/init.d executes the S and K scripts upon change
-# of runlevel.
-#
-# Runlevel 0 is halt.
-# Runlevel 1 is single-user.
-# Runlevels 2-5 are multi-user.
-# Runlevel 6 is reboot.
-
-l0:0:wait:/etc/init.d/rc 0
-l1:1:wait:/etc/init.d/rc 1
-l2:2:wait:/etc/init.d/rc 2
-l3:3:wait:/etc/init.d/rc 3
-l4:4:wait:/etc/init.d/rc 4
-l5:5:wait:/etc/init.d/rc 5
-l6:6:wait:/etc/init.d/rc 6
-
-2:23:respawn:/sbin/getty 38400 tty2
-
-" >> $Inittab
     ;;
   esac
 }
@@ -3652,31 +3572,19 @@ l6:6:wait:/etc/init.d/rc 6
         
         runit)
           Switchcontaineruser="yes"
-          [ "$Capdropall" = "yes" ] && [ "$Adminusercaps" = "no" ] && Dockercommand="$Dockercommand \\
-  --cap-add FOWNER      --cap-add KILL"
           Dockercommand="$Dockercommand \\
-  --cap-add SYS_BOOT \\
-  --stop-signal HUP --env VIRTUALIZATION=container \\
-  -v $Runitservice:/etc/sv/x11docker/run"
+  --cap-add SYS_BOOT    --cap-add KILL \\
+  --stop-signal HUP --env VIRTUALIZATION=container"
         ;;
         
         openrc)
           Switchcontaineruser="yes"
-          [ "$Capdropall" = "yes" ] && [ "$Adminusercaps" = "no" ] && Dockercommand="$Dockercommand \\
-  --cap-add FOWNER \\
-  --cap-add FSETID      --cap-add CHOWN"
           Dockercommand="$Dockercommand \\
-  --cap-add SYS_BOOT \\
-  -v $Openrcservice:/etc/init.d/x11docker.service:rw \\
-  -v $Inittab:/etc/inittab:ro"
+  --cap-add SYS_BOOT"
         ;;
         
         sysvinit)
           Switchcontaineruser="yes"
-          Dockercommand="$Dockercommand \\
-  --cap-add SYS_BOOT \\
-  -v $Rclocal:/etc/rc.local \\
-  -v $Inittab:/etc/inittab:ro"
         ;;
       esac
       
@@ -3823,6 +3731,14 @@ l6:6:wait:/etc/init.d/rc 6
   echo "ls -l $Newxsocket"
   echo "export DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie"
   echo ""
+
+  while read -r Line; do
+    [ -z "$Line" ] || {
+      Line="$(echo $Line | cut -d= -f1)=\"$(echo $Line | cut -d= -f2-)\""
+      echo "export \"$Line\"" 
+    }
+  done < <(echo -e $Customenvironment)
+  echo ""
   
   echo "# create user entry in /etc/passwd (and delete possibly existing same uid)"
   echo "getent passwd | grep -v \$(getent passwd $Benutzeruid || echo USERNOTFOUND) > /tmp/passwd"
@@ -3871,8 +3787,6 @@ l6:6:wait:/etc/init.d/rc 6
   case $Initsystem in
     tini|none)
       [ "$Dbusdaemon" = "yes" ] && {
-        echo "mkdir -p /etc/dbus-1/system-services"
-        echo "printf '[D-BUS Service]\nName=org.freedesktop.ConsoleKit\nExec=console-kit-daemon --debug --no-daemon\nUser=root\n\n' > /etc/dbus-1/system-services/org.freedesktop.ConsoleKit.service"
         echo "echo 'x11docker: starting dbus system daemon'"
         echo "dbus-daemon --system --fork"
       }
@@ -3886,28 +3800,64 @@ l6:6:wait:/etc/init.d/rc 6
       echo "systemctl enable x11docker-startcmd.service"
     ;;
     runit)
-      echo "mkdir -p /etc/dbus-1/system-services"
-      echo "printf '[D-BUS Service]\nName=org.freedesktop.ConsoleKit\nExec=console-kit-daemon --debug --no-daemon\nUser=root\n\n' > /etc/dbus-1/system-services/org.freedesktop.ConsoleKit.service"
-      echo "echo 'x11docker: enabling dbus service'"
-      echo "ln -s /etc/sv/dbus  /etc/runit/runsvdir/default"
-      echo "# enable x11docker service containing image command"
+     echo "# create and enable x11docker service containing image command"
+     echo "mkdir -p /etc/sv/x11docker"
+     echo "printf '#! /bin/sh
+waitforservice() {
+  Service=\$1
+  [ \"\$(sv check \$Service | cut -d: -f1)\" = \"ok\" ] && {
+    echo \"x11docker: waiting for service \$Service ...\"
+    for Count in $(seq -s' ' 20); do
+      [ \"\$(sv status \$Service | cut -d: -f1)\" = \"down\" ] && sleep 0.2 || break
+    done
+  }
+}
+# make stderr visible
+exec 2>&1
+# wait for all other services
+for Service in \$(ls /etc/runit/runsvdir/default/) ; do waitforservice \$Service ;done
+echo \"Current status of runit services:\"
+for Service in \$(ls /etc/runit/runsvdir/default/) ; do sv status      \$Service ;done
+# x11docker service should only run once
+sv once x11docker
+su - --shell=/bin/sh $Benutzer $Cshare/x11docker.CMD.sh
+runit-init 0
+' > /etc/sv/x11docker/run"
       echo "chmod +x /etc/sv/x11docker/run"
       echo "ln -s /etc/sv/x11docker /etc/runit/runsvdir/default"
+      echo "echo 'x11docker: enabling dbus service'"
+      echo "ln -s /etc/sv/dbus  /etc/runit/runsvdir/default"
     ;;
     openrc)
-      echo "mkdir -p /etc/dbus-1/system-services"
-      echo "printf '[D-BUS Service]\nName=org.freedesktop.ConsoleKit\nExec=console-kit-daemon --debug --no-daemon\nUser=root\n\n' > /etc/dbus-1/system-services/org.freedesktop.ConsoleKit.service"
-      echo "echo 'x11docker: enabling dbus service'"
-      echo "rc-update add dbus default"
-      echo "# enable x11docker service containing image command"
+      echo "# create and enable x11docker service containing image command"
+      echo "printf \"#!/sbin/openrc-run
+name=x11docker
+depend() {
+  after *
+}
+start() {
+  ebegin 'Starting x11docker.CMD.sh'
+  su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh
+  openrc shutdown
+  halt
+  eend \$?
+}
+\" > /etc/init.d/x11docker.service"
       echo "chmod +x /etc/init.d/x11docker.service"
       echo "rc-update add x11docker.service default"
+      echo "echo 'x11docker: enabling dbus service'"
+      echo "rc-update add dbus default"
+      echo "# disable getty in inittab" 
+      echo "sed -i 's/.*getty/##getty disabled by x11docker## \0/' /etc/inittab"
+      echo "sed -i '/exit 0/d' /etc/rc.local"
     ;;
     sysvinit)
-      echo "chmod +x /etc/rc.local"
-      ### FIXME: currently assuming that dbus service will be present. Should create service file to be sure.
-      echo "mkdir -p /etc/dbus-1/system-services"
-      echo "printf '[D-BUS Service]\nName=org.freedesktop.ConsoleKit\nExec=console-kit-daemon --debug --no-daemon\nUser=root\n\n' > /etc/dbus-1/system-services/org.freedesktop.ConsoleKit.service"
+      echo "# add x11docker start command to rc.local"
+      echo "sed -i '/exit 0/d' /etc/rc.local"
+      echo "echo 'su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh' >> /etc/rc.local"
+      echo "echo 'shutdown -h 0' >> /etc/rc.local"
+      echo "# disable getty in inittab" 
+      echo "sed -i 's/.*getty/##getty disabled by x11docker## \0/' /etc/inittab"
     ;;
   esac
   
@@ -3958,11 +3908,11 @@ l6:6:wait:/etc/init.d/rc 6
   echo ""
   echo ":> /tmp/x11docker.setupready"
   [ "$Switchcontaineruser" = "yes" ] && {   # if "no", x11docker.CMD.sh is executed in command line $Dockercommand
-    echo "case $Initsystem in"
-    echo "  systemd)               exec /lib/systemd/systemd ;;"
-    echo "  runit|openrc|sysvinit) exec /sbin/init ;;"
-    echo "  tini|none)             /bin/su - $Benutzer -c '/bin/sh - $Cshare/x11docker.CMD.sh' ;;"
-    echo "esac"
+    case $Initsystem in
+      systemd)               echo "exec /lib/systemd/systemd" ;;
+      runit|openrc|sysvinit) echo "exec /sbin/init" ;;
+      tini|none)             echo "/bin/su - $Benutzer -c '/bin/sh - $Cshare/x11docker.CMD.sh'" ;;
+    esac
   }
 } >> $Setupscript
 
@@ -4055,7 +4005,6 @@ l6:6:wait:/etc/init.d/rc 6
     echo "  echo 'Dbus=\"\$(dbus-launch --help >/dev/null 2>&1 && echo dbus-launch)\"'"
     echo "  echo '[ -z \"\$Dbus\" ] && Dbus=\"\$(dbus-run-session --help >/dev/null 2>&1 && echo dbus-run-session)\"'"
     echo "  echo '[ -z \"\$Dbus\" ] && echo \"x11docker WARNING: Did not find dbus-launch or dbus-run-session (option --dbus).\" >&2'"
-    [ "$Dbusdaemon" = "yes" ] && [ "$Initsystem" != "systemd" ] && echo "  echo 'command -v ck-launch-session >/dev/null && Dbus=\"ck-launch-session \$Dbus\"'"
   } 
   echo "  echo 'echo x11docker: running dbus user session with: \${Dbus:-(none)} >&2'"
   echo "  echo ''"
