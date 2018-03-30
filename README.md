@@ -286,24 +286,22 @@ x11docker --hostdisplay x11docker/xfce thunar  # Thunar from another image appea
 
 # Init system
 x11docker supports init systems as PID 1 in container.
- - As default, x11docker uses docker built-in `tini` with docker run option `--init`.
+ - As default, x11docker uses docker built-in [`tini`](https://github.com/krallin/tini) with docker run option `--init`.
  - Init in container solves the [zombie reaping issue](https://blog.phusion.nl/2015/01/20/docker-and-the-pid-1-zombie-reaping-problem/).
  - You can disable init in container with option `--no-init`. 
- - Installing `dbus` in image is recommended for `--systemd`, `--runit`, `--openrc`, `--sysvinit`.
-## systemd, SysVinit, runit, openrc
- - `--systemd`: systemd in container.
+## systemd, SysVinit, runit, OpenRC
+x11docker sets up the init system to run desired command. No special setup is needed beside installing the init system in image. Installing `dbus` in image is recommended.
+ - `--systemd`: [systemd](https://wiki.debian.org/systemd) in container.
    - To get a faster startup, it helps to look for services that fail to start in container and to mask them in image with `systemctl mask servicename`.
    - Tested with fedora, debian and Arch Linux images. Debian 10 images run well; debian 9 images additionally need insecure option `--sys-admin`.
    - Image example based on debian buster: [x11docker/cinnamon](https://hub.docker.com/r/x11docker/cinnamon/)
- - `--runit`: runit in container.
+ - `--runit`: [runit](https://wiki.voidlinux.eu/Runit) in container.
    - For a bit faster startup, failing services can be disabled by deleting their softlinks in `/etc/runit/runsvdir/default`.
-   - Tested with [Void Linux](https://www.voidlinux.eu/) images.
-   - Image examples based on Void Linux: [x11docker/enlightenment](https://hub.docker.com/r/x11docker/enlightenment/) and [x11docker/lumina](https://hub.docker.com/r/x11docker/lumina/).
- - `--openrc`: openrc in container.
-   - Tested with [Alpine Linux](https://alpinelinux.org/) images.
+   - Image examples based on [Void Linux](https://www.voidlinux.eu/): [x11docker/enlightenment](https://hub.docker.com/r/x11docker/enlightenment/) and [x11docker/lumina](https://hub.docker.com/r/x11docker/lumina/).
+ - `--openrc`: [OpenRC](https://wiki.gentoo.org/wiki/OpenRC) in container.
    - cgroup usage possible with option `--sharecgroup`.
-   - Image example based on alpine: [x11docker/fvwm](https://hub.docker.com/r/x11docker/fvwm/)
- - `--sysvinit`: SysVinit in container.
+   - Image example based on [Alpine Linux](https://alpinelinux.org/): [x11docker/fvwm](https://hub.docker.com/r/x11docker/fvwm/)
+ - `--sysvinit`: [SysVinit](https://wiki.archlinux.org/index.php/SysVinit) in container.
    - Tested with [devuan](https://devuan.org/) images from [gitlab/paddy-hack](https://gitlab.com/paddy-hack/devuan/container_registry).
 
 ## dbus
