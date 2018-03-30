@@ -9,9 +9,12 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.7.5"
+Version="3.9.7.6"
 
 changelog() {
+# 30.03.2018 V3.9.7.6   mount X socket and lockfile read-only to protect from /tmp cleanup of init systems
+#                       minor improvements of init system initialization
+#                       remove checks for --userns-remap and --selinux-enabled. #33 
 # 30.03.2018 V3.9.7.5   --dbus-system: drop consolekit
 #                       --sysvinit,--openrc: disable getty in inittab instead of overwriting inittab with shared volume
 #                       --sysvinit: change rc.local in setupscript instead of overwriting it with shared volume
@@ -232,7 +235,6 @@ changelog() {
 }
 todo() {
 # --wayland --dbus-system GTK3 seems to work now!?
-# BUG console-kit-daemon fails. fix it or drop it.
 # check fgconsole
 # --env SHELL=/bin/bash fails in deepin with --dbus-system
 # --env: escape special chars
@@ -1106,7 +1108,6 @@ Dockeroptions=""                                # options for docker after -- an
 # docker variables
 Containername=""                                # name of container set by x11docker to make --cleanup able to find orphaned containers
 Containerpid=""                                 # process ID of script process with docker container
-Dockerdaemon="$(pgrep -xa $(ps -e -o comm | grep dockerd) 2>/dev/null)"  # how docker daemon has been started
 
 # docker related files
 Dockerrc=dockerrc                               # init script run by docker. Creates $Imagecommandscript
@@ -1658,7 +1659,7 @@ Parsed options: $Parsedoptions"
   [ "$Capsysadmin" = "yes" ] && warning "Option --sys-admin may be dangerous.
   It adds insecure capability SYS_ADMIN to container.
   It is needed to run debian 9 images with option --systemd.
-  Debian 10 images run well without --sys-admin."
+  Debian 10 images run well without --sys-admin."  
 }
 
 { #### part: check X server dependencies, use fallbacks if needed, auto-choose X server
@@ -3216,7 +3217,7 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
     run)
       command -v docker >/dev/null || error "docker is not installed.
   To run docker images, you need to install docker."
-      [ -z "$Dockerdaemon" ]       && error "Please make sure docker daemon is running.
+      pidof dockerd >/dev/null     || error "Please make sure docker daemon is running.
   Try as root: 'systemctl start docker'"
     ;;
     exe)
@@ -3383,26 +3384,10 @@ $(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
     }
   }
   
-  ## check --userns-remap
-  nsBenutzeruid=$Benutzeruid
-  Line="${Dockerdaemon#*dockerd}"
-  echo "$Line" | grep -q userns-remap && {
-    Line="$(echo "${Line#*userns-remap}" | xargs)"
-    [ "$(echo $Line | cut -c1)" = "=" ] && Line="$(echo $Line | cut -c2-)"
-    Line="$(echo $Line | cut -d' ' -f1)"
-    nsBenutzeruid="$(cat /etc/subuid | grep "$Line:" | cut -d: -f2)" # FIXME: can be wrong, cannot predict or preset mapped uid for sure.
-  }
-  
   ## option '--home':    share folder ~/.local/share/x11docker/imagename with created container as its home directory
   ## option '--homedir': share custom host folder as home
   case $Benutzerhosthome in
     yes)
-      [ "$nsBenutzeruid" = "$Benutzeruid" ] || {
-        note "Can not share host folder as home folder in container
-  with user namespace remapping enabled. 
-  Fallback: Disabling user namespace remapping for this container." 
-        Dockeroptions="$Dockeroptions --userns=host"
-      }
       # if no home folder on host is specified (--homedir), create a standard one in ~/.local/share/x11docker
       [ -z "$Benutzerhosthomefolder" ] && Benutzerhosthomefolder="$Benutzerhome/.local/share/x11docker/$(echo $Imagename | tr / - | tr : - )$Hostexebasename"
       [ -d "$Benutzerhosthomefolder" ] || {
@@ -3501,7 +3486,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(for Li
     
     runit)
       warning "Option --runit slightly degrades container isolation.
-  Beside some uer switching capabilities x11docker would disable otherwise
+  Beside some user switching capabilities x11docker would disable otherwise
   it adds capability SYS_BOOT."
     ;;
     
@@ -3545,6 +3530,10 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(for Li
         systemd|runit|openrc|sysvinit) Dockercommand="$Dockercommand \\
   --user root" ;;
       esac
+      
+      # Disable user namespacing if host home folder is in use. Files need same UID/GID.
+      [ "$Benutzerhosthome" = "yes" ] && Dockercommand="$Dockercommand \\
+  --userns=host"
 
       [ "$Capdropall" = "yes" ] && Dockercommand="$Dockercommand \\
   --cap-drop=ALL"
@@ -3562,7 +3551,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(for Li
           Adminusercaps="yes"
           Sharecgroup="yes"
           Dockercommand="$Dockercommand \\
-  --stop-signal SIGRTMIN+3 --env container=docker \\
+  --stop-signal SIGRTMIN+3\\
   -v $Systemdtarget:/etc/systemd/system/x11docker.target:ro \\
   -v $Systemdstartcmd:/etc/systemd/system/x11docker-startcmd.service:ro \\
   -v $Systemdwatch:/etc/systemd/system/x11docker-watch.service:ro \\
@@ -3573,18 +3562,20 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(for Li
         runit)
           Switchcontaineruser="yes"
           Dockercommand="$Dockercommand \\
-  --cap-add SYS_BOOT    --cap-add KILL \\
-  --stop-signal HUP --env VIRTUALIZATION=container"
+  --stop-signal HUP     --env VIRTUALIZATION=docker \\
+  --cap-add SYS_BOOT    --cap-add KILL"
         ;;
         
         openrc)
           Switchcontaineruser="yes"
           Dockercommand="$Dockercommand \\
-  --cap-add SYS_BOOT"
+  --cap-add SYS_BOOT    --cap-add KILL"
         ;;
         
         sysvinit)
           Switchcontaineruser="yes"
+          Dockercommand="$Dockercommand \\
+  --cap-add SYS_BOOT    --cap-add KILL"
         ;;
       esac
       
@@ -3592,8 +3583,8 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(for Li
         [ "$Adminusercaps" = "yes" ] && {
           Switchcontaineruser="yes"
           Dockercommand="$Dockercommand \\
-  --cap-add FOWNER      --cap-add KILL\\
-  --cap-add FSETID      --cap-add CHOWN   --cap-add SETPCAP"
+  --cap-add CHOWN       --cap-add KILL\\
+  --cap-add FSETID      --cap-add FOWNER  --cap-add SETPCAP"
         }
         case $Switchcontaineruser in
           yes) 
@@ -3603,26 +3594,22 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(for Li
           ;;
           no)
             Dockercommand="$Dockercommand \\
-  --security-opt=no-new-privileges" 
+  --security-opt no-new-privileges" 
           ;;
         esac
         
+      # SELinux restrictions for containers must be disabled to allow access to X socket. Flags z or Z do not help.
+      Dockercommand="$Dockercommand \\
+  --security-opt label=type:container_runtime_t"
+        
         # option --dbusdaemon: dbus needs CHOWN for XDG_RUNTIME_DIR
-        [ "$Dbusdaemon" = "yes" ] && Dockercommand="$Dockercommand \\
+        [ "$Dbusdaemon" = "yes" ] && [ "$Adminusercaps" = "no" ] && Dockercommand="$Dockercommand \\
   --cap-add CHOWN"
       }
       
+      # option --sharecgroup
       [ "$Sharecgroup" = "yes" ] && Dockercommand="$Dockercommand \\
   -v /sys/fs/cgroup:/sys/fs/cgroup:ro"
-      
-      # check SELinux
-      echo "$Dockerdaemon" | grep -q 'selinux-enabled' && [ "$Sharehostipc" = "no" ] && {
-        Dockercommand="$Dockercommand \\
-  --security-opt label=type:container_runtime_t" 
-        note "SELinux restrictions for this container are decreased
-  with option '--security-opt label=type:container_runtime_t' to allow access
-  to X unix socket $Newxsocket. A more precise restriction is desirable."
-      }
       
       # Add video group for GPU access, needed by some systems
       # Add audio group for ALSA
@@ -3643,6 +3630,10 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(for Li
       # entrypoint is checked in dockerrc
       Dockercommand="$Dockercommand \\
   --entrypoint=env --workdir=/tmp"
+      
+      # At least OpenRC and systemd regard this hint
+      Dockercommand="$Dockercommand \\
+  --env container=docker"
 
       # shared host folders
       Dockercommand="$Dockercommand \\
@@ -3666,12 +3657,12 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(for Li
         --weston|--hostwayland|--kwin) ;;
         *) 
           [ "$Newxlock" ] && Dockercommand="$Dockercommand \\
-  -v $Newxlock:$Newxlock:rw"
+  -v $Newxlock:$Newxlock:ro"
           [ "$Newxsocket" ] && case $Adminusercaps in # especially systemd can have issues with soft linked X socket, avoiding that here
             no)  Dockercommand="$Dockercommand \\
-  -v $Newxsocket:$Cshare/X$Newdisplaynumber:rw" ;;
+  -v $Newxsocket:$Cshare/X$Newdisplaynumber:ro" ;;
             yes) Dockercommand="$Dockercommand \\
-  -v $Newxsocket:$Newxsocket:rw" ;;
+  -v $Newxsocket:$Newxsocket:ro" ;;
           esac
         ;;
       esac
@@ -3849,13 +3840,14 @@ start() {
       echo "rc-update add dbus default"
       echo "# disable getty in inittab" 
       echo "sed -i 's/.*getty/##getty disabled by x11docker## \0/' /etc/inittab"
-      echo "sed -i '/exit 0/d' /etc/rc.local"
+      echo "# tell openrc that it runs in docker"
+      echo "sed -e 's/#rc_sys=\"\"/rc_sys=\"docker\"/g' -i /etc/rc.conf"
     ;;
     sysvinit)
       echo "# add x11docker start command to rc.local"
       echo "sed -i '/exit 0/d' /etc/rc.local"
-      echo "echo 'su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh' >> /etc/rc.local"
-      echo "echo 'shutdown -h 0' >> /etc/rc.local"
+      echo "echo 'su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh || echo \"x11docker: Exit code \$?\"' >> /etc/rc.local"
+      echo "echo 'shutdown -hP 0' >> /etc/rc.local"
       echo "# disable getty in inittab" 
       echo "sed -i 's/.*getty/##getty disabled by x11docker## \0/' /etc/inittab"
     ;;
@@ -3909,9 +3901,22 @@ start() {
   echo ":> /tmp/x11docker.setupready"
   [ "$Switchcontaineruser" = "yes" ] && {   # if "no", x11docker.CMD.sh is executed in command line $Dockercommand
     case $Initsystem in
-      systemd)               echo "exec /lib/systemd/systemd" ;;
-      runit|openrc|sysvinit) echo "exec /sbin/init" ;;
       tini|none)             echo "/bin/su - $Benutzer -c '/bin/sh - $Cshare/x11docker.CMD.sh'" ;;
+      runit|openrc|sysvinit) echo "exec /sbin/init" ;;
+      systemd)
+        echo 'Systemd=/lib/systemd/systemd'
+        echo '[ -e "$Systemd" ] || Systemd=/bin/systemd'
+        echo '[ -e "$Systemd" ] || Systemd=/sbin/systemd'
+        echo '[ -e "$Systemd" ] || {'
+        echo '  echo "x11docker WARNING: executeable for systemd not found. Will try /sbin/init"'
+        echo '  Systemd=/sbin/init'
+        echo '}'
+        echo '[ -e "$Systemd" ] || {'
+        echo '  echo "x11docker ERROR: Is systemd really installed in image?"'
+        echo '  exit 1'
+        echo '}'
+        echo 'exec $Systemd'
+      ;;
     esac
   }
 } >> $Setupscript
