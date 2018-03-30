@@ -16,7 +16,7 @@ Running graphical applications or desktop environments in docker images is effec
    - [Clipboard](#clipboard) sharing.
    - [Language locale](#language-locales) creation.
  - [Network setup](#network-setup) with [SSH](#ssh-x-forwarding), [VNC](#vnc) or [HTML5](#html5-web-applications) possible.
- - Supports [init systems](#init-system) `tini`, `runit`, `openrc` and `systemd` in container.
+ - Supports [init systems](#init-system) `tini`, `runit`, `openrc`, `SysVinit` and `systemd` in container.
  - Developed on debian 9. Tested on fedora 25, CentOS 7, openSUSE 42.3, Ubuntu 16.04, Manjaro 17, Mageia 6 and Arch Linux.
  - Easy to use. [Examples](#examples): 
     - `x11docker jess/cathode`
@@ -287,10 +287,10 @@ x11docker --hostdisplay x11docker/xfce thunar  # Thunar from another image appea
 # Init system
 x11docker supports init systems as PID 1 in container.
  - As default, x11docker uses docker built-in `tini` with docker run option `--init`.
+ - Init in container solves the [zombie reaping issue](https://blog.phusion.nl/2015/01/20/docker-and-the-pid-1-zombie-reaping-problem/).
  - You can disable init in container with option `--no-init`. 
- - This solves the [zombie reaping issue](https://blog.phusion.nl/2015/01/20/docker-and-the-pid-1-zombie-reaping-problem/).
  - Installing `dbus` in image is recommended for `--systemd`, `--runit`, `--openrc`, `--sysvinit`.
-## systemd, sysvinit, runit, openrc
+## systemd, SysVinit, runit, openrc
  - `--systemd`: systemd in container.
    - To get a faster startup, it helps to look for services that fail to start in container and to mask them in image with `systemctl mask servicename`.
    - Tested with fedora, debian and Arch Linux images. Debian 10 images run well; debian 9 images additionally need insecure option `--sys-admin`.
