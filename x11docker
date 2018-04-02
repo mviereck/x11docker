@@ -9,10 +9,12 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.7.8"
+Version="3.9.8.0"
 
 changelog() {
-# 31.03.2018            Store parsed parts of $Imagecommand in '' to allow constructs like:  sh -c "cd /etc ; xterm"
+# 02.04.2018 V3.9.8.0   Removed Xtermlogfile,  using Dockerlogfile instead. Strange: solved missing output with --pw su/sudo, too.
+# 01.04.2018            Escape special characters in --env, ENV and image command. (adresses #34, too, now solved better)
+# 31.03.2018 V3.9.7.9   Store parsed parts of $Imagecommand in '' to allow constructs like:  sh -c "cd /etc ; xterm"
 #                       bugfix: add --rm to docker run for environment check
 # 31.03.2018 V3.9.7.8   Handle equal signs in container environment defined with ENV (#34)
 # 31.03.2018 V3.9.7.7   Handle whitespaces in container environment defined with ENV (#34)
@@ -240,13 +242,10 @@ changelog() {
 todo() {
 # --wayland --dbus-system GTK3 seems to work now!?
 # check fgconsole
-# --env SHELL=/bin/bash fails in deepin with --dbus-system
-# --env: escape special chars
-# setupscript: set environment variables?
+# bestwu/deepin: why sh is replaced by bash?
 # x11docker/fvwm: check quit option
 # opensuse/arch: issues with x11docker/fluxbox, background missing, sometimes no context menu
-# BUG --weston,--kwin: docker sometimes fails although socket exists: "stat /run/user/1000/wayland-607: no such file or directory"
-# minor BUG: some xtermrc log output gets lost with GUI password prompts, not sure why; maybe fds get lost when gui stops. Use nohup?
+# BUG --weston,--kwin: docker sometimes fails although socket exists: "stat /run/user/1000/wayland-607: no such file or directory". dirty sleep needed?
 # check echo especially in sh scripts, replace with printf if needed (#25)
 # avoid possible confusions --home --sharedir. --sharedir mounts can overlap --home folder. What about softlinks with existing target in --home? Maybe avoid /home/$USER at all
 # check out possibilities to allow 'sudo docker' directly again.
@@ -313,11 +312,13 @@ To run a host application on a new X server:
   x11docker [OPTIONS] --exe -- COMMAND [ARG1 ARG2 ...]
 To run only a new empty X server:
   x11docker [OPTIONS]
+To run more than one command, use 'sh -c' syntax. Example: 
+  x11docker [OPTIONS] -- IMAGE sh -c \"cd /etc && xterm\"
 
 Dependencies on host:
   Depending on chosen options, x11docker needs some packages to be installed. 
   It will check for them on startup and show messages if some are missing. 
-  List of possible needed packages:
+  List of possibly needed packages:
    * most recommended to allow security and convenience:
        xpra Xephyr xauth xrandr
    * advanced GPU support:
@@ -376,14 +377,14 @@ Special options:
      --no-internet     Disable internet access for container.
      --no-entrypoint   Disable ENTRYPOINT in image to allow other commands, too
      --env VAR=value   Set custom environment variable VAR=value
-                       Special usecase for user shell: '--env SHELL=/bin/sh'
+                       Special use case for user shell: '--env SHELL=/bin/sh'
      --showenv         Echo new \$DISPLAY, \$XAUTHORITY and \$WAYLAND_DISPLAY.
                        For custom access to new X server. Get environment with:
                          read xenv < <(x11docker --showenv [...])
      --sudouser        Allow sudo and su for container user. Use with care,
                        severe reduction of default x11docker security!
                        Password:  x11docker
-     --add COMMAND     Add custom host command to xinitrc (use sh syntax).
+     --add COMMAND     Add host command to xinitrc (sh syntax. You may need & ).
      --pw FRONTEND     Choose frontend for password prompt. Possible FRONTEND:
                          su sudo gksu gksudo lxsu lxsudo kdesu kdesudo
                          pkexec beesu none
@@ -625,8 +626,7 @@ error() {               # show error messages on stderr and exit
   Type 'x11docker --help' for usage information
   For debugging, run x11docker in terminal and/or enable option '--verbose'
   and look afterwards at logfile $Logfile3
-  If you think this is a bug in x11docker, 
-  please report at https://github.com/mviereck/x11docker"
+  Please report issues at https://github.com/mviereck/x11docker"
   
   # output to terminal
 echo -e "
@@ -947,9 +947,13 @@ $(sh -c "${1:-}")"
 isnum() {               # check if $1 is a number
   [ "1" = "$(awk -v a="${1:-}" 'BEGIN {print (a == a + 0)}')" ]
 }
+escapestring() {          # escape special chars of $1
+  # escape all characters except those described in [^a-zA-Z0-9,._+@=/-]
+  echo "${1:-}" | LC_ALL=C sed -e 's/[^a-zA-Z0-9,._+@=/-]/\\&/g; 1{$s/^$/""/}; 1!s/^/"/; $!s/$/"/'
+}
 writeaccess() {         # check if useruid $1 has write access to folder $2
   local dirVals gMember IFS
-  if IFS="	" read -a dirVals < <(stat -Lc "%U	%G	%A" "${2:-}") && (
+  if IFS=$'\t' read -a dirVals < <(stat -Lc "%U	%G	%A" "${2:-}") && (
     ( [ "$(id -u $dirVals)" == "${1:-}" ] && [ "${dirVals[2]:2:1}" == "w" ] ) ||
     ( [ "${dirVals[2]:8:1}" == "w" ] ) ||
     ( [ "${dirVals[2]:5:1}" == "w" ] && (
@@ -1047,7 +1051,7 @@ mkfile() {              # create file $1 owned by $Hostuser
   [ -n "${2:-}" ] && chmod ${2:-} "${1:-}"
 }
 
-{ #### part: variables: default settings
+{ #### part: declare variables
 trap finish EXIT
 
 export IFS=$' \n\t'                                 # set IFS to default
@@ -1126,7 +1130,6 @@ Xinitrc=xinitrc                                 # file to store xinitrc commands
 Xinitlogfile=xinit.log                          # file to log output of X server
 Xtermrc=xtermrc                                 # file for password prompt script
 Pullrc=pullrc                                   # file for pull dialog script
-Xtermlogfile=xterm.log                          # file to log output of xterm
 Compositorlogfile=compositor.log                # file to log output of Weston or KWin 
 Compositorpidfile=compositor.pid                # process id of compositor
 Xpraserverlogfile=xpraserver.log                # logfile for xpra server
@@ -1221,6 +1224,7 @@ Shareclipboardscript=clipboard.bash             #    "              "      scrip
 Showdisplayenvironment="no"                     # option -E, --env: Show environment variables of new display
 Customenvironment=""                            # option '--env': set custom environment variables 
 Pulseaudio="no"                                 #   "                    use pulseaudio yes/no
+Pulseserver=""
 Pulseaudioconf=pulseclient.conf
 Pulseaudiosocketdir=""
 Pulseaudiosocketname=""
@@ -1316,7 +1320,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
   Parsedoptions="$(getopt --options $Shortoptions --longoptions $Longoptions --name "$0" -- "$@" 2>/tmp/x11docker_parsererror)"
   [ -e /tmp/x11docker_parsererror ] && Parsererror=$(cat /tmp/x11docker_parsererror) && rm /tmp/x11docker_parsererror
   [ -n "$Parsererror" ] && error "$Parsererror"
-  eval set -- $Parsedoptions
+  eval set -- "$Parsedoptions"
 
   [ "$*" = "-h --" ] &&    usage         && exit 0         # catch single -h for usage info, otherwise it means --hostdisplay
   
@@ -1418,7 +1422,8 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
          
        ## Environment
          --showenv)    Showdisplayenvironment="yes" ;;     # output of display number and cookie file on stdout. Catch with  ~$ read xdenv < <(x11docker --showenv)
-         --env)        Customenvironment="$Customenvironment\n\"${2:-}\"" ; shift ;;   # set custom environment variables
+         --env)        Customenvironment="$(escapestring "${2:-}")
+$Customenvironment"    ;  shift ;;                         # set custom environment variables
          --vt)         Newxvt="vt${2:-}" ;       shift ;;  # set virtual console to use
          --display)    Newdisplaynumber=${2:-}             # display number to use
                        [ "$(echo $Newdisplaynumber | cut -c1)" = ":" ] && Newdisplaynumber="$(echo $Newdisplaynumber | cut -c2-)"
@@ -1498,7 +1503,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
         while [ $# -gt 0 ] ; do
           [ -n "${1:-}" ] && [ -z "$Imagename" ] && [ "$(echo "${1:-}" | cut -c1)"  = "-" ]  && Dockeroptions="$Dockeroptions ${1:-}"
           [ -n "${1:-}" ] && [ -z "$Imagename" ] && [ "$(echo "${1:-}" | cut -c1)" != "-" ]  && Imagename="${1:-}" && shift
-          [ -n "${1:-}" ] && [ -n "$Imagename" ] && Imagecommand="$Imagecommand '${1:-}'"    && Imagecommand="${Imagecommand## }"
+          [ -n "${1:-}" ] && [ -n "$Imagename" ] && Imagecommand="$Imagecommand$(escapestring "${1:-}") "
           shift
         done
         [ -z "$Imagename" ] && X11dockermode="xonly"
@@ -2305,6 +2310,14 @@ Parsed options: $Parsedoptions"
   Cachefolder="$Cacherootfolder/X$Newdisplaynumber-$(echo $Imagename | tr / - | cut -d: -f1)"
   [ -d "$Cachefolder" ] && error "Cache folder already exists:
   $Cachefolder"
+  
+  [ "$Cachefolder" != "$(escapestring "$Cachefolder")" ] && error "Invalid name created for cache folder:
+    $Cachefolder
+  Most probably provided image name (or --exe command) is invalid in some way:
+    $(escapestring "$Imagename")
+  For special setups like command chains use a syntax like:
+    x11docker IMAGENAME  --  sh -c \"cd /etc && xterm\""
+  
   Sharefolder="$Cachefolder/$Sharefolder"
   $Mksu "mkdir -p $Sharefolder"
   export Cachefolder Sharefolder
@@ -2324,7 +2337,6 @@ Parsed options: $Parsedoptions"
   Xinitlogfile="$Cachefolder/$Xinitlogfile"                 && mkfile $Xinitlogfile
   Xtermrc="$Cachefolder/$Xtermrc"                           && mkfile $Xtermrc
   Pullrc="$Cachefolder/$Pullrc"                             && mkfile $Pullrc
-  Xtermlogfile="$Cachefolder/$Xtermlogfile"                 && mkfile $Xtermlogfile
   Dockerlogfile="$Cachefolder/$Dockerlogfile"               && mkfile $Dockerlogfile
   Containerpidfile="$Cachefolder/$Containerpidfile"         && mkfile $Containerpidfile
   Dockerrc="$Cachefolder/$Dockerrc"                         && mkfile $Dockerrc
@@ -2538,6 +2550,61 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
   $Wm_good"
   ;;
   esac
+}
+
+{ #### part: check sound (options --pulseaudio and --alsa)
+  # option '--pulseaudio'
+  [ "$Pulseaudio" = "yes" ] && {
+    warning "Option --pulseaudio allows container applications
+  to catch your audio output and microphone input."
+    Pulseaudiosocketdir="$XDG_RUNTIME_DIR/pulse"
+    [ -d "$Pulseaudiosocketdir" ] || Pulseaudiosocketdir="$(pax11publish -d | grep Server | cut -d'}' -f2 | cut -d' ' -f1 | cut -d: -f2)"
+    [ -d "$Pulseaudiosocketdir" ] || {
+      warning "Did not find directory 'pulse' in XDG_RUNTIME_DIR.
+  Is pulseaudio up and running on your host?
+  Fallback: Will try to use ALSA (option --alsa) instead."
+      Pulseaudio="no"
+      Alsa="yes"
+    }
+    [ -s "$Pulseaudiosocketdir/native" ] && Pulseaudiosocketname="native"
+    [ -z "$Pulseaudiosocketname" ] && Pulseaudiosocketname="$(find "$Pulseaudiosocketdir" -type s | rev | cut -d/ -f1 | rev | head -n1)"
+    [ -z "$Pulseaudiosocketname" ] && {
+      warning "Did not find pulseaudio socket
+  in $Pulseaudiosocketdir
+  Fallback: Will try to use ALSA (option --alsa) instead."
+      Pulseaudio="no"
+      Alsa="yes"
+    }
+    [ "$Pulseaudio" = "yes" ] && Pulseserver="PULSE_SERVER=unix:/pulse/$Pulseaudiosocketname"
+    echo "# Connect to the host's server using the mounted UNIX socket
+default-server = unix:/pulse/$Pulseaudiosocketname
+# Prevent a server running in the container
+autospawn = no
+daemon-binary = /bin/true
+# Prevent the use of shared memory
+enable-shm = false
+" >> $Pulseaudioconf
+  }
+  
+  # option --alsa
+  [ "$Alsa" = "yes" ] && {
+    warning "ALSA sound with option --alsa degrades container isolation.
+  Shares device files in /dev/snd, container gains access to sound hardware.
+  Container applications can catch audio output and microphone input."
+  
+    note "You can specify the sound card to use setting environment
+  variable ALSA_CARD. Example:  --env ALSA_CARD=Generic
+  Following sound cards found on your system:
+$(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
+  Option --alsa allows a general access to real sound cards. 
+  To use virtual ALSA devices like dmix, too, install ALSA libraries in image.
+  (Example: debian images would need package libasound2)."
+  
+    pgrep pulseaudio >/dev/null && note "It seems that pulseaudio is running on your host.
+  Pulseaudio can interfere with ALSA sound (option --alsa).
+  Host sound may not work while container is playing sound and vice versa.
+  Alternative: with pulseaudio on host and in image, use option --pulseaudio."
+  }  
 }
 
 { #### part: create xorg.conf and Xorg wrapper for --xdummy (options --xdummy, --xpra)
@@ -3107,7 +3174,9 @@ esac
   Newxenv="$Newxenv X11DOCKER_CACHE=$Cachefolder"
   
   # custom environment
-  while read -r Line; do Newxenv="$Newxenv $Line" ;   done < <(echo -e $Customenvironment)
+  IFS=$'\n'
+  for Line in $Customenvironment; do Newxenv="$Newxenv $Line" ; done
+  IFS=$' \t\n'
 }
 
 { #### part: create shareclipboard script (option --clipboard)
@@ -3156,61 +3225,6 @@ done
       }
     ;;
   esac
-}
-
-{ #### part: check sound (options --pulseaudio and --alsa)
-  # option '--pulseaudio'
-  [ "$Pulseaudio" = "yes" ] && {
-    warning "Option --pulseaudio allows container applications
-  to catch your audio output and microphone input."
-    Pulseaudiosocketdir="$XDG_RUNTIME_DIR/pulse"
-    [ -d "$Pulseaudiosocketdir" ] || Pulseaudiosocketdir="$(pax11publish -d | grep Server | cut -d'}' -f2 | cut -d' ' -f1 | cut -d: -f2)"
-    [ -d "$Pulseaudiosocketdir" ] || {
-      warning "Did not find directory 'pulse' in XDG_RUNTIME_DIR.
-  Is pulseaudio up and running on your host?
-  Fallback: Will try to use ALSA (option --alsa) instead."
-      Pulseaudio="no"
-      Alsa="yes"
-    }
-    [ -s "$Pulseaudiosocketdir/native" ] && Pulseaudiosocketname="native"
-    [ -z "$Pulseaudiosocketname" ] && Pulseaudiosocketname="$(find "$Pulseaudiosocketdir" -type s | rev | cut -d/ -f1 | rev | head -n1)"
-    [ -z "$Pulseaudiosocketname" ] && {
-      warning "Did not find pulseaudio socket
-  in $Pulseaudiosocketdir
-  Fallback: Will try to use ALSA (option --alsa) instead."
-      Pulseaudio="no"
-      Alsa="yes"
-    }
-    [ "$Pulseaudio" = "yes" ] && Customenvironment="$Customenvironment PULSE_SERVER=unix:/pulse/$Pulseaudiosocketname\n"
-    echo "# Connect to the host's server using the mounted UNIX socket
-default-server = unix:/pulse/$Pulseaudiosocketname
-# Prevent a server running in the container
-autospawn = no
-daemon-binary = /bin/true
-# Prevent the use of shared memory
-enable-shm = false
-" >> $Pulseaudioconf
-  }
-  
-  # option --alsa
-  [ "$Alsa" = "yes" ] && {
-    warning "ALSA sound with option --alsa degrades container isolation.
-  Shares device files in /dev/snd, container gains access to sound hardware.
-  Container applications can catch audio output and microphone input."
-  
-    note "You can specify the sound card to use setting environment
-  variable ALSA_CARD. Example:  --env ALSA_CARD=Generic
-  Following sound cards found on your system:
-$(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
-  Option --alsa allows a general access to real sound cards. 
-  To use virtual ALSA devices like dmix, too, install ALSA libraries in image.
-  (Example: debian images would need package libasound2)."
-  
-    pgrep pulseaudio >/dev/null && note "It seems that pulseaudio is running on your host.
-  Pulseaudio can interfere with ALSA sound (option --alsa).
-  Host sound may not work while container is playing sound and vice versa.
-  Alternative: with pulseaudio on host and in image, use option --pulseaudio."
-  }  
 }
 
 { #### part: check run/--exe/--xonly
@@ -3482,7 +3496,7 @@ WantedBy=x11docker.target
 " >> $Systemdjournal
 
       echo "[Manager]
-DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(for Line in $Customenvironment ; do echo -n "$Line " ; done)
+DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'\n' ; for Line in $Customenvironment ; do echo -n "$Line " ; done)
 " >> $Systemdenvironment
     ;;
     
@@ -3725,12 +3739,11 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(for Li
   echo "export DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie"
   echo ""
 
-  while read -r Line; do
-    [ -z "$Line" ] || {
-      Line="$(echo $Line | cut -d= -f1)=\"$(echo $Line | cut -d= -f2-)\""
-      echo "export \"$Line\"" 
-    }
-  done < <(echo -e $Customenvironment)
+  IFS=$'\n'
+  for Line in $Customenvironment ; do
+    [ "$Line" ] && echo "export $Line" 
+  done
+  IFS=$' \t\n'
   echo ""
   
   echo "# create user entry in /etc/passwd (and delete possibly existing same uid)"
@@ -3927,7 +3940,7 @@ start() {
   # create script that needs root permissions or docker group membership to use docker.
   # This is the part the password prompt / $Getroot is needed for.
   echo "#! /bin/bash"
-  declare -f waitforfilecreation verbose warning
+  declare -f waitforfilecreation verbose warning escapestring
   [ "$Debug" = "yes" ] && echo "set -x"
 
   echo "Imagename=\"$Imagename\""
@@ -3974,6 +3987,7 @@ start() {
   echo "  echo 'echo x11docker: container system:'"
   echo "  echo 'cat /etc/os-release'"
   echo "  echo ''"
+  
   echo "  echo '# wait for container setup script do be ready'"
   echo "  echo 'for Count in $(seq -s' ' 30); do'"
   echo "  echo '  [ -e /tmp/x11docker.setupready ] && break'"
@@ -3981,15 +3995,16 @@ start() {
   echo "  echo 'done'"
   echo "  echo ''"
   echo "} >> $Imagecommandscript"
+  
   [ "$Switchcontaineruser" = "yes" ] && {
     echo "echo '# Environment variables found in image:' >> $Imagecommandscript"
-    echo "IFS="
+    echo "IFS=$'\n'"
     echo "while read -r Line; do"
-    echo "  Var=\$(echo \$Line | cut -d= -f1)"
-    echo "  Value=\"\$(echo \$Line | cut -d= -f2-)\""
-    echo "  echo export \$Var=\\\"\$Value\\\" >> $Imagecommandscript"
+    echo "  echo export \$(escapestring \"\$Line\") >> $Imagecommandscript"
     echo "done < <(docker run --rm --entrypoint env $Imagename env)"
+    echo "IFS=$' \t\n'"
   }
+  
   echo "{"
   echo "  echo ''"
   echo "  echo '# x11docker variable settings'"
@@ -4002,6 +4017,9 @@ start() {
     done
   }
   echo "  echo 'export HOME=\"$Benutzerhome\"'"
+  echo "  echo 'cd \"\$HOME\"'"
+  echo "  echo ''"
+  
   [ -n "$Newdisplay" ]           && {
     echo "  echo 'export DISPLAY=$Newdisplay'"
     echo "  echo 'ln -s $Cshare/X$Newdisplaynumber /tmp/.X11-unix/'" 
@@ -4010,6 +4028,7 @@ start() {
   [ "$Xserver" = "--nothing" ]   && echo "  echo 'unset DISPLAY WAYLAND_DISPLAY XAUTHORITY'"
   [ "$Dbuslaunch" = "yes" ] && {
     echo "  echo ''"
+    
     echo "  echo 'Dbus=\"\$(dbus-launch --help >/dev/null 2>&1 && echo dbus-launch)\"'"
     echo "  echo '[ -z \"\$Dbus\" ] && Dbus=\"\$(dbus-run-session --help >/dev/null 2>&1 && echo dbus-run-session)\"'"
     echo "  echo '[ -z \"\$Dbus\" ] && echo \"x11docker WARNING: Did not find dbus-launch or dbus-run-session (option --dbus).\" >&2'"
@@ -4020,6 +4039,7 @@ start() {
   echo "  echo '  export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR'"
   echo "  echo '  mkdir -v -m 700 -p \$XDG_RUNTIME_DIR'"
   echo "  echo '  export XDG_RUNTIME_DIR'"
+  echo "  echo ''"
   echo "  echo '}'"
   
   [ "$Sharewayland" = "yes" ] && {
@@ -4035,33 +4055,37 @@ start() {
     --nothing) ;;
     *)                             echo "  echo 'export XDG_SESSION_TYPE=x11'" ;;
   esac
+  
   echo "  echo ''"
   echo "  echo '# xpra environment settings'"
   echo "  echo 'export UBUNTU_MENUPROXY= QT_X11_NO_NATIVE_MENUBAR=1 MWNOCAPTURE=true MWNO_RIT=true MWWM=allwm'"
   [ -n "$Xprashm" ] && echo "  echo 'export $Xprashm'"
+  
   echo "  echo ''"
   echo "  echo 'bash --version >/dev/null 2>&1 && export SHELL=/bin/bash || export SHELL=/bin/sh'"
   echo "  echo 'export TERM=xterm'"
-  echo "  echo '# custom environment'"
-  while read -r Line; do
-    [ -z "$Line" ] || {
-      Line="$(echo $Line | cut -d= -f1)=\"$(echo $Line | cut -d= -f2-)\""
-      echo "  echo 'export \"$Line\"'" 
-    }
-  done < <(echo -e $Customenvironment)
+  echo "  echo ''"
 
-  echo "  echo 'echo'"
   echo "  echo '[ -e /tmp/x11docker.LANG ] && export LANG=\$(cat /tmp/x11docker.LANG) '"
+  echo "  echo ''"
   
-  echo "  echo 'echo'"
+  [ "$Pulseaudio" = "yes" ] && echo "  echo 'export $Pulseserver'"
+
+  echo "  echo '# custom environment (--env)'"
+  IFS=$'\n'
+  for Line in $Customenvironment ; do
+    echo "  echo export $(escapestring $Line)"
+  done
+  IFS=$' \t\n'
+  echo "  echo ''"
+  
   echo "  echo 'echo x11docker: container environment:'"
   echo "  echo 'env > $Cshare/environment'"
   echo "  echo 'sed -i \"/\(PWD=\|_=\)/d\" $Cshare/environment'"
   echo "  echo 'env | sort'"
   echo "  echo 'echo x11docker: copy of environment stored in $Cshare/environment'"
   echo "  echo ''"
-  echo "  echo 'cd \"\$HOME\"'"
-  echo "  echo ''"
+
   [ -s "$Cmdstdinfile" ] && echo "  echo \"cat $Cshare/stdin | \\\$Dbus \$Entrypoint \$Imagecommand >>$Cshare/stdout 2>>$Cshare/stderr\""
   [ -s "$Cmdstdinfile" ] || echo "  echo                \"exec \\\$Dbus \$Entrypoint \$Imagecommand >>$Cshare/stdout 2>>$Cshare/stderr\""
   echo "  echo '# Ready for docker run'"
@@ -4132,9 +4156,9 @@ start() {
     ;;
   esac
   case $Passwordprompt in
-    gksudo|lxsudo)  echo "$Getroot bash $Dockerrc  >>$Xtermlogfile 2>&1" ;;
-    pkexec)         echo "pkexec env DISPLAY=\$DISPLAY XAUTHORITY=\$XAUTHORITY bash $Dockerrc  >>$Xtermlogfile 2>&1" ;;
-    *)              echo "$Getroot \"${Sudo}bash $Dockerrc >>$Xtermlogfile 2>&1\"" ;;
+    gksudo|lxsudo)  echo "$Getroot bash $Dockerrc  >>$Dockerlogfile 2>&1" ;;
+    pkexec)         echo "pkexec env DISPLAY=\$DISPLAY XAUTHORITY=\$XAUTHORITY bash $Dockerrc  >>$Dockerlogfile 2>&1" ;;
+    *)              echo "$Getroot \"${Sudo}bash $Dockerrc >>$Dockerlogfile 2>&1\"" ;;
   esac
   echo "exit"
 } >> $Xtermrc
@@ -4446,7 +4470,6 @@ $(cat "$Westonini" | nl -ba)"
   $Xpraserverlogfile
   $Xpraclientlogfile
   $Compositorlogfile
-  $Xtermlogfile
   $Dockerlogfile
 Summary logfile: $Logfile2
 In container: $Cshare/x11docker.log
@@ -4454,7 +4477,7 @@ After finish: $Logfile3"
     verbose "Running X server $Xserver on display $Newdisplay now ..."
 
     # create summary logfile
-    tail --pid=$$ --retry -n +1 -F $Xtermlogfile $Dockerlogfile \
+    tail --pid=$$ --retry -n +1 -F $Dockerlogfile \
                                    $Cmdstdoutlogfile $Cmdstderrlogfile $Journallogfile \
                                    $Xpraserverlogfile $Xpraclientlogfile \
                                    $Xinitlogfile $Compositorlogfile 2>/dev/null >> $Logfile &
@@ -4676,13 +4699,10 @@ $(tail $Compositorlogfile)"
             error "Docker startup seems to have failed! 
 
   Last lines of docker.log:
-$(tail -n5 $Dockerlogfile)
-
-  Last lines of xterm.log:
-$(cat  $Xtermlogfile | sed '/container not ready/d' | uniq | tail -n7)
+$(tail $Dockerlogfile)
 
   Last lines of command stderr:
-$(cat $Cmdstderrlogfile | tail)"
+$(tail $Cmdstderrlogfile)"
           }
         }
         storepid $Containerpid container
@@ -4695,8 +4715,8 @@ $(cat $Cmdstderrlogfile | tail)"
   Maybe you mistyped your password, or image does not exist.
   Or the chosen password prompt does not match your setup;
   you can try option --pw with f.e. --pw=su or --pw=sudo.
-  Last lines of xterm.log:
-$(tail $Xtermlogfile)"
+  Last lines of docker logfile:
+$(tail $Dockerlogfile)"
       }
     ;;
     
