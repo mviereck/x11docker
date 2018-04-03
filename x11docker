@@ -9,9 +9,12 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.8.0"
+Version="3.9.8.1"
 
 changelog() {
+# 03.04.2018 V3.9.8.1   show container ID on stdout (#36)
+# 02.04.2018            --security-opt=no-new-privileges now always set except for --sudouser. It does not harm switching from root to less privileged users.
+#                       setup script with user switching: "exec su" instead of "su" to avoid root shell in parent tree. su is now child of init.
 # 02.04.2018 V3.9.8.0   Removed Xtermlogfile,  using Dockerlogfile instead. Strange: solved missing output with --pw su/sudo, too.
 # 01.04.2018            Escape special characters in --env, ENV and image command. (adresses #34, too, now solved better)
 # 31.03.2018 V3.9.7.9   Store parsed parts of $Imagecommand in '' to allow constructs like:  sh -c "cd /etc ; xterm"
@@ -1122,6 +1125,7 @@ Dockerrc=dockerrc                               # init script run by docker. Cre
 Imagecommandscript=x11docker.CMD.sh             # name of shared script containing image command
 Dockerlogfile=docker.log                        # file to log output of docker
 Containerpidfile=container.pid                  # file to store process ID of script -c docker
+Containeridfile=container.id                    # file to store process ID of script -c docker
 Containerip=container.ip                        # IP adress of container
 Setupscript=containersetup.sh
 
@@ -2339,6 +2343,7 @@ Parsed options: $Parsedoptions"
   Pullrc="$Cachefolder/$Pullrc"                             && mkfile $Pullrc
   Dockerlogfile="$Cachefolder/$Dockerlogfile"               && mkfile $Dockerlogfile
   Containerpidfile="$Cachefolder/$Containerpidfile"         && mkfile $Containerpidfile
+  Containeridfile="$Cachefolder/$Containeridfile"           && mkfile $Containeridfile
   Dockerrc="$Cachefolder/$Dockerrc"                         && mkfile $Dockerrc
   Setupscript="$Sharefolder/$Setupscript"                   && mkfile $Setupscript
   Containerip="$Cachefolder/$Containerip"                   && mkfile $Containerip
@@ -3602,27 +3607,23 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   --cap-add CHOWN       --cap-add KILL\\
   --cap-add FSETID      --cap-add FOWNER  --cap-add SETPCAP"
         }
-        case $Switchcontaineruser in
-          yes) 
-            Dockercommand="$Dockercommand \\
+        [ "$Switchcontaineruser" = "yes" ] && {
+          Dockercommand="$Dockercommand \\
   --cap-add SETUID      --cap-add SETGID  --cap-add DAC_OVERRIDE\\
-  --cap-add AUDIT_WRITE" 
-          ;;
-          no)
-            Dockercommand="$Dockercommand \\
-  --security-opt no-new-privileges" 
-          ;;
-        esac
-        
-      # SELinux restrictions for containers must be disabled to allow access to X socket. Flags z or Z do not help.
-      Dockercommand="$Dockercommand \\
+  --cap-add AUDIT_WRITE"
+        }
+        # SELinux restrictions for containers must be disabled to allow access to X socket. Flags z or Z do not help.
+        Dockercommand="$Dockercommand \\
   --security-opt label=type:container_runtime_t"
-        
         # option --dbusdaemon: dbus needs CHOWN for XDG_RUNTIME_DIR
         [ "$Dbusdaemon" = "yes" ] && [ "$Adminusercaps" = "no" ] && Dockercommand="$Dockercommand \\
   --cap-add CHOWN"
       }
       
+      # especially forbid switching to root
+      [ "$Adminusercaps" = "no" ] && Dockercommand="$Dockercommand \\
+  --security-opt no-new-privileges" 
+  
       # option --sharecgroup
       [ "$Sharecgroup" = "yes" ] && Dockercommand="$Dockercommand \\
   -v /sys/fs/cgroup:/sys/fs/cgroup:ro"
@@ -3641,7 +3642,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       
       # allows writing even with --read-only. --systemd needs tmpfs at all
       Dockercommand="$Dockercommand \\
-  --tmpfs /tmp --tmpfs /run --tmpfs /var/run --tmpfs /run/lock" 
+  --tmpfs /tmp --tmpfs /run --tmpfs /var/run --tmpfs /run/lock"
       
       # entrypoint is checked in dockerrc
       Dockercommand="$Dockercommand \\
@@ -3916,7 +3917,7 @@ start() {
   echo ":> /tmp/x11docker.setupready"
   [ "$Switchcontaineruser" = "yes" ] && {   # if "no", x11docker.CMD.sh is executed in command line $Dockercommand
     case $Initsystem in
-      tini|none)             echo "/bin/su - $Benutzer -c '/bin/sh - $Cshare/x11docker.CMD.sh'" ;;
+      tini|none)             echo "exec /bin/su - $Benutzer -c '/bin/sh - $Cshare/x11docker.CMD.sh'" ;;
       runit|openrc|sysvinit) echo "exec /sbin/init" ;;
       systemd)
         echo 'Systemd=/lib/systemd/systemd'
@@ -4100,6 +4101,7 @@ start() {
   
   echo "[ -z \"\$Containerid\" ] && echo 'x11docker ERROR: Startup of docker failed.' && exit 1"
   echo "echo x11docker: container ID: \$Containerid"
+  echo "echo \$Containerid >> $Containeridfile"
   echo "docker logs -f \$Containerid >> $Dockerlogfile 2>&1 &"
   echo ""
   echo "# wait for container to be ready"
@@ -4706,6 +4708,9 @@ $(tail $Cmdstderrlogfile)"
           }
         }
         storepid $Containerpid container
+        
+        note "container ID:"
+        cat $Containeridfile
         
         # wait for docker until it terminates. bash builtin wait does not work in this case
         ps -p $Containerpid >/dev/null 2>&1 && mywatch "ls $Timetosaygoodbye 2>/dev/null; ps -p $Containerpid -o pid #container" 
