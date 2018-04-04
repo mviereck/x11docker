@@ -9,9 +9,12 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.8.3"
+Version="3.9.8.4"
 
 changelog() {
+# 04.04.2018 V3.9.8.4   --workdir: new option
+#                       --systemd/--dbus-system: changed su command to remove sh from pstree
+#                       bugfix user entry in /etc/group
 # 04.04.2018 V3.9.8.3   bugfix --dbus-system: regression: must not set no-new-privileges
 # 03.04.2018 V3.9.8.2   disable entrypoint 'tini' if x11docker already runs an init system (default: tini from docker).
 # 03.04.2018 V3.9.8.1   show container ID on stdout (#36)
@@ -245,8 +248,10 @@ changelog() {
   : 
 }
 todo() {
-# --workdir: new  option
-# deeper check of --dbus-system on all init systems
+# --dbus-system: policykit must not have no-new-privileges. Seems to use setuid? Core issue AccountsService?
+#                starting polkitd and accounts-daemon in setupscript helps:
+#                -> cinnamon starts up with lots of (harmless?) error messages
+#                -> deepin needs --pulseaudio again
 # --wayland --dbus-system GTK3 seems to work now!?
 # check fgconsole
 # bestwu/deepin: why sh is replaced by bash?
@@ -383,6 +388,7 @@ Clipboard, sound, language:
 Special options:
      --no-internet     Disable internet access for container.
      --no-entrypoint   Disable ENTRYPOINT in image to allow other commands, too
+     --workdir DIR     Set working directory DIR
      --env VAR=value   Set custom environment variable VAR=value
                        Special use case for user shell: '--env SHELL=/bin/sh'
      --showenv         Echo new \$DISPLAY, \$XAUTHORITY and \$WAYLAND_DISPLAY.
@@ -1240,6 +1246,7 @@ Alsa="no"                                       # option --alsa: enable ALSA sou
 Noentrypoint="no"                               # option --no-entrypoint: disable entrypoint in image
 Internetaccess="yes"                            # option --no-internet: disable internet access
 Langwunsch=""                                   # option --lang: search or create UTF-8 locale and set LANG
+Workdir=""                                      # option --workdir: set working directory
 
 # verbosity options
 Verbose="no"                                    # option '-v, --verbose': if "yes", be verbose
@@ -1314,7 +1321,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
   Longoptions="$Longoptions,wm:,desktop,exe,xonly"
   Longoptions="$Longoptions,fullscreen,size:,glamor,scale:,rotate:,dpi:,output-count:,gpu,xfishtank"                       # screen options
   Longoptions="$Longoptions,user:,home,clipboard,pulseaudio,alsa,lang:"                                                    # comfort options
-  Longoptions="$Longoptions,no-xhost,trusted,untrusted,dbus,dbus-system,pw:,no-internet"                                   # advanced options
+  Longoptions="$Longoptions,no-xhost,trusted,untrusted,dbus,dbus-system,pw:,no-internet,workdir:"                          # advanced options
   Longoptions="$Longoptions,tini,no-init,systemd,runit,openrc,sysvinit,sys-admin,sharecgroup"                              # init system options
   Longoptions="$Longoptions,starter,cleanup,license,licence,help,version,install,update,remove,wmlist"                     # special options without starting X server
   Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,xtest,no-xtest,env:,showenv"                                       # X and environment options
@@ -1392,6 +1399,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
       -b|--dbus)       Dbuslaunch="yes" ;;                 # run image command with dbus-launch or dbus-run-session
          --no-entrypoint) Noentrypoint="yes" ;;            # don't use ENTRYPOINT of image
          --no-internet)Internetaccess="no" ;;              # disallow internet access
+         --workdir)    Workdir="$(escapestring "${2:-}")" ; shift ;; # set working directory
          --pw)         Passwordprompt="${2:-}" ; shift ;;  # frontend for password prompt
          --add)        Addcommand="${2:-}" ; shift ;;      # add custom host command in xinitrc
          
@@ -1424,7 +1432,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
          --sysvinit)   Initsystem="sysvinit" ;;
          --sharecgroup)Sharecgroup="yes" ;;                # share /sys/fs/cgroup. default for --systemd, possible use with --openrc
          --sys-admin)  Capsysadmin="yes" ;;                # add capability SYS_ADMIN for older systemd versions in image (i.e. debian 9 needs it, debian 10 runs well)
-         --dbus-system|--dbus-daemon|--dbusdaemon) Dbusdaemon="yes"; Dbuslaunch="yes" # set up dbus system daemon
+         --dbus-system|--dbus-daemon|--dbusdaemon) Dbusdaemon="yes" # set up dbus system daemon
                        { [ "${1:-}" = "--dbus-daemon" ] || [ "${1:-}" = "--dbusdaemon" ] ;} && note "Option --dbus-daemon changed to --dbus-system.
   Please use --dbus-system in future." ;;                  
          
@@ -2272,10 +2280,6 @@ Parsed options: $Parsedoptions"
       [ "$Tty" = "yes" ] && note "Option --keymap does not work with option $Xserver
   if running from console."
     ;;
-  esac
-  
-  case $Initsystem in
-    runit|openrc|systemd|sysvinit) Dbusdaemon="yes"; Dbuslaunch="yes" ;;
   esac
 }
 
@@ -3398,7 +3402,7 @@ done
       Benutzerhosthome="no"
     }
   }
-  Benutzergruppe="$(getent group $Benutzergid || echo group_$Benutzer | cut -d: -f1)"
+  Benutzergruppe="$(getent group $Benutzergid | cut -d: -f1 || echo group_$Benutzer)"
 
   [ "$Benutzer" = "$Hostuser" ] && Mksubenutzer=$Mksu || { 
     Mksubenutzer="su $Benutzer -c"
@@ -3477,10 +3481,10 @@ Wants=x11docker-watch.service
 Wants=x11docker-journal.service
 Wants=dbus.service
 [Service]
-#User=$Benutzer
 Type=simple
+#User=$Benutzer
 #ExecStart=/bin/sh $Cshare/x11docker.CMD.sh
-ExecStart=/bin/su - $Benutzer -c '/bin/sh $Cshare/x11docker.CMD.sh ; touch $Cshare/timetosaygoodbye'
+ExecStart=/bin/su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh
 [Install]
 WantedBy=x11docker.target
 WantedBy=multi-user.target
@@ -3499,6 +3503,7 @@ WantedBy=x11docker.target
 Description=x11docker journal log service
 [Service]
 Type=simple
+User=$Benutzer
 ExecStart=/bin/sh -c '/bin/journalctl --follow --no-tail --merge >> $Cshare/journalctl 2>&1'
 [Install]
 WantedBy=x11docker.target
@@ -3538,6 +3543,11 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       Containername="x11docker_X${Newdisplaynumber}_${Mycookie}_$(echo $Imagename | tr / _ | tr : _ )"
       Dockercommand="$Dockercommand --name=$Containername"
       
+  
+      case $Initsystem in
+        runit|openrc|systemd|sysvinit) Dbusdaemon="yes" ;;
+      esac
+  
       [ "$Benutzeruid" = "0" ]     && Adminusercaps="yes"
       [ "$Sudouser" = "yes" ]      && Adminusercaps="yes"
       [ "$Adminusercaps" = "yes" ] && Switchcontaineruser="yes"
@@ -3552,7 +3562,8 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   --user root" ;;
           esac
         ;;
-        systemd|runit|openrc|sysvinit) Dockercommand="$Dockercommand \\
+        systemd|runit|openrc|sysvinit) 
+          Dockercommand="$Dockercommand \\
   --user root" ;;
       esac
       
@@ -3573,10 +3584,11 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   --init" ;;
   
         systemd)
-          Adminusercaps="yes"
+          Switchcontaineruser="yes"
           Sharecgroup="yes"
           Dockercommand="$Dockercommand \\
   --stop-signal SIGRTMIN+3\\
+  --cap-add FSETID      --cap-add FOWNER  --cap-add SETPCAP \\
   -v $Systemdtarget:/etc/systemd/system/x11docker.target:ro \\
   -v $Systemdstartcmd:/etc/systemd/system/x11docker-startcmd.service:ro \\
   -v $Systemdwatch:/etc/systemd/system/x11docker-watch.service:ro \\
@@ -3628,6 +3640,10 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
           esac
         }
       }
+      
+      ###  TEST
+#      Dockercommand="$Dockercommand \\
+#  --security-opt no-new-privileges"
       
       # SELinux restrictions for containers must be disabled to allow access to X socket. Flags z or Z do not help.
       Dockercommand="$Dockercommand \\
@@ -3711,18 +3727,22 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       [ "$Sharehostnet" = "yes" ]      && Dockercommand="$Dockercommand \\
   --net=host"
       ## option --no-internet
-      [ "$Internetaccess" = "no" ] && Dockercommand="$Dockercommand \\
+      [ "$Internetaccess" = "no" ]     && Dockercommand="$Dockercommand \\
   --net=none"
       ## option --alsa      
-      [ "$Alsa" = "yes" ]          && Dockercommand="$Dockercommand \\
+      [ "$Alsa" = "yes" ]              && Dockercommand="$Dockercommand \\
   --device=/dev/snd:/dev/snd:rw -v /dev/snd:/dev/snd:rw"
       ## synchronize time location from host and container
       [ -e /etc/localtime ] && Dockercommand="$Dockercommand \\
   -v /etc/localtime:/etc/localtime:ro"
-      [ "$Pulseaudio" = "yes" ]          && Dockercommand="$Dockercommand \\
+      ## option --pulseaudio
+      [ "$Pulseaudio" = "yes" ]        && Dockercommand="$Dockercommand \\
   -v $Pulseaudiosocketdir:/pulse:rw \\
   -v $Cachefolder/pulseclient.conf:/etc/pulse/client.conf:rw"
-        
+      ## option --workdir
+      [ "$Workdir" ] && Dockercommand="$Dockercommand \\
+  --workdir $Workdir"
+  
       # add custom docker arguments, imagename and imagecommand
       Dockercommand="$Dockercommand \\
   $Dockeroptions"
@@ -3922,11 +3942,22 @@ start() {
     echo "command -v pulseaudio >/dev/null || echo \"x11docker ERROR: pulseaudio not found in image (option --pulseaudio)\""
   }
   
+  ### TEST
+  #[ "$Dbusdaemon" = "yes" ] && {
+  #  case $Initsystem in
+  #    tini|none)
+  #      echo "echo x11docker: starting polkitd and accounts-daemon"
+  #      echo "/usr/lib/policykit-1/polkitd & "
+  #      echo "/usr/lib/accountsservice/accounts-daemon &"
+  #    ;;
+  #  esac
+  #}
+  
   echo ""
   echo ":> /tmp/x11docker.setupready"
   [ "$Switchcontaineruser" = "yes" ] && {   # if "no", x11docker.CMD.sh is executed in command line $Dockercommand
     case $Initsystem in
-      tini|none)             echo "exec /bin/su - $Benutzer -c '/bin/sh - $Cshare/x11docker.CMD.sh'" ;;
+      tini|none)             echo "exec /bin/su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh" ;;
       runit|openrc|sysvinit) echo "exec /sbin/init" ;;
       systemd)
         echo 'Systemd=/lib/systemd/systemd'
@@ -4035,6 +4066,8 @@ start() {
   }
   echo "  echo 'export HOME=\"$Benutzerhome\"'"
   echo "  echo 'cd \"\$HOME\"'"
+  [ "$Workdir" ] && echo "  echo 'cd $Workdir'"
+
   echo "  echo ''"
   
   [ -n "$Newdisplay" ]           && {
@@ -4043,9 +4076,9 @@ start() {
   }
   [ "$Xauthentication" = "yes" ] && echo "  echo 'export XAUTHORITY=$Cshare/Xclientcookie'"
   [ "$Xserver" = "--nothing" ]   && echo "  echo 'unset DISPLAY WAYLAND_DISPLAY XAUTHORITY'"
+  [ "$Dbusdaemon" = "yes" ] && Dbuslaunch="yes"
   [ "$Dbuslaunch" = "yes" ] && {
     echo "  echo ''"
-    
     echo "  echo 'Dbus=\"\$(dbus-launch --help >/dev/null 2>&1 && echo dbus-launch)\"'"
     echo "  echo '[ -z \"\$Dbus\" ] && Dbus=\"\$(dbus-run-session --help >/dev/null 2>&1 && echo dbus-run-session)\"'"
     echo "  echo '[ -z \"\$Dbus\" ] && echo \"x11docker WARNING: Did not find dbus-launch or dbus-run-session (option --dbus).\" >&2'"
