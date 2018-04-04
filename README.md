@@ -68,11 +68,12 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
  - x11docker shows warnings if something is insecure, missing or going wrong. 
  - Use option `--verbose` to see logfile output, too. 
    - Use options `--stdout --stderr` without `--verbose` to see only application output. 
+   - You can find the latest dispatched logfile at `~/.cache/x11docker/x11docker.log`.
  - Some applications need more privileges or capabilities than x11docker provides as default.
    - Reduce container isolation with options `--hostipc --hostnet --cap-default --sys-admin` and try again. If the application runs, reduce this insecure options to encircle the issue.
    - You can run container application as root with `--user=root`.
  - Get help in the [issue tracker](https://github.com/mviereck/x11docker/issues). 
-   - Most times it makes sense to store the `--verbose`output at [pastebin](https://pastebin.com/).
+   - Most times it makes sense to store the `--verbose`output (or `x11docker.log`) at [pastebin](https://pastebin.com/).
 
 # Dependencies
 x11docker can run with standard system utilities without additional dependencies on host or in image. As a core it only needs an `X` server and, of course, [`docker`](https://www.docker.com/) to run docker images on X.
