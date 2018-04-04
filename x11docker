@@ -9,9 +9,11 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # https://github.com/mviereck/x11docker
 
-Version="3.9.8.4"
+Version="3.9.8.5"
 
 changelog() {
+# 05.04.2018 V3.9.8.5   finish() 'docker stop' before creating 'timetosaygoodbye' for more graceful shutdown #37
+#                       minor bugfixes (XAUTHORITY in setup script, User in systemd journal service)
 # 04.04.2018 V3.9.8.4   --workdir: new option
 #                       --systemd/--dbus-system: changed su command to remove sh from pstree
 #                       bugfix user entry in /etc/group
@@ -855,7 +857,6 @@ finish() {              # trap routine, clean up background processes and cache
   local Pid Name Zeit
   trap - EXIT
   verbose "terminating x11docker ..."
-  saygoodbye
   sleep 1 # a bit time for background processes like mywatch() to look for $Timetosaygoodbye (most look once a 1 second)
   [ -s "$Bgpidfile" ] && {
     # check for possible remaining background processes stored in $Bgpidfile
@@ -927,7 +928,7 @@ x11docker --cleanup"
       }
     done < <(tac $Bgpidfile)
   }
-
+  saygoodbye
   sleep 0.5 # a bit time for all processes to finish log output
   [ -n "$Logfile2$Logfile3" ] && $Mksu "cp '$Logfile2' '$Logfile3'"
   rm "$Logfile"
@@ -3482,7 +3483,7 @@ Wants=x11docker-journal.service
 Wants=dbus.service
 [Service]
 Type=simple
-#User=$Benutzer
+#User=$Benutzer # disabled because it does not invoke logind
 #ExecStart=/bin/sh $Cshare/x11docker.CMD.sh
 ExecStart=/bin/su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh
 [Install]
@@ -3503,7 +3504,6 @@ WantedBy=x11docker.target
 Description=x11docker journal log service
 [Service]
 Type=simple
-User=$Benutzer
 ExecStart=/bin/sh -c '/bin/journalctl --follow --no-tail --merge >> $Cshare/journalctl 2>&1'
 [Install]
 WantedBy=x11docker.target
@@ -3642,9 +3642,11 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       }
       
       ###  TEST
-#      Dockercommand="$Dockercommand \\
-#  --security-opt no-new-privileges"
-      
+[ "$TESTMODE" ] && {
+      Dockercommand="$Dockercommand \\
+  --security-opt no-new-privileges"
+}
+
       # SELinux restrictions for containers must be disabled to allow access to X socket. Flags z or Z do not help.
       Dockercommand="$Dockercommand \\
   --security-opt label=type:container_runtime_t"
@@ -3766,7 +3768,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "chmod -c 1777 /tmp/.ICE-unix /tmp/.X11-unix /tmp/.font-unix"
   echo "ln -s $Cshare/X$Newdisplaynumber $Newxsocket"
   echo "ls -l $Newxsocket"
-  echo "export DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie"
+  echo "export DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie"
   echo ""
 
   IFS=$'\n'
@@ -3943,15 +3945,24 @@ start() {
   }
   
   ### TEST
-  #[ "$Dbusdaemon" = "yes" ] && {
-  #  case $Initsystem in
-  #    tini|none)
-  #      echo "echo x11docker: starting polkitd and accounts-daemon"
-  #      echo "/usr/lib/policykit-1/polkitd & "
-  #      echo "/usr/lib/accountsservice/accounts-daemon &"
-  #    ;;
-  #  esac
-  #}
+[ "$TESTMODE" ] && {
+  [ "$Dbusdaemon" = "yes" ] && [ "$Capdropall" = "yes" ] && {
+    echo "mkdir /usr/share/dbus-1/system-services.disabled"
+    echo "mv /usr/share/dbus-1/system-services/org.freedesktop.UPower.service  /usr/share/dbus-1/system-services.disabled/org.freedesktop.UPower.service"
+    echo "mv /usr/share/dbus-1/system-services/org.freedesktop.UDisks2.service /usr/share/dbus-1/system-services.disabled/org.freedesktop.UDisks2.service"
+    case $Initsystem in
+      systemd|tini|none) ;;
+      sysvinit|openrc|runit) echo "dbus-daemon --system --fork" ;;
+    esac
+    echo "for Count in 1 2 3 4 5 6 7 8 9 10; do ls /run/dbus/system_bus_socket 2>/dev/null && break ; sleep 0.1 ; done"
+    echo "echo x11docker: starting polkitd and accounts-daemon"
+    echo "/usr/lib/policykit-1/polkitd &"
+    echo "for Count in 1 2 3 4 5 6 7 8 9 10 ; do pkaction >/dev/null 2>&1 && break ; sleep 0.1 ; done"
+    #echo "echo x11docker: Output of pkaction:"
+    #echo "pkaction"
+    echo "/usr/lib/accountsservice/accounts-daemon &"
+  }
+}
   
   echo ""
   echo ":> /tmp/x11docker.setupready"
