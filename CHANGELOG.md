@@ -12,7 +12,7 @@ Project website: https://github.com/mviereck/x11docker
 - Follow guidelines of [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 - Stricter compliance to [Semantic Versioning](https://semver.org/) rules.
 
-## [3.9.9] - 2018-04-06
+## [3.9.9](https://github.com/mviereck/x11docker/tree/8abded01de9482ef70195550f936c9f07668b486) - 2018-04-06
 - Removed `--security-opt=no-new-privileges` for `--systemd`/`--sysvinit`/`--runit`/`--openrc`. (Undoes some changes from V3.9.8.1). Will be reintroduced after further checks, caused issues with `x11docker/deepin` and `x11docker/cinnamon`.
 - `--env`: set environment variables in `docker run`, too. Makes them available within `docker exec`.
 
@@ -367,11 +367,174 @@ Project website: https://github.com/mviereck/x11docker
 ## [3.6.3](https://github.com/mviereck/x11docker/tree/63410b85f617b3449c48212dda9d0e74ec6327bf) - 2017-10-20
 - **new option** `--no-internet`; adjustments for CentOS/RHEL, Arch and Manjaro
 
-## [3.6.2] - 2017-10-10
-- **new option** `--xfishtank`; better SELinux support; `--scale` and `--size` for `--xorg`
+## [3.6.2.12](https://github.com/mviereck/x11docker/tree/e907bd364ed591fc1087fa64005f4f890345d43f) - 2017-10-18
+ -  **bugfix**: dbus-launch disturbed gksu
 
-## [3.6.1] - 2017-08-15
-- **new option**s `--stdout` and `--stderr`; support stdin
+## [3.6.2.11](https://github.com/mviereck/x11docker/tree/a21a9d8cca6483b8c29b50e0a77b348867325e04) - 2017-10-18
+ -  CentOS/RHEL workaround: insist on root or gksu; terminal password prompt causes docker to terminate regardless of nohup
+
+## [3.6.2.10](https://github.com/mviereck/x11docker/tree/18506dee00b987b0acaca9ed84531e3aadb07f8f) - 2017-10-17
+ -  **bugfixes** in terminal-emulator setup for password prompt and pull question (2)
+
+## [3.6.2.9](https://github.com/mviereck/x11docker/tree/c4fcfac53be978322831fcad4a6b671598faa19f) - 2017-10-17
+ -  **bugfixes** in terminal-emulator setup for password prompt and pull question
+ -  xpra: `--file-transfer=off` (stores files in "Downloads" from host, useless here)
+
+## [3.6.2.8](https://github.com/mviereck/x11docker/tree/dc36c1d29958cdf48a8c45ec791220f869026cd1) - 2017-10-12
+ -  `--xdummy`/`--xpra`: add multiple modelines for virtual display sizes to allow flexible changes of xpra client desktop window
+ -  `--xpra`: virtual display size always equal with physical display, create smaller mode in xinitrc -> allow fullscreen
+ -  xpra: disable some unused, but possibly leaking features (forwarding of webcam, notifications, printer)
+ -  xpra: set xpra specific environment variables in dockerrc
+ -  xpra: show keyboard shortcuts
+
+## [3.6.2.7](https://github.com/mviereck/x11docker/tree/51c5dab789c335d87c4d11c5ad91ebe7477766f1) - 2017-10-08
+ -  `--xephyr`: title for Xephyr windows
+ -  `--xephyr`: Xnest as fallback for missing Xephyr
+ -  `--xpra` `--desktop` hint: screensize bug fixed since xpra v2.2-r17117
+
+## [3.6.2.6](https://github.com/mviereck/x11docker/tree/4d94c7eb5dc690e8a22135394cb2e9d4dd3ba9ab) - 2017-10-07
+ -  **bugfix**: `--xpra` `--desktop`: use start-desktop instead of shadow
+
+## [3.6.2.5](https://github.com/mviereck/x11docker/tree/72e8afc59750310ac621c10c5ddcaf826bc167f2) - 2017-10-05
+ -  no_xhost() after cookie creation avoids xhost warning on Xwayland
+ -  `--output-count` in `--auto` mode: choose `--weston-xwayland`
+ -  `--display`: allow : before display number
+ -  sh instead of bash to run x11docker_CMD
+
+## [3.6.2.4](https://github.com/mviereck/x11docker/tree/8ab3d12af1c14b437870788b72615eb89d0bfa0a) - 2017-09-27
+ -  `--starter`: missing xdg-user-dir is no longer an error
+ -  `--silent`: redirect stderr already while parsing
+ -  `--user=root`: disable `--cap-drop=`ALL
+ -  `--help`: update usage info
+ -  weston.ini: background color and zoom-in effect
+ -  **bugfix** `--xonly`: do not fail if docker daemon is not running
+ -  use Kwin/Kwin-Xwayland as fallback for Weston/Weston-Xwayland
+ -  catch closing xpra client in every case, not only in desktop mode
+ -  parsing cli options: check for remaining arguments $# instead of empty $1
+
+## [3.6.2.3](https://github.com/mviereck/x11docker/tree/a24de4ad106ffa1c2c671a53c3c16582efe1ad14) - 2017-09-19
+ -  `--xorg`: only run setxkbmap in xinitrc if $Hostdisplay is set
+
+## [3.6.2.2](https://github.com/mviereck/x11docker/tree/e137d771026424dcf4d0bbfc83bfec94195448c5) - 2017-09-18
+ -  `--xpra` `--scale` in desktop mode: regard different `--dpi` behaviour since xpra v2.2
+ -  `--help`: update usage info
+ -  setxkbmap for Xorg like for Xephyr, too
+ -  weston.ini: added panel-position=none, different syntax for different weston versions (seen in Arch Linux).
+ -  x11docker_CMD: replace shell with "exec $Imagecommand" (only if stdin is empty)
+
+## Version: [3.6.2.1](https://github.com/mviereck/x11docker/tree/3bffa70a029722a3aeeb6137720f0270bd359e3d)
+ -  `--home`: avoid creating $Adduserhomefolder with wrong restrictions if $Hostuser is different from $Benutzer
+ -  removed z flag in docker command, not needed with current SELinux solution
+ -  `--weston`[-xwayland]: no output section on tty without `--scale`, `--size` or `--rotate`
+ -  `--weston`[-xwayland]: allow `--size` on tty, though only "real" resolutions will take effect
+ -  `--xorg`: `--scale`, `--size`: change primary monitor only, will do better on multi monitor setup
+ -  **bugfixes** in part:check screensize
+ -  **bugfix**: watch for closing xpra client in desktop mode to avoid invisible remaining x11docker
+ -  **bugfix**: `--xdummy` `--gpu` now possible on tty, too
+ -  **bugfix**: `--xorg` on tty: do not set screen size without `--size`.
+
+## [3.6.2](https://github.com/mviereck/x11docker/tree/d223b1b97d3c98b6dcf4769152122ee5e2e9dbc8) - 2017-10-10
+ -  **bugfix** `--sharedir`, `--homedir`: allow whitespaces in path
+ -  **bugfix** `--cachedir`: path must not contain whitespaces -> error()
+ -  `--westonini`: regard for `--xpra-xwayland` and `--xdummy-xwayland`, too.
+ -  **bugfix** `--westonini`: allow whitespaces in path
+ -  **bugfix** `--pulseaudio`: remove tcp module, store id in file to not loose it in subshell
+ -  **bugfix** `--exe`: support of `--stdout` and `--stderr`
+ -  **bugfix** error()/finish(): reliable error code before cache folder creation
+ -  **bugfix** weston on tty: clean logfile&pidfile to allow second weston
+ -  $PATH: adding /usr/games:/usr/local/bin. Can miss for root, but may be needed for `--exe` and `--xfishtank`
+ -  check for X extension Security with xdpyinfo
+ -  `--clipboard` for `--hostdisplay`: enable `--trusted` and -ipc, show warning.
+ -  xpra startup after xinitrc, not inside. for better error handling
+ -  removed ps loop in dockerrc, not needed anymore due to "docker run" in subshell
+ -  waitforlogentry(): Just return 0 or 1 instead of calling error()
+ -  `--xfishtank`: **new option** to run xfishtank on new X server
+ -  changed logfile handling, move log from /tmp to $Sharefolder after tail -F
+
+## [3.6.1.11](https://github.com/mviereck/x11docker/tree/27861a05fb0fd28f51a8358ae37ab877913aa146) - 2017-08-28
+ -  clean check for stdin, no more workaround
+
+## [3.6.1.10](https://github.com/mviereck/x11docker/tree/cbb904ef2b2c94ccda76aec9f6a59b68dcb854c2) - 2017-08-27
+ -  `--nothing`: no check for successfull startup, avoids error message for short-timed cli commands
+ -  `--showenv`: wait for output until X is ready
+
+## [3.6.1.9](https://github.com/mviereck/x11docker/tree/d50ecb314b5d96110b59796493bc983a46a5c780) - 2017-08-25
+ - **bugfix**: `--home`: remove debugging error message
+
+## [3.6.1.8](https://github.com/mviereck/x11docker/tree/e3a49cbe95522a79128e9af8feede4b04074a96b) - 2017-08-25
+ - **bugfix** `--orphaned`: did not find cache folder
+ - provide stdin to host exe, too (`--exe`)
+ - **bugfix** `--hostuser`: cache folder created with root ownership
+ - `--silent`: supress error dialog box, too
+ - more reliable exit code 1 on error
+
+## [3.6.1.7](https://github.com/mviereck/x11docker/tree/427a937a53c81b3bf98621aeb668048d4a8e913a) - 2017-08-22
+ - removed color from verbose, looks strange in logfile
+ - **bugfix** installer: check for installed unzip
+
+## [3.6.1.6](https://github.com/mviereck/x11docker/tree/699392d7579e3962d099cf495dc254fde4e9bf97) - 2017-08-22
+ - code cleanup
+ - changed window manager priority
+ - SELinux: ``--security-opt` label=type:container_runtime_t` allows access to X unix socket
+ - `--xorg`: avoid searching for native resolution if `--scale` is set.
+ - `--xorg`: improved check for failed panning
+ - Logfile created in /tmp, moved later to $Cacherootfolder, to catch early messages
+ - **bugfix**: trap -EXIT avoids double finish. faster shutdown now.
+ - code cleanup in variable definitions and option parsing
+
+## [3.6.1.5](https://github.com/mviereck/x11docker/tree/34ac2a9bdc63b2d2bcaebc06bed3e3bdcc92845c) - 2017-08-21
+ - **bugfix**: broken stdin pipe if running as root
+ - mkdir -p in installer for tmp folder: -p was missing, could cause error
+ - declare note() in xinitrc
+ - `--scale` support for `--xorg`
+ - `--size` without `--scale` for `--xorg`: first try `--mode`, than panning
+
+## [3.6.1.4](https://github.com/mviereck/x11docker/tree/de1b34d32b5a08b269ebab5c7695d17f59eb16b7) - 2017-08-19
+ - **bugfix**: wrong file descriptor for messages before part init()
+ - strange **bugfix**: passwordless sudo -n on fedora did not work with x11docker-gui started from menu instead of cli, without -n is ok
+ - beesu: new frontend for `--pw` available on fedora
+ - do not test for passwordless docker if `--pw` is set
+ - create non-existing shared home folder for user different from host user if running as root
+ - more verbose cache folder names, now with image name and X server in use
+
+## [3.6.1.3](https://github.com/mviereck/x11docker/tree/17dd6a39f5256be816cd22327a34f70e1845cf07) - 2017-08-17
+ - minor **bugfix** installer: did not find icon at new location
+
+## [3.6.1.2](https://github.com/mviereck/x11docker/tree/53839badad3e440057cd5a2ef122b38616b50a95) - 2017-08-15
+ - `--resizeable`: **deprecated**. Xephyr can crash if resized.
+ - no |tee to $Xtermlogfile on `docker pull`: better interactive output
+
+## Version: 3.6.1.1
+ - timeout 3600 for xauth cookie creation. Needed to avoid cookie timeout on `docker pull`
+
+## [3.6.1](https://github.com/mviereck/x11docker/tree/cf56d6b5039c634934644051c6b75ea5218060ac) - 2017-08-15
+ - `--stdout` and `--stderr`: **new option**s showing stdout and stderr of imagecommand
+ - forward stdin of x11docker to image command
+ - `--silent`: **new option** supressing all x11docker terminal messages
+ - x11docker-gui trys to use image x11docker/kaptain if kaptain is not installed
+
+## [3.6.0.5](https://github.com/mviereck/x11docker/tree/1f309fa8970b972b58eaa22d03c43c958bc7d783) - 2017-08-14
+ - **bugfix** opensuse: cookie creation failed due to different xauth behaviour
+ - **bugfix** sudo: do not prompt for password for `docker stop` in finish(), rather fail stopping
+ - note() instead of warning() for less urgent messages
+
+## [3.6.0.4](https://github.com/mviereck/x11docker/tree/ae2e6ec386c43d724c635484bdc3b005ed42fcdf) - 2017-08-14
+ - minor **bugfix**: do not complain about missing docker daemon on `--xonly`
+
+## [3.6.0.3](https://github.com/mviereck/x11docker/tree/50b48ea0088c9f1742af0b4d97cac1e26db54699) - 2017-08-13
+ - xpra dpi warning only if `--dpi` or `--scale` is set
+ - cookie failure warning for untrusted cookies only
+ - **bugfix** installer: remove older installations in /usr/local/bin
+
+## [3.6.0.2](https://github.com/mviereck/x11docker/tree/0f2c38b69a0645f3c7df1ccae0e02389a5199631) - 2017-08-13
+ - **bugfix** preventing `--xorg` from console if running in subshell
+ - **bugfix** in finish(): check for still running container with ps, too. formerly root only could detect it
+ - check for running docker daemon with $Dockerdaemon instead of ifconfig
+ - do not disable SELinux if `--ipc` is set
+ - **bugfix** fedora: `--xorg`: add -keeptty if running from tty
+
+## [3.6.0.1](https://github.com/mviereck/x11docker/tree/01baffa250c048988f64beeb4ddf05660a766639) - 2017-08-12
+ - minor **bugfix** `--gpu`: :rw,z does not work for `--device`
 
 ## [3.6.0] - 2017-08-12
 - workaround: disabling SELinux for container until solution for sharing unix socket is found.
