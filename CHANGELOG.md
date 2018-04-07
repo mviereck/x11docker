@@ -8,9 +8,9 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [4.0.0] - 2018-04-07
 ### Changed
-- Outsourced changelog from x11docker source code to `CHANGELOG.md` [(#38)](https://github.com/mviereck/x11docker/issues/38)
-- Follow guidelines of [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
-- Stricter compliance to [Semantic Versioning](https://semver.org/) rules. [(#38)](https://github.com/mviereck/x11docker/issues/38)
+- Outsourced changelog from x11docker source code to `CHANGELOG.md`. [(#38)](https://github.com/mviereck/x11docker/issues/38)
+- Follow guidelines of [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
+- Stricter compliance to [Semantic Versioning](https://semver.org/) rules.
 
 ## [3.9.9] - 2018-04-06
 - Removed `--security-opt=no-new-privileges` for `--systemd`/`--sysvinit`/`--runit`/`--openrc`. (Undoes some changes from V3.9.8.1). Will be reintroduced after further checks, caused issues with `x11docker/deepin` and `x11docker/cinnamon`.
