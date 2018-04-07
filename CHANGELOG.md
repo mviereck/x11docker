@@ -9,6 +9,7 @@ Project website: https://github.com/mviereck/x11docker
 ## [4.0.0] - 2018-04-07
 ### Changed
 - Outsourced changelog from x11docker source code to `CHANGELOG.md` [(#38)](https://github.com/mviereck/x11docker/issues/38)
+- Follow guidelines of [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 - Stricter compliance to [Semantic Versioning](https://semver.org/) rules. [(#38)](https://github.com/mviereck/x11docker/issues/38)
 
 ## [3.9.9] - 2018-04-06
