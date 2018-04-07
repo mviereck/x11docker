@@ -41,7 +41,7 @@ Project website: https://github.com/mviereck/x11docker
 - Removed Xtermlogfile,  using Dockerlogfile instead. Strange: solved missing output with `--pw=su` or `--pw=sudo`, too.
 - Escape special characters in `--env`, `ENV` and image command. (adresses [#34](https://github.com/mviereck/x11docker/issues/34), too, now solved better)
 
-## [3.9.7.9] - 2018-03-31
+## [3.9.7.9](https://github.com/mviereck/x11docker/tree/7776de0f3128a679239037567626cca09f472ee5) - 2018-03-31
 - Store parsed parts of $Imagecommand in single backticks to allow constructs like:  `sh -c "cd /etc ; xterm"`
 - **bugfix**: add `--rm` to docker run for environment check
 
@@ -62,7 +62,7 @@ Project website: https://github.com/mviereck/x11docker
 - `--sysvinit`: change `rc.local` in setupscript instead of overwriting it with shared volume
 - `--openrc`, `--runit`: create service in setupscript, drop some more capabilities
 
-## [3.9.7.4] - 2018-03-26
+## [3.9.7.4](https://github.com/mviereck/x11docker/tree/85f1f29855090d2dba9328e9184f23365f4f1a6f) - 2018-03-26
 - **new option** `--sysvinit` for init system SysVinit in container. Tested with devuan.
 - **bugfix** `--pulseaudio`: need to set environment variable `PULSE_SERVER`
 - `--runit`: add softlink for X socket in `x11docker.CMD.sh` for compatibility with `runit` on debian
@@ -227,7 +227,7 @@ Project website: https://github.com/mviereck/x11docker
 - run docker command with script -c to provide fake tty
 - change /tmp/fakehome to /home/fakehome
 
-## [3.9.0.3] - 2017-12-17
+## [3.9.0.3](https://github.com/mviereck/x11docker/tree/0b48a998d8f6c53636b3197899e0bacb002227c8) - 2017-12-17
 - switched back to /tmp/fakehome to avoid CHOWN and issues with `--sharedir`
 - drop `--cap-add` CHOWN
 - **bugfix** `--sudouser`, failed to start
@@ -422,7 +422,7 @@ Project website: https://github.com/mviereck/x11docker
  -  weston.ini: added panel-position=none, different syntax for different weston versions (seen in Arch Linux).
  -  x11docker_CMD: replace shell with "exec $Imagecommand" (only if stdin is empty)
 
-## Version: [3.6.2.1](https://github.com/mviereck/x11docker/tree/3bffa70a029722a3aeeb6137720f0270bd359e3d)
+## [3.6.2.1](https://github.com/mviereck/x11docker/tree/3bffa70a029722a3aeeb6137720f0270bd359e3d) - 2017-09-15
  -  `--home`: avoid creating $Adduserhomefolder with wrong restrictions if $Hostuser is different from $Benutzer
  -  removed z flag in docker command, not needed with current SELinux solution
  -  `--weston`[-xwayland]: no output section on tty without `--scale`, `--size` or `--rotate`
@@ -504,7 +504,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--resizeable`: **deprecated**. Xephyr can crash if resized.
  - no |tee to $Xtermlogfile on `docker pull`: better interactive output
 
-## Version: 3.6.1.1
+## [3.6.1.1](https://github.com/mviereck/x11docker/tree/133c26e737ac7936b894c30e01ee8f454374db97) -2017-08-16
  - timeout 3600 for xauth cookie creation. Needed to avoid cookie timeout on `docker pull`
 
 ## [3.6.1](https://github.com/mviereck/x11docker/tree/cf56d6b5039c634934644051c6b75ea5218060ac) - 2017-08-15
@@ -536,7 +536,7 @@ Project website: https://github.com/mviereck/x11docker
 ## [3.6.0.1](https://github.com/mviereck/x11docker/tree/01baffa250c048988f64beeb4ddf05660a766639) - 2017-08-12
  - minor **bugfix** `--gpu`: :rw,z does not work for `--device`
 
-## [3.6.0] - 2017-08-12
+## [3.6.0](https://github.com/mviereck/x11docker/tree/d580a477617fb7d32da263a5408a82c01756fef1) - 2017-08-12
 - workaround: disabling SELinux for container until solution for sharing unix socket is found.
 - compare: http://www.projectatomic.io/blog/2015/06/using-volumes-with-docker-can-cause-problems-with-selinux/
 - install to /usr/bin instead of /usr/local/bin to support root
@@ -576,7 +576,7 @@ Project website: https://github.com/mviereck/x11docker
 - `--fullscreen`. Set fullscreen screen size for windowed options (xpra),too
 - allow root to start x11docker, use $(logname) for X server and as container user
 
-## [3.5.11] - 2017-07-12
+## [3.5.11](https://github.com/mviereck/x11docker/tree/27f52c9edb28518568e8f6881a1300ca4aea4f2b) - 2017-07-12
 - pull image if not available before calling `docker run`
 
 ## [3.5.10](https://github.com/mviereck/x11docker/tree/dbd85cfc9f26948ddf8e27075923ff673dc5a89b) - 2017-07-12
