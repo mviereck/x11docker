@@ -10,7 +10,7 @@ Running graphical applications or desktop environments in docker images is effec
  - No obliging [dependencies](#dependencies) on host beside X and docker. Recommended: `xpra` and `Xephyr`.
  - [Wayland](#wayland) support.
  - [Optional features](#options): 
-   - [Persistent data storage](#shared-folders) with shared host folders.
+   - [Persistent data storage](#shared-folders-and-home-in-container) with shared host folders and a persistant `HOME` in container.
    - [Sound](#sound) with pulseaudio or ALSA.
    - [Hardware acceleration](#hardware-acceleration) for OpenGL.
    - [Clipboard](#clipboard) sharing.
@@ -136,7 +136,7 @@ x11docker assumes that you want to run a single application in seamless mode, i.
     - If neither `xpra` nor `nxagent` are installed, but x11docker finds a desktop capable X server like `Xephyr`, it avoids insecure option `--hostdisplay` and runs Xephyr with a host window manager.
     - You can specify a host window manager with option `--wm WINDOWMANAGER`, for example `--wm openbox`.
   - Desktop mode is supported with all X server options except `--hostdisplay`. If available, x11docker prefers `Xephyr` and `nxagent` 
-## Shared folders
+## Shared folders and HOME in container
 Changes in a running docker image are lost, the created docker container will be discarded. For persistent data storage you can share host directories:
  - Option `--home` creates a host directory in `~/x11docker/IMAGENAME` that is shared with the container and mounted as home directory. Files in container home and configuration changes will persist. 
  - Option `--sharedir DIR` mounts a host directory at the same location in container without setting `HOME`.
