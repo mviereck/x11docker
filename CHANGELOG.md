@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [4.0.1](https://github.com/mviereck/x11docker/releases/tag/v4.0.1) - 2018-04-08
 ### Added
  - `--update-master` updates to lastest x11docker master version. (Formerly job of `--update`).
 ### Changed
