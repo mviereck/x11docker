@@ -52,7 +52,8 @@ For manual installation, make x11docker executable with `chmod +x x11docker` and
 ### Installation options
 As root, you can install, update and remove x11docker on your system:
  - `x11docker --install` : install x11docker and x11docker-gui from current directory. 
- - `x11docker --update` : download and install latest version from github.
+ - `x11docker --update` : download and install latest [release](https://github.com/mviereck/x11docker/releases) from github.
+ - `x11docker --update-master` : download and install latest master version from github.
  - `x11docker --remove` : remove all files installed by x11docker.
  
 Copies `x11docker` and `x11docker-gui` to `/usr/bin`. Creates an icon in `/usr/share/icons`. Creates `x11docker.desktop` in `/usr/share/applications`. Copies `README.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
