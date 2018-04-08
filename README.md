@@ -56,7 +56,7 @@ As root, you can install, update and remove x11docker on your system:
  - `x11docker --update-master` : download and install latest master version from github.
  - `x11docker --remove` : remove all files installed by x11docker.
  
-Copies `x11docker` and `x11docker-gui` to `/usr/bin`. Creates an icon in `/usr/share/icons`. Creates `x11docker.desktop` in `/usr/share/applications`. Copies `README.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
+Copies `x11docker` and `x11docker-gui` to `/usr/bin`. Creates an icon in `/usr/share/icons`. Creates `x11docker.desktop` in `/usr/share/applications`. Copies `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
 ### Shortest way for first installation:
 ```
 wget https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker -O /tmp/x11docker
