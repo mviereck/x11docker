@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Changed
+ - Mount nothing into `/tmp` as init cleanups may try (and fail) to delete it. 
+ - Write or link into `/tmp` only _after_ possible init cleanup.
+ - Mount X socket r/w again as there is no longer a risk due to `/tmp` cleanups.
+### Fixed
+ - Mount `WAYLAND_DISPLAY` and `DISPLAY` at `/` instead of `/x11docker/` in container. 
+   Avoids a docker bug that only sometimes causes startup failure `stat /run/user/1000/wayland-600: no such file or directory`.
+   docker sometimes seemes to be confused about a mount point inside of a mount point. Avoiding that now. 
+   However, issue only seen with shared Wayland sockets and never with X sockets, maybe due to different option positions in `docker run` command.
+ - `--workdir`: Avoid double setting of `--workdir` in docker command if x11docker option `--workdir` is set. Caused no trouble, though.
+
 ## [4.1.0](https://github.com/mviereck/x11docker/releases/tag/v4.1.0) - 2018-04-08
 ### Added
  - `--update-master` updates to lastest x11docker master version. (Formerly job of `--update`).
