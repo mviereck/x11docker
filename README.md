@@ -362,11 +362,11 @@ Now you can access the dockered web application at http://localhost:8085. A samp
 ## VNC
 Sample setup for VNC access:
 ```
-read Xenv < <(x11docker --xdummy  x11docker/lxde pcmanfm)
-echo $Xenv && export $Xenv
-x11vnc -localhost -noshm
+read Xenv < <(x11docker --xdummy --showenv x11docker/lxde)
+echo $Xenv
+env $Xenv x11vnc -noshm -forever -localhost -rfbport 5910
 ```
-In another terminal, start VNC viewer with `vncviewer localhost:0`.
+In another terminal, start VNC viewer with `vncviewer localhost:5910`.
 See `man x11vnc`  for many details and further infos.
 Option `-noshm` disables shared memory (MIT-SHM). To allow shared memory, remove `-noshm` and use isolation breaking x11docker option `--hostipc`.
  
