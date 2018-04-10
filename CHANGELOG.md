@@ -12,11 +12,11 @@ Project website: https://github.com/mviereck/x11docker
  - Write or link into `/tmp` only _after_ possible init cleanup.
  - Mount X socket r/w again as there is no longer a risk due to `/tmp` cleanups.
  - `--debug`: Experimental changes for more useful debugging output.
- - `--update`/`--update-master`: Show excerpt of CHANGELOG.md.
+ - `--update`/`--update-master`: Show excerpt of `CHANGELOG.md`.
 ### Fixed
  - Mount `WAYLAND_DISPLAY` and `DISPLAY` at `/` instead of `/x11docker/` in container. 
    Avoids a docker bug that only sometimes causes startup failure `stat /run/user/1000/wayland-600: no such file or directory`.
-   docker sometimes seemes to be confused about a mount point inside of a mount point. Avoiding that now. 
+   Occasionally docker is confused about a mount point inside of a mount point. Avoiding that now. 
    However, issue only seen with shared Wayland sockets and never with X sockets, maybe due to different option positions in `docker run` command.
  - `--workdir`: Avoid double setting of `--workdir` in docker command if x11docker option `--workdir` is set. Caused no trouble, though.
 
