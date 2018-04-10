@@ -11,7 +11,8 @@ Project website: https://github.com/mviereck/x11docker
  - Mount nothing into `/tmp` as init cleanups may try (and fail) to delete it. 
  - Write or link into `/tmp` only _after_ possible init cleanup.
  - Mount X socket r/w again as there is no longer a risk due to `/tmp` cleanups.
- - `--debug`: experimental changes for more useful debugging output.
+ - `--debug`: Experimental changes for more useful debugging output.
+ - `--update`/`--update-master`: Show excerpt of CHANGELOG.md.
 ### Fixed
  - Mount `WAYLAND_DISPLAY` and `DISPLAY` at `/` instead of `/x11docker/` in container. 
    Avoids a docker bug that only sometimes causes startup failure `stat /run/user/1000/wayland-600: no such file or directory`.
