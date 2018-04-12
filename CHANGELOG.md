@@ -8,6 +8,8 @@ Project website: https://github.com/mviereck/x11docker
 ## [Unreleased]
 ### Changed
  - Outsourced `x11docker.png` from `x11docker-gui`.
+### Fixed
+ - Don't share or link `/tmp/.Xn-lock` as usefulness is in doubt. Avoids issues with `x11docker/xwayland`.
 
 ## [4.1.1](https://github.com/mviereck/x11docker/releases/tag/v4.1.1) - 2018-04-12
 ### Changed
