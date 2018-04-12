@@ -8,6 +8,7 @@ Project website: https://github.com/mviereck/x11docker
 ## [Unreleased]
 ### Changed
  - Outsourced `x11docker.png` from `x11docker-gui`.
+ - `--systemd`: If host does not run `systemd`, create and mount cgroup `/sys/fs/cgroup/systemd`.
 ### Fixed
  - Don't share or link `/tmp/.Xn-lock` as usefulness is in doubt. 
    Avoids issues with `x11docker/xwayland`.
