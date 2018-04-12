@@ -6,7 +6,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 ## [Unreleased]
- - master branch is currently equal with latest release.
+### Changed
+ - Outsourced `x11docker.png` from `x11docker-gui`.
 
 ## [4.1.1]
 ### Changed
