@@ -9,29 +9,40 @@ Project website: https://github.com/mviereck/x11docker
 ### Changed
  - Outsourced `x11docker.png` from `x11docker-gui`.
 ### Fixed
- - Don't share or link `/tmp/.Xn-lock` as usefulness is in doubt. Avoids issues with `x11docker/xwayland`.
+ - Don't share or link `/tmp/.Xn-lock` as usefulness is in doubt. 
+   Avoids issues with `x11docker/xwayland`.
 
 ## [4.1.1](https://github.com/mviereck/x11docker/releases/tag/v4.1.1) - 2018-04-12
 ### Changed
  - Mount nothing into `/tmp` as init cleanups may try (and fail) to delete it. 
  - Write or link into `/tmp` only _after_ possible init cleanup.
  - Mount X socket r/w again as there is no longer a risk due to `/tmp` cleanups.
- - `--debug`: Some changes for more useful debugging output. Drop `set -x` in main code, instead `set -Eu` with `trap ERR`.
+ - `--debug`: Some changes for more useful debugging output. 
+   Drop `set -x` in main code, instead `set -Eu` with `trap ERR`.
  - `--update`/`--update-master`: Show excerpt of `CHANGELOG.md`.
- - Check `ENTRYPOINT` for init entries `/tini|/init|/systemd` and disable it if x11docker already runs an init. (Default: `--tini`.)
+ - Check `ENTRYPOINT` for init entries `/tini|/init|/systemd` and disable it 
+   if x11docker already runs an init. (Default: `--tini`.)
 ### Fixed
- - `x11docker-gui` regards new output of container ID now that confused output of `x11docker/kaptain` and prevented start of `x11docker`.
- - Mount `WAYLAND_DISPLAY` and `DISPLAY` at `/` instead of `/x11docker/` in container. 
-   Avoids a docker bug that only sometimes causes startup failure `stat /run/user/1000/wayland-600: no such file or directory`.
-   Occasionally docker is confused about a mount point inside of a mount point. Avoiding that now. 
-   However, issue only seen with shared Wayland sockets and never with X sockets, maybe due to different option positions in `docker run` command.
- - `--workdir`: Avoid double setting of `--workdir` in docker command if x11docker option `--workdir` is set. Caused no trouble, though.
+ - `x11docker-gui` regards new output of container ID now that confused output
+   of `x11docker/kaptain` and prevented start of `x11docker`.
+ - Mount `WAYLAND_DISPLAY` and `DISPLAY` at `/` instead of `/x11docker/` 
+   in container. 
+   Avoids a docker bug that only sometimes causes startup failure 
+   `stat /run/user/1000/wayland-600: no such file or directory`.
+   Occasionally docker is confused about a mount point inside of a mount point.
+   Avoiding that now. 
+   However, issue only seen with shared Wayland sockets and never with X 
+   sockets, maybe due to different option positions in `docker run` command.
+ - `--workdir`: Avoid double setting of `--workdir` in docker command 
+   if x11docker option `--workdir` is set. Caused no trouble, though.
 
 ## [4.1.0](https://github.com/mviereck/x11docker/releases/tag/v4.1.0) - 2018-04-08
 ### Added
- - `--update-master` updates to lastest x11docker master version. (Formerly job of `--update`).
+ - `--update-master` updates to lastest x11docker master version. 
+   (Formerly job of `--update`).
 ### Changed
- - `--update` updates to latest x11docker release on github. (Formerly: latest master version).
+ - `--update` updates to latest x11docker release on github. 
+   (Formerly: latest master version).
 
 ## [4.0.0](https://github.com/mviereck/x11docker/releases/tag/v4.0.0) - 2018-04-07
 ### Changed
@@ -39,20 +50,26 @@ Project website: https://github.com/mviereck/x11docker
  - Follow guidelines of [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
  - Stricter compliance to [Semantic Versioning](https://semver.org/) rules.
 ### Notes
- - Previous version links in changelog lead to history tree leafs with corresponding `x11docker` script.
+ - Previous version links in changelog lead to history tree leafs with 
+   corresponding `x11docker` script.
  - Upcoming version links in changelog will lead to corresponding [releases](https://github.com/mviereck/x11docker/releases).
 
 ## [3.9.9](https://github.com/mviereck/x11docker/blob/8abded01de9482ef70195550f936c9f07668b486/x11docker) - 2018-04-06
 ### Changed
- - Removed `--security-opt=no-new-privileges` for `--systemd`/`--sysvinit`/`--runit`/`--openrc`. (Undoes some changes from V3.9.8.1). Will be reintroduced after further checks, caused issues with `x11docker/deepin` and `x11docker/cinnamon`.
- - `--env`: set environment variables in `docker run`, too. Makes them available within `docker exec`.
+ - Removed `--security-opt=no-new-privileges` for 
+   `--systemd`/`--sysvinit`/`--runit`/`--openrc`.  (Undoes some changes 
+   from V3.9.8.1). Will be reintroduced after further checks, caused issues 
+   with `x11docker/deepin` and `x11docker/cinnamon`.
+ - `--env`: set environment variables in `docker run`, too. 
+   Makes them available within `docker exec`.
 
 ## [3.9.8.5](https://github.com/mviereck/x11docker/blob/6227a1eebc5b63df305822896d7360a14440caf4/x11docker) - 2018-04-05
 ### Changed
- - `finish()`: run `docker stop` before creating `timetosaygoodbye` for more graceful shutdown [(#37)](https://github.com/mviereck/x11docker/issues/37)
+ - `finish()`: run `docker stop` before creating `timetosaygoodbye` for 
+   more graceful shutdown [(#37)](https://github.com/mviereck/x11docker/issues/37)
 ### Fixed
- - Set correct `XAUTHORITY` in setup script
- - Disable `User` in systemd journal service, can fail in restricted setups
+ - Set correct `XAUTHORITY` in setup script.
+ - Disable `User` in systemd journal service, can fail in restricted setups.
 
 ## [3.9.8.4](https://github.com/mviereck/x11docker/blob/d74fa2defceb538d8c9e90932d48f23cae0f102b/x11docker) - 2018-04-04
 ### Added
@@ -64,28 +81,37 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [3.9.8.3](https://github.com/mviereck/x11docker/blob/6ce5d2cbd7a14556723a3c8e1163988f2ddda8ce/x11docker) - 2018-04-04
 ### Fixed
- - `--dbus-system`: must not set `--security-opt=no-new-privileges`, important services like `polkitd` fail.
+ - `--dbus-system`: must not set `--security-opt=no-new-privileges`, 
+   important services like `polkitd` fail.
 
 ## [3.9.8.2](https://github.com/mviereck/x11docker/blob/a58e6808254ce78eb528010584ff9d7ef9b8aa26/x11docker) - 2018-04-03
 ### Changed
- - disable entrypoint `tini` if x11docker already runs an init system (default: `--tini`/`docker-init` from docker). ([#34](https://github.com/mviereck/x11docker/issues/34))
+ - disable entrypoint `tini` if x11docker already runs an init system 
+   (default: `--tini`/`docker-init` from docker). ([#34](https://github.com/mviereck/x11docker/issues/34))
 
 ## [3.9.8.1](https://github.com/mviereck/x11docker/blob/75f79c9888beee08ca08c42c5f70feaa0f02cd30/x11docker) - 2018-04-03
 ### Changed
- - `--security-opt=no-new-privileges` now always set except for `--sudouser`. It does not harm switching from root to less privileged users. _(Note: is undone in v3.9.9)_
- - setup script with user switching: `exec su` instead of `su` to avoid root shell in parent tree. `su` is now immediate child of `init`.
+ - `--security-opt=no-new-privileges` now always set except for `--sudouser`.
+   It does not harm switching from root to less privileged users. 
+   _(Note: is undone in v3.9.9)_
+ - setup script with user switching: `exec su` instead of `su` to avoid 
+   root shell in parent tree. `su` is now immediate child of `init`.
 ### Added
- - show container ID on stdout ([#36](https://github.com/mviereck/x11docker/issues/36)). Can be catched e.g. with `read containerID < <(x11docker [...] )`.
+ - show container ID on stdout ([#36](https://github.com/mviereck/x11docker/issues/36)). 
+   Can be catched e.g. with `read containerID < <(x11docker [...] )`.
 
 ## [3.9.8.0](https://github.com/mviereck/x11docker/blob/a4067993a91f39bce145b48406453f786d1707eb/x11docker) - 2018-04-02
 ### Changed
- - Removed `Xtermlogfile`, using `Dockerlogfile` instead. Strange: solved missing output with `--pw=su` or `--pw=sudo`, too.
+ - Removed `Xtermlogfile`, using `Dockerlogfile` instead. 
+   Strange: solved missing output with `--pw=su` or `--pw=sudo`, too.
 ### Fixed
- - Escape special characters in `--env`, `ENV` and image command. (adresses [#34](https://github.com/mviereck/x11docker/issues/34), too, now solved better). _(Note: still have to escape some other optional arguments)_
+ - Escape special characters in `--env`, `ENV` and image command. 
+   (Adresses [#34](https://github.com/mviereck/x11docker/issues/34), too, now solved better). _(Note: still have to escape some other optional arguments)_
 
 ## [3.9.7.9](https://github.com/mviereck/x11docker/blob/7776de0f3128a679239037567626cca09f472ee5/x11docker) - 2018-03-31
 ### Changed
- - Store parsed parts of `Imagecommand` in `''` to allow constructs like:  `sh -c "cd /etc ; xterm"`
+ - Store parsed parts of `Imagecommand` in `''` to allow constructs like
+   `sh -c "cd /etc ; xterm"`
 ### Fixed
  - Added `--rm` to `docker run` of environment check. ([#34](https://github.com/mviereck/x11docker/issues/34))
 
@@ -99,7 +125,7 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [3.9.7.6](https://github.com/mviereck/x11docker/blob/65305faba992415b8b255a4fac7e89c4417e5a1e/x11docker) - 2018-03-30
 ### Changed
- - mount X socket and lockfile read-only to protect from `/tmp` cleanup of init systems
+ - mount X socket and lockfile read-only to protect from `/tmp` init cleanups.
  - minor improvements of init system initialization
 ### Fixed
  - remove checks for `--userns-remap` and `--selinux-enabled`. [(#33)](https://github.com/mviereck/x11docker/issues/33)
@@ -107,20 +133,26 @@ Project website: https://github.com/mviereck/x11docker
 ## [3.9.7.5](https://github.com/mviereck/x11docker/blob/0f0b138db7c2f3093511fae7583b34bc44db3423/x11docker) - 2018-03-30
 ### Changed
  - `--dbus-system`: drop explicit consolekit support
- - `--sysvinit`,`--openrc`: disable getty in inittab instead of overwriting inittab with shared volume
- - `--sysvinit`: change `rc.local` in setupscript instead of overwriting it with shared volume
- - `--openrc`, `--runit`: create service in setupscript, drop some more capabilities
+ - `--sysvinit`,`--openrc`: disable getty in inittab instead of overwriting 
+   inittab with shared volume
+ - `--sysvinit`: change `rc.local` in setupscript instead of overwriting it
+   with shared volume
+ - `--openrc`, `--runit`: create service in setupscript. 
+   Drop some more capabilities
 
 ## [3.9.7.4](https://github.com/mviereck/x11docker/blob/85f1f29855090d2dba9328e9184f23365f4f1a6f/x11docker) - 2018-03-26
 ### Added
  - `--sysvinit` for init system SysVinit in container. Tested with devuan.
 ### Fixed
- - `--pulseaudio`: need to set environment variable `PULSE_SERVER`. (Was missing after switch from tcp to socket connection).
- - `--runit`: add softlink for X socket in `x11docker.CMD.sh` for compatibility with `runit` on debian.
+ - `--pulseaudio`: need to set environment variable `PULSE_SERVER`. 
+   (Was missing after switch from tcp to socket connection).
+ - `--runit`: add softlink for X socket in `x11docker.CMD.sh` for 
+   compatibility with `runit` on debian.
 
 ## [3.9.7.3](https://github.com/mviereck/x11docker/blob/57e34236dca42e05434a304c77f61202d678398a/x11docker) - 2018-03-21
 ### Changed
- - `--pulseaudio`: share socket `XDG_RUNTIME_DIR/pulse` instead of connecting over tcp.
+ - `--pulseaudio`: share socket `XDG_RUNTIME_DIR/pulse` 
+   instead of connecting over tcp.
 
 ## [3.9.7.2](https://github.com/mviereck/x11docker/blob/25201b916159b2f77d6c6188ea875d80004733d1/x11docker) - 2018-03-20
 ### Added
@@ -129,11 +161,12 @@ Project website: https://github.com/mviereck/x11docker
 ### Changed
  - `--wm`: fall back to autodetection if specified window manager not found.
  - `--dbus`: enable automatically for `--runit`, `--openrc`
- - consolekit: enable and use automatically for `--dbus-system`, `--openrc`, `--runit`
+ - consolekit: use automatically with `--dbus-system`, `--openrc`, `--runit`
  - `mywatch()`: use `watch` again, now without `sh -c`
  - `--help`: `usage()` cleanup
 ### Deprecated
- - `--sharewayland`, `--waylandenv`: not needed for anything anymore. `--wayland` does the job.
+ - `--sharewayland`, `--waylandenv`: not needed for anything anymore. 
+   `--wayland` does the job.
 ### Fixed
  - `writeaccess()` handles user group names with spaces in it. [#30](https://github.com/mviereck/x11docker/issues/30)
  - `--env`: regard whitespace. Still need to handle special chars like "\'$.
