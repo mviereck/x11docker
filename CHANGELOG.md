@@ -5,15 +5,19 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html) since version 4.0.0.
 
 Project website: https://github.com/mviereck/x11docker
-
 ## [Unreleased]
+ - master branch is currently equal with latest release.
+
+## [4.1.1]
 ### Changed
  - Mount nothing into `/tmp` as init cleanups may try (and fail) to delete it. 
  - Write or link into `/tmp` only _after_ possible init cleanup.
  - Mount X socket r/w again as there is no longer a risk due to `/tmp` cleanups.
- - `--debug`: Experimental changes for more useful debugging output.
+ - `--debug`: Some changes for more useful debugging output. Drop `set -x` in main code, instead `set -Eu` with `trap ERR`.
  - `--update`/`--update-master`: Show excerpt of `CHANGELOG.md`.
+ - Check `ENTRYPOINT` for init entries `/tini|/init|/systemd` and disable it if x11docker already runs an init. (Default: `--tini`.)
 ### Fixed
+ - `x11docker-gui` regards new output of container ID now that confused output of `x11docker/kaptain` and prevented start of `x11docker`.
  - Mount `WAYLAND_DISPLAY` and `DISPLAY` at `/` instead of `/x11docker/` in container. 
    Avoids a docker bug that only sometimes causes startup failure `stat /run/user/1000/wayland-600: no such file or directory`.
    Occasionally docker is confused about a mount point inside of a mount point. Avoiding that now. 
