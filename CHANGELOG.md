@@ -9,7 +9,7 @@ Project website: https://github.com/mviereck/x11docker
 ### Changed
  - Outsourced `x11docker.png` from `x11docker-gui`.
 
-## [4.1.1]
+## [4.1.1](https://github.com/mviereck/x11docker/releases/tag/v4.1.1) - 2018-04-12
 ### Changed
  - Mount nothing into `/tmp` as init cleanups may try (and fail) to delete it. 
  - Write or link into `/tmp` only _after_ possible init cleanup.
