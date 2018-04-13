@@ -67,8 +67,9 @@ rm /tmp/x11docker
 # Troubleshooting
 For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. 
  - x11docker shows warnings if something is insecure, missing or going wrong. 
- - Use option `--verbose` to see logfile output, too. 
-   - Use options `--stdout --stderr` without `--verbose` to see only application output. 
+ - Use option `--verbose` to see logfile output, too.
+   - Option `--debug` can provide additional informations.
+   - Use options `--stdout --stderr --silent` to get application output only.
    - You can find the latest dispatched logfile at `~/.cache/x11docker/x11docker.log`.
  - Some applications need more privileges or capabilities than x11docker provides as default.
    - Reduce container isolation with options `--hostipc --hostnet --cap-default --sys-admin` and try again. If the application runs, reduce this insecure options to encircle the issue.
