@@ -23,11 +23,11 @@ x11docker: Run GUI applications and desktop environments in docker.
    * Persistent home folders
    * Wayland support
    * Language locale creation
-   * Init system support (systemd, openrc, runit, tini)
+   * Init system support (systemd, SysVinit, OpenRC, runit, tini)
  Focus on security:
    * Avoids X security leaks using additional X servers.
    * Container user is same as host user to avoid root in container.
-   * Default docker container capabilities are dropped.
+   * Restricts container capabilities to bare minimum.
     
 Usage:
 To run a docker image with new X server (auto-choosing X server):
@@ -389,6 +389,9 @@ note() {                # show notice messages
   [ -e "$Logfile" ] && echo "x11docker note: $*
 " >> "$Logfile"
   return 0
+}
+notestdout() {          # write something on stdout
+  echo "$*" >&5
 }
 verbose() {             # show verbose messages
   # only logfile notes here, terminal output is done with tail in part:verbose
@@ -834,6 +837,7 @@ trap finish EXIT
 export IFS=$' \n\t'                                 # set IFS to default
 exec 3>&2                                           # second stderr channel
 exec 4>&2                                           # stderr channel for --stderr
+exec 5>&1                                           # second stdout channel
 pstree -ps $$ | grep -q sshd && Ssh="yes" || Ssh="no"
 tty | grep -q tty && Tty="yes" || Tty="no"          # check if running on X or on tty
 [ "$Tty" = "no" ] && [ -z "$DISPLAY" ] && [ "$Ssh" = "yes" ] && Tty="yes"
@@ -1851,6 +1855,7 @@ Parsed options: $Parsedoptions"
   needing OpenGL. Also, some keys like AltGr may not work. 
   Some applications crash if using the X clipboard.
   You can degrade isolation and allow trusted cookies with option --trusted.
+  You may also need insecure option --hostipc to avoid RAM access errors.
   (Options --gpu and --clipboard enable trusted cookies, too).
   It is recommended to use another X server option like --xpra or --nxagent."
   
@@ -1862,6 +1867,8 @@ Parsed options: $Parsedoptions"
       warning "Option --hostdisplay with trusted cookies provides 
       QUITE BAD CONTAINER ISOLATION !
   Keylogging and controlling host applications is possible!"
+      [ "$Sharehostipc" = "no" ] && warning "Using --hostdisplay with --trusted but without 
+  insecure option --hostipc can lead to graphical issues and RAM access errors."
     }
     [ "$Desktopmode" = "yes" ] && note "Can not avoid to use host window manager
   along with option --hostdisplay. 
@@ -2146,6 +2153,9 @@ Parsed options: $Parsedoptions"
   Cmdstdinfile="$Sharefolder/$Cmdstdinfile"                 && mkfile $Cmdstdinfile
   Cmdstdoutlogfile="$Sharefolder/$Cmdstdoutlogfile"         && mkfile $Cmdstdoutlogfile 666
   Cmdstderrlogfile="$Sharefolder/$Cmdstderrlogfile"         && mkfile $Cmdstderrlogfile 666 
+  
+  # catch stdin (submitted in x11docker.CMD.sh)
+  [ -t 0 ] || cat >> $Cmdstdinfile
 }
 
 { #### part: create $Hostxenv: Environment variables for host X display
@@ -3735,7 +3745,7 @@ start() {
   # create script that needs root permissions or docker group membership to use docker.
   # This is the part the password prompt / $Getroot is needed for.
   echo "#! /bin/bash"
-  declare -f waitforfilecreation verbose warning note escapestring
+  declare -f waitforfilecreation verbose warning note notestdout escapestring
   [ "$Debug" = "yes" ] && {
     echo "PS4='$DebugPS4'"
     echo "set -x"
@@ -3879,7 +3889,7 @@ start() {
   echo "  echo 'export TERM=xterm'"
   echo "  echo ''"
 
-  echo "  echo '[ -e /x11docker.LANG ] && export LANG=\$(cat /x11docker.LANG) '"
+  echo "  echo '[ -e /x11docker.LANG ] && export LANG=\"\$(cat /x11docker.LANG)\"'"
   echo "  echo ''"
   
   [ "$Pulseaudio" = "yes" ] && echo "  echo 'export $Pulseserver'"
@@ -3901,6 +3911,7 @@ start() {
 
   [ -s "$Cmdstdinfile" ] && echo "  echo \"cat $Cshare/stdin | \\\$Dbus \$Entrypoint \$Imagecommand >>$Cshare/stdout 2>>$Cshare/stderr\""
   [ -s "$Cmdstdinfile" ] || echo "  echo                \"exec \\\$Dbus \$Entrypoint \$Imagecommand >>$Cshare/stdout 2>>$Cshare/stderr\""
+
   echo "  echo '# Ready for docker run'"
   echo "} >> $Imagecommandscript"
   
@@ -3914,6 +3925,8 @@ start() {
   echo "[ -z \"\$Containerid\" ] && echo 'x11docker ERROR: Startup of docker failed.' && exit 1"
   echo "echo x11docker: container ID: \$Containerid"
   echo "echo \$Containerid >> $Containeridfile"
+  echo "note 'Container ID:'"
+  echo "notestdout \"\$(cat $Containeridfile)\""
   echo "docker logs -f \$Containerid >> $Dockerlogfile 2>&1 &"
   echo ""
   echo "# wait for container to be ready"
@@ -4318,7 +4331,10 @@ After finish: $Logfile3"
       esac
     }
     # options --stdout, --stderr
-    [ "$Showstdout" = "yes" ] && tail --pid=$$ --retry -n +1 -F $Cmdstdoutlogfile >&1 2>/dev/null &
+    [ "$Showstdout" = "yes" ] && {
+      waitforfilecontent $Containeridfile infinity
+      tail --pid=$$ --retry -n +1 -F $Cmdstdoutlogfile >&1 2>/dev/null
+    } &
     [ "$Showstderr" = "yes" ] && tail --pid=$$ --retry -n +1 -F $Cmdstderrlogfile >&4 2>/dev/null &
 }
 
@@ -4480,9 +4496,6 @@ $(tail $Compositorlogfile)"
       } & storepid $! mywatch
     ;;
   esac
-  
-  # catch stdin (submitted in x11docker.CMD.sh)
-  [ -t 0 ] || cat >> $Cmdstdinfile
 
   #### start docker ####
   case $X11dockermode in
@@ -4520,9 +4533,6 @@ $(tail $Cmdstderrlogfile)"
           }
         }
         storepid $Containerpid container
-        
-        note "container ID:"
-        cat $Containeridfile
         
         # wait for docker until it terminates. bash builtin wait does not work in this case
         ps -p $Containerpid >/dev/null 2>&1 && mywatch "ls $Timetosaygoodbye 2>/dev/null; ps -p $Containerpid -o pid #container" 
@@ -4625,6 +4635,7 @@ $(tail $Compositorlogfile)"
 
 ######### ToDo notes for development
 todo() {
+# --fullscreen: --weston[-x] in weston crashes. Use X backend if DISPLAY is available.
 # work on traperror(). 'set -u' possible without a stop?
 # --update: regard possible location in /opt
 # outsource x11docker.png from x11docker-gui

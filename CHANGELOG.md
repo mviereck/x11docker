@@ -12,6 +12,8 @@ Project website: https://github.com/mviereck/x11docker
 ### Fixed
  - Don't share or link `/tmp/.Xn-lock` as usefulness is in doubt. 
    Avoids issues with `x11docker/xwayland`.
+ - Forward `stdin` again. (Had been disappeared in a subshell)
+ - `--stdout:` Make sure container ID is shown before output of `--stdout`.
 
 ## [4.1.1](https://github.com/mviereck/x11docker/releases/tag/v4.1.1) - 2018-04-12
 ### Changed
