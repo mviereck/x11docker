@@ -3310,6 +3310,17 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   it adds capability SYS_BOOT."
     ;;
   esac
+  
+  case $Initsystem in
+    sysvinit|openrc|runit) 
+      Dbusdaemon="yes"
+      [ "$Sharecgroup" = "no" ] && note "If you want to use elogind in container,
+  you also need to set option --sharecgroup."
+    ;;
+    systemd)
+      Dbusdaemon="yes"
+    ;;
+  esac
 }
 
 { #### part: create command to run docker
@@ -3320,11 +3331,6 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       
       Containername="x11docker_X${Newdisplaynumber}_${Mycookie}_$(echo $Imagename | tr / _ | tr : _ )"
       Dockercommand="$Dockercommand --name=$Containername"
-      
-  
-      case $Initsystem in
-        runit|openrc|systemd|sysvinit) Dbusdaemon="yes" ;;
-      esac
   
       [ "$Benutzeruid" = "0" ]     && Adminusercaps="yes"
       [ "$Sudouser" = "yes" ]      && Adminusercaps="yes"
@@ -3337,7 +3343,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
             no) Dockercommand="$Dockercommand \\
   --user $Benutzeruid:$Benutzergid --env USER=$Benutzer" ;;
             yes) Dockercommand="$Dockercommand \\
-  --user root" ;;
+  --user root --env USER=root" ;;
           esac
         ;;
         systemd|runit|openrc|sysvinit) 
@@ -3741,9 +3747,11 @@ start() {
   }
 } >> $Setupscript
 
-{ #### part: create dockerrc: inspect image, create x11docker.CMD.sh and run docker <- dockerrc is running as root on host (or as member of group docker)
+{ #### part: create dockerrc: inspect image, create x11docker.CMD.sh, set up cgroup for systemd or elogind and run docker <- dockerrc is running as root on host (or as member of group docker)
   # create script that needs root permissions or docker group membership to use docker.
   # This is the part the password prompt / $Getroot is needed for.
+  # This part runs as root on host (unless you are member of group docker)
+  
   echo "#! /bin/bash"
   declare -f waitforfilecreation verbose warning note notestdout escapestring
   [ "$Debug" = "yes" ] && {
@@ -3753,6 +3761,7 @@ start() {
     echo "set -Eu"
     echo "trap 'traperror \$? \$LINENO \$BASH_LINENO \"\$BASH_COMMAND\" \$(printf \"::%s\" \${FUNCNAME[@]})'  ERR"
   }
+  
   echo "Imagename=\"$Imagename\""
   echo "Imagecommand=\"$Imagecommand\""
   
@@ -3919,6 +3928,39 @@ start() {
   echo "cat $Imagecommandscript | nl -ba >> $Dockerlogfile"
   echo ""
 
+  # prepare cgroup mountpoint for systemd or elogind
+  [ "$Sharecgroup" = "yes" ] && case "$Initsystem" in
+    systemd|sysvinit|openrc|runit)
+      [ "$Initsystem" = "systemd" ] && Wantcgroup=systemd || Wantcgroup=elogind
+      findmnt /sys/fs/cgroup/$Wantcgroup >/dev/null || {
+        echo "[ '$Wantcgroup' = 'systemd' ] || docker run --rm --entrypoint env $Imagename which elogind >/dev/null && {"
+        echo "  echo x11docker: creating cgroup mountpoint for $Wantcgroup"
+        echo '  [ "$(id -u)" != "0" ] && {'
+        echo "    warning 'Want to create and mount a cgroup for $Wantcgroup."
+        echo "  As x11docker currently does not run as root, this will probably fail."
+        echo "  Please either run x11docker as root, or run with option --pw=su or --pw=sudo,"
+        echo "  or create cgroup mountpoint yourself with:"
+        echo "    mkdir -p /sys/fs/cgroup/$Wantcgroup"
+        echo "    mount -t cgroup cgroup /sys/fs/cgroup/$Wantcgroup -o none,name=$Wantcgroup"
+        echo "  If you get a read-only error message, remove write protection with:"
+        echo "    mount -o remount,rw cgroup /sys/fs/cgroup'"
+        echo "  You can restore write protection after cgroup creation with:"
+        echo "    mount -o remount,ro cgroup /sys/fs/cgroup'"
+        [ "$Wantcgroup" = "elogind" ] && echo "    note 'If you do not want or need elogind in container, just ignore warning above.'"
+        echo "  }"
+        findmnt /sys/fs/cgroup -O ro >/dev/null && {
+          echo "  mount -o remount,rw cgroup /sys/fs/cgroup"
+          echo "  Remounted=yes"
+        }
+        echo "  mkdir -p /sys/fs/cgroup/elogind"
+        echo "  mount -t cgroup cgroup /sys/fs/cgroup/elogind -o none,name=elogind"
+        echo '  [ "${Remounted:-}" = "yes" ] && mount -o remount,ro cgroup /sys/fs/cgroup'
+        echo "}"
+        echo ""
+      }
+    ;;
+  esac
+  
   echo "read Containerid < <($Dockercommand)" # <- docker run is here!
   
   echo ""
@@ -3937,18 +3979,6 @@ start() {
   echo "cat $Dockerlogfile | grep 'Error response from daemon ||:'"  # repeat possible error message to make it visible in error() after verbose Count loop
   echo ""
 
-  [ "$Initsystem" = "systemd" ] && ! mount -t cgroup | grep -q /sys/fs/cgroup/systemd && {
-    [ "$(id -u)" != "0" ] && [ "$Capsysadmin" = "no" ] && warning "Need to create and mount a cgroup for systemd.
-  As x11docker currently does not run as root, this will probably fail.
-  You can either run x11docker as root, or you can mount yourself with:
-    mkdir -p /sys/fs/cgroup/systemd
-    mount -t cgroup cgroup /sys/fs/cgroup/systemd -o none,name=systemd
-  Alternativly (and discouraged) you can run with option --sys-admin."
-    echo "# create cgroup mount point for systemd"
-    echo "mkdir -v -p /sys/fs/cgroup/systemd"
-    echo "mount -t cgroup cgroup /sys/fs/cgroup/systemd -o none,name=systemd"
-    echo ""
-  }
   
   #echo "sleep 1 # wait a moment until IP is available. Currently, IP is only needed for --pulseaudio"
   echo "docker inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername >> $Containerip"

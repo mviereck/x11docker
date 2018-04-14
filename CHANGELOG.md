@@ -8,8 +8,10 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Changed
+ - `elogind` support for `--sysvinit`, `--openrc` and `--runit`.
+   See also [elogind in container: elogind#52](https://github.com/elogind/elogind/issues/52)
+ - `--systemd`: If host does not run `systemd`, create `/sys/fs/cgroup/systemd`.
  - Outsourced `x11docker.png` from `x11docker-gui`.
- - `--systemd`: If host does not run `systemd`, mount `/sys/fs/cgroup/systemd`.
 ### Fixed
  - Don't share or link `/tmp/.Xn-lock` as usefulness is in doubt. 
    Avoids issues with `x11docker/xwayland`.
