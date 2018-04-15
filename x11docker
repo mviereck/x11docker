@@ -1367,7 +1367,7 @@ Parsed options: $Parsedoptions"
   [ "$Debug" = "yes" ] && {
     #PS4="$DebugPS4"    # useful output for set -x
     #set -x             # show every executed line
-    set -Eu -o pipefail 
+    set -Eu -o pipefail
     trap 'traperror $? $LINENO $BASH_LINENO "$BASH_COMMAND" $(printf "::%s" ${FUNCNAME[@]})'  ERR
   }
   
@@ -1412,10 +1412,10 @@ Parsed options: $Parsedoptions"
   }
   
   # Weston and Xwayland need XDG_RUNTIME_DIR
-  [ -z "$XDG_RUNTIME_DIR" ] && [ -e "/run/user/$Hostuseruid" ] && export XDG_RUNTIME_DIR="/run/user/$Hostuseruid" 
-  [ -z "$XDG_RUNTIME_DIR" ] && {
-    $Mksu "mkdir -p /tmp/XDG_RUNTIME_DIR.x11docker.$Hostuseruid"
+  [ -z "${XDG_RUNTIME_DIR:-}" ] && [ -e "/run/user/$Hostuseruid" ] && export XDG_RUNTIME_DIR="/run/user/$Hostuseruid" 
+  [ -z "${XDG_RUNTIME_DIR:-}" ] && {
     export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR.x11docker.$Hostuseruid
+    $Mksu "mkdir -p $XDG_RUNTIME_DIR"
     $Mksu "chmod 700 $XDG_RUNTIME_DIR"
   }
   [ -n "$Customwestonini" ] && [ ! -e "$Customwestonini" ] && { 
@@ -3534,223 +3534,10 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   esac
 }
 
-{ #### part: create container setup script
-  echo "#! /bin/sh"
-  echo "# set up docker container before ongoing in x11docker.CMD.sh"
-  echo "# commands in this script are executed as root in container"
-  [ "$Debug" = "yes" ] && echo "set -x"
-  echo ""
-  echo "# create some system dirs with needed permissions"
-  echo "mkdir -v -p /var/lib/dbus /var/run/dbus"
-  echo "mkdir -v -p -m 1777 /tmp/.ICE-unix /tmp/.X11-unix /tmp/.font-unix"
-  echo "chmod -c 1777 /tmp/.ICE-unix /tmp/.X11-unix /tmp/.font-unix"
-  echo "ln -s /X$Newdisplaynumber $Newxsocket" # done again in x11docker.CMD.sh. At least x11docker/deepin needs it here already.
-  #[ "$Newxlock" ] && echo "ln -s /$(basename $Newxlock) $Newxlock"
-  echo "ls -l $Newxsocket"
-  echo "export DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie"
-  echo ""
-
-  IFS=$'\n'
-  for Line in $Customenvironment ; do
-    [ "$Line" ] && echo "export $Line" 
-  done
-  IFS=$' \t\n'
-  echo ""
-  
-  echo "# create user entry in /etc/passwd (and delete possibly existing same uid)"
-  echo "getent passwd | grep -v \$(getent passwd $Benutzeruid || echo USERNOTFOUND) > /tmp/passwd"
-  echo "echo $Benutzerpasswdentry >> /tmp/passwd"
-  echo "mv /tmp/passwd /etc/passwd"
-  echo ""
-  echo "# make sure root has no password in /etc/shadow"
-  echo "sed -i /root.*/d /etc/shadow"
-  case $Sudouser in
-    no)  echo "echo 'root:*:17219:0:99999:7:::' >> /etc/shadow" ;;
-    yes) echo "echo 'root:$Benutzerpasswort:17219:0:99999:7:::' >> /etc/shadow  # with option --sudouser, set root password 'x11docker'" ;;
-  esac
-  echo ""
-  echo "# create password entry for container user in /etc/shadow"
-  echo "sed -i /$Benutzer.*/d /etc/shadow # delete user entry if already existing"
-  echo "echo \"$Benutzer:$Benutzerpasswort:17293:0:99999:7:::\" >> /etc/shadow"
-  echo ""
-  echo "# add user to groups video, audio, systemd-journal"
-  echo "# replace container GIDs of video and audio with host GIDs"
-  echo "Gidvideo=$Hostgidvideo"
-  echo "Gidaudio=$Hostgidaudio"
-  echo "[ \"\$Gidvideo\" ] || Gidvideo=\$(getent group | grep video: | cut -d: -f3)"
-  echo "[ \"\$Gidaudio\" ] || Gidaudio=\$(getent group | grep audio: | cut -d: -f3)"
-  echo "getent group | sed \"s/^video.*/video:x:\$Gidvideo:\$(getent group | grep video: | cut -d: -f4 ),$Benutzer/ ;"
-  echo "                     s/^audio.*/audio:x:\$Gidaudio:\$(getent group | grep audio: | cut -d: -f4 ),$Benutzer/ ;;"
-  echo "                     s/^systemd-journal.*/\0,$Benutzer/ \" | sed 's/:,/:/' > /tmp/group"
-  echo "cp /tmp/group /etc/group"
-  echo ""
-  echo "# create user group entry (and delete possibly existing same gid)"
-  echo "getent group | grep -v \$(getent group $Benutzergid || echo USERNOTFOUND) > /tmp/group"
-  echo "echo $Benutzergruppe:x:$Benutzergid: >> /tmp/group"
-  echo "mv /tmp/group /etc/group"
-  echo ""
-  [ "$Benutzerhosthome" = "no" ] && echo "mkdir -v -m 777 /fakehome"
-  echo ""
-  [ "$Switchcontaineruser" = "yes" ] && {
-    echo "# create /etc/sudoers, remove /etc/sudoers.d. Delete possible sudo setups in image."
-    echo "echo 'root ALL=(ALL) ALL' > /etc/sudoers"
-    echo "rm -R /etc/sudoers.d"
-    [ "$Sudouser" = "yes" ] && {
-      echo "# create sudo entry for container user"
-      echo "echo '$Benutzer ALL=(ALL) ALL' >> /etc/sudoers"
-    }
-  }
-  echo ""
-  case $Initsystem in
-    tini|none)
-      [ "$Dbusdaemon" = "yes" ] && {
-        echo "echo 'x11docker: starting dbus system daemon'"
-        echo "dbus-daemon --system --fork"
-      }
-    ;;
-    systemd)
-      echo "# to be sure, allow/unmask most important services"
-      echo "systemctl unmask systemd-logind dbus"
-      echo "# disable cgproxy.service, can cause failing startup."
-      echo "systemctl mask cgproxy"
-      echo "# enable x11docker CMD service"
-      echo "systemctl enable x11docker-startcmd.service"
-    ;;
-    runit)
-     echo "# create and enable x11docker service containing image command"
-     echo "mkdir -p /etc/sv/x11docker"
-     echo "printf '#! /bin/sh
-waitforservice() {
-  Service=\$1
-  [ \"\$(sv check \$Service | cut -d: -f1)\" = \"ok\" ] && {
-    echo \"x11docker: waiting for service \$Service ...\"
-    for Count in $(seq -s' ' 20); do
-      [ \"\$(sv status \$Service | cut -d: -f1)\" = \"down\" ] && sleep 0.2 || break
-    done
-  }
-}
-# make stderr visible
-exec 2>&1
-# wait for all other services
-for Service in \$(ls /etc/runit/runsvdir/default/) ; do waitforservice \$Service ;done
-echo \"Current status of runit services:\"
-for Service in \$(ls /etc/runit/runsvdir/default/) ; do sv status      \$Service ;done
-# x11docker service should only run once
-sv once x11docker
-su - --shell=/bin/sh $Benutzer $Cshare/x11docker.CMD.sh
-runit-init 0
-' > /etc/sv/x11docker/run"
-      echo "chmod +x /etc/sv/x11docker/run"
-      echo "ln -s /etc/sv/x11docker /etc/runit/runsvdir/default"
-      echo "echo 'x11docker: enabling dbus service'"
-      echo "ln -s /etc/sv/dbus  /etc/runit/runsvdir/default"
-    ;;
-    openrc)
-      echo "# create and enable x11docker service containing image command"
-      echo "printf \"#!/sbin/openrc-run
-name=x11docker
-depend() {
-  after *
-}
-start() {
-  ebegin 'Starting x11docker.CMD.sh'
-  su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh
-  openrc shutdown
-  halt
-  eend \$?
-}
-\" > /etc/init.d/x11docker.service"
-      echo "chmod +x /etc/init.d/x11docker.service"
-      echo "rc-update add x11docker.service default"
-      echo "echo 'x11docker: enabling dbus service'"
-      echo "rc-update add dbus default"
-      echo "# disable getty in inittab" 
-      echo "sed -i 's/.*getty/##getty disabled by x11docker## \0/' /etc/inittab"
-      echo "# tell openrc that it runs in docker"
-      echo "sed -e 's/#rc_sys=\"\"/rc_sys=\"docker\"/g' -i /etc/rc.conf"
-    ;;
-    sysvinit)
-      echo "# add x11docker start command to rc.local"
-      echo "sed -i '/exit 0/d' /etc/rc.local"
-      echo "echo 'su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh || echo \"x11docker: Exit code \$?\"' >> /etc/rc.local"
-      echo "echo 'shutdown -hP 0' >> /etc/rc.local"
-      echo "# disable getty in inittab" 
-      echo "sed -i 's/.*getty/##getty disabled by x11docker## \0/' /etc/inittab"
-    ;;  
-  esac
-
-  [ "$Langwunsch" ] && {
-    echo "echo \"x11docker: Searching for language locale matching $Langwunsch\""
-    echo "Locales=\"\$(locale -a)\""
-    echo "Langall=\"\$(cat /usr/share/i18n/SUPPORTED | grep -E 'UTF-8|utf8' | cut -d' ' -f1 | cut -d. -f1 | cut -d@ -f1 | sort | uniq)\""
-    echo "Langland=\$(echo $Langwunsch | cut -d. -f1)"
-    echo "echo \$Langland | grep -q '_' || {"
-    echo "  Langland=\"\$(echo \$Langland | tr '[:upper:]' '[:lower:]')_\$(echo \$Langland | tr '[:lower:]' '[:upper:]')\""
-    echo "  echo \"\$Langall\" | grep -q \$Langland || {"
-    echo "    echo \"\$Langall\" | grep -i -q $Langwunsch && {"
-    echo "      Langland=\$(echo \"\$Langall\" | grep -i -m1 $Langwunsch)"
-    echo "    }"
-    echo "  }"
-    echo "}"
-    echo "Langland=\$(echo \$Langland | cut -d_ -f1 | tr '[:upper:]' '[:lower:]')_\$(echo \$Langland | cut -d_ -f2 | tr '[:lower:]' '[:upper:]')"
-    echo "echo \"\$Locales\" | grep -q \$Langland.UTF-8 && Langcontainer=\$Langland.UTF-8"
-    echo "echo \"\$Locales\" | grep -q \$Langland.utf8  && Langcontainer=\$Langland.utf8"
-    echo "echo $Langwunsch | grep -E 'C|C.UTF-8|C.utf8|POSIX' >/dev/null && Langcontainer=$Langwunsch"
-    echo "[ -z \"\$Langcontainer\" ] && {"
-    echo "  [ -e /usr/share/i18n/SUPPORTED ] || echo \"x11docker ERROR: /usr/share/i18n/SUPPORTED not found."
-    echo "  Please install locale package in image (belongs to glibc).\""
-    echo "  Langcontainer=\$Langland.utf8"
-    echo "  echo \"x11docker: Creating language locale \$Langcontainer\""
-    echo "  command -v localedef >/dev/null || echo \"x11docker ERROR: command localedef not found in image.\""
-    echo "  localedef --verbose --force -i \$Langland -f UTF-8 \$Langcontainer || echo \"x11docker: localedef exit code: \$?\""
-    echo "  locale -a | grep -q \"\$Langcontainer\" || {"
-    echo "    echo \"x11docker ERROR: locale creation of \$Langcontainer failed.\""
-    echo "    Langcontainer=''"
-    echo "  }"
-    echo "} || {"
-    echo "  echo \"x11docker: Found locale in image: \$Langcontainer\""
-    echo "}"
-    echo "[ \"\$Langcontainer\" ] && {"
-    echo "  echo \"\$Langcontainer\" > /x11docker.LANG"
-    echo "  echo \"LANG=\$Langcontainer\" > /etc/default/locale"
-    echo "} || echo \"x11docker WARNING: desired locale for '--lang=$Langwunsch' not found and not created.\""
-    echo "echo \"x11docker: Output of locale -a:\""
-    echo "locale -a"
-  }
-  
-  echo ""
-  [ "$Pulseaudio" = "yes" ] && {
-    echo "command -v pulseaudio >/dev/null || echo \"x11docker ERROR: pulseaudio not found in image (option --pulseaudio)\""
-  }
-  
-  echo ""
-  echo ":> /x11docker.setupready"
-  [ "$Switchcontaineruser" = "yes" ] && {   # if "no", x11docker.CMD.sh is executed in command line $Dockercommand
-    case $Initsystem in
-      tini|none)             echo "exec /bin/su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh" ;;
-      runit|openrc|sysvinit) echo "exec /sbin/init" ;;
-      systemd)
-        echo 'Systemd=/lib/systemd/systemd'
-        echo '[ -e "$Systemd" ] || Systemd=/bin/systemd'
-        echo '[ -e "$Systemd" ] || Systemd=/sbin/systemd'
-        echo '[ -e "$Systemd" ] || {'
-        echo '  echo "x11docker WARNING: executeable for systemd not found. Will try /sbin/init"'
-        echo '  Systemd=/sbin/init'
-        echo '}'
-        echo '[ -e "$Systemd" ] || {'
-        echo '  echo "x11docker ERROR: Is systemd really installed in image?"'
-        echo '  exit 1'
-        echo '}'
-        echo 'exec $Systemd'
-      ;;
-    esac
-  }
-} >> $Setupscript
-
-{ #### part: create dockerrc: inspect image, create x11docker.CMD.sh, set up cgroup for systemd or elogind and run docker <- dockerrc is running as root on host (or as member of group docker)
-  # create script that needs root permissions or docker group membership to use docker.
-  # This is the part the password prompt / $Getroot is needed for.
-  # This part runs as root on host (unless you are member of group docker)
+{ #### part: create dockerrc: This part runs as root (or member of group docker) on host
+  # create x11docker.CMD.sh
+  # check and set up cgroup on host for systemd or elogind
+  # run docker
   
   echo "#! /bin/bash"
   declare -f waitforfilecreation verbose warning note notestdout escapestring
@@ -3928,38 +3715,37 @@ start() {
   echo "cat $Imagecommandscript | nl -ba >> $Dockerlogfile"
   echo ""
 
-  # prepare cgroup mountpoint for systemd or elogind
-  [ "$Sharecgroup" = "yes" ] && case "$Initsystem" in
-    systemd|sysvinit|openrc|runit)
-      [ "$Initsystem" = "systemd" ] && Wantcgroup=systemd || Wantcgroup=elogind
-      findmnt /sys/fs/cgroup/$Wantcgroup >/dev/null || {
-        echo "[ '$Wantcgroup' = 'systemd' ] || docker run --rm --entrypoint env $Imagename which elogind >/dev/null && {"
-        echo "  echo x11docker: creating cgroup mountpoint for $Wantcgroup"
-        echo '  [ "$(id -u)" != "0" ] && {'
-        echo "    warning 'Want to create and mount a cgroup for $Wantcgroup."
-        echo "  As x11docker currently does not run as root, this will probably fail."
-        echo "  Please either run x11docker as root, or run with option --pw=su or --pw=sudo,"
-        echo "  or create cgroup mountpoint yourself with:"
-        echo "    mkdir -p /sys/fs/cgroup/$Wantcgroup"
-        echo "    mount -t cgroup cgroup /sys/fs/cgroup/$Wantcgroup -o none,name=$Wantcgroup"
-        echo "  If you get a read-only error message, remove write protection with:"
-        echo "    mount -o remount,rw cgroup /sys/fs/cgroup'"
-        echo "  You can restore write protection after cgroup creation with:"
-        echo "    mount -o remount,ro cgroup /sys/fs/cgroup'"
-        [ "$Wantcgroup" = "elogind" ] && echo "    note 'If you do not want or need elogind in container, just ignore warning above.'"
-        echo "  }"
-        findmnt /sys/fs/cgroup -O ro >/dev/null && {
-          echo "  mount -o remount,rw cgroup /sys/fs/cgroup"
-          echo "  Remounted=yes"
-        }
-        echo "  mkdir -p /sys/fs/cgroup/elogind"
-        echo "  mount -t cgroup cgroup /sys/fs/cgroup/elogind -o none,name=elogind"
-        echo '  [ "${Remounted:-}" = "yes" ] && mount -o remount,ro cgroup /sys/fs/cgroup'
-        echo "}"
-        echo ""
+  # check and create cgroup mountpoint for systemd or elogind
+  [ "$Sharecgroup" = "yes" ] && {
+    [ "$Initsystem" = "systemd" ] && Wantcgroup=systemd || Wantcgroup=elogind
+    findmnt /sys/fs/cgroup/$Wantcgroup >/dev/null || {
+      echo "[ '$Wantcgroup' = 'systemd' ] || docker run --rm --entrypoint env $Imagename which elogind >/dev/null && {"
+      echo "  echo x11docker: creating cgroup mountpoint for $Wantcgroup"
+      echo '  [ "$(id -u)" != "0" ] && {'
+      echo "    warning 'Want to create and mount a cgroup for $Wantcgroup."
+      echo "  As x11docker currently does not run as root, this will probably fail."
+      echo "  Please either run x11docker as root, or run with option --pw=su or --pw=sudo,"
+      echo "  or create cgroup mountpoint yourself with:"
+      echo "    mkdir -p /sys/fs/cgroup/$Wantcgroup"
+      echo "    mount -t cgroup cgroup /sys/fs/cgroup/$Wantcgroup -o none,name=$Wantcgroup"
+      echo "  If you get a read-only error message, remove write protection with:"
+      echo "    mount -o remount,rw cgroup /sys/fs/cgroup"
+      echo "  You can restore write protection after cgroup creation with:"
+      echo "    mount -o remount,ro cgroup /sys/fs/cgroup'"
+      [ "$Wantcgroup" = "elogind" ] && echo "    note 'If you do not want or need elogind in container, "
+      echo "  just ignore warning above.'"
+      echo "  }"
+      findmnt /sys/fs/cgroup -O ro >/dev/null && {
+        echo "  mount -o remount,rw cgroup /sys/fs/cgroup"
+        echo "  Remounted=yes"
       }
-    ;;
-  esac
+      echo "  mkdir -p /sys/fs/cgroup/elogind"
+      echo "  mount -t cgroup cgroup /sys/fs/cgroup/elogind -o none,name=elogind"
+      echo '  [ "${Remounted:-}" = "yes" ] && mount -o remount,ro cgroup /sys/fs/cgroup'
+      echo "}"
+      echo ""
+    }
+  }
   
   echo "read Containerid < <($Dockercommand)" # <- docker run is here!
   
@@ -3976,7 +3762,7 @@ start() {
   echo "  sleep 0.2"
   echo "  docker exec $Containername sh -c : && { echo 'x11docker: container is up and running.' ; break ; } || echo \"x11docker: container not ready on \$Count. attempt, trying again.\" "
   echo "done"
-  echo "cat $Dockerlogfile | grep 'Error response from daemon ||:'"  # repeat possible error message to make it visible in error() after verbose Count loop
+  echo "cat $Dockerlogfile | grep -E 'Error response from daemon|OCI runtime exec' ||:"  # repeat possible error message to make it visible in error() after verbose Count loop
   echo ""
 
   
@@ -3991,6 +3777,225 @@ start() {
   echo ""
   [ "$Switchcontaineruser" = "no" ] && echo "docker exec -u root $Containername /bin/sh $Cshare/containersetup.sh"
 } >> $Dockerrc
+
+{ #### part: create container setup script
+  echo "#! /bin/sh"
+  echo "# set up docker container before ongoing in x11docker.CMD.sh"
+  echo "# commands in this script are executed as root in container"
+  [ "$Debug" = "yes" ] && echo "set -x"
+  echo ""
+  echo "# create some system dirs with needed permissions"
+  echo "mkdir -v -p /var/lib/dbus /var/run/dbus"
+  echo "mkdir -v -p -m 1777 /tmp/.ICE-unix /tmp/.X11-unix /tmp/.font-unix"
+  echo "chmod -c 1777 /tmp/.ICE-unix /tmp/.X11-unix /tmp/.font-unix"
+  echo "ln -s /X$Newdisplaynumber $Newxsocket" # done again in x11docker.CMD.sh. At least x11docker/deepin needs it here already.
+  #[ "$Newxlock" ] && echo "ln -s /$(basename $Newxlock) $Newxlock"
+  echo "ls -l $Newxsocket"
+  echo "export DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie"
+  echo ""
+
+  IFS=$'\n'
+  for Line in $Customenvironment ; do
+    [ "$Line" ] && echo "export $Line" 
+  done
+  IFS=$' \t\n'
+  echo ""
+  
+  echo "# create user entry in /etc/passwd (and delete possibly existing same uid)"
+  echo "getent passwd | grep -v \$(getent passwd $Benutzeruid || echo USERNOTFOUND) > /tmp/passwd"
+  echo "echo $Benutzerpasswdentry >> /tmp/passwd"
+  echo "mv /tmp/passwd /etc/passwd"
+  echo ""
+  echo "# make sure root has no password in /etc/shadow"
+  echo "sed -i /root.*/d /etc/shadow"
+  case $Sudouser in
+    no)  echo "echo 'root:*:17219:0:99999:7:::' >> /etc/shadow" ;;
+    yes) echo "echo 'root:$Benutzerpasswort:17219:0:99999:7:::' >> /etc/shadow  # with option --sudouser, set root password 'x11docker'" ;;
+  esac
+  echo ""
+  echo "# create password entry for container user in /etc/shadow"
+  echo "sed -i /$Benutzer.*/d /etc/shadow # delete user entry if already existing"
+  echo "echo \"$Benutzer:$Benutzerpasswort:17293:0:99999:7:::\" >> /etc/shadow"
+  echo ""
+  echo "# add user to groups video, audio, systemd-journal"
+  echo "# replace container GIDs of video and audio with host GIDs"
+  echo "Gidvideo=$Hostgidvideo"
+  echo "Gidaudio=$Hostgidaudio"
+  echo "[ \"\$Gidvideo\" ] || Gidvideo=\$(getent group | grep video: | cut -d: -f3)"
+  echo "[ \"\$Gidaudio\" ] || Gidaudio=\$(getent group | grep audio: | cut -d: -f3)"
+  echo "getent group | sed \"s/^video.*/video:x:\$Gidvideo:\$(getent group | grep video: | cut -d: -f4 ),$Benutzer/ ;"
+  echo "                     s/^audio.*/audio:x:\$Gidaudio:\$(getent group | grep audio: | cut -d: -f4 ),$Benutzer/ ;;"
+  echo "                     s/^systemd-journal.*/\0,$Benutzer/ \" | sed 's/:,/:/' > /tmp/group"
+  echo "cp /tmp/group /etc/group"
+  echo ""
+  echo "# create user group entry (and delete possibly existing same gid)"
+  echo "getent group | grep -v \$(getent group $Benutzergid || echo USERNOTFOUND) > /tmp/group"
+  echo "echo $Benutzergruppe:x:$Benutzergid: >> /tmp/group"
+  echo "mv /tmp/group /etc/group"
+  echo ""
+  [ "$Benutzerhosthome" = "no" ] && echo "mkdir -v -m 777 /fakehome"
+  echo ""
+  [ "$Switchcontaineruser" = "yes" ] && {
+    echo "# create /etc/sudoers, remove /etc/sudoers.d. Delete possible sudo setups in image."
+    echo "echo 'root ALL=(ALL) ALL' > /etc/sudoers"
+    echo "rm -R /etc/sudoers.d"
+    [ "$Sudouser" = "yes" ] && {
+      echo "# create sudo entry for container user"
+      echo "echo '$Benutzer ALL=(ALL) ALL' >> /etc/sudoers"
+    }
+  }
+  echo ""
+  case $Initsystem in
+    tini|none)
+      [ "$Dbusdaemon" = "yes" ] && {
+        echo "echo 'x11docker: starting dbus system daemon'"
+        echo "dbus-daemon --system --fork"
+        [ "$Sharecgroup" = "yes" ] && {
+          echo "[ -e /sys/fs/cgroup/elogind ] && which elogind >/dev/null && {"
+          echo "  echo x11docker: starting elogind"
+          echo "  elogind &"
+          echo "}"
+        }
+      }
+    ;;
+    systemd)
+      echo "# to be sure, allow/unmask most important services"
+      echo "systemctl unmask systemd-logind dbus"
+      echo "# disable cgproxy.service, can cause failing startup."
+      echo "systemctl mask cgproxy"
+      echo "# enable x11docker CMD service"
+      echo "systemctl enable x11docker-startcmd.service"
+    ;;
+    runit)
+      echo "# create and enable x11docker service containing image command"
+      echo "mkdir -p /etc/sv/x11docker"
+      echo "printf '#! /bin/sh
+waitforservice() {
+  Service=\$1
+  [ \"\$(sv check \$Service | cut -d: -f1)\" = \"ok\" ] && {
+    echo \"x11docker: waiting for service \$Service ...\"
+    for Count in $(seq -s' ' 20); do
+      [ \"\$(sv status \$Service | cut -d: -f1)\" = \"down\" ] && sleep 0.2 || break
+    done
+  }
+}
+# make stderr visible
+exec 2>&1
+# wait for all other services
+for Service in \$(ls /etc/runit/runsvdir/default/) ; do waitforservice \$Service ;done
+echo \"Current status of runit services:\"
+for Service in \$(ls /etc/runit/runsvdir/default/) ; do sv status      \$Service ;done
+# x11docker service should only run once
+sv once x11docker
+su - --shell=/bin/sh $Benutzer $Cshare/x11docker.CMD.sh
+runit-init 0
+' > /etc/sv/x11docker/run"
+      echo "chmod +x /etc/sv/x11docker/run"
+      echo "ln -s /etc/sv/x11docker /etc/runit/runsvdir/default"
+      echo "echo 'x11docker: enabling dbus service'"
+      echo "ln -s /etc/sv/dbus  /etc/runit/runsvdir/default"
+    ;;
+    openrc)
+      echo "# create and enable x11docker service containing image command"
+      echo "printf \"#!/sbin/openrc-run
+name=x11docker
+depend() {
+  after *
+}
+start() {
+  ebegin 'Starting x11docker.CMD.sh'
+  su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh
+  openrc shutdown
+  halt
+  eend \$?
+}
+\" > /etc/init.d/x11docker.service"
+      echo "chmod +x /etc/init.d/x11docker.service"
+      echo "rc-update add x11docker.service default"
+      echo "echo 'x11docker: enabling dbus service'"
+      echo "rc-update add dbus default"
+      echo "# disable getty in inittab" 
+      echo "sed -i 's/.*getty/##getty disabled by x11docker## \0/' /etc/inittab"
+      echo "# tell openrc that it runs in docker"
+      echo "sed -e 's/#rc_sys=\"\"/rc_sys=\"docker\"/g' -i /etc/rc.conf"
+    ;;
+    sysvinit)
+      echo "# add x11docker start command to rc.local"
+      echo "sed -i '/exit 0/d' /etc/rc.local"
+      echo "echo 'su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh || echo \"x11docker: Exit code \$?\"' >> /etc/rc.local"
+      echo "echo 'shutdown -hP 0' >> /etc/rc.local"
+      echo "# disable getty in inittab" 
+      echo "sed -i 's/.*getty/##getty disabled by x11docker## \0/' /etc/inittab"
+    ;;  
+  esac
+
+  [ "$Langwunsch" ] && {
+    echo "echo \"x11docker: Searching for language locale matching $Langwunsch\""
+    echo "Locales=\"\$(locale -a)\""
+    echo "Langall=\"\$(cat /usr/share/i18n/SUPPORTED | grep -E 'UTF-8|utf8' | cut -d' ' -f1 | cut -d. -f1 | cut -d@ -f1 | sort | uniq)\""
+    echo "Langland=\$(echo $Langwunsch | cut -d. -f1)"
+    echo "echo \$Langland | grep -q '_' || {"
+    echo "  Langland=\"\$(echo \$Langland | tr '[:upper:]' '[:lower:]')_\$(echo \$Langland | tr '[:lower:]' '[:upper:]')\""
+    echo "  echo \"\$Langall\" | grep -q \$Langland || {"
+    echo "    echo \"\$Langall\" | grep -i -q $Langwunsch && {"
+    echo "      Langland=\$(echo \"\$Langall\" | grep -i -m1 $Langwunsch)"
+    echo "    }"
+    echo "  }"
+    echo "}"
+    echo "Langland=\$(echo \$Langland | cut -d_ -f1 | tr '[:upper:]' '[:lower:]')_\$(echo \$Langland | cut -d_ -f2 | tr '[:lower:]' '[:upper:]')"
+    echo "echo \"\$Locales\" | grep -q \$Langland.UTF-8 && Langcontainer=\$Langland.UTF-8"
+    echo "echo \"\$Locales\" | grep -q \$Langland.utf8  && Langcontainer=\$Langland.utf8"
+    echo "echo $Langwunsch | grep -E 'C|C.UTF-8|C.utf8|POSIX' >/dev/null && Langcontainer=$Langwunsch"
+    echo "[ -z \"\$Langcontainer\" ] && {"
+    echo "  [ -e /usr/share/i18n/SUPPORTED ] || echo \"x11docker ERROR: /usr/share/i18n/SUPPORTED not found."
+    echo "  Please install locale package in image (belongs to glibc).\""
+    echo "  Langcontainer=\$Langland.utf8"
+    echo "  echo \"x11docker: Creating language locale \$Langcontainer\""
+    echo "  command -v localedef >/dev/null || echo \"x11docker ERROR: command localedef not found in image.\""
+    echo "  localedef --verbose --force -i \$Langland -f UTF-8 \$Langcontainer || echo \"x11docker: localedef exit code: \$?\""
+    echo "  locale -a | grep -q \"\$Langcontainer\" || {"
+    echo "    echo \"x11docker ERROR: locale creation of \$Langcontainer failed.\""
+    echo "    Langcontainer=''"
+    echo "  }"
+    echo "} || {"
+    echo "  echo \"x11docker: Found locale in image: \$Langcontainer\""
+    echo "}"
+    echo "[ \"\$Langcontainer\" ] && {"
+    echo "  echo \"\$Langcontainer\" > /x11docker.LANG"
+    echo "  echo \"LANG=\$Langcontainer\" > /etc/default/locale"
+    echo "} || echo \"x11docker WARNING: desired locale for '--lang=$Langwunsch' not found and not created.\""
+    echo "echo \"x11docker: Output of locale -a:\""
+    echo "locale -a"
+  }
+  
+  echo ""
+  [ "$Pulseaudio" = "yes" ] && {
+    echo "command -v pulseaudio >/dev/null || echo \"x11docker ERROR: pulseaudio not found in image (option --pulseaudio)\""
+  }
+  
+  echo ""
+  echo ":> /x11docker.setupready"
+  [ "$Switchcontaineruser" = "yes" ] && {   # if "no", x11docker.CMD.sh is executed in command line $Dockercommand
+    case $Initsystem in
+      tini|none)             echo "exec /bin/su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh" ;;
+      runit|openrc|sysvinit) echo "exec /sbin/init" ;;
+      systemd)
+        echo 'Systemd=/lib/systemd/systemd'
+        echo '[ -e "$Systemd" ] || Systemd=/bin/systemd'
+        echo '[ -e "$Systemd" ] || Systemd=/sbin/systemd'
+        echo '[ -e "$Systemd" ] || {'
+        echo '  echo "x11docker WARNING: executeable for systemd not found. Will try /sbin/init"'
+        echo '  Systemd=/sbin/init'
+        echo '}'
+        echo '[ -e "$Systemd" ] || {'
+        echo '  echo "x11docker ERROR: Is systemd really installed in image?"'
+        echo '  exit 1'
+        echo '}'
+        echo 'exec $Systemd'
+      ;;
+    esac
+  }
+} >> $Setupscript
 
 { #### part: create pullrc: interactive script to pull image from docker hub
   echo "#! /bin/bash"

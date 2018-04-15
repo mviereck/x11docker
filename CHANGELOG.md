@@ -8,7 +8,7 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Changed
- - `elogind` support for `--sysvinit`, `--openrc` and `--runit`.
+ - `elogind` support for `--sysvinit`, `--openrc`, `--runit` and `--dbus-system`.
    See also [elogind in container: elogind#52](https://github.com/elogind/elogind/issues/52)
  - `--systemd`: If host does not run `systemd`, create `/sys/fs/cgroup/systemd`.
  - Outsourced `x11docker.png` from `x11docker-gui`.
