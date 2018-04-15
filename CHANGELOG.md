@@ -11,6 +11,7 @@ Project website: https://github.com/mviereck/x11docker
  - `elogind` support for `--sysvinit`, `--openrc`, `--runit` and `--dbus-system`.
    See also [elogind in container: elogind#52](https://github.com/elogind/elogind/issues/52)
  - `--systemd`: If host does not run `systemd`, create `/sys/fs/cgroup/systemd`.
+ - `--dbus-system`: wait for bus socket to be ready before continuing.
  - Outsourced `x11docker.png` from `x11docker-gui`.
 ### Fixed
  - Don't share or link `/tmp/.Xn-lock` as usefulness is in doubt. 
