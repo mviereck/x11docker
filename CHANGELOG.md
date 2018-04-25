@@ -7,12 +7,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
+### Added
+ - `--group-add`: New option to add groups to container user. 
+   Needed instead of ` -- --group-add` to cover user switching setups, too.
+ - `--showid`: New option to show container ID on stdout.
 ### Changed
  - `elogind` support for `--sysvinit`, `--openrc`, `--runit` and `--dbus-system`.
    See also [elogind in container: elogind#52](https://github.com/elogind/elogind/issues/52)
  - `--systemd`: If host does not run `systemd`, create `/sys/fs/cgroup/systemd`.
  - `--dbus-system`: wait for bus socket to be ready before continuing.
  - Outsourced `x11docker.png` from `x11docker-gui`.
+ - No default output of container ID on stdout anymore. Use `--showid` instead. 
+ - `--silent`: Do not show error messages except in logfile.
 ### Fixed
  - Don't share or link `/tmp/.Xn-lock` as usefulness is in doubt. 
    Avoids issues with `x11docker/xwayland`.
