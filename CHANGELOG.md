@@ -12,6 +12,7 @@ Project website: https://github.com/mviereck/x11docker
    Needed instead of ` -- --group-add` to cover user switching setups, too.
  - `--showid`: New option to show container ID on stdout.
 ### Changed
+ - `--gpu`: Support for automatical installation of NVIDIA drivers. [(#41)](https://github.com/mviereck/x11docker/issues/41)
  - `elogind` support for `--sysvinit`, `--openrc`, `--runit` and `--dbus-system`.
    See also [elogind in container: elogind#52](https://github.com/elogind/elogind/issues/52)
  - `--systemd`: If host does not run `systemd`, create `/sys/fs/cgroup/systemd`.

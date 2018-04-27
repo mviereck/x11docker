@@ -253,8 +253,8 @@ Miscellaneous:
      --cleanup         Clean up orphaned containers and cache files.
        
 Verbose options:
- -v, --verbose         Be verbose. (Shows logfiles).
-     --silent          Do not show terminal messages (except errors).
+ -v, --verbose         Be verbose. Output of logfile on stderr.
+     --silent          Do not show terminal messages.
      --debug           Debug mode: Show some debug output,
      --stdout          Show stdout of container applications.
      --stderr          Show stderr of container applications.
@@ -966,6 +966,8 @@ Autochooseserver="yes"                          # option '--auto': automated cho
 Desktopmode="no"                                # option --desktop: image contains a desktop enironment.
 Windowmanager=""                                # option '-w, --wm': window manager to use. if not given but needed, autodetection is used
 Gpu="no"                                        # option '--gpu': Use hardware accelerated OpenGL, share files in /dev/dri
+Nvidiadriver=""                                 # option '--gpu': nvidia driver installer for container
+Nvidiaversion=""                                #   "        "    nvidia driver version on host
 
 # Screensize and related X server adjustments
 Screensize=""                                   # option --size  XxY
@@ -1787,12 +1789,6 @@ Parsed options: $Parsedoptions"
   source drivers (radeon, nouveau, intel ...) on host and OpenGL/MESA in image.
   If you have closed source drivers on your host, you need to install
   the very same driver version in your image to get hardware acceleration."
-    ls /dev/nvidia* >/dev/null 2>&1 && warning "It seems you are using proprietary NVIDIA drivers on host. 
-  GPU acceleration will only work if you have the very same driver version 
-  installed in image. That makes images less portable.
-  It is recommended to use the free nouveau driver on host instead.
-  Insist that NVIDIA corporation at least publishes their closed source API,
-  or even better supports open source drivers at all."
     Forcetrusted="yes"
   }
   
@@ -2266,6 +2262,53 @@ Parsed options: $Parsedoptions"
     Maxyaxis=$Yaxis
   }
   Modeline="$(cvt $Xaxis $Yaxis | tail -n1 | cut -d' ' -f2-)"
+}
+
+{ #### part: --gpu: check NVIDIA
+  [ "$Gpu" = "yes" ] && [ -e "/proc/driver/nvidia" ] && {
+    Nvidiaversion=$(cat /proc/driver/nvidia/version | head -n1 | awk '{ print $8 }')
+    verbose "Detected nvidia driver $Nvidiaversion on host."
+    Nvidiadriver=$(ls $Cacherootfolder/NVIDIA* 2>/dev/null | grep $Nvidiaversion )
+    [ -e "$Nvidiadriver" ] && [ ! -x "$Nvidiadriver" ] && chmod +x $Nvidiadriver
+    [ -x "$Nvidiadriver" ] && {
+      verbose "Found proprietary closed source nvidia driver installer
+  $Nvidiadriver"
+      warning "Will install closed source nvidia driver in container.
+  That slows down container startup. 
+  It will be a bit faster if image has package 'kmod' already installed.
+  With free nouveau driver on host you would not be retarded.
+  Ask NVIDIA corp. to publish their closed source API."
+      Adminusercaps="yes"
+      [ "$Capdropall" = "yes" ] && warning "To install proprietary closed source nvidia driver,
+  x11docker must grant advanced privileges to container that would be dropped 
+  otherwise for security reasons. Container security is reduced now.
+  You would not have this issue with free nouveau driver on host."
+    } || {
+      Nvidiadriver=""
+      warning "You are using proprietary closed source nvidia driver on host.
+  GPU acceleration will only work if you have the very same driver version 
+  installed in image. That makes images less portable.
+  It is recommended to use free open source nouveau driver on host instead.
+  Ask NVIDIA corporation to at least publish their closed source API,
+  or even better to actively support open source drivers."
+      note "x11docker can try to automatically install nvidia driver
+  in container on every container startup.
+  Drawbacks: Container startup is slower and its security will be reduced.
+  If you have a driver, make it executeable with 'chmod +x' and store it in
+  $Cacherootfolder.
+  Look at http://www.nvidia.de/Download/index.aspx if you find a matching one.
+  A direct download URL may be:
+  http://us.download.nvidia.com/XFree86/Linux-x86_64/$Nvidiaversion/NVIDIA-Linux-x86_64-$Nvidiaversion.run
+  Be aware that the version number must match exactly the driver version
+  on host. The file name must begin with 'NVIDIA', contain the version number
+  and end with '.run'. Detected version: $Nvidiaversion
+  To avoid all this, use free nouveau driver on host instead of proprietary 
+  closed source nvidia driver."
+      [ -e "$Nvidiadriver" ] && [ ! -x "$Nvidiadriver" ] && warning "Found $Nvidiadriver
+  but it is not executeable. Please run:
+  chmod +x $Nvidiadriver"
+    }
+  }
 }
 
 { #### part: check window manager (option --wm)
@@ -3493,6 +3536,8 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   --device=$Line:$Line:rw \\
   -v $Line:$Line:rw"
         done < <(find /dev/dri /dev/nvidia* /dev/vga_arbiter -maxdepth 0 2>/dev/null ||:)
+        [ "$Nvidiadriver" ] && Dockercommand="$Dockercommand \\
+  -v $Nvidiadriver:$Cshare/NVIDIA-$Nvidiaversion.run:rw"
       }
       
       ## options --hostipc and --hostnet
@@ -3853,6 +3898,26 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       echo "# create sudo entry for container user"
       echo "echo '$Benutzer ALL=(ALL) ALL' >> /etc/sudoers"
     }
+  }
+  echo ""
+  [ "$Nvidiadriver" ] && {
+    echo "[ -z \"\$(find . -name *${Nvidiaversion}* -print -quit)\" ] && {" 
+    echo "  # Install nvidia driver"
+    echo "  /sbin/modprobe -V || {"
+    echo "    # Try to install modprobe"
+    echo "    echo 'x11docker WARNING: Did not find modprobe from package kmod."
+    echo "  Will try to install it. That slows down container startup.'"
+    echo "    apt-get update && apt-get install -y  kmod   # debian"
+    echo "    apk add --no-cache                    kmod   # alpine"
+    echo "    zypper install -n                     kmod   # opensuse"
+    echo "    dnf install -y kmod || yum install -y kmod   # fedora, centos"
+    echo "    pacman -S --noconfirm                 kmod   # arch"
+    echo "  }"
+    echo "  echo 'x11docker WARNING: Installing proprietary closed source NVIDIA driver $Nvidiaversion. That slows down container startup.'"
+    echo "  chmod +x $Cshare/NVIDIA-$Nvidiaversion.run"
+    echo "  $Cshare/NVIDIA-$Nvidiaversion.run  --accept-license --no-runlevel-check  --no-questions --ui=none --no-kernel-module --no-kernel-module-source --no-backup"
+    echo "} || echo 'x11docker: NVIDIA driver $Nvidiaversion seems to be installed already."
+    echo "  Skipping installation of $Cshare/NVIDIA-$Nvidiaversion.run'"
   }
   echo ""
   case $Initsystem in
