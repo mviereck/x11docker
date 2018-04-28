@@ -93,7 +93,8 @@ _Advanced usage:_
  - **Hardware acceleration** with option `--gpu`
    - Beside `xpra`, also install `Xwayland`, `weston` and `xdotool`. (Not needed for `--xorg` and `--hostdisplay`)
    - Works best with open source drivers on host and OpenGL/Mesa in image. 
-     - With closed source drivers on host, you need the very same driver version in image. (Please note that installing proprietary closed source drivers like `nvidia` makes your images less portable. Rather insist that NVIDIA corporation actively supports open source drivers like `nouveau`, or at least publishes an API documentation.)
+     - With closed source drivers on host, you need the very same driver version in image. 
+       For a possible automated install of nvidia driver in container try out latest master version.
    - Packages for OpenGL/Mesa in image:
      - debian and Ubuntu images: `mesa-utils mesa-utils-extra`.
      - CentOS and fedora images: `glx-utils mesa-dri-drivers`
