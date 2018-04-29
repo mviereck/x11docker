@@ -966,8 +966,11 @@ Autochooseserver="yes"                          # option '--auto': automated cho
 Desktopmode="no"                                # option --desktop: image contains a desktop enironment.
 Windowmanager=""                                # option '-w, --wm': window manager to use. if not given but needed, autodetection is used
 Gpu="no"                                        # option '--gpu': Use hardware accelerated OpenGL, share files in /dev/dri
+
+# --gpu: nvidia
 Nvidiadriver=""                                 # option '--gpu': nvidia driver installer for container
 Nvidiaversion=""                                #   "        "    nvidia driver version on host
+Alpineglibc=""                                  #   "        "    apk package file with glibc compatibility layer for alpine, needed to install nvidia driver on musl libc systems
 
 # Screensize and related X server adjustments
 Screensize=""                                   # option --size  XxY
@@ -2264,24 +2267,35 @@ Parsed options: $Parsedoptions"
   Modeline="$(cvt $Xaxis $Yaxis | tail -n1 | cut -d' ' -f2-)"
 }
 
-{ #### part: --gpu: check NVIDIA
+{ #### part: --gpu: check nvidia driver
   [ "$Gpu" = "yes" ] && [ -e "/proc/driver/nvidia" ] && {
     Nvidiaversion=$(cat /proc/driver/nvidia/version | head -n1 | awk '{ print $8 }')
     verbose "Detected nvidia driver $Nvidiaversion on host."
-    Nvidiadriver=$(find /usr/share/x11docker/NVIDIA* $Hostuserhome/.local/share/x11docker/NVIDIA* $Cacherootfolder/NVIDIA* 2>/dev/null | grep $Nvidiaversion )
+    Nvidiadriver=$(find /usr/local/share/x11docker/NVIDIA* $Hostuserhome/.local/share/x11docker/NVIDIA* $Cacherootfolder/NVIDIA* 2>/dev/null | grep $Nvidiaversion )
+    
     [ -e "$Nvidiadriver" ] && {
+      Adminusercaps="yes"
       verbose "Found proprietary closed source nvidia driver installer
   $Nvidiadriver"
       note "Will install closed source nvidia driver $Nvidiaversion in container.
   That slows down container startup. Startup will be much faster if image 
-  already includes modprobe and xz (packages 'kmod' and 'xz').
+  already includes modprobe and xz (packages 'kmod' and 'xz' or 'xz-utils').
   With free nouveau driver on host there would be no startup delay.
-  Ask NVIDIA corp. to publish their closed source API and to support nouveau."
-      Adminusercaps="yes"
+  Ask NVIDIA corporation to publish the closed source API of your hardware."
       [ "$Capdropall" = "yes" ] && warning "To install proprietary closed source nvidia driver,
   x11docker must grant advanced privileges to container that would be dropped 
   otherwise for security reasons. Container security is reduced now.
-  You would not have this issue with free nouveau driver on host." ||:
+  You would not have this issue with free nouveau driver on host."
+  
+      Alpineglibc=$(find /usr/local/share/x11docker/glibc*.apk $Hostuserhome/.local/share/x11docker/glibc*.apk 2>/dev/null | sort -V | tail -n1 )
+      [ "$Alpineglibc" ] || note "For images based on musl libc like alpine or NixOS nvidia
+  driver needs a glibc compatibility layer. Get glibc from:
+    https://github.com/sgerrand/alpine-pkg-glibc
+  You can download glibc-X.Y.Z.apk and store it at one of these locations:
+    $Hostuserhome/.local/share/x11docker/
+    /usr/local/share/x11docker/
+  Otherwise, x11docker will download and install on itself in container."
+      :
     } || {
       Nvidiadriver=""
       warning "You are using proprietary closed source nvidia driver on host.
@@ -2289,20 +2303,23 @@ Parsed options: $Parsedoptions"
   installed in image. That makes images less portable.
   It is recommended to use free open source nouveau driver on host instead.
   Ask NVIDIA corporation to at least publish their closed source API,
-  or even better to actively support open source drivers."
+  or even better to actively support open source drivers like nouveau."
       note "x11docker can try to automatically install nvidia driver $Nvidiaversion
   in container on every container startup.
   Drawbacks: Container startup is slower and its security will be reduced.
+  
   You can look here for a driver installer:
     https://www.nvidia.com/Download/index.aspx
   A direct download URL may be:
     https://us.download.nvidia.com/XFree86/Linux-x86_64/$Nvidiaversion/NVIDIA-Linux-x86_64-$Nvidiaversion.run
   If you got a driver, store it at one of the following locations:
     $Hostuserhome/.local/share/x11docker/
-    /usr/share/x11docker/
+    /usr/local/share/x11docker/
+    
   Be aware that the version number must match exactly the version on host. 
   The file name must begin with 'NVIDIA', contain the version number $Nvidiaversion
   and end with suffix '.run'.
+  
   To avoid all this, use free nouveau driver on host 
   instead of proprietary closed source nvidia driver."
     }
@@ -3535,7 +3552,9 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   -v $Line:$Line:rw"
         done < <(find /dev/dri /dev/nvidia* /dev/vga_arbiter -maxdepth 0 2>/dev/null ||:)
         [ "$Nvidiadriver" ] && Dockercommand="$Dockercommand \\
-  -v $Nvidiadriver:$Cshare/NVIDIA-$Nvidiaversion.run:rw"
+  -v $Nvidiadriver:$Cshare/NVIDIA-$Nvidiaversion.run:ro"
+        [ "$Alpineglibc" ] && Dockercommand="$Dockercommand \\
+  -v $Alpineglibc:$Cshare/glibc.apk:ro"
       }
       
       ## options --hostipc and --hostnet
@@ -3911,11 +3930,26 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     echo "    dnf install -y kmod || yum install -y kmod xz        # fedora, centos" #ok
     echo "    xbps-install -Sy                      kmod xz        # void"           #ok
     echo "    pacman -Sy --noconfirm                kmod xz        # arch"           #ok
-    echo "    apk add --no-cache                    kmod xz        # alpine"         #ok, but nvidia-installer FAILS: "line 1092: ./nvidia-installer: not found"
-    echo "    zypper --non-interactive install      kmod xz        # opensuse"       #ok, but nvidia-installer extraction FAILS
-    echo "    nix-env --install                     kmod xz        # nixos"          #ERROR: busybox-1.26.2-r5.trigger: script exited with error 127; /x11docker/NVIDIA-387.12.run: line 1092: ./nvidia-installer: not found
+    echo "    apk add --no-cache                    kmod xz        # alpine, nixos"  #ok
+    echo "    zypper --non-interactive install      kmod xz        # opensuse"       #ok, but nvidia-installer extraction fails
     echo "    emerge --ask n                        kmod xz        # gentoo"         #NOT CHECKED
-    echo "    eopkg install                         kmod xz        # solus"          #NOT CHECKED
+    echo "    set +x"
+    echo "  }"
+    echo "  apk -V && {"
+    echo "    apk info glibc 2>/dev/null | grep glibc || {"
+    echo "      echo 'x11docker: Installing glibc compatibility layer next to musl libc, needed for nvidia driver. Look at https://github.com/sgerrand/alpine-pkg-glibc'"
+    echo "      echo 'x11docker: Preinstalling this GNU C Library compatibility layer in image speeds up nvidia driver install.'"
+    echo "      apk info libc6-compat && apk del libc6-compat && echo 'x11docker: Removing libc6-compat as it interferes with glibc.'"
+    echo "      [ -e $Cshare/glibc.apk ] && {"
+    echo "        apk add --allow-untrusted $Cshare/glibc.apk ||:"
+    echo "      } || {"
+    echo "        echo 'x11docker: Providing glibc from https://github.com/sgerrand/alpine-pkg-glibc in /usr/share/x11docker avoids following downloads and installs.'"
+    echo "        apk add --no-cache wget ca-certificates"
+    echo "        wget -q -O /etc/apk/keys/sgerrand.rsa.pub https://raw.githubusercontent.com/sgerrand/alpine-pkg-glibc/master/sgerrand.rsa.pub"
+    echo "        wget https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.27-r0/glibc-2.27-r0.apk"
+    echo "        apk add glibc-2.27-r0.apk"
+    echo "      }"
+    echo "    }"
     echo "  }"
     echo "  echo 'x11docker WARNING: Installing proprietary closed source NVIDIA driver $Nvidiaversion. That slows down container startup.'"
     echo "  chmod +x $Cshare/NVIDIA-$Nvidiaversion.run"
