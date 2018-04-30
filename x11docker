@@ -1783,18 +1783,8 @@ Parsed options: $Parsedoptions"
       ;;
     esac
   }
-  [ "$Gpu" = "yes" ] && {
-    warning "Option --gpu degrades container isolation.
-  Container gains access to GPU hardware.
-  This allows reading host window content (palinopsia leak)
-  and GPU rootkits (compare proof of concept: jellyfish)."
-    note "Hardware acceleration (option --gpu) works quite well with open
-  source drivers (radeon, nouveau, intel ...) on host and OpenGL/MESA in image.
-  If you have closed source drivers on your host, you need to install
-  the very same driver version in your image to get hardware acceleration."
-    Forcetrusted="yes"
-  }
   
+  [ "$Gpu" = "yes" ]               && Forcetrusted="yes"
   [ "$Xserver" = "--hostdisplay" ] && Trusted="no"
   [ "$Forcetrusted" = "yes" ]      && Trusted="yes"
   
@@ -2268,6 +2258,27 @@ Parsed options: $Parsedoptions"
 }
 
 { #### part: --gpu: check nvidia driver
+
+  [ "$Gpu" = "yes" ] && {
+    warning "Option --gpu degrades container isolation.
+  Container gains access to GPU hardware.
+  This allows reading host window content (palinopsia leak)
+  and GPU rootkits (compare proof of concept: jellyfish)."
+    note "Hardware acceleration (option --gpu) works quite well
+  with open source drivers on host and OpenGL/MESA in image.
+  
+  OpenGL/MESA packages for different base images:
+    Debian, Ubuntu: mesa-utils mesa-utils-extra
+    Arch Linux:     mesa-demos
+    Fedora, CentOS: glx-utils mesa-dri-drivers
+    Alpine, NixOS:  mesa-demos mesa-dri-ati mesa-dri-intel 
+                    mesa-dri-nouveau mesa-dri-swrast
+                    
+  If you have closed source nvidia driver on host, you need the very same
+  closed source driver version in container to get hardware acceleration."
+  }
+  
+  # check for closed source nvidia driver on host, provide automated installation, warn about disadvantages
   [ "$Gpu" = "yes" ] && [ -e "/proc/driver/nvidia" ] && {
     Nvidiaversion=$(cat /proc/driver/nvidia/version | head -n1 | awk '{ print $8 }')
     verbose "Detected nvidia driver $Nvidiaversion on host."
@@ -2286,19 +2297,23 @@ Parsed options: $Parsedoptions"
   x11docker must grant advanced privileges to container that would be dropped 
   otherwise for security reasons. Container security is reduced now.
   You would not have this issue with free nouveau driver on host."
-  
-      Alpineglibc=$(find /usr/local/share/x11docker/glibc*.apk $Hostuserhome/.local/share/x11docker/glibc*.apk 2>/dev/null | sort -V | tail -n1 )
-      [ "$Alpineglibc" ] || note "For images based on musl libc like alpine or NixOS nvidia
-  driver needs a glibc compatibility layer. Get glibc from:
-    https://github.com/sgerrand/alpine-pkg-glibc
-  You can download glibc-X.Y.Z.apk and store it at one of these locations:
-    $Hostuserhome/.local/share/x11docker/
-    /usr/local/share/x11docker/
-  Otherwise, x11docker will download and install on itself in container."
+      warning "Installation of proprietary closed source nvidia driver
+  fails with images based on musl libc like NixOS and Alpine.
+  Due to closed source policy of NVIDIA corporation that is not solvable.
+  Ask NVIDIA corp. to publish driver source code so you can use your hardware.
+  Otherwise, install free nouveau driver on host."
+#      Alpineglibcd=$(find /usr/local/share/x11docker/glibc*.apk $Hostuserhome/.local/share/x11docker/glibc*.apk 2>/dev/null | sort -V | tail -n1 )
+#      [ "$Alpineglibc" ] || note "For images based on musl libc like alpine or NixOS nvidia
+#  driver needs a glibc compatibility layer. Get glibc from:
+#    https://github.com/sgerrand/alpine-pkg-glibc
+#  You can download glibc-X.Y.Z.apk and store it at one of these locations:
+#    $Hostuserhome/.local/share/x11docker/
+#    /usr/local/share/x11docker/
+#  Otherwise, x11docker will download and install on itself in container."
       :
     } || {
       Nvidiadriver=""
-      warning "You are using proprietary closed source nvidia driver on host.
+      warning "You are using proprietary closed source nvidia driver.
   GPU acceleration will only work if you have the very same driver version 
   installed in image. That makes images less portable.
   It is recommended to use free open source nouveau driver on host instead.
@@ -3920,27 +3935,33 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   }
   echo ""
   [ "$Nvidiadriver" ] && {
-    echo "[ -z \"\$(find . -name *${Nvidiaversion}* -print 2>/dev/null)\" ] && {" 
+    echo "ldd 2>&1 | grep 'musl libc' && {"
+    echo "  Musllibc=yes"
+    echo "  echo 'x11docker WARNING: Found musl libc in image. Closed source NVIDIA driver"
+    echo "  is not not installable. Use free nouveau driver on host and ask NVIDIA corp."
+    echo "  to publish driver source code to allow you using your hardware.'"
+    echo "} || Musllibc=no"
+    echo "[ \"\$Musllibc\" = \"no\" ] && [ -z \"\$(find . -name *${Nvidiaversion}* -print 2>/dev/null)\" ] && {" 
     echo "  # Install nvidia driver"
     echo "  { command -v modprobe && command -v xz ; } || {"
     echo "    # Try to install modprobe"
     echo "    echo 'x11docker WARNING: Did not find modprobe/kmod or xz in image."
     echo "  Will try to install them. That slows down container startup.'"
-    echo "    apt-get update && apt-get install -y  kmod xz-utils  # debian"         #ok
-    echo "    dnf install -y kmod || yum install -y kmod xz        # fedora, centos" #ok
-    echo "    xbps-install -Sy                      kmod xz        # void"           #ok
-    echo "    pacman -Sy --noconfirm                kmod xz        # arch"           #ok
-    echo "    apk add --no-cache                    kmod xz        # alpine, nixos"  #ok
-    echo "    zypper --non-interactive install      kmod xz        # opensuse"       #ok, but nvidia-installer extraction fails
-    echo "    emerge --ask n                        kmod xz        # gentoo"         #NOT CHECKED
+    echo "    apt-get update && apt-get install -y     kmod xz-utils  # debian"         #ok
+    echo "    dnf install -y kmod xz || yum install -y kmod xz        # fedora, centos" #ok
+    echo "    xbps-install -Sy                         kmod xz        # void"           #ok
+    echo "    pacman -Sy --noconfirm                   kmod xz        # arch"           #ok
+    echo "    apk add --no-cache                       kmod xz        # alpine, nixos"  #ok, but some remaining glibc issues
+    echo "    zypper --non-interactive install         kmod xz        # opensuse"       #ok, but nvidia-installer extraction fails
+    echo "    emerge --ask n                           kmod xz        # gentoo"         #NOT CHECKED
     echo "    set +x"
     echo "  }"
     echo "  apk -V && {"
-    echo "    apk info glibc 2>/dev/null | grep glibc || {"
+    echo "    apk info glibc 2>/dev/null | grep glibc && echo 'x11docker: found glibc in container' || {"
     echo "      echo 'x11docker: Installing glibc compatibility layer next to musl libc, needed for nvidia driver. Look at https://github.com/sgerrand/alpine-pkg-glibc'"
     echo "      echo 'x11docker: Preinstalling this GNU C Library compatibility layer in image speeds up nvidia driver install.'"
     echo "      apk info libc6-compat && apk del libc6-compat && echo 'x11docker: Removing libc6-compat as it interferes with glibc.'"
-    echo "      [ -e $Cshare/glibc.apk ] && {"
+    echo "      [ -e $Cshare/glibc.apk ] && { "
     echo "        apk add --allow-untrusted $Cshare/glibc.apk ||:"
     echo "      } || {"
     echo "        echo 'x11docker: Providing glibc from https://github.com/sgerrand/alpine-pkg-glibc in /usr/share/x11docker avoids following downloads and installs.'"
@@ -3952,7 +3973,6 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     echo "    }"
     echo "  }"
     echo "  echo 'x11docker WARNING: Installing proprietary closed source NVIDIA driver $Nvidiaversion. That slows down container startup.'"
-    echo "  chmod +x $Cshare/NVIDIA-$Nvidiaversion.run"
     echo "  sh $Cshare/NVIDIA-$Nvidiaversion.run  --accept-license --no-runlevel-check  --no-questions --ui=none --no-kernel-module --no-kernel-module-source --no-backup"
     echo "  [ \$? ] || echo 'x11docker ERROR: Installation of nvidia driver seems to have failed.'"
     echo "} || echo 'x11docker: NVIDIA driver $Nvidiaversion seems to be installed already."
@@ -4798,6 +4818,7 @@ todo() {
 # --runasroot: new option?
 # --add: change to --runfromhost?
 # BUG: ENTYPOINT (sbin/init or systemd fails with $Switchcontainruser=yes
+# BUG: --runit: nvidia driver install fails
 # ssh -X -- command fails. why?
 # --group-add: compare host and container GID? warn if group misses in container?
 # --fullscreen: --weston[-x] in weston crashes. Use X backend if DISPLAY is available.
