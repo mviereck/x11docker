@@ -98,6 +98,7 @@ _Advanced usage:_
    - Packages for OpenGL/Mesa in image:
      - debian and Ubuntu images: `mesa-utils mesa-utils-extra`.
      - CentOS and fedora images: `glx-utils mesa-dri-drivers`
+     - Alpine and NixOS images: `mesa-demos mesa-dri-ati mesa-dri-intel mesa-dri-nouveau mesa-dri-swrast`
      - Arch Linux images: `mesa-demos`
  - **Sound**:
    - Option `--alsa` has no dependencies. 
