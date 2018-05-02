@@ -1,4 +1,4 @@
-# x11docker: Run GUI applications in docker ![x11docker logo](/../screenshots/x11docker_klein.jpeg?raw=true "Optional Title") 
+# x11docker: Run GUI applications in docker ![x11docker logo](x11docker.png) 
 ## Avoiding X security leaks and hardening container security
 
 Running graphical applications or desktop environments in docker images is effectively similar to running a snapshot of a virtual machine that is set back to it origin state on every restart. Advantage: It needs much less resources than a virtual machine, and it is easier to share host resources like hardware acceleration, sound and clipboard. Persistant data storage is possible with shared host folders. Persistant system changes can be done in Dockerfile.

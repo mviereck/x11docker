@@ -11,20 +11,29 @@ Project website: https://github.com/mviereck/x11docker
  - `--group-add`: New option to add groups to container user. 
    Needed instead of ` -- --group-add` to cover user switching setups, too.
  - `--showid`: New option to show container ID on stdout.
+ - `--runfromhost`: Replaces deprecated `--add` to have a meaningful option name.
 ### Changed
- - `--gpu`: Support for automatical installation of NVIDIA drivers. [(#41)](https://github.com/mviereck/x11docker/issues/41)
+ - `--gpu`: Support for automatical installation of NVIDIA drivers in container. 
+   Limited to `glibc` based image systems. 
+   [(#41)](https://github.com/mviereck/x11docker/issues/41)
  - `elogind` support for `--sysvinit`, `--openrc`, `--runit` and `--dbus-system`.
    See also [elogind in container: elogind#52](https://github.com/elogind/elogind/issues/52)
  - `--systemd`: If host does not run `systemd`, create `/sys/fs/cgroup/systemd`.
  - `--dbus-system`: wait for bus socket to be ready before continuing.
+ - `--tini`: Use `tini-static` from `~/.local/share/x11docker` or 
+   `/usr/local/share/x11docker` if available. Show message for this possibility
+   if `/usr/bin/docker-init` is missing. (Widespread docker packaging issue).
+   [(#42)](https://github.com/mviereck/x11docker/issues/42)
  - Outsourced `x11docker.png` from `x11docker-gui`.
- - No default output of container ID on stdout anymore. Use `--showid` instead. 
+ - No default output of container ID on stdout anymore. Use `--showid` instead.
  - `--silent`: Do not show error messages except in logfile.
+### Deprecated
+ - `--add` changed its option name to `--runfromhost`.
 ### Fixed
  - Don't share or link `/tmp/.Xn-lock` as usefulness is in doubt. 
    Avoids issues with `x11docker/xwayland`.
  - Forward `stdin` again. (Had been disappeared in a subshell)
- - `--stdout:` Make sure container ID is shown before output of `--stdout`.
+ - `--stdout --showid:` Make sure container ID is shown first.
 
 ## [4.1.1](https://github.com/mviereck/x11docker/releases/tag/v4.1.1) - 2018-04-12
 ### Changed
