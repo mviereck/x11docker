@@ -69,4 +69,4 @@
 
 ![screenshot](x11docker-dependencies.png "x11docker GUI dependencies")
 
-![screenshot](x11docker_gross.png "x11docker logo")
+![screenshot](x11docker-512x512.png "x11docker logo")
