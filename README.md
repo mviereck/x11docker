@@ -1,7 +1,13 @@
 # x11docker: Run GUI applications in docker ![x11docker logo](x11docker.png) 
 ## Avoiding X security leaks and hardening container security
 
-Running graphical applications or desktop environments in docker images is effectively similar to running a snapshot of a virtual machine that is set back to it origin state on every restart. Advantage: It needs much less resources than a virtual machine, and it is easier to share host resources like hardware acceleration, sound and clipboard. Persistant data storage is possible with shared host folders. Persistant system changes can be done in Dockerfile.
+Running graphical applications or desktop environments in docker images is 
+effectively similar to running a snapshot of a virtual machine that is 
+set back to it origin state on every restart. 
+Advantage: It needs much less resources than a virtual machine, and it is 
+easier to share host resources like hardware acceleration, sound and clipboard.
+Persistant data storage is possible with shared host folders. 
+Persistant system changes can be done in Dockerfile.
  - Avoids X security leaks by running [additional X servers](#choice-of-x-servers-and-wayland-compositors).
  - Improves container [security](#security):
    - Restricts container capabilities to bare minimum.
@@ -19,8 +25,8 @@ Running graphical applications or desktop environments in docker images is effec
  - Supports [init systems](#init-system) `tini`, `runit`, `openrc`, `SysVinit` and `systemd` in container.
  - Developed on debian 9. Tested on fedora 25, CentOS 7, openSUSE 42.3, Ubuntu 16.04, Manjaro 17, Mageia 6 and Arch Linux.
  - Easy to use. [Examples](#examples): 
-    - `x11docker jess/cathode`
-    - `x11docker --desktop --size 320x240 x11docker/lxde`
+   - `x11docker jess/cathode`
+   - `x11docker --desktop --size 320x240 x11docker/lxde`
  
 ![x11docker-gui screenshot](/../screenshots/screenshot-retroterm.png?raw=true "Cathode retro term in docker") ![LXDE in xpra](/../screenshots/screenshot-lxde-small.png?raw=true "LXDE desktop in docker")
 
@@ -90,31 +96,43 @@ _Basics:_
  - Already installed on most systems with an X server: `xrandr`, `xauth` and `xdpyinfo`.
  
 _Advanced usage:_
+ - **Clipboard** sharing with option `--clipboard` needs `xclip`. (Not needed for `--xpra`, `--nxagent` and `--hostdisplay`). Image clipboard sharing is possible with `--xpra` and `--hostdisplay`.
+ - **Sound**:
+   - Option `--alsa` has no dependencies. 
+     - You can install ALSA libraries in image to support virtual devices (debian images: `libasound2`).
+   - Option `--pulseaudio` needs `pulseaudio` on host _and_ in image. 
  - **Hardware acceleration** with option `--gpu`
-   - Beside `xpra`, also install `Xwayland`, `weston` and `xdotool`. (Not needed for `--xorg` and `--hostdisplay`)
-   - Works best with open source drivers on host and OpenGL/Mesa in image. 
-     - With closed source drivers on host, you need the very same driver version in image. 
-       For a possible automated install of nvidia driver in container try out latest master version.
+   - Works best with open source drivers on host and OpenGL/Mesa in image. In most cases everything will work out of the box with just setting `--gpu`.
+   - To provide good X isolation: Beside `xpra`, also install `Xwayland`, `weston` and `xdotool` on host. Without these, you still can use `--hostdisplay` and `--xorg`.
    - Packages for OpenGL/Mesa in image:
      - debian and Ubuntu images: `mesa-utils mesa-utils-extra`.
      - CentOS and fedora images: `glx-utils mesa-dri-drivers`
      - Alpine and NixOS images: `mesa-demos mesa-dri-ati mesa-dri-intel mesa-dri-nouveau mesa-dri-swrast`
      - Arch Linux images: `mesa-demos`
- - **Sound**:
-   - Option `--alsa` has no dependencies. 
-     - You can install ALSA libraries in image to support virtual devices (debian images: `libasound2`).
-   - Option `--pulseaudio` needs `pulseaudio` on host _and_ in image. 
- - **Clipboard** sharing with option `--clipboard` needs `xclip`. (Not needed for `--xpra`, `--nxagent` and `--hostdisplay`). Image clipboard sharing is possible with `--xpra` and `--hostdisplay`.
- - Rarer needed dependencies for special options:
-   - `--nxagent` provides a fast and lightweight alternative to `xpra` and `Xephyr`. Needs [`nxagent`](https://packages.debian.org/experimental/nxagent) to be installed.
-   - `--kwin` and `--kwin-xwayland` need `kwin_wayland`, included in modern `kwin` packages.
-   - `--xdummy` needs dummy video driver `xserver-xorg-video-dummy` (debian) or `xorg-x11-drv-dummy` (fedora).
-   - `--xvfb` needs `Xvfb`
-   - `--xfishtank` needs `xfishtank` to show a fish tank.
-   - `--dbus` is needed only for QT5 application in Wayland. It needs `dbus-launch` (package `dbus-x11`) in image.
-   - `--starter` needs `xdg-user-dir` to locate your `Desktop` folder for starter icons.
-   - `--install`, `--update` and `--remove` need `unzip` and `xdg-icon-resource`.
- - List of all host packages for all possible x11docker options (debian package names): `xpra xserver-xephyr xvfb weston xwayland nxagent kwin xserver-xorg-video-dummy xfishtank xclip xdg-utils xauth xdotool xrandr unzip`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
+   - Proprietary closed source drivers from NVIDIA corporation need some manual setup and have some restrictions. Consider to use free `nouveau` driver instead.
+     - x11docker can automatically install closed source nvidia drivers in container at every container startup. It gives some instructions in terminal output.
+     - The image should contain `modprobe` (package `kmod`) and `xz`. x11docker installs them if they are missing, but that slows down container startup.
+     - You need the very same driver version as on host. It must not be a `deb` or `rpm` package but an `NVIDIA_[...].run` file. Store it at one of the following locations:
+       - `~/.local/share/x11docker` (current user only)
+       - `/usr/local/share/x11docker` (system wide)
+     - Look at NVIDIA driver download page or try the direct download link provided in x11docker terminal output.
+     - Closed source driver installation fails on image systems that are not based on `glibc`. This affects especially [Alpine](https://alpinelinux.org/) based images. 
+       NVIDIA corporation does not provide the source code that would allow you to use your hardware with different systems.
+     - Alternativly, you can install a driver version matching your host setup in image yourself. Note that this image will not be portable anymore.
+     - Consider to say: "Closed source sucks".
+ 
+_Rarer needed dependencies for special options:_
+ - `--nxagent` provides a fast and lightweight alternative to `xpra` and `Xephyr`. Needs [`nxagent`](https://packages.debian.org/experimental/nxagent) to be installed.
+ - `--kwin` and `--kwin-xwayland` need `kwin_wayland`, included in modern `kwin` packages.
+ - `--xdummy` needs dummy video driver `xserver-xorg-video-dummy` (debian) or `xorg-x11-drv-dummy` (fedora).
+ - `--xvfb` needs `Xvfb`
+ - `--xfishtank` needs `xfishtank` to show a fish tank.
+ - `--dbus` is needed only for QT5 application in Wayland. It needs `dbus-launch` (package `dbus-x11`) in image.
+ - `--starter` needs `xdg-user-dir` to locate your `Desktop` folder for starter icons.
+ - `--install`, `--update` and `--remove` need `unzip` and `xdg-icon-resource`.
+   
+_List of all host packages for all possible x11docker options (debian package names):_
+ - `xpra xserver-xephyr xvfb weston xwayland nxagent kwin xserver-xorg-video-dummy xfishtank xclip xdg-utils xauth xdotool xrandr unzip`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
 
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
 
@@ -122,8 +140,8 @@ _Advanced usage:_
 root permissions are needed only to run docker. X servers run as unprivileged user.
 
 _Running x11docker as unprivileged user:_
- - x11docker checks whether docker needs a password to run and whether `su` or `sudo` are needed to get root privileges. A password prompt appears, if needed.
- - If that check fails and does not match your setup, use option `--pw FRONTEND`. `FRONTEND` can be one of `su sudo gksu gksudo lxsu lxsudo kdesu kdesudo beesu pkexec` or `none`.  
+ - x11docker checks whether docker needs a password to run and whether `su` or `sudo` are needed to get root privileges. A password prompt appears if needed.
+ - If that check fails and does not match your setup, use option `--pw FRONTEND`. `FRONTEND` can be one of `su sudo gksu gksudo lxsu lxsudo kdesu kdesudo beesu pkexec` or `none`.
 
 _Running x11docker as root:_
  - Commands other than `docker` are executed as unprivileged user determined with [`logname`](http://pubs.opengroup.org/onlinepubs/9699919799/utilities/logname.html). (You  can specify another host user with `--hostuser USER`).
@@ -214,8 +232,8 @@ _Most important:_
   
 _Rather special options reducing security, but not needed for regular use:_
   - `--sudouser` allows sudo with password `x11docker`for container user. If an application breaks out of container, it can do anything. Allows some container capabilties that x11docker would drop otherwise.
-  - `--systemd`, `--openrc` and `--runit` allow some container capabilities that x11docker would drop otherwise. `--systemd` also shares access to `/sys/fs/cgroup`.
   - `--cap-default` disables x11docker's container hardening and falls back to default docker container privileges.
+  - `--systemd`, `--sysvinit`, `--openrc` and `--runit` allow some container capabilities that x11docker would drop otherwise. `--systemd` also shares access to `/sys/fs/cgroup`.
   - `--hostipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory. Disables IPC namespacing.)
   - `--hostnet` sets docker run option `--net=host`. (Allows dbus connection to host, Shares host network stack.)
    
@@ -290,10 +308,23 @@ x11docker --hostdisplay x11docker/xfce thunar  # Thunar from another image appea
 ```
 
 # Init system
-x11docker supports init systems as PID 1 in container.
- - As default, x11docker uses docker built-in [`tini`](https://github.com/krallin/tini) with docker run option `--init`.
- - Init in container solves the [zombie reaping issue](https://blog.phusion.nl/2015/01/20/docker-and-the-pid-1-zombie-reaping-problem/).
+x11docker supports init systems as PID 1 in container. Init in container solves the [zombie reaping issue](https://blog.phusion.nl/2015/01/20/docker-and-the-pid-1-zombie-reaping-problem/).
+
+## tini
+As default, x11docker uses docker built-in [`tini`](https://github.com/krallin/tini) with docker run option `--init`.
  - You can disable init in container with option `--no-init`. 
+ - On some distributions docker's init `/usr/bin/docker-init` is missing in docker package. To provide a replacement, download `tini-static` from https://github.com/krallin/tini
+   and store it at one of following locations:
+   - `~/local/share/x11docker`
+   - `/usr/local/share/x11docker`
+   - Example installation code:
+```
+mkdir -p ~/.local/share/x11docker
+cd ~/.local/share/x11docker
+wget https://github.com/krallin/tini/releases/download/v0.18.0/tini-static
+chmod +x tini-static
+```
+      
 ## systemd, SysVinit, runit, OpenRC
 x11docker sets up the init system to run desired command. No special setup is needed beside installing the init system in image. Installing `dbus` in image is recommended.
  - `--systemd`: [systemd](https://wiki.debian.org/systemd) in container.
@@ -308,6 +339,24 @@ x11docker sets up the init system to run desired command. No special setup is ne
    - Image example based on [Alpine Linux](https://alpinelinux.org/): [x11docker/fvwm](https://hub.docker.com/r/x11docker/fvwm/)
  - `--sysvinit`: [SysVinit](https://wiki.archlinux.org/index.php/SysVinit) in container.
    - Tested with [devuan](https://devuan.org/) images from [gitlab/paddy-hack](https://gitlab.com/paddy-hack/devuan/container_registry).
+
+## elogind
+x11docker automatically supports `elogind` in container with init system options `--sysvinit`, `--runit` and `--openrc`.
+ - You must set option `--sharecgroup` to allow `elogind` in container.
+ - If your host does not run with `elogind` (but e.g. with `systemd`), x11docker needs an elogind cgroup mountpoint at `/sys/fs/cgroup/elogind`. Run x11docker with root privileges to automatically create it.
+ - Same goes for `elogind` on host and `systemd` in container; a cgroup mountpoint for `systemd` must be created.
+ - Example to manually create elogind cgroup mountpoint on a systemd host:
+```
+mount -o remount,rw cgroup /sys/fs/cgroup  # remove write protection
+mkdir -p /sys/fs/cgroup/elogind
+mount -t cgroup cgroup /sys/fs/cgroup/elogind -o none,name=elogind
+mount -o remount,ro cgroup /sys/fs/cgroup  # restore write protection
+```
+ - Example to manually create a systemd cgroup mountpoint on an elogind host:
+```
+mkdir -p /sys/fs/cgroup/systemd
+mount -t cgroup cgroup /sys/fs/cgroup/systemd -o none,name=systemd
+```
 
 ## dbus
 Some desktop environments and applications need a running dbus daemon and/or dbus user session. 

@@ -6,33 +6,39 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [4.2.0](https://github.com/mviereck/x11docker/releases/tag/v4.2.0) - 2018-05-04
 ### Added
  - `--group-add`: New option to add groups to container user. 
    Needed instead of ` -- --group-add` to cover user switching setups, too.
  - `--showid`: New option to show container ID on stdout.
  - `--runfromhost`: Replaces deprecated `--add` to have a meaningful option name.
+ - `--runasroot`: New option to run command as root in container on startup.
+   Similar to already existing `--exe`, but integrates with container.
 ### Changed
  - `--gpu`: Support for automatical installation of NVIDIA drivers in container. 
    Limited to `glibc` based image systems. 
    [(#41)](https://github.com/mviereck/x11docker/issues/41)
- - `elogind` support for `--sysvinit`, `--openrc`, `--runit` and `--dbus-system`.
+ - `elogind` support for `--sysvinit`, `--openrc` and `--runit`.
    See also [elogind in container: elogind#52](https://github.com/elogind/elogind/issues/52)
  - `--systemd`: If host does not run `systemd`, create `/sys/fs/cgroup/systemd`.
  - `--dbus-system`: wait for bus socket to be ready before continuing.
  - `--tini`: Use `tini-static` from `~/.local/share/x11docker` or 
    `/usr/local/share/x11docker` if available. Show message for this possibility
    if `/usr/bin/docker-init` is missing. (Widespread docker packaging issue).
-   [(#42)](https://github.com/mviereck/x11docker/issues/42)
+   [(#23)](https://github.com/mviereck/x11docker/issues/23)
+ - Avoid user switching except for `--systemd`, `--sysvinit`, `--openrc` and 
+   `--runit`. [(#42)](https://github.com/mviereck/x11docker/issues/42)
  - Outsourced `x11docker.png` from `x11docker-gui`.
  - No default output of container ID on stdout anymore. Use `--showid` instead.
  - `--silent`: Do not show error messages except in logfile.
+ - `--weston[-xwayland] --fullscreen`: Use X backend if possible to prevent
+   possible crash with nested fullscreen weston in host drm weston.
+ - Disabled forwarding of `stdin` to container, has not been reliable.
 ### Deprecated
  - `--add` changed its option name to `--runfromhost`.
 ### Fixed
  - Don't share or link `/tmp/.Xn-lock` as usefulness is in doubt. 
    Avoids issues with `x11docker/xwayland`.
- - Forward `stdin` again. (Had been disappeared in a subshell)
  - `--stdout --showid:` Make sure container ID is shown first.
 
 ## [4.1.1](https://github.com/mviereck/x11docker/releases/tag/v4.1.1) - 2018-04-12

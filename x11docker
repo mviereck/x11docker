@@ -10,7 +10,7 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="4.2.0-beta"
+Version="4.2.0"
 
 usage() {               # --help: show usage information
   echo "
@@ -68,16 +68,15 @@ Basic settings: (especially influencing auto choosing X server)
  -d, --desktop         Indicate desktop environment in image.
  -g, --gpu             Hardware accelerated OpenGL rendering. Shares files in
                        /dev/dri. Works best with open source drivers installed
-                       on host and OpenGL/Mesa in image. Closed source drivers 
-                       need to be the very same on host and in image.
+                       on host and OpenGL/Mesa in image. 
+                       For closed source nvidia drivers regard terminal output.
                        Degrades container isolation. Container access to GPU.
- -W, --wayland         Set up a wayland environment. (Some QT5 apps also need
-                       option --dbus, some GTK3 apps must run without --dbus.)
  -w, --wm COMMAND      Host window manager to use for single applications in
                        nested X server options like --xephyr.
                        To autodetect a host wm, use --wm=auto or short: -wm
                        To set default autodetected window manager:
                            update-alternatives --config x-window-manager
+ -W, --wayland         Create a Wayland environment.
 
 Shared folders:
  -m, --home            Share a host folder ~/x11docker/imagename as home folder
@@ -100,6 +99,9 @@ Clipboard, sound, language:
                        Same as host: --lang=\$LANG.
                        
 Special options:
+     --sudouser        Allow sudo and su for container user. Use with care,
+                       severe reduction of default x11docker security!
+                       Password:  x11docker
      --no-internet     Disable internet access for container.
      --no-entrypoint   Disable ENTRYPOINT in image to allow other commands, too
      --workdir DIR     Set working directory DIR
@@ -109,10 +111,8 @@ Special options:
                        For custom access to new X server. Get environment with:
                          read xenv < <(x11docker --showenv [...])
      --showid          Echo container ID on stdout.
-     --sudouser        Allow sudo and su for container user. Use with care,
-                       severe reduction of default x11docker security!
-                       Password:  x11docker
      --runfromhost CMD Run host command CMD on new X server (you may need & ).
+     --runasroot CMD   Run command CMD as root in container on startup.
      --pw FRONTEND     Choose frontend for password prompt. Possible FRONTEND:
                          su sudo gksu gksudo lxsu lxsudo kdesu kdesudo
                          pkexec beesu none
@@ -252,7 +252,7 @@ Miscellaneous:
      --ps              Preserve container and cache files on exit.
      --cleanup         Clean up orphaned containers and cache files.
        
-Verbose options:
+Verbosity options:
  -v, --verbose         Be verbose. Output of logfile on stderr.
      --silent          Do not show terminal messages.
      --debug           Debug mode: Show some debug output,
@@ -466,6 +466,7 @@ installer() {           # --install, --update, --update-master, --remove: Instal
       note "Installing icon for x11docker with xdg-icon-resource"
       xdg-icon-resource install --context apps --novendor --mode system --size 64 "$(pwd)/x11docker.png" x11docker || warning "Could not install icon for x11docker.
   Is 'xdg-icon-resource' installed on your system?"
+      xdg-icon-resource uninstall --size 72 x11docker ||:  # deprecated icon size, may still be present.
       
       note "Creating application entry for x11docker"
       [ -e "/usr/bin/x11docker-gui" ] && {
@@ -752,7 +753,7 @@ writeaccess() {         # check if useruid $1 has write access to folder $2
 waitforfilecreation() { # similar to inotify-wait: wait up to 15s for file $1 to be created
   # $1 file to wait for
   # $2 time to wait. default: 15s. possible: infinity
-  local Zeit Warten
+  local Zeit Warten Dauer Count
   Zeit=$(date +%s)
   verbose "Waiting for file creation of ${1:-}"
   case ${2:-} in
@@ -761,13 +762,15 @@ waitforfilecreation() { # similar to inotify-wait: wait up to 15s for file $1 to
     *)            Warten=${2:-} ;;
   esac
   while [ ! "$(find  "${1:-}" 2>/dev/null)" ] ; do
-    sleep 0.2
-    [ $Warten -lt $(($(date +%s) - $Zeit)) ] && {
+    Count=$(( Count + 1 ))
+    Dauer=$(( $(date +%s) - $Zeit ))
+    sleep $(awk "BEGIN { print $Count * 0.1 }")
+    [ $Warten -lt $Dauer ] && {
       warning "Failed to wait for file creation of
   ${1:-}"
       return 1
     }
-    verbose "waiting since $(($(date +%s) - $Zeit))s for ${1:-} to be created, will wait up to $Warten seconds."
+    verbose "waiting since ${Dauer}s for ${1:-} to be created, will wait up to $Warten seconds."
     [ -e "$Timetosaygoodbye" ] && {
       verbose "stopped waiting for ${1:-} due to terminating signal."
       return 1
@@ -778,15 +781,17 @@ waitforfilecreation() { # similar to inotify-wait: wait up to 15s for file $1 to
   return 0
 }
 waitforfilecontent() {  # wait for file $1 to be not empty
-  local Zeit Warten
   # $1 file to look at
+  local Zeit Warten Dauer Count
   Zeit=$(date +%s)
   Warten=15
   verbose "Waiting for file content in ${1:-}"
   while [ ! -s "${1:-}" ] ; do
-    sleep 0.2
-    [ $Warten -lt $(expr $(date +%s) - $Zeit) ]  && return 1
-    verbose "waiting since $(expr $(date +%s) - $Zeit)s for ${1:-} to have content, will wait up to $Warten seconds."
+    Count=$(( Count + 1 ))
+    Dauer=$(( $(date +%s) - $Zeit ))
+    sleep $(awk "BEGIN { print $Count * 0.1 }")
+    [ $Warten -lt $Dauer ]  && return 1
+    verbose "waiting since ${Dauer}s for ${1:-} to have content, will wait up to $Warten seconds."
     [ -e "$Timetosaygoodbye" ] && {
       verbose "stopped waiting for file content of ${1:-} due to terminating signal."
       return 1
@@ -798,14 +803,16 @@ waitforlogentry() {     # wait for entry $3 in logfile $2 of application $1
   # $1 is the application we are waiting for to be ready
   # $2 points to logfile
   # $3 keyword to wait for 
-  local Zeit Warten
+  local Zeit Warten Dauer Count
   Zeit=$(date +%s)
   Warten=24
   while ! cat "${2:-}" | grep -q "${3:-}" ; do
+    Count=$(( Count + 1 ))
+    Dauer=$(( $(date +%s) - $Zeit ))
 #    verbose "waiting since $(expr $(date +%s) - $Zeit)s for ${1:-} to be ready..."
-    verbose "waiting since $(expr $(date +%s) - $Zeit)s for ${1:-} to be ready..."
-    sleep 0.2
-    [ $Warten -lt $(expr $(date +%s) - $Zeit) ] && return 1
+    verbose "waiting since ${Dauer}s for ${1:-} to be ready..."
+    sleep $(awk "BEGIN { print $Count * 0.1 }")
+    [ $Warten -lt $Dauer ] && return 1
     [ -e "$Timetosaygoodbye" ] && {
       verbose "stopped waiting for logentry in ${2:-} of ${1:-} due to terminating signal."
       return 1
@@ -876,6 +883,7 @@ Mksu=""                                         # prefix to run unprivileged com
 Mksubenutzer=""                                 # prefix to run commands as user defined by --user
 Hostgidaudio=""                                 # host GID of group audio. Can differ from container GID
 Hostgidvideo=""                                 # host GID of group video. Can differ from container GID
+Groupadd=""                                     # option --group-add: additional groups for container user
 
 # Gaining root privileges to run docker
 Passwordprompt=""                               # way to ask for password. one of pkexec, su, sudo, gksu, gksudo, auto
@@ -900,6 +908,7 @@ Dockeroptions=""                                # options for docker after -- an
 # docker variables
 Containername=""                                # name of container set by x11docker to make --cleanup able to find orphaned containers
 Containerpid=""                                 # process ID of script process with docker container
+Nonewprivileges="yes"
 
 # docker related files
 Dockerrc=dockerrc                               # init script run by docker. Creates $Imagecommandscript
@@ -1005,6 +1014,7 @@ Anyterminal=""                                  # terminal emulator for alert()
 Terminallist=""                                 # list of possible terminal emulators. Only a few work on wayland
 
 # regular options
+Sudouser="no"                                   # option --sudouser: Create user and root with sudo permissions with password 'x11docker'
 Benutzerhosthome="no"                           # option '-m, --home' (or '--homedir'): share a folder ~/.local/share/x11docker/Imagename with created container
 Benutzerhosthomefolder=""                       #   "        "   : path to shared folder. 
 Sharevolumes=""                                 # option --volume: host folders to share, array
@@ -1035,10 +1045,10 @@ Debug="no"                                      # option --debug: Throw it all o
 DebugPS4='+ \033[32m${LINENO}:${FUNCNAME[0]:+${FUNCNAME[0]}(): }\033[0m'
 
 # developer options
-Sudouser="no"                                   # option --sudouser: Create user and root with sudo permissions with password 'x11docker'
 Capdropall="yes"                                # option --cap-default: (don't) drop all container capabilities
 Adminusercaps="no"                              # options --sudouser, --systemd: add capabilities for general sys administration
-Switchcontaineruser="no"                        # options --dbus, --sudouser and initsystems: add capabilities for su/sudo user switching
+Switchcontaineruser="no"                        # options for init systems: user switching to toggle login daemons
+Switchcontainerusercaps="no"                    # options --dbus, --sudouser and initsystems: add capabilities for su/sudo user switching
 Sharehostipc="no"                               # option --hostipc, set --ipc=host.
 Sharehostnet="no"                               # option --hostnet, set --ipc=net
 Preservecachefiles="no"                         # if yes, dont delete cache files
@@ -1046,7 +1056,8 @@ Preservecontainer="no"                          # option '-p, --ps': if yes, pre
 Initsystem="tini"
 Capsysadmin="no"                                # option --sys-admin: add capability SYS_ADMIN (deprecated)
 Sharecgroup="no"                                # options --systemd, --cgroup: share /sys/fs/cgroup
-Addcommand=""                                   # option --add: add host command to xinitrc
+Runfromhost=""                                  # option --runfromhost: add host command to xinitrc
+Runasroot=""                                    # option --runasroot: add command running as root to container setup script
 
 # X authentication
 Xauthentication="yes"                           # option '--no-auth' use cookie authentication yes/no
@@ -1104,7 +1115,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
   Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,xtest,no-xtest,env:,showenv,showid"                                # X and environment options
   Longoptions="$Longoptions,verbose,stdout,stderr,silent,debug"                                                            # verbose options
   Longoptions="$Longoptions,hostipc,hostnet,ps,cache,cap-default,no-entrypoint,sudouser,hostuser:,group-add:"              # capabilities, users
-  Longoptions="$Longoptions,cachedir:,homedir:,westonini:,sharedir:,keymap:,runfromhost:"                                  # developer options
+  Longoptions="$Longoptions,cachedir:,homedir:,westonini:,sharedir:,keymap:,runfromhost:,runasroot:"                       # developer options
   Longoptions="$Longoptions,ipc,net,dbus-daemon,dbusdaemon,sharewayland,waylandenv,add:"                                   # deprecated
 
   Parsedoptions="$(getopt --options $Shortoptions --longoptions $Longoptions --name "$0" -- "$@" 2>/tmp/x11docker_parsererror)"
@@ -1141,18 +1152,20 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
       -K|--kwin)                     Xserver="--kwin" ;            Autochooseserver="no"  ;;
          --kwin-xwayland)            Xserver="--kwin-xwayland" ;   Autochooseserver="no"  ;;
       -n|--nxagent)                  Xserver="--nxagent" ;         Autochooseserver="no"  ;;
-      -W|--wayland)                  Sharewayland="yes" ; Setwaylandenv="yes"             ;; # set up wayland environment, regards --desktop
       
      #### Influencing X server 
       -d|--desktop)    Desktopmode="yes" ;;                # image contains a desktop environment.
-      -g|--gpu)        Gpu="yes" ;;                        # share files in /dev/dri
-      -w|--wm)         case ${2:-} in
+      -g|--gpu)        Gpu="yes" ;;                        # share files in /dev/dri, allow GPU usage
+      -w|--wm)         case ${2:-} in                      # choose host window manager
                          ""|"n"|"none") Windowmanager="none" ;;
                          "m"|"auto")    Windowmanager="auto" ;;
                          *)             Windowmanager=${2:-} ;;
                        esac
                        shift 
                        Desktopmode="yes" ;;
+      -W|--wayland)    Sharewayland="yes"                  # set up wayland environment, regards --desktop
+                       Setwaylandenv="yes"
+                       Dbusdaemon="yes" ;;
                        
      #### Appearance
       -f|--fullscreen) Fullscreen="yes"  ;;                # fullscreen mode for Xephyr and Weston
@@ -1176,10 +1189,10 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
          --no-internet)Internetaccess="no" ;;              # disallow internet access
          --workdir)    Workdir="$(escapestring "${2:-}")" ; shift ;; # set working directory
          --pw)         Passwordprompt="${2:-}" ; shift ;;  # frontend for password prompt
-         --runfromhost|--add) Addcommand="${2:-}" 
+         --runfromhost|--add) Runfromhost="${2:-}" ; shift # add custom host command in xinitrc
                        [ "${1:-}" = "--add" ] && warning "Option --add changed to --runfromhost and is deprecated.
-  Please use --runfromhost instead."
-                       shift ;;      # add custom host command in xinitrc
+  Please use --runfromhost instead." ;;  
+         --runasroot) Runasroot="${2:-}" ; shift ;;        # add custom root command in container setup script
          
      #### Verbose options
       -v|--verbose)    Verbose="yes"  ;;                   # be verbose
@@ -1942,9 +1955,6 @@ Parsed options: $Parsedoptions"
     --weston|--kwin|--hostwayland)
      note "You are running a pure Wayland environment.
   X applications without Wayland support will fail."
-    [ "$Dbuslaunch" = "no" ] || [ "$Setwaylandenv" = "no" ] && note "QT5 / KDE applications need 
-  options --dbus --wayland to run in Wayland.
-  GTK3 applications often fail with option --dbus."
     [ "$Xserver" = "--kwin" ] && note "kwin_wayland (option --kwin) does not support the xdg_shell
   interface in all versions. Some GTK3 Wayland applications depend on it.
   If application startup fails, try --weston instead."
@@ -2106,8 +2116,9 @@ Parsed options: $Parsedoptions"
   Cmdstderrlogfile="$Sharefolder/$Cmdstderrlogfile"         && mkfile $Cmdstderrlogfile 666
   mkfile "$Sharefolder/environment"
   
+  ### FIXME disabled, blocks in ssh setups.
   # catch stdin (submitted in x11docker.CMD.sh)
-  [ -t 0 ] || cat >> $Cmdstdinfile
+  # [ -t 0 ] || cat >> $Cmdstdinfile
 }
 
 { #### part: create $Hostxenv: Environment variables for host X display
@@ -2222,7 +2233,6 @@ Parsed options: $Parsedoptions"
 }
 
 { #### part: --gpu: check nvidia driver
-
   [ "$Gpu" = "yes" ] && {
     warning "Option --gpu degrades container isolation.
   Container gains access to GPU hardware.
@@ -2231,14 +2241,6 @@ Parsed options: $Parsedoptions"
   
     note "Hardware acceleration (option --gpu) works quite well
   with open source drivers on host and OpenGL/MESA in image.
-  
-  OpenGL/MESA packages for different base images:
-    Debian, Ubuntu: mesa-utils mesa-utils-extra
-    Arch Linux:     mesa-demos
-    Fedora, CentOS: glx-utils mesa-dri-drivers
-    Alpine, NixOS:  mesa-demos mesa-dri-ati mesa-dri-intel 
-                    mesa-dri-nouveau mesa-dri-swrast
-                    
   If you have closed source nvidia driver on host, you need the very same
   closed source driver version in container to get hardware acceleration."
   }
@@ -2246,30 +2248,32 @@ Parsed options: $Parsedoptions"
   # check for closed source nvidia driver on host, provide automated installation, warn about disadvantages
   [ "$Gpu" = "yes" ] && [ -e "/proc/driver/nvidia" ] && {
     Nvidiaversion=$(cat /proc/driver/nvidia/version | head -n1 | awk '{ print $8 }')
-    verbose "Detected nvidia driver $Nvidiaversion on host."
+    verbose "Detected nvidia driver version $Nvidiaversion on host."
     Nvidiadriver=$(find /usr/local/share/x11docker/NVIDIA* $Hostuserhome/.local/share/x11docker/NVIDIA* 2>/dev/null | grep $Nvidiaversion )
     
     [ -e "$Nvidiadriver" ] && {
-      Adminusercaps="yes"
       verbose "Found proprietary closed source nvidia driver installer
   $Nvidiadriver"
       note "Will install closed source nvidia driver $Nvidiaversion in container.
   That slows down container startup. Startup will be much faster if image 
   already includes modprobe and xz (packages 'kmod' and 'xz' or 'xz-utils').
   With free nouveau driver on host there would be no startup delay.
-  Ask NVIDIA corporation to publish the closed source API of your hardware."
+  Ask NVIDIA corporation to publish the closed source API of your hardware.
+  Ask NVIDIA corporation to actively support free nouveau driver."
   
       [ "$Capdropall" = "yes" ] && warning "To install proprietary closed source nvidia driver,
-  x11docker must grant advanced privileges to container that would be dropped 
+  x11docker must give some capabilities to container that would be dropped
   otherwise for security reasons. Container security is reduced now.
   You would not have this issue with free nouveau driver on host."
   
-      warning "Installation of proprietary closed source nvidia driver
-  fails with images based on musl libc like NixOS and Alpine.
-  Due to closed source policy of NVIDIA corporation that is not solvable.
-  Ask NVIDIA corp. to publish driver source code so you can use the hardware
-  you paid for on linux systems different from their presumptions.
-  Otherwise, install free nouveau driver on host."
+      note "Installation of proprietary closed source nvidia driver
+  fails in containers based on musl libc like NixOS and Alpine.
+  Installation in openSUSE containers fails with a self-extraction error.
+    
+  For openSUSE images you can try to create a custom installation 
+  command with option --runasroot or to install a closed source nvidia driver 
+  in image itself that matches your nvidia driver version on host."
+  
 # disabled: automated install of glibc compatibilty layer. nvidia installer fails anyway.
 #      Alpineglibc=$(find /usr/local/share/x11docker/glibc*.apk $Hostuserhome/.local/share/x11docker/glibc*.apk 2>/dev/null | sort -V | tail -n1 )
 #      [ "$Alpineglibc" ] || note "For images based on musl libc like alpine or NixOS nvidia
@@ -2279,24 +2283,23 @@ Parsed options: $Parsedoptions"
 #    $Hostuserhome/.local/share/x11docker/
 #    /usr/local/share/x11docker/
 #  Otherwise, x11docker will download and install on itself in container."
-      :
     } || {
       Nvidiadriver=""
       warning "You are using proprietary closed source nvidia driver.
-  GPU acceleration will only work if you have the very same driver version 
-  installed in image. That makes images less portable.
+  GPU acceleration will only work if you have installed the very same driver
+  version in image. That makes images less portable.
   It is recommended to use free open source nouveau driver on host instead.
   Ask NVIDIA corporation to at least publish their closed source API,
   or even better to actively support open source drivers like nouveau."
   
-      note "x11docker can try to automatically install nvidia driver $Nvidiaversion
-  in container on every container startup.
+      note "x11docker can try to automatically install nvidia driver
+  version $Nvidiaversion in container on every container startup.
   Drawbacks: Container startup is slower and its security will be reduced.
   
   You can look here for a driver installer:
     https://www.nvidia.com/Download/index.aspx
   A direct download URL may be:
-    https://us.download.nvidia.com/XFree86/Linux-x86_64/$Nvidiaversion/NVIDIA-Linux-x86_64-$Nvidiaversion.run
+   https://http.download.nvidia.com/XFree86/Linux-x86_64/$Nvidiaversion/NVIDIA-Linux-x86_64-$Nvidiaversion.run
   If you got a driver, store it at one of the following locations:
     $Hostuserhome/.local/share/x11docker/
     /usr/local/share/x11docker/
@@ -2304,6 +2307,10 @@ Parsed options: $Parsedoptions"
   Be aware that the version number must match exactly the version on host. 
   The file name must begin with 'NVIDIA', contain the version number $Nvidiaversion
   and end with suffix '.run'.
+  
+  Automated installation fails on image systems not using glibc like Alpine
+  and fails on openSUSE images with a self-extraction error.
+  These issues cannot be fixed due to closed source policy of NVIDIA corporation.
   
   To avoid all this, use free nouveau driver on host 
   instead of proprietary closed source nvidia driver."
@@ -2729,11 +2736,12 @@ startup-animation=fade
 " >> "$Westonini"
       [ -n "$Xkblayout" ] && echo "keymap_layout=$Xkblayout" >> "$Westonini"
       [ -z "$Xkblayout" ] && [ "$Tty" = "yes" ] && echo "$(echo -n "keymap_layout=" && cat /etc/default/keyboard | grep XKBLAYOUT | cut -d= -f2 | cut -d'"' -f2)" >> "$Westonini"
-      [ -n "$Hostwayland" ] &&  [ "$Xserver" != "--xpra-xwayland" ] && [ "$Hostsystem" != "ubuntu" ] && {
+      [ -n "$Hostwayland" ] && [ "$Xserver" != "--xpra-xwayland" ] && [ "$Hostsystem" != "ubuntu" ] && [ "$Fullscreen" = "no" ] && {
         Westonoutput="WL"
       } || {
         [ -n "$Hostdisplay" ] && Westonoutput="X"
       }
+      [ -z "$Westonoutput" ] && [ -n "$Hostwayland" ] && Westonoutput="WL"
       [ "$Tty" = "yes" ] && { 
         [ -n "$Screensize" ] || [ "$Scaling" != "0" ] || [ -n "$Rotation" ] && {
           # short start&stop of Weston to grep name of monitor
@@ -3277,23 +3285,29 @@ done
       [ -e "$Hostuserhome/.local/share/x11docker/tini-static" ] && Tinibinary="$Hostuserhome/.local/share/x11docker/tini-static"
       [ -z "$Tinibinary" ] && {
         Initsystem="none"
-        warning "Did not find binary for init system tini.
+        note "Did not find binary for init system tini.
   This is most probably an issue with your distributions docker package.
   It should provide an executeable /usr/bin/docker-init.
   Please write a bug report to your distribution maintainer.
   
-  To get the advantages of init in container and to avoid possible startup
-  failures for some setups, please download tini-static from here:
+  To get the advantages of init in container, please download tini:
     https://github.com/krallin/tini/releases/download/v0.18.0/tini-static
     
   Make it executeable with 'chmod +x tini-static' and store it in one of:
     $Hostuserhome/.local/share/x11docker/
     /usr/local/share/x11docker/"
       } || {
-        [ -x "$Tinibinary" ] || chmod +x "$Tinibinary"
+        [ -x "$Tinibinary" ] || {
+          chmod +x "$Tinibinary" || {
+            warning "Your tini binary is not executeable. Please run
+  chmod +x $Tinibinary"
+            Initsystem="none"
+          }
+        }
       }
-      
+      verbose "Found tini binary: ${Tinibinary:-(none)}"
     ;;
+    
     systemd)
       warning "Option --systemd degrades container isolation.
   It allows some docker container capabilities (nearly like --cap-default).
@@ -3396,10 +3410,9 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       Containername="x11docker_X${Newdisplaynumber}_${Mycookie}_$(echo $Imagename | tr / _ | tr : _ )"
       Dockercommand="$Dockercommand --name=$Containername"
   
-      [ "$Benutzeruid" = "0" ]     && Adminusercaps="yes"
+      [ "$Benutzeruid" = "0" ]     && Sudouser="yes"
       [ "$Sudouser" = "yes" ]      && Adminusercaps="yes"
-      [ "$Adminusercaps" = "yes" ] && Switchcontaineruser="yes"
-      [ "$Dbusdaemon" = "yes" ]    && Switchcontaineruser="yes"
+      [ "$Dbusdaemon" = "yes" ]    && Switchcontainerusercaps="yes" && Nonewprivileges="no"
       
       case $Initsystem in
         none|tini)
@@ -3420,7 +3433,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   --userns=host"
 
       [ "$Capdropall" = "yes" ] && Dockercommand="$Dockercommand \\
-  --cap-drop=ALL"
+  --cap-drop ALL"
       
       # option --sys-admin (deprecated)
       [ "$Capsysadmin" = "yes" ] && Dockercommand="$Dockercommand \\
@@ -3433,6 +3446,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   
         systemd)
           Switchcontaineruser="yes"
+          Nonewprivileges="no"
           Sharecgroup="yes"
           Dockercommand="$Dockercommand \\
   --stop-signal SIGRTMIN+3\\
@@ -3446,6 +3460,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
         
         runit)
           Switchcontaineruser="yes"
+          Nonewprivileges="no"
           Dockercommand="$Dockercommand \\
   --stop-signal HUP     --env VIRTUALIZATION=docker \\
   --cap-add SYS_BOOT    --cap-add KILL"
@@ -3453,37 +3468,55 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
         
         openrc)
           Switchcontaineruser="yes"
+          Nonewprivileges="no"
           Dockercommand="$Dockercommand \\
   --cap-add SYS_BOOT    --cap-add KILL"
         ;;
         
         sysvinit)
           Switchcontaineruser="yes"
+          Nonewprivileges="no"
           Dockercommand="$Dockercommand \\
   --cap-add SYS_BOOT    --cap-add KILL"
         ;;
       esac
       
+      [ "$Switchcontaineruser" = "yes" ] && Switchcontainerusercaps="yes"
       [ "$Capdropall" = "yes" ] && {
         [ "$Adminusercaps" = "yes" ] && {
-          Switchcontaineruser="yes"
+          Switchcontainerusercaps="yes"
+          Nonewprivileges="no"
           Dockercommand="$Dockercommand \\
   --cap-add CHOWN       --cap-add KILL\\
   --cap-add FSETID      --cap-add FOWNER  --cap-add SETPCAP"
         }
-        [ "$Switchcontaineruser" = "yes" ] && {
+        [ "$Switchcontainerusercaps" = "yes" ] && {
           Dockercommand="$Dockercommand \\
   --cap-add SETUID      --cap-add SETGID  --cap-add DAC_OVERRIDE\\
   --cap-add AUDIT_WRITE"
-        } || {
-          Dockercommand="$Dockercommand \\
-  --security-opt no-new-privileges"
         }
         # option --dbusdaemon: dbus needs CHOWN for XDG_RUNTIME_DIR
         [ "$Dbusdaemon" = "yes" ] && [ "$Adminusercaps" = "no" ] && Dockercommand="$Dockercommand \\
   --cap-add CHOWN"
-      }
-
+        :
+      } || Nonewprivileges="no"
+      
+      case $Nonewprivileges in
+        yes) Dockercommand="$Dockercommand \\
+  --security-opt no-new-privileges" ;;
+        no) warning "Container runs without --security-opt=no-new-privileges.
+  That reduces default x11docker container security hardening.
+  This is the case for options:
+    --wayland --dbus-system --sudouser --cap-default
+    --systemd --sysvinit --openrc --runit"
+          [ "$Setwaylandenv" = "yes" ] && note "For more restricted Wayland setups 
+  including --security-opt=no-new-privileges you can drop option --wayland
+  and use one of options '--weston', '--kwin' or '--hostwayland'.
+  QT5 applications also need options '--dbus  --env QT_QPA_PLATFORM=wayland'.
+  But GTK3 applications must run without option '--dbus'."
+        ;;
+      esac
+  
       # SELinux restrictions for containers must be disabled to allow access to X socket. Flags z or Z do not help.
       Dockercommand="$Dockercommand \\
   --security-opt label=type:container_runtime_t"
@@ -3558,10 +3591,15 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   --device=$Line:$Line:rw \\
   -v $Line:$Line:rw"
         done < <(find /dev/dri /dev/nvidia* /dev/vga_arbiter -maxdepth 0 2>/dev/null ||:)
-        [ "$Nvidiadriver" ] && Dockercommand="$Dockercommand \\
+        [ "$Nvidiadriver" ] && {
+          Dockercommand="$Dockercommand \\
   -v $Nvidiadriver:$Cshare/NVIDIA-$Nvidiaversion.run:ro"
-        [ "$Alpineglibc" ] && Dockercommand="$Dockercommand \\
+          [ "$Capdropall" = "yes" ] && [ "$Adminusercaps" = "no" ] && Dockercommand="$Dockercommand \\
+  --cap-add SETUID      --cap-add SETGID  --cap-add DAC_OVERRIDE\\
+  --cap-add CHOWN       --cap-add FOWNER"
+          [ "$Alpineglibc" ] && Dockercommand="$Dockercommand \\
   -v $Alpineglibc:$Cshare/glibc.apk:ro"
+        }
       }
       
       ## options --hostipc and --hostnet
@@ -3646,61 +3684,90 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "  Imagecommand=\${Imagecommand#/bin/sh -c }"
   echo "  Imagecommand=\${Imagecommand%]}"
   echo "}"
-  [ "$Noentrypoint" = "no" ] && {
-    echo "# check ENTRYPOINT"
-    echo "Entrypoint=\$(docker inspect --format='{{.Config.Entrypoint}}' $Imagename)"
-    echo "Entrypoint=\${Entrypoint#[}"
-    echo "Entrypoint=\${Entrypoint#/bin/sh -c }"
-    echo "Entrypoint=\${Entrypoint%]}"
-    [ "$Initsystem" != "none" ] && {
-      echo "echo \"\$Entrypoint\" | grep -qE '/tini|/init|/systemd' && {"
-      echo "  note \"There seems to be an init system in ENTRYPOINT of image:"
-      echo "  \$Entrypoint"
-      echo "  Will disable it as x11docker already runs an init with option --$Initsystem."
-      echo "  To allow this ENTRYPOINT, run x11docker with option --no-init.\""
-      echo "  Entrypoint="
-      echo "}"
-    } ||:
-  } || echo "Entrypoint="
-  echo "[ -z \"\$Imagecommand\$Entrypoint\" ] && echo 'x11docker WARNING: No image command specified and no CMD or ENTRYPOINT found in image.'|tee -a $Logfile"
+  echo ""
   
-  echo "# create x11docker.CMD.sh (shared with container and given as image command to docker run)"
-  echo "{ echo '#! /bin/sh'"
-  [ "$Debug" = "yes" ] && echo "echo 'set -x'"
-  echo "  echo '# created startscript for docker run: x11docker.CMD.sh'"
-  echo "  echo '# runs as unprivileged user in container'"
-  echo "  echo 'echo x11docker: Running unprivileged user commands in container'"
+  [ "$Tinibinary" ] && echo "Tini=\"/tini --\""
+  case $Noentrypoint in
+    yes) echo "Entrypoint=" ;;
+    no)
+      echo "# check ENTRYPOINT"
+      echo "Entrypoint=\$(docker inspect --format='{{.Config.Entrypoint}}' $Imagename)"
+      echo "Entrypoint=\${Entrypoint#[}"
+      echo "Entrypoint=\${Entrypoint#/bin/sh -c }"
+      echo "Entrypoint=\${Entrypoint%]}"
+      case $Initsystem in
+        systemd|sysvinit|runit|openrc)
+          echo "echo \"\$Entrypoint\" | grep -qE '/init|/systemd' && {"
+          echo "  note \"There seems to be an init system in ENTRYPOINT of image:"
+          echo "  \$Entrypoint"
+          echo "  Will disable it as x11docker already runs an init with option --$Initsystem."
+          echo "  To allow this ENTRYPOINT, run x11docker with option --no-init.\""
+          echo "  Entrypoint="
+          echo "}"
+        ;;
+        tini)
+          echo "echo \"\$Entrypoint\" | grep -qE '/tini|/init|/systemd' && {"
+          echo "  note \"There seems to be an init system in ENTRYPOINT of image:"
+          echo "  \$Entrypoint"
+          echo "  x11docker will run this instead of tini from host."
+          echo "  You can disable this ENTRYPOINT with option --no-entrypoint.\""
+          echo "  Tini="
+          echo "}"
+        ;;
+        none)
+          echo "echo \"\$Entrypoint\" | grep -qE '/tini|/init|/systemd' && {"
+          echo "  note \"There seems to be an init system in ENTRYPOINT of image:"
+          echo "  \$Entrypoint\""
+          echo "}"
+        ;;
+      esac
+    ;;
+  esac
+  echo ""
 
-  echo '  echo Imagecommand="\"$Imagecommand\""'
-  echo '  echo Entrypoint="\"$Entrypoint\""'
-  echo "  echo ''"
-  echo "  echo 'echo x11docker: container system:'"
-  echo "  echo 'cat /etc/os-release'"
-  echo "  echo ''"
+  echo "[ -z \"\$Imagecommand\$Entrypoint\" ] && echo 'x11docker WARNING: No image command specified and no CMD or ENTRYPOINT found in image.'|tee -a $Logfile"
+  echo ""
   
-  echo "  echo '# wait for container setup script do be ready'"
-  echo "  echo 'for Count in $(seq -s' ' 30); do'"
-  echo "  echo '  [ -e /x11docker.setupready ] && break'"
-  echo "  echo '  echo x11docker: waiting for root setup to be ready && sleep 0.1'"
-  echo "  echo 'done'"
-  echo "  echo ''"
-  echo "} >> $Imagecommandscript"
+  #### create x11docker.CMD.sh ####
+  echo   "# create x11docker.CMD.sh (shared with container and given as image command to docker run)"
+  echo   "{ echo '#! /bin/sh'"
+  [ "$Debug" = "yes" ] && echo "echo 'set -x'"
+  echo   "  echo '# created startscript for docker run: x11docker.CMD.sh'"
+  echo   "  echo '# runs as unprivileged user in container'"
+  echo   "  echo 'echo x11docker: Running unprivileged user commands in container'"
+
+  echo   '  echo Imagecommand="\"$Imagecommand\""'
+  echo   '  echo Entrypoint="\"$Entrypoint\""'
+  echo   "  echo ''"
+  echo   "  echo 'echo x11docker: container system:'"
+  echo   "  echo 'cat /etc/os-release'"
+  echo   "  echo ''"
+  
+  echo   "  echo '# wait for container setup script do be ready'"
+  echo   "  echo 'Zeit=\$(date +%s)'"
+  echo   "  echo 'for Count in $(seq -s' ' 90); do'"
+  echo   "  echo '  [ -e /x11docker.setupready ] && break'"
+  echo   "  echo '  echo \"'"
+  echo   "  echo 'x11docker: waiting since \$((\$(date +%s) - \$Zeit))s for container setup to be ready\"'"
+  echo   "  echo '  sleep \$(awk \"BEGIN { print \$Count*0.2 }\")'"
+  echo   "  echo 'done'"
+  echo   "  echo ''"
+  echo   "} >> $Imagecommandscript"
   
   [ "$Switchcontaineruser" = "yes" ] && {
     echo "echo '# Environment variables found in image:' >> $Imagecommandscript"
     echo "IFS=$'\n'"
     echo "while read -r Line; do"
-    echo "  echo export \$(escapestring \"\$Line\") >> $Imagecommandscript"
+    echo "  echo export \$(escapestring \"\$Line\")      >> $Imagecommandscript"
     echo "done < <(docker run --rm --entrypoint env $Imagename env)"
     echo "IFS=$' \t\n'"
     echo ""
-    echo "echo 'export TINI_SUBREAPER=1' >> $Imagecommandscript"
   }
   
-  echo "{"
-  echo "  echo ''"
-  echo "  echo '# x11docker variable settings'"
-  echo "  echo export USER=\"$Benutzer\""
+  echo   "{"
+  echo   "  echo ''"
+  echo   "  echo '# x11docker variable settings'"
+  echo   "  echo export USER=\"$Benutzer\""
   [ "$Benutzerhosthome" = "no" ] && {
     echo "  echo mkdir -p -v $Benutzerhome"
     for ((Count=1 ; Count<=$Sharevolumescount ; Count++)) ; do
@@ -3708,11 +3775,11 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       echo "  echo 'ln -s ${Sharevolumes[$Count]} $Benutzerhome'"
     done
   }
-  echo "  echo 'export HOME=\"$Benutzerhome\"'"
-  echo "  echo 'cd \"\$HOME\"'"
+  echo   "  echo 'export HOME=\"$Benutzerhome\"'"
+  echo   "  echo 'cd \"\$HOME\"'"
   [ "$Workdir" ] && echo "  echo 'cd $Workdir'"
 
-  echo "  echo ''"
+  echo   "  echo ''"
   
   [ -n "$Newdisplay" ] && {
     echo "  echo 'export DISPLAY=$Newdisplay'"
@@ -3729,14 +3796,14 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     echo "  echo '[ -z \"\$Dbus\" ] && Dbus=\"\$(dbus-run-session --help >/dev/null 2>&1 && echo dbus-run-session)\"'"
     echo "  echo '[ -z \"\$Dbus\" ] && echo \"x11docker WARNING: Did not find dbus-launch or dbus-run-session (option --dbus).\" >&2'"
   } 
-  echo "  echo 'echo x11docker: running dbus user session with: \${Dbus:-(none)} >&2'"
-  echo "  echo ''"
-  echo '  echo "[ -e \"\$XDG_RUNTIME_DIR\" ] || {"'
-  echo "  echo '  export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR'"
-  echo "  echo '  mkdir -v -m 700 -p \$XDG_RUNTIME_DIR'"
-  echo "  echo '  export XDG_RUNTIME_DIR'"
-  echo "  echo ''"
-  echo "  echo '}'"
+  echo   "  echo 'echo x11docker: running dbus user session with: \${Dbus:-(none)} >&2'"
+  echo   "  echo ''"
+  echo   '  echo "[ -e \"\$XDG_RUNTIME_DIR\" ] || {"'
+  echo   "  echo '  export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR'"
+  echo   "  echo '  mkdir -v -m 700 -p \$XDG_RUNTIME_DIR'"
+  echo   "  echo '  export XDG_RUNTIME_DIR'"
+  echo   "  echo ''"
+  echo   "  echo '}'"
   
   [ "$Sharewayland" = "yes" ] && {
     echo "  echo ''"
@@ -3753,47 +3820,45 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     *)                             echo "  echo 'export XDG_SESSION_TYPE=x11'" ;;
   esac
   
-  echo "  echo ''"
-  echo "  echo '# xpra environment settings'"
-  echo "  echo 'export UBUNTU_MENUPROXY= QT_X11_NO_NATIVE_MENUBAR=1 MWNOCAPTURE=true MWNO_RIT=true MWWM=allwm'"
+  [ "$Switchcontaineruser" = "yes" ] && echo "  echo 'export TINI_SUBREAPER=1'"
+  echo   "  echo ''"
+  echo   "  echo '# xpra environment settings'"
+  echo   "  echo 'export UBUNTU_MENUPROXY= QT_X11_NO_NATIVE_MENUBAR=1 MWNOCAPTURE=true MWNO_RIT=true MWWM=allwm'"
   [ -n "$Xprashm" ] && echo "  echo 'export $Xprashm'"
   
-  echo "  echo ''"
-  echo "  echo 'bash --version >/dev/null 2>&1 && export SHELL=/bin/bash || export SHELL=/bin/sh'"
-  echo "  echo 'export TERM=xterm'"
-  echo "  echo ''"
+  echo   "  echo ''"
+  echo   "  echo 'bash --version >/dev/null 2>&1 && export SHELL=/bin/bash || export SHELL=/bin/sh'"
+  echo   "  echo 'export TERM=xterm'"
+  echo   "  echo ''"
 
-  echo "  echo '[ -e /x11docker.LANG ] && export LANG=\"\$(cat /x11docker.LANG)\"'"
-  echo "  echo ''"
+  echo   "  echo '[ -e /x11docker.LANG ] && export LANG=\"\$(cat /x11docker.LANG)\"'"
+  echo   "  echo ''"
   
   [ "$Pulseaudio" = "yes" ] && echo "  echo 'export $Pulseserver'"
 
-  echo "  echo '# custom environment (--env)'"
+  echo   "  echo '# custom environment (--env)'"
   IFS=$'\n'
   for Line in $Customenvironment ; do
     echo "  echo export $(escapestring $Line)"
   done
   IFS=$' \t\n'
-  echo "  echo ''"
+  echo   "  echo ''"
   
-  echo "  echo 'echo x11docker: container environment:'"
-  echo "  echo 'env >> $Cshare/environment'"
-  echo "  echo 'sed -i \"/\(PWD=\|_=\)/d\" $Cshare/environment'"
-  echo "  echo 'env | sort'"
-  echo "  echo 'echo x11docker: copy of environment stored in $Cshare/environment'"
-  echo "  echo ''"
+  echo   "  echo 'echo x11docker: container environment:'"
+  echo   "  echo 'env >> $Cshare/environment'"
+  echo   "  echo 'sed -i \"/\(PWD=\|_=\)/d\" $Cshare/environment'"
+  echo   "  echo 'env | sort'"
+  echo   "  echo 'echo x11docker: copy of environment stored in $Cshare/environment'"
+  echo   "  echo ''"
 
-  [ "$Tinibinary" ] && echo "  echo 'Tini=\"/tini --\"'"
-
-  echo "  echo \"echo x11docker: running image command: \\\$Tini \\\$Dbus \$Entrypoint \$Imagecommand\""
+  echo   "  echo \"echo x11docker: running image command: \$Tini \\\$Dbus \$Entrypoint \$Imagecommand\""
   [ -s "$Cmdstdinfile" ] && echo "  echo \"cat $Cshare/stdin | \\\$Dbus \$Entrypoint \$Imagecommand >>$Cshare/stdout 2>>$Cshare/stderr\""
-  [ -s "$Cmdstdinfile" ] || echo "  echo                \"exec \\\$Tini \\\$Dbus \$Entrypoint \$Imagecommand >>$Cshare/stdout 2>>$Cshare/stderr\""
+  [ -s "$Cmdstdinfile" ] || echo "  echo                \"exec \$Tini \\\$Dbus \$Entrypoint \$Imagecommand >>$Cshare/stdout 2>>$Cshare/stderr\""
 
-  echo "  echo 'pstree'"
+  echo   "  echo '# Ready for docker run'"
+  echo   "} >> $Imagecommandscript"
+  #### End of x11docker.CMD.sh ####
 
-  echo "  echo '# Ready for docker run'"
-  echo "} >> $Imagecommandscript"
-  
   echo ""
   echo "cat $Imagecommandscript | nl -ba >> $Dockerlogfile"
   echo ""
@@ -3815,7 +3880,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       echo "    mount -o remount,rw cgroup /sys/fs/cgroup"
       echo "  You can restore write protection after cgroup creation with:"
       echo "    mount -o remount,ro cgroup /sys/fs/cgroup'"
-      [ "$Wantcgroup" = "elogind" ] && echo "    note 'If you do not want or need elogind in container, "
+      [ "$Wantcgroup" = "elogind" ] && echo "    note 'If you do not want, need or have elogind in container, "
       echo "  just ignore warning above.'"
       echo "  }"
       findmnt /sys/fs/cgroup -O ro >/dev/null && {
@@ -3857,7 +3922,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "echo x11docker: container PID: \$Containerpid"
   echo "echo \$Containerpid >> $Containerpidfile"
   echo ""
-  [ "$Switchcontaineruser" = "no" ] && echo "docker exec -u root $Containername /bin/sh $Cshare/containersetup.sh"
+  [ "$Switchcontaineruser" = "no" ] && echo "docker exec --tty -u root $Containername /bin/sh $Cshare/containersetup.sh"
 } >> $Dockerrc
 
 { #### part: create container setup script: This part runs as root in container
@@ -3865,8 +3930,9 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "# set up docker container as root before ongoing in unprivileged x11docker.CMD.sh"
   echo "# commands in this script are executed as root in container"
   [ "$Debug" = "yes" ] && echo "set -x"
-  echo "echo x11docker: setup as root in container"
+  echo "echo 'x11docker: setup as root in container'"
   echo ""
+  
   echo "# create some system dirs with needed permissions"
   echo "mkdir -v -p /var/lib/dbus /var/run/dbus"
   echo "mkdir -v -p -m 1777 /tmp/.ICE-unix /tmp/.X11-unix /tmp/.font-unix"
@@ -3877,6 +3943,10 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "export DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie"
   echo ""
 
+  echo "Containersystem=\$(source /etc/os-release; echo \$ID)"
+  echo "echo \"x11docker: container system ID: \$Containersystem\""
+  echo ""
+  
   IFS=$'\n'
   for Line in $Customenvironment ; do
     [ "$Line" ] && echo "export $Line" 
@@ -3904,10 +3974,10 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "# replace container GIDs of video and audio with host GIDs"
   echo "Gidvideo=$Hostgidvideo"
   echo "Gidaudio=$Hostgidaudio"
-  echo "[ \"\$Gidvideo\" ] || Gidvideo=\$(getent group | grep video: | cut -d: -f3)"
-  echo "[ \"\$Gidaudio\" ] || Gidaudio=\$(getent group | grep audio: | cut -d: -f3)"
-  echo "getent group | sed \"s/^video.*/video:x:\$Gidvideo:\$(getent group | grep video: | cut -d: -f4 ),$Benutzer/ ;"
-  echo "                     s/^audio.*/audio:x:\$Gidaudio:\$(getent group | grep audio: | cut -d: -f4 ),$Benutzer/ ;"
+  echo "[ \"\$Gidvideo\" ] || Gidvideo=\$(getent group video | cut -d: -f3)"
+  echo "[ \"\$Gidaudio\" ] || Gidaudio=\$(getent group audio | cut -d: -f3)"
+  echo "getent group | sed \"s/^video.*/video:x:\$Gidvideo:\$(getent group video | cut -d: -f4 ),$Benutzer/ ;"
+  echo "                     s/^audio.*/audio:x:\$Gidaudio:\$(getent group audio | cut -d: -f4 ),$Benutzer/ ;"
   for Line in $Groupadd ; do
     echo "                     s/^$Line.*/\0,$Benutzer/ ;"
   done
@@ -3921,38 +3991,50 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo ""
   [ "$Benutzerhosthome" = "no" ] && echo "mkdir -v -m 777 /fakehome"
   echo ""
-  [ "$Switchcontaineruser" = "yes" ] && {
-    echo "# create /etc/sudoers, remove /etc/sudoers.d. Delete possible sudo setups in image."
-    echo "echo 'root ALL=(ALL) ALL' > /etc/sudoers"
-    echo "rm -R /etc/sudoers.d"
-    [ "$Sudouser" = "yes" ] && {
-      echo "# create sudo entry for container user"
-      echo "echo '$Benutzer ALL=(ALL) ALL' >> /etc/sudoers"
-    }
-  }
+  
+  echo "# create /etc/sudoers, delete /etc/sudoers.d. Overwrite possible sudo setups in image."
+  echo "rm -R /etc/sudoers.d"
+  echo "echo '# /etc/sudoers created by x11docker' > /etc/sudoers"
+  echo "echo 'root ALL=(ALL) ALL'                 >> /etc/sudoers"
+  case $Sudouser in
+    yes)
+      echo "echo '$Benutzer ALL=(ALL) ALL'        >> /etc/sudoers"
+    ;;
+    no) echo "rm /etc/sudoers" ;;
+  esac
   echo ""
+
   [ "$Nvidiadriver" ] && {
+    echo "Installationwillsucceed=maybe"
     echo "ldd 2>&1 | grep 'musl libc' && {"
-    echo "  Musllibc=yes"
+    echo "  Installationwillsucceed=no"
     echo "  echo 'x11docker WARNING: Found musl libc in image. Closed source NVIDIA driver"
     echo "  is not not installable. Use free nouveau driver on host and ask NVIDIA corp."
     echo "  to publish driver source code to allow you using your hardware."
     echo "  Fallback: Skipping installation of nvidia driver.'"
-    echo "} || Musllibc=no"
-    echo "[ \"\$Musllibc\" = \"no\" ] && [ -z \"\$(find . -name *${Nvidiaversion}* -print 2>/dev/null)\" ] && {" 
+    echo "}"
+    echo "case \$Containersystem in"
+    echo "  opensuse)"
+    echo "    Installationwillsucceed=no"
+    echo "    echo x11docker WARNING: nvidia driver installation fails in \$Containersystem."
+    echo "  ;;"
+    echo "esac"
+    echo "[ \"\$Installationwillsucceed\" = \"maybe\" ] && [ -z \"\$(find . -name *${Nvidiaversion}* -print 2>/dev/null)\" ] && {" 
     echo "  mkdir -m 1777 /tmp2 && export TMPDIR=/tmp2"
     echo "  # Install nvidia driver"
     echo "  { command -v modprobe && command -v xz ; } || {"
     echo "    # Try to install modprobe"
     echo "    echo 'x11docker WARNING: Did not find modprobe/kmod or xz in image."
+    echo "  modprobe and xz are needed by nvidia installer."
+    echo "  Install them in image to speed up container startup."
     echo "  Will try to install them. That slows down container startup.'"
     echo "    apt-get update && apt-get install -y     kmod xz-utils  # debian"         #ok
     echo "    dnf install -y kmod xz || yum install -y kmod xz        # fedora, centos" #ok
     echo "    xbps-install -Sy                         kmod xz        # void"           #ok
     echo "    pacman -Sy --noconfirm                   kmod xz        # arch"           #ok
-    echo "    apk add --no-cache                       kmod xz        # alpine, nixos"  #ok, but some remaining glibc issues
+    echo "    emerge --ask n                           kmod xz        # gentoo"         #ok
+    echo "    apk add --no-cache                       kmod xz        # alpine, nixos"  #ok, but remaining glibc issues
     echo "    zypper --non-interactive install         kmod xz        # opensuse"       #ok, but nvidia-installer extraction fails
-    echo "    emerge --ask n                           kmod xz        # gentoo"         #NOT CHECKED
     echo "  }"
 # disabled: nvidia-driver fails anyway. closed source sucks.
 #    echo "  apk -V && {"
@@ -3974,26 +4056,29 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     echo "  echo 'x11docker WARNING: Installing proprietary closed source NVIDIA driver $Nvidiaversion. That slows down container startup.'"
     echo "  sh $Cshare/NVIDIA-$Nvidiaversion.run  --accept-license --no-runlevel-check  --no-questions --ui=none --no-kernel-module --no-kernel-module-source --no-backup --tmpdir /tmp2"
     echo "  rm -R /tmp2 && unset TMPDIR"
-    echo "} || echo 'x11docker: NVIDIA driver $Nvidiaversion seems to be installed already."
-    echo "  Skipping installation of $Cshare/NVIDIA-$Nvidiaversion.run'"
+    echo "} || echo 'x11docker: Skipping installation of $Cshare/NVIDIA-$Nvidiaversion.run'"
+    echo ""
   }
-  echo ""
+  
   case $Initsystem in
     tini|none)
-      [ "$Dbusdaemon" = "yes" ] && {
-        echo "echo 'x11docker: starting dbus system daemon'"
-        echo "dbus-daemon --system --fork"
-        echo "  for Count in 1 2 3 4 5 6 7 8 9 10 ; do"
-        echo "    [ -e /run/dbus/system_bus_socket ] && break"
-        echo "    sleep 0.1"
-        echo "  done"
-        [ "$Sharecgroup" = "yes" ] && {
-          echo "[ -e /sys/fs/cgroup/elogind ] && which elogind >/dev/null && {"
-          echo "  echo x11docker: starting elogind"
-          echo "  elogind &"
-          echo "}"
-        }
-      }
+      case $Dbusdaemon in
+        yes)
+          echo "echo 'x11docker: starting dbus system daemon'"
+          echo "dbus-daemon --system --fork"
+          echo "for Count in 1 2 3 4 5 6 7 8 9 10 ; do"
+          echo "  [ -e /run/dbus/system_bus_socket ] && break"
+          echo "  sleep 0.1"
+          echo "done"
+          [ "$Nonewprivileges" = "yes" ] && {
+            echo "# support for dbus daemon with no-new-privileges"
+            echo "echo 'x11docker: starting polkitd'"
+            echo "/usr/lib/policykit-1/polkitd &"
+            echo "echo 'x11docker: starting accounts-daemon'"
+            echo "/usr/lib/accountsservice/accounts-daemon &"
+          }
+        ;;
+      esac
     ;;
     systemd)
       echo "# to be sure, allow/unmask most important services"
@@ -4065,6 +4150,7 @@ start() {
       echo "sed -i 's/.*getty/##getty disabled by x11docker## \0/' /etc/inittab"
     ;;  
   esac
+  echo ""
 
   [ "$Langwunsch" ] && {
     echo "echo \"x11docker: Searching for language locale matching $Langwunsch\""
@@ -4103,14 +4189,19 @@ start() {
     echo "} || echo \"x11docker WARNING: desired locale for '--lang=$Langwunsch' not found and not created.\""
     echo "echo \"x11docker: Output of locale -a:\""
     echo "locale -a"
+    echo ""
   }
   
-  echo ""
   [ "$Pulseaudio" = "yes" ] && {
     echo "command -v pulseaudio >/dev/null || echo \"x11docker ERROR: pulseaudio not found in image (option --pulseaudio)\""
+    echo ""
+  }  
+  
+  [ "$Runasroot" ] && {
+    echo "# custom setup root command added with option --runasroot"
+    echo "$Runasroot"
   }
   
-  echo ""
   echo ":> /x11docker.setupready"
   [ "$Switchcontaineruser" = "yes" ] && {   # if "no", x11docker.CMD.sh is executed in command line $Dockercommand
     case $Initsystem in
@@ -4418,9 +4509,9 @@ start() {
     echo "$Windowmanager & storepid \$! windowmanager"
   }
   
-  [ -n "$Addcommand" ] && {
-    echo "# added custom command with option --add"
-    echo "$Addcommand"
+  [ "$Runfromhost" ] && {
+    echo "# custom host command with added option --runfromhost"
+    echo "$Runfromhost"
   }
   
   echo "touch $Cachefolder/Xready"
@@ -4814,30 +4905,24 @@ $(tail $Compositorlogfile)"
 
 ######### ToDo notes for development
 todo() {
-# docker run options: check escaped strings, failed once with : in --volume
-# nvidia-driver: check openSUSE and gentoo images
-# stdin seems to be not recognized if running starter from xfce4-panel
-# --runasroot: new option?
-# ssh -X -- command fails. why?
-# --group-add: compare host and container GID? warn if group misses in container?
-# --fullscreen: --weston[-x] in weston crashes. Use X backend if DISPLAY is available.
+# stdin: find reliable check to reimplement it
+# --group-add: compare host and container GID? warn if group misses in container, or create it?
+# BUG opensuse/arch: issues with x11docker/fluxbox, background missing, sometimes no context menu. where is the difference?
+
 # work on traperror(). 'set -u' possible without a stop?
 # --update: regard possible location in /opt
-# escape more option arguments: --runfromhost, custom docker options, --workdir, --user, --homedir, --sharedir, --wm, --lang, --xhost
+# escape more option arguments: custom docker options, --workdir, --user, --homedir, --sharedir, --wm, --lang, --xhost
 # --dbus-system: policykit must not have no-new-privileges. Seems to use setuid? Core issue AccountsService?
 #                starting polkitd and accounts-daemon in setupscript helps:
 #                -> cinnamon starts up with lots of (harmless?) error messages
 #                -> deepin needs --pulseaudio again
-# --wayland --dbus-system GTK3 seems to work now!?
 # check fgconsole
 # bestwu/deepin: why sh is replaced by bash?
-# BUG opensuse/arch: issues with x11docker/fluxbox, background missing, sometimes no context menu. where is the difference?
 # check echo especially in sh scripts, replace with printf if needed (#25)
 # avoid possible confusions --home --sharedir. --sharedir mounts can overlap --home folder. What about softlinks with existing target in --home? Maybe avoid /home/$USER at all
 # --xpra --desktop restarts client if closing desktop window
-# bug report to docker about --volume in --volume
+# bug report to docker about --volume waylandsocket in --volume
 
-# check out possibilities to allow 'sudo docker' directly again.
 # --lang: find out locale package names for several distris for documentation
 # --keymap does not work on tty with --kwin and --kwin-xwayland. No idea how to set it.
 # xpra restart on tty switch -> bug report
@@ -4845,13 +4930,11 @@ todo() {
 
 # BUG check whether VT is not in use with --xorg/--xpra/--xdummy, bug if accidently using vt that is already in use
 # check all FIXME 
-# note: SYS_PTRACE allows polkit in docker?
 # --systemd: try to avoid xhost +SI:localuser:$Benutzer
 # --xpra-xwayland, xdummy-xwayland: use kwin-wayland as fallback for missing weston? 
 # --xorg: getty and autologin to avoid Xwrapper.config changes?
 # gnome3 based desktop failing due to gnome bugs: pantheon budgie gnome3
 # check Xorg version for +iglx, check security implications, maybe option --iglx?
-# GTK3 in Wayland: --dbus once worked with $Dbusdaemon=yes
 # --wayland --user/--hostuser: wayland socket access denied due to XDG_RUNTIME_DIR
 # --nxagent 3.5.0: Mageia 6: seamless mode fails
 # fedora: SElinux issue: '--security-opt label=type:container_runtime_t': need more restrictive setting
