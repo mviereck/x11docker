@@ -1,7 +1,5 @@
 # Screenshots of GUI applications and desktop environments running with x11docker 
 
-![screenshot](x11docker_klein.jpeg "x11docker logo") 
-
 `x11docker --desktop x11docker/lxqt`
 ![screenshot](screenshot-lxqt.png "LXQT desktop running in Xnest window using x11docker")
 
@@ -71,4 +69,4 @@
 
 ![screenshot](x11docker-dependencies.png "x11docker GUI dependencies")
 
-![screenshot](x11docker.jpeg "x11docker logo")
+![screenshot](x11docker_gross.png "x11docker logo")
