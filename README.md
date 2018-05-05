@@ -110,7 +110,7 @@ _Advanced usage:_
      - Alpine and NixOS images: `mesa-demos mesa-dri-ati mesa-dri-intel mesa-dri-nouveau mesa-dri-swrast`
      - Arch Linux images: `mesa-demos`
    - Proprietary closed source drivers from NVIDIA corporation need some manual setup and have some restrictions. Consider to use free `nouveau` driver instead.
-     - x11docker can automatically install closed source nvidia drivers in container at every container startup. It gives some instructions in terminal output.
+     - x11docker can automatically install closed source nvidia drivers in container at every container startup. It gives some setup instructions in terminal output.
      - The image should contain `modprobe` (package `kmod`) and `xz`. x11docker installs them if they are missing, but that slows down container startup.
      - You need the very same driver version as on host. It must not be a `deb` or `rpm` package but an `NVIDIA_[...].run` file. Store it at one of the following locations:
        - `~/.local/share/x11docker` (current user only)
@@ -119,7 +119,6 @@ _Advanced usage:_
      - Closed source driver installation fails on image systems that are not based on `glibc`. This affects especially [Alpine](https://alpinelinux.org/) based images. 
        NVIDIA corporation does not provide the source code that would allow you to use your hardware with different systems.
      - Alternativly, you can install a driver version matching your host setup in image yourself. Note that this image will not be portable anymore.
-     - Consider to say: "Closed source sucks".
  
 _Rarer needed dependencies for special options:_
  - `--nxagent` provides a fast and lightweight alternative to `xpra` and `Xephyr`. Needs [`nxagent`](https://packages.debian.org/experimental/nxagent) to be installed.
@@ -127,12 +126,12 @@ _Rarer needed dependencies for special options:_
  - `--xdummy` needs dummy video driver `xserver-xorg-video-dummy` (debian) or `xorg-x11-drv-dummy` (fedora).
  - `--xvfb` needs `Xvfb`
  - `--xfishtank` needs `xfishtank` to show a fish tank.
- - `--dbus` is needed only for QT5 application in Wayland. It needs `dbus-launch` (package `dbus-x11`) in image.
+ - `--dbus` is needed only for QT5 application in Wayland. It needs `dbus` or `dbus-launch` in image.
  - `--starter` needs `xdg-user-dir` to locate your `Desktop` folder for starter icons.
- - `--install`, `--update` and `--remove` need `unzip` and `xdg-icon-resource`.
+ - `--install`, `--update` and `--remove` need `wget`, `unzip` and `xdg-icon-resource`.
    
 _List of all host packages for all possible x11docker options (debian package names):_
- - `xpra xserver-xephyr xvfb weston xwayland nxagent kwin xserver-xorg-video-dummy xfishtank xclip xdg-utils xauth xdotool xrandr unzip`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
+ - `xpra xserver-xephyr xvfb weston xwayland nxagent kwin xserver-xorg-video-dummy xfishtank xclip xdg-utils xauth xdotool xrandr unzip wget`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
 
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
 
@@ -179,7 +178,7 @@ Clipboard sharing is possible with option `--clipboard`. Image clips are possibl
 ## Sound
 Sound is possible with options `--pulseaudio` and `--alsa`.
  - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and in image.
- - For ALSA sound with `--alsa` you can specify the desired sound card with `--env ALSA_CARD=Generic`. Get a list of available sound cards with `aplay -l`.
+ - For ALSA sound with `--alsa` you can specify the desired sound card with e.g. `--env ALSA_CARD=Generic`. Get a list of available sound cards with `aplay -l`.
 ## Language locales
 You have two possibilities to set [language locale](https://wiki.archlinux.org/index.php/locale) in docker image. 
  - For support of chinese, japanese and korean characters install a font like `fonts-arphic-uming` in image.
@@ -189,7 +188,7 @@ x11docker provides option `--lang $LANG` for flexible language locale settings.
  - If x11docker does not find the locale, it creates it on container startup.
    - Debian images need package `locales`. 
    - x11docker will only look for or create `UTF-8`/`utf8` locales. 
- - Examples: `--lang de` for german, `--lang zh_CN` for chinese, `--lang ru` for russian, `--lang $LANG` for your host locale.
+ - Examples: `--lang de` for German, `--lang zh_CN` for Chinese, `--lang ru` for Russian, `--lang $LANG` for your host locale.
 ### language locale precompiled in image
 You can choose between already installed language locales in image setting environment variable `LANG`, e.g. in image with `ENV LANG=en_US.utf8` or with x11docker option `--env LANG=en_US.utf8`.  
  - Already installed locales in image can be checked with `docker run IMAGENAME locale -a`. 
@@ -207,9 +206,9 @@ Core concept is:
      - This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control. (x11docker provides this with option `--hostdisplay`).
      - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.
    - Create container user similar to host user to [avoid root in container](http://blog.dscpl.com.au/2015/12/don-run-as-root-inside-of-docker.html).
-     - If you want to be root in container, use option `--user=root`. 
      - You can also specify another user with `--user=USERNAME` or a non-existing one with `--user=UID:GID`.
-   - Disables possible root password and entries in `/etc/sudoers`.
+     - If you want root permissions in container, use option `--sudouser` that allows `su` and `sudo` with password `x11docker`. Alternatively, you can run with `--user=root`. 
+   - Disables possible root password and deletes entries in `/etc/sudoers`.
    - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
      - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. 
      - This restriction can be disabled with x11docker option `--cap-default` or reduced with `--sudouser`.
@@ -217,7 +216,7 @@ Core concept is:
 _Weaknesses / ToDo:_
  - If docker daemon runs with `--selinux-enabled`, SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. A more restrictive solution is desirable.
    Compare: [SELinux and docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
- - User namespace remapping is disabled for options `--home` and `--homedir` to avoid file ownership issues. (Though, this is less a problem as x11docker already avoids root in container).
+ - User namespace remapping is disabled to allow options `--home` and `--homedir` without file ownership issues. (Though, this is less a problem as x11docker already avoids root in container).
 
 ### Options degrading container isolation
 x11docker shows warning messages in terminal if chosen options degrade container isolation.
@@ -233,9 +232,9 @@ _Most important:_
 _Rather special options reducing security, but not needed for regular use:_
   - `--sudouser` allows sudo with password `x11docker`for container user. If an application breaks out of container, it can do anything. Allows some container capabilties that x11docker would drop otherwise.
   - `--cap-default` disables x11docker's container hardening and falls back to default docker container privileges.
-  - `--systemd`, `--sysvinit`, `--openrc` and `--runit` allow some container capabilities that x11docker would drop otherwise. `--systemd` also shares access to `/sys/fs/cgroup`.
+  - `--dbus-system`, `--systemd`, `--sysvinit`, `--openrc` and `--runit` allow some container capabilities that x11docker would drop otherwise. `--systemd` also shares access to `/sys/fs/cgroup`.
   - `--hostipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory. Disables IPC namespacing.)
-  - `--hostnet` sets docker run option `--net=host`. (Allows dbus connection to host, Shares host network stack.)
+  - `--hostnet` sets docker run option `--net=host`. (Allows dbus connection to host. Shares host network stack.)
    
 # Choice of X servers and Wayland compositors
 If no X server option is specified, x11docker automatically chooses one depending on installed dependencies and on given or missing options `--desktop`, `--gpu` and `--wayland`. 
@@ -251,11 +250,10 @@ If no X server option is specified, x11docker automatically chooses one dependin
 
 ## Wayland
 Beside the X servers to choose from there are options `--wayland`, `--weston`, `--kwin` and `--hostwayland` to run pure [Wayland](https://wayland.freedesktop.org/) applications without X.
- - Option `--wayland` tries to automatically set up a Wayland environment. It regards option `--desktop`.
-   - QT5 applications (most of KDE) also need option `--dbus`. (GTK3 applications must run _without_ option `--dbus`).
- - Options `--kwin` and `--weston` run Wayland compositors `Kwin` or `Weston`. 
-   - For QT5 applications you may need to manually add options `--waylandenv`  and `--dbus` to set some environment variables.
- - Option `--hostwayland` can run single applications on host Wayland desktops like Gnome 3 and KDE 5.
+ - Option `--wayland` automatically set up a Wayland environment with some special environment variables and a dbus system daemon in container to support both QT5 and GTK3 applications.
+ - Options `--kwin` and `--weston` run Wayland compositors `kwin_wayland` or `weston`. 
+   - For QT5 applications without option `--wayland` you need to manually add options `--dbus`  and `--env QT_QPA_PLATFORM=wayland`.
+ - Option `--hostwayland` can run single applications on host Wayland desktops like Gnome 3, KDE 5 and [Sway](https://github.com/swaywm/sway).
 
 _Examples:_
  - xfce4-terminal (GTK3) in Wayland: 
@@ -264,7 +262,7 @@ x11docker --wayland x11docker/xfce xfce4-terminal
 ```  
  - KDE plasma shell (QT5) in a pure Wayland environment with hardware acceleration. Option `--kwin` is used as `kwin_wayland` on host supports plasma panel placing while default `--weston` does not:
  ```
-x11docker --kwin --wayland --dbus --gpu -- x11docker/plasma plasmashell
+x11docker --kwin --wayland --gpu -- x11docker/plasma plasmashell
 ```
 
 You can also run Wayland applications from host with option `--exe`. 
@@ -291,20 +289,19 @@ On debian 9 and Ubuntu 16.04 you need to install package `xserver-xorg-legacy`.
 (Depending on your hardware and system setup, you may not need line `needs_root_rights=yes`).
 
 ## Custom access to X server
-Running x11docker without an image name (or explicitly with option `--xonly`) creates an empty X server. In that case, or forced with option `--showenv`, x11docker writes some environment variables on stdout. You can use this for custom access to new X server. Example:
+Running x11docker without an image name (or explicitly with option `--xonly`) creates an empty X server. In that case, or enforced with option `--showenv`, x11docker writes some environment variables on stdout. You can use this for custom access to new X server. Example:
 ```
 read Xenv < <(x11docker --xephyr --showenv)
-echo $Xenv && export $Xenv
 # run xterm from host on new X server
-xterm   
+env $Xenv xterm
 # run docker image on new X server
+export $Xenv
 docker run --env DISPLAY --env XAUTHORITY -v $XAUTHORITY:$XAUTHORITY -v $XSOCKET:$XSOCKET x11docker/xfce
 ```
 If you like to, you can run two docker images sharing the same X server. Example:
 ```
 read Xenv < <(x11docker --xephyr --showenv x11docker/lxde)  # LXDE desktop in Xephyr
-echo $Xenv && export $Xenv
-x11docker --hostdisplay x11docker/xfce thunar  # Thunar from another image appears on LXDE desktop
+env $Xenv x11docker --hostdisplay x11docker/xfce thunar  # Thunar from another image appears on LXDE desktop
 ```
 
 # Init system
@@ -313,11 +310,12 @@ x11docker supports init systems as PID 1 in container. Init in container solves 
 ## tini
 As default, x11docker uses docker built-in [`tini`](https://github.com/krallin/tini) with docker run option `--init`.
  - You can disable init in container with option `--no-init`. 
- - On some distributions docker's init `/usr/bin/docker-init` is missing in docker package. To provide a replacement, download `tini-static` from https://github.com/krallin/tini
-   and store it at one of following locations:
+ - On some distributions docker's init `/usr/bin/docker-init` is missing in docker package. Compare https://github.com/mviereck/x11docker/issues/23#issuecomment-386817295. 
+   To provide a replacement, download `tini-static` from https://github.com/krallin/tini and store it at one of following locations:
    - `~/local/share/x11docker`
    - `/usr/local/share/x11docker`
-   - Example installation code:
+
+Example installation code:
 ```
 mkdir -p ~/.local/share/x11docker
 cd ~/.local/share/x11docker
@@ -344,7 +342,7 @@ x11docker sets up the init system to run desired command. No special setup is ne
 x11docker automatically supports `elogind` in container with init system options `--sysvinit`, `--runit` and `--openrc`.
  - You must set option `--sharecgroup` to allow `elogind` in container.
  - If your host does not run with `elogind` (but e.g. with `systemd`), x11docker needs an elogind cgroup mountpoint at `/sys/fs/cgroup/elogind`. Run x11docker with root privileges to automatically create it.
- - Same goes for `elogind` on host and `systemd` in container; a cgroup mountpoint for `systemd` must be created.
+ - Same goes for `elogind` on host and `systemd` in container; a cgroup mountpoint for `systemd` must be created. x11docker does this automatically if it runs as root.
  - Example to manually create elogind cgroup mountpoint on a systemd host:
 ```
 mount -o remount,rw cgroup /sys/fs/cgroup  # remove write protection
@@ -360,17 +358,25 @@ mount -t cgroup cgroup /sys/fs/cgroup/systemd -o none,name=systemd
 
 ## dbus
 Some desktop environments and applications need a running dbus daemon and/or dbus user session. 
- - use `--dbus-system` to run dbus system daemon. This includes option `--dbus`. Some desktops like cinnamon or deepin depend more on dbus system daemon than on a running full blown init system.
+ - use `--dbus-system` to run dbus system daemon. This includes option `--dbus`. Some desktops like cinnamon or deepin depend more on dbus system daemon than on a full blown init system.
  - use `--dbus` to run image command with `dbus-launch` (fallback: `dbus-run-session`) for a dbus user session.
 
 # Developer options
-Collection of rarer needed but sometimes useful options.
+Collection of rarer needed but sometimes useful options. Most of interest:
+ - `--showid`: Show container ID on stdout.
+ - `--showenv`: Show X environment variables on stdout.
+ - `--env VAR=VALUE`: Set environment variable in container.
+ - `--cap-default`: Allow default docker container capabilities.
+ - `--user USER`: Specify a container user different from current host user.
+ - `--display N`: Specify X display number for new X server.
+ - `--runfromhost CMD`: Run command from host on new X server.
+ - `--runasroot CMD`: Run command as root on container startup.
 
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/x11docker-developer.png "developer options")
 
 # Network setup
 ## SSH X forwarding
-You can run x11docker on remote servers with `ssh -X` like regular X applications. 
+You can run x11docker on remote servers with `ssh -X` like a regular X application. 
 ### SSH with xpra
 Example for an SSH setup with xpra:
 ```
@@ -415,7 +421,6 @@ Now you can access the dockered web application at http://localhost:8085. A samp
 Sample setup for VNC access:
 ```
 read Xenv < <(x11docker --xdummy --showenv x11docker/lxde)
-echo $Xenv
 env $Xenv x11vnc -noshm -forever -localhost -rfbport 5910
 ```
 In another terminal, start VNC viewer with `vncviewer localhost:5910`.
@@ -440,7 +445,7 @@ docker run --rm -e DISPLAY=$DISPLAY \
 This nice short solution has the disadvantage of breaking container isolation. X security leaks like keylogging and remote host control can be abused by container applications.
 ### Alternative for desktop environments
 This is similar to x11docker option `--xephyr`:
- - Run Xephyr with disabled shared memory (extension MIT-SHM) and disabled extension XTEST.
+ - Run Xephyr with disabled shared memory (extension `MIT-SHM`) and disabled extension `XTEST`.
  - Set `DISPLAY` and share access to new unix socket `/tmp/.X11-unix/X1`.
  - Create unprivileged container user to avoid root in container.
 ```
@@ -483,7 +488,7 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
      - Enlightenment: `x11docker --desktop --gpu --runit x11docker/enlightenment` (Based on [Void Linux](https://www.voidlinux.eu/))
      - [Trinity](https://www.trinitydesktop.org/) (successor of KDE 3): `x11docker --desktop x11docker/trinity`
      
-   - Heavy, option `--gpu` recommended
+   - Heavy, option `--gpu` recommended:
      - Cinnamon: `x11docker --desktop --dbus-system x11docker/cinnamon`
      - [deepin](https://www.deepin.org/en/dde/): `x11docker --desktop --dbus-system x11docker/deepin`
      - KDE Plasma: `x11docker --desktop x11docker/plasma`
