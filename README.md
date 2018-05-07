@@ -74,6 +74,57 @@ wget https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker -O /t
 sudo bash /tmp/x11docker --update
 rm /tmp/x11docker
 ```
+
+# Options
+Description of some commonly used options. Get an [overview of all options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`.
+## Desktop or seamless mode
+x11docker assumes that you want to run a single application in seamless mode, i.e. a single window on your regular desktop. If you want to run a desktop environment in image, add option `--desktop`. If you don't specify a [desired X server](#choice-of-x-servers-and-wayland-compositors), x11docker chooses the best matching one depending on chosen options and installed dependencies.
+  - Seamless mode is supported with options `--xpra` and `--nxagent`. As a fallback insecure option `--hostdisplay` is possible.
+    - If neither `xpra` nor `nxagent` are installed, but x11docker finds a desktop capable X server like `Xephyr`, it avoids insecure option `--hostdisplay` and runs Xephyr with a host window manager.
+    - You can specify a host window manager with option `--wm WINDOWMANAGER`, for example `--wm openbox`.
+  - Desktop mode is supported with all X server options except `--hostdisplay`. If available, x11docker prefers `Xephyr` and `nxagent` 
+## Shared folders and HOME in container
+Changes in a running docker image are lost, the created docker container will be discarded. For persistent data storage you can share host directories:
+ - Option `--home` creates a host directory in `~/x11docker/IMAGENAME` that is shared with the container and mounted as home directory. Files in container home and configuration changes will persist. 
+ - Option `--sharedir DIR` mounts a host directory at the same location in container without setting `HOME`.
+ - Option `--homedir DIR` is similar to `--home` but allows you to specify a custom host directory for data storage.
+ - Special cases for `$HOME`:
+   - `--homedir $HOME` will use your host home as container home. Discouraged, use with care.
+   - `--sharedir $HOME` will mount your host home as a subfolder of container home. 
+ 
+For persistant changes of image system, adjust Dockerfile and rebuild. To add custom applications to x11docker example images, you can create a new Dockerfile based on them. Example:
+```
+# xfce desktop with Midori internet browser
+FROM x11docker/xfce
+RUN apt-get update && apt-get install -y midori
+```
+## Hardware acceleration
+Hardware acceleration for OpenGL is possible with option `--gpu`. This will work out of the box in most cases with open source drivers on host. Otherwise have a look at [Dependencies](#Dependencies).
+## Clipboard
+Clipboard sharing is possible with option `--clipboard`. Image clips are possible with `--xpra` and `--hostdisplay`. Some X server options need package `xclip` on host.
+## Sound
+Sound is possible with options `--pulseaudio` and `--alsa`.
+ - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and in image.
+ - For ALSA sound with `--alsa` you can specify the desired sound card with e.g. `--env ALSA_CARD=Generic`. Get a list of available sound cards with `aplay -l`.
+## Language locales
+You have two possibilities to set [language locale](https://wiki.archlinux.org/index.php/locale) in docker image. 
+ - For support of chinese, japanese and korean characters install a font like `fonts-arphic-uming` in image.
+### language locale created offhand
+x11docker provides option `--lang $LANG` for flexible language locale settings. 
+ - x11docker will check on container startup if the desired locale is already present in image and enable it. 
+ - If x11docker does not find the locale, it creates it on container startup.
+   - Debian images need package `locales`. 
+   - x11docker will only look for or create `UTF-8`/`utf8` locales. 
+ - Examples: `--lang de` for German, `--lang zh_CN` for Chinese, `--lang ru` for Russian, `--lang $LANG` for your host locale.
+### language locale precompiled in image
+You can choose between already installed language locales in image setting environment variable `LANG`, e.g. in image with `ENV LANG=en_US.utf8` or with x11docker option `--env LANG=en_US.utf8`.  
+ - Already installed locales in image can be checked with `docker run IMAGENAME locale -a`. 
+ - Example to create a language locale in image:
+```
+RUN apt-get install -y locales
+ENV LANG en_US.utf8
+RUN localedef --verbose --force -i en_US -f UTF-8 en_US.utf8 || echo "localedef exit code: $?"
+```
  
 # Troubleshooting
 For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. 
@@ -152,57 +203,6 @@ _Running x11docker as root:_
  - Unfortunately, some systems do not provide `DISPLAY` and `XAUTHORITY` for root, but needed for nested X servers like Xephyr.    
    - Tools like `gksu` or `gksudo` can help. 
    - Some `sudo` implementations provide `-E` to keep the user environment: `sudo -E x11docker [...]`.
-
-# Options
-Description of some commonly used options. Get an [overview of all options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`.
-## Desktop or seamless mode
-x11docker assumes that you want to run a single application in seamless mode, i.e. a single window on your regular desktop. If you want to run a desktop environment in image, add option `--desktop`. If you don't specify a [desired X server](#choice-of-x-servers-and-wayland-compositors), x11docker chooses the best matching one depending on chosen options and installed dependencies.
-  - Seamless mode is supported with options `--xpra` and `--nxagent`. As a fallback insecure option `--hostdisplay` is possible.
-    - If neither `xpra` nor `nxagent` are installed, but x11docker finds a desktop capable X server like `Xephyr`, it avoids insecure option `--hostdisplay` and runs Xephyr with a host window manager.
-    - You can specify a host window manager with option `--wm WINDOWMANAGER`, for example `--wm openbox`.
-  - Desktop mode is supported with all X server options except `--hostdisplay`. If available, x11docker prefers `Xephyr` and `nxagent` 
-## Shared folders and HOME in container
-Changes in a running docker image are lost, the created docker container will be discarded. For persistent data storage you can share host directories:
- - Option `--home` creates a host directory in `~/x11docker/IMAGENAME` that is shared with the container and mounted as home directory. Files in container home and configuration changes will persist. 
- - Option `--sharedir DIR` mounts a host directory at the same location in container without setting `HOME`.
- - Option `--homedir DIR` is similar to `--home` but allows you to specify a custom host directory for data storage.
- - Special cases for `$HOME`:
-   - `--homedir $HOME` will use your host home as container home. Discouraged, use with care.
-   - `--sharedir $HOME` will mount your host home as a subfolder of container home. 
- 
-For persistant changes of image system, adjust Dockerfile and rebuild. To add custom applications to x11docker example images, you can create a new Dockerfile based on them. Example:
-```
-# xfce desktop with Midori internet browser
-FROM x11docker/xfce
-RUN apt-get update && apt-get install -y midori
-```
-## Hardware acceleration
-Hardware acceleration for OpenGL is possible with option `--gpu`. This will work out of the box in most cases with open source drivers on host. Otherwise have a look at [Dependencies](#Dependencies).
-## Clipboard
-Clipboard sharing is possible with option `--clipboard`. Image clips are possible with `--xpra` and `--hostdisplay`. Some X server options need package `xclip` on host.
-## Sound
-Sound is possible with options `--pulseaudio` and `--alsa`.
- - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and in image.
- - For ALSA sound with `--alsa` you can specify the desired sound card with e.g. `--env ALSA_CARD=Generic`. Get a list of available sound cards with `aplay -l`.
-## Language locales
-You have two possibilities to set [language locale](https://wiki.archlinux.org/index.php/locale) in docker image. 
- - For support of chinese, japanese and korean characters install a font like `fonts-arphic-uming` in image.
-### language locale created offhand
-x11docker provides option `--lang $LANG` for flexible language locale settings. 
- - x11docker will check on container startup if the desired locale is already present in image and enable it. 
- - If x11docker does not find the locale, it creates it on container startup.
-   - Debian images need package `locales`. 
-   - x11docker will only look for or create `UTF-8`/`utf8` locales. 
- - Examples: `--lang de` for German, `--lang zh_CN` for Chinese, `--lang ru` for Russian, `--lang $LANG` for your host locale.
-### language locale precompiled in image
-You can choose between already installed language locales in image setting environment variable `LANG`, e.g. in image with `ENV LANG=en_US.utf8` or with x11docker option `--env LANG=en_US.utf8`.  
- - Already installed locales in image can be checked with `docker run IMAGENAME locale -a`. 
- - Example to create a language locale in image:
-```
-RUN apt-get install -y locales
-ENV LANG en_US.utf8
-RUN localedef --verbose --force -i en_US -f UTF-8 en_US.utf8 || echo "localedef exit code: $?"
-```
 
 # Security 
 Scope of x11docker is to run dockered GUI applications while preserving and improving container isolation.
