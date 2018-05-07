@@ -1,4 +1,4 @@
-# ![x11docker logo](x11docker.png) x11docker: Run GUI applications in docker
+# x11docker: ![x11docker logo](x11docker.png) Run GUI applications in docker
 ## Avoid X security leaks and improve container security
 
 Graphical applications or desktops in docker are similar in usage to a Virtual
