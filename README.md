@@ -1,4 +1,4 @@
-# x11docker: Run GUI applications in docker ![x11docker logo](x11docker.png) 
+# ![x11docker logo](x11docker.png) x11docker: Run GUI applications in docker
 ## Avoid X security leaks and improve container security
 
 Graphical applications or desktops in docker are similar in usage to a Virtual
@@ -13,7 +13,6 @@ storage is done with shared folders.
 Persistant container system changes can be done in Dockerfile; system changes
 in running containers are discarded after use.
 
-Persistant system changes can be done in Dockerfile.
  - Avoids X security leaks by running [additional X servers](#choice-of-x-servers-and-wayland-compositors).
  - Improves container [security](#security):
    - Restricts container capabilities to bare minimum.
