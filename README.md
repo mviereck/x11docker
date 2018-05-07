@@ -1,12 +1,18 @@
 # x11docker: Run GUI applications in docker ![x11docker logo](x11docker.png) 
-## Avoiding X security leaks and hardening container security
+## Avoid X security leaks and improve container security
 
-Running graphical applications or desktop environments in docker images is 
-effectively similar to running a snapshot of a virtual machine that is 
-set back to it origin state on every restart. 
-Advantage: It needs much less resources than a virtual machine, and it is 
-easier to share host resources like hardware acceleration, sound and clipboard.
-Persistant data storage is possible with shared host folders. 
+Graphical applications or desktops in docker are similar in usage to a Virtual
+Machine. They are isolated from host, and it is possible to run applications 
+that would not run on host due to missing dependencies. For example, it is 
+possible to run latest development versions or outdated versions of 
+applications, or multiple versions at the same time.
+
+Practical differences to a VM: docker containers need much less resources. 
+x11docker discardes containers after use. Persistant data and configuration 
+storage is done with shared folders. 
+Persistant container system changes can be done in Dockerfile; system changes
+in running containers are discarded after use.
+
 Persistant system changes can be done in Dockerfile.
  - Avoids X security leaks by running [additional X servers](#choice-of-x-servers-and-wayland-compositors).
  - Improves container [security](#security):
@@ -310,7 +316,7 @@ x11docker supports init systems as PID 1 in container. Init in container solves 
 ## tini
 As default, x11docker uses docker built-in [`tini`](https://github.com/krallin/tini) with docker run option `--init`.
  - You can disable init in container with option `--no-init`. 
- - On some distributions docker's init `/usr/bin/docker-init` is missing in docker package. Compare https://github.com/mviereck/x11docker/issues/23#issuecomment-386817295. 
+ - On some distributions docker's init `/usr/bin/docker-init` is missing in docker package. Compare [#23](https://github.com/mviereck/x11docker/issues/23#issuecomment-386817295). 
    To provide a replacement, download `tini-static` from https://github.com/krallin/tini and store it at one of following locations:
    - `~/local/share/x11docker`
    - `/usr/local/share/x11docker`
