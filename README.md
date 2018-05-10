@@ -133,6 +133,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
    - Option `--debug` can provide additional informations.
    - Use options `--stdout --stderr --silent` to get application output only.
    - You can find the latest dispatched logfile at `~/.cache/x11docker/x11docker.log`.
+ - Make sure your x11docker version is up to date with `x11docker --update` (latest release) or `x11docker --update-master` (latest beta).
  - Some applications need more privileges or capabilities than x11docker provides as default.
    - Reduce container isolation with options `--hostipc --hostnet --cap-default --sys-admin` and try again. If the application runs, reduce this insecure options to encircle the issue.
    - You can run container application as root with `--user=root`.
@@ -146,7 +147,7 @@ x11docker checks dependencies for chosen options on startup and shows terminal m
 
 _Basics:_
  - If no additional X server is installed, only less isolated option `--hostdisplay` will work out of the box within X, and option `--xorg` from console. (To use `--xorg` within X, look at [setup for option --xorg](#setup-for-option---xorg)).
- - As a **well working base** for convenience and security, it is recommended to install `xpra` and `Xephyr`. 
+ - As a **well working base** for convenience and security, it is recommended to install `xpra` (seamless applications) and `Xephyr` (desktop mode).
    - It is recommended to use latest stable xpra version from [http://xpra.org](http://xpra.org/). 
    - Alternativly, you can install `nxagent` for both seamless and desktop mode.
  - Already installed on most systems with an X server: `xrandr`, `xauth` and `xdpyinfo`.
@@ -159,7 +160,7 @@ _Advanced usage:_
    - Option `--pulseaudio` needs `pulseaudio` on host _and_ in image. 
  - **Hardware acceleration** with option `--gpu`
    - Works best with open source drivers on host and OpenGL/Mesa in image. In most cases everything will work out of the box with just setting `--gpu`.
-   - To provide good X isolation: Beside `xpra`, also install `Xwayland`, `weston` and `xdotool` on host. Without these, you still can use `--hostdisplay` and `--xorg`.
+   - To provide good X isolation: Beside `xpra`, also install `Xwayland`, `weston` and `xdotool` on host. Without these, you still can use `--gpu` with `--hostdisplay` and `--xorg`.
    - Packages for OpenGL/Mesa in image:
      - debian and Ubuntu images: `mesa-utils mesa-utils-extra`.
      - CentOS and fedora images: `glx-utils mesa-dri-drivers`

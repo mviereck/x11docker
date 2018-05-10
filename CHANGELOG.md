@@ -6,14 +6,25 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [4.2.1](https://github.com/mviereck/x11docker/releases/tag/v4.2.1) - 2018-05-10
+## Added
+ - Forward `stdin` of x11docker to container command with a named pipe/fifo.
+## Changed
+ - `x11docker-gui`: Use stdin for kaptain grammar transmission. Don't use cache.
+ - `--dbus-system`: Don't create `--tmpf /tmp --tmpfs /run --tmpfs /var/run --tmpfs /run/lock`.
+   [(#43)](https://github.com/mviereck/x11docker/issues/43)
+ - Some internal improvements for faster startup and shutdown.
+### Fixed
+ - `x11docker-gui`: fixed x11docker startup failure due to changed stdout output.
+
 ## [4.2.0](https://github.com/mviereck/x11docker/releases/tag/v4.2.0) - 2018-05-04
 ### Added
  - `--group-add`: New option to add groups to container user. 
    Needed instead of ` -- --group-add` to cover user switching setups, too.
  - `--showid`: New option to show container ID on stdout.
  - `--runfromhost`: Replaces deprecated `--add` to have a meaningful option name.
- - `--runasroot`: New option to run command as root in container on startup.
    Similar to already existing `--exe`, but integrates with container.
+ - `--runasroot`: New option to run command as root in container on startup.
 ### Changed
  - `--gpu`: Support for automatical installation of NVIDIA drivers in container. 
    Limited to `glibc` based image systems. 
