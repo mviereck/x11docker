@@ -5,9 +5,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html) since version 4.0.0.
 
 Project website: https://github.com/mviereck/x11docker
-## Unreleased
+## [Unreleased]
 ### Changed
  - Logfile handling with fifo/named pipe.
+ - `--auto`: Tightened dependency check.
 ### Fixed
  - Don't set `-title` in `Xephyr` command. Xephyr bug: Releasing keyboard
    and mouse after grab (ctrl+shift) does not work with `-title`. 
