@@ -609,6 +609,7 @@ storepid () {           # store pids and names of background processes in file $
   # for use on exit / with trap to clean up with background processes
   # this subroutine has a twin in xinitrc
   echo ${1:-} ${2:-} >> $Bgpidfile
+  disown ${1:-} 2>/dev/null
   verbose "stored background pid ${1:-} of ${2:-}"
 }
 saygoodbye() {          # create file signaling watching processes to terminate
@@ -616,38 +617,45 @@ saygoodbye() {          # create file signaling watching processes to terminate
   [ -e "$Sharefolder" ] && $Mksu "touch $Timetosaygoodbye"
 }
 finish() {              # trap EXIT routine to clean up background processes and cache
-  local Pid Name Zeit
+  local Pid Name Zeit Catlogfilepid
   trap - EXIT
-  verbose "terminating x11docker ..."
+  verbose "terminating x11docker."
+  
+  # check for background processes stored in $Bgpidfile
   [ -s "$Bgpidfile" ] && {
-    # check for possible remaining background processes stored in $Bgpidfile
     while read -r Line ; do 
-      Pid=$(echo $Line | awk '{print $1}')
+      Pid=$(echo $Line  | awk '{print $1}')
       Name=$(echo $Line | awk '{print $2}')
+      
       ps -p $Pid --no-headers >/dev/null && {
-        verbose "terminating background pid $Pid of $Name"
+        verbose "terminating background pid $Pid of $Name: $(ps -p $Pid --no-headers)"
+        
         case $Name in
           windowmanager) 
             Windowmanager="$(basename "$Windowmanager" | cut -d' ' -f1)"
-            ps -p $Pid | grep $Windowmanager >/dev/null           && (exec 2>/dev/null ; kill $Pid)
+            ps -p $Pid | grep $Windowmanager >/dev/null           && kill $Pid
           ;;
           xpraserver|xpraclient)
-            ps -p $Pid | grep 'xpra' >/dev/null                   && (exec 2>/dev/null ; kill $Pid)
+            ps -p $Pid | grep 'xpra' >/dev/null                   && kill $Pid
           ;;
           compositor)
-            ps -p $Pid | grep -E 'weston|kwin_wayland' >/dev/null && (exec 2>/dev/null ; kill $Pid)
+            ps -p $Pid | grep -E 'weston|kwin_wayland' >/dev/null && kill $Pid
           ;;
           x11docker-run|mywatch|xpraloop)
-            ps -p $Pid | grep x11docker >/dev/null                && (exec 2>/dev/null ; kill $Pid)
+            ps -p $Pid | grep x11docker >/dev/null                && kill $Pid
           ;;
           catstdin)
-            ps -p $Pid | grep x11docker >/dev/null                && (exec 2>/dev/null ; kill $Pid)
+            ps -p $Pid >/dev/null                                 && kill $Pid
+          ;;
+          catlogfile)
+            Catlogfilepid=$Pid
+            Pid=
           ;;
           hostexe|shareclipboard)
-            ps -p $Pid | grep 'bash' >/dev/null                   && (exec 2>/dev/null ; kill $Pid)
+            ps -p $Pid | grep 'bash' >/dev/null                   && kill $Pid
           ;;
           xfishtank)
-            ps -p $Pid | grep 'xfishtank' >/dev/null              && (exec 2>/dev/null ; kill $Pid)
+            ps -p $Pid | grep 'xfishtank' >/dev/null              && kill $Pid
           ;;
           container) 
             [ -n "$Sudo" ] && Sudo="sudo -n" # no password prompt here, rather fail
@@ -682,16 +690,22 @@ x11docker --cleanup"
             note "Found remaining background process $Line"
           ;;
         esac
+        [ "$Pid" ] && ps -p $Pid --no-headers >/dev/null && {
+          sleep 1
+          ps -p $Pid --no-headers >/dev/null && note "Issue terminating $Line" && kill -s KILL $Pid
+        }
       }
     done < <(tac $Bgpidfile)
   }
   
-  [ "$Verbose" = "yes" ] && sleep 1   # make sure all logfiles are ready
-  [ "$Logfile" ] && $Mksu "cp '$Logfile' '$Logbackup'"
+  [ "$Logfile" ] && {
+    [ "$Verbose" = "yes" ] && sleep 1
+    $Mksu "cp '$Logfile' '$Logbackup'"
+    kill $Catlogfilepid
+  }
   
   exec 3>&- 4>&- 6>&- 7>&-
   [ "$Logfifo" ] && rm "$Logfifo"
-  (exec 2>/dev/null ; kill $(jobs -p))
 
   [ "$Preservecachefiles" = "no" ] && echo "$Cachefolder" | grep -q .cache && echo "$Cachefolder" | grep -q x11docker && [ "x11docker" != "$(basename "$Cachefolder")" ] && rm -f -R "$Cachefolder"
   exit ${1:-0}
@@ -718,6 +732,8 @@ $(sh -c "${1:-}" ||:)"
   Watchoutput="$(sh -c "${1:-}" 2>&1)"
   while sleep 1 ; do
     [ "$Watchoutput" = "$(sh -c "${1:-}" 2>&1)" ] || break
+    #[ -e "$Timetosaygoodbye" ] && break
+    [ -p "$Logfifo" ] || break
   done
   verbose "Stopped watching: sh -c '${1:-}'
   Current output:
@@ -1457,7 +1473,7 @@ $Customenvironment"    ;  shift ;;                         # set custom environm
   Mycookie=$(mcookie | cut -b1-6)
   [ -z "$Mycookie" ] && Mycookie=$RANDOM
 
-  Logfifo=$Cacherootfolder/$Mycookie.fifo
+  export Logfifo=$Cacherootfolder/$Mycookie.fifo
   mkfifo $Logfifo
   exec 7<>$Logfifo
 
@@ -4345,7 +4361,7 @@ start() {
           *)                                       # synchronizing between different X servers
             echo "# option '-c, --clipboard': Run clipboard script "
             echo "# (text copy only) (xpra has its own clipboard managment including images)"
-            echo "bash $Shareclipboardscript & storepid \$! shareclipboard"
+            echo "bash $Shareclipboardscript & storepid \$! shareclipboard" 
           ;;
         esac
       }
@@ -4540,7 +4556,7 @@ After finish: $Logbackup"
                                    $Cmdstdoutlogfile $Cmdstderrlogfile ${Journallogfile:-} \
                                    $Xpraserverlogfile $Xpraclientlogfile \
                                    $Xinitlogfile $Compositorlogfile 2>/dev/null >&7 &
-    cat <&7 >$Logfile &
+    cat <&7 >$Logfile & storepid $! catlogfile
     # option --verbose
     Esc="$(printf '\033')"
     [ "$Verbose" = "yes" ] && { 
@@ -4566,8 +4582,8 @@ After finish: $Logbackup"
     [ "$Showstdout" = "yes" ] && {
       waitforfilecontent $Containeridfile infinity
       tail --pid=$$ --retry -n +1 -F $Cmdstdoutlogfile >&1 2>/dev/null
-    } &
-    [ "$Showstderr" = "yes" ] && tail --pid=$$ --retry -n +1 -F $Cmdstderrlogfile >&4 2>/dev/null &
+    } & storepid $! tailstdout
+    [ "$Showstderr" = "yes" ] && tail --pid=$$ --retry -n +1 -F $Cmdstderrlogfile >&4 2>/dev/null & storepid $! tailstderr
 }
 
 { #### part: option '--starter': create desktop starter
@@ -4821,6 +4837,7 @@ $(tail $Dockerlogfile)"
         waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                       || error "Weston startup failed. Can not run $Xserver.
   Last lines of weston log:
 $(tail $Compositorlogfile)"
+        storepid $(cat $Compositorpidfile) compositor
         # hide weston window
         $Mksu "xdotool windowunmap 0x$(printf '%x\n' $(cat $Compositorlogfile | grep 'window id' | rev | cut -d' ' -f1 | rev))"
       }
@@ -4831,7 +4848,8 @@ $(tail $Compositorlogfile)"
       waitforfilecreation $XDG_RUNTIME_DIR/$Waylandsocket
       waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                         || error "Weston startup failed. Can not run $Xserver.
   Last lines of weston log:
-$(tail $Compositorlogfile)"      
+$(tail $Compositorlogfile)"
+      storepid $(cat $Compositorpidfile) compositor
       $Mksu "env WAYLAND_DISPLAY=$Waylandsocket           xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
     ;;
     --weston)
@@ -4840,6 +4858,7 @@ $(tail $Compositorlogfile)"
       waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                         || error "Weston startup failed. Can not run $Xserver.
   Last lines of weston log:
 $(tail $Compositorlogfile)"
+      storepid $(cat $Compositorpidfile) compositor
       $Mksu                                              "bash  $Xinitrc                       >> $Xinitlogfile  2>&1" 
     ;;
     --kwin-xwayland)
@@ -4848,6 +4867,7 @@ $(tail $Compositorlogfile)"
       waitforlogentry kwin   $Compositorlogfile "X-Server"                                     || error "Kwin startup failed. Can not run $Xserver.
   Last lines of kwin log:
 $(tail $Compositorlogfile)"
+      storepid $(cat $Compositorpidfile) compositor
       $Mksu "env WAYLAND_DISPLAY=$Waylandsocket           xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
     ;;
     --kwin)
@@ -4856,6 +4876,7 @@ $(tail $Compositorlogfile)"
       waitforlogentry kwin   $Compositorlogfile "X-Server"                                     || error "Kwin startup failed. Can not run $Xserver.
   Last lines of kwin log:
 $(tail $Compositorlogfile)"
+      storepid $(cat $Compositorpidfile) compositor
       $Mksu                                              "bash  $Xinitrc                       >> $Xinitlogfile  2>&1 " 
     ;;
     --nothing)
