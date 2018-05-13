@@ -389,7 +389,7 @@ note() {                # show notice messages
 " >&7
   return 0
 }
-notestdout() {          # write something on stdout
+printstdout() {         # write something on stdout
   echo "$*" >&6
 }
 verbose() {             # show verbose messages
@@ -573,8 +573,8 @@ checkorphaned() {       # --cleanup : check for non-removed containers and left 
   Caution: any currently running x11docker sessions will be terminated, too."
   Orphanedcontainers=""
   Orphanedfolders=""
-  cd $Cacherootfolder || error "Could not cd to cache folder '$Cacherootfolder'."
-  [ $? ] && [ -n "$(echo "$Cacherootfolder" | grep .cache/x11docker)" ] && Orphanedfolders=$(echo $(find "$Cacherootfolder" -mindepth 1 -maxdepth 1 -type d | sed s%$Cacherootfolder/%%))
+  cd $Cachebasefolder || error "Could not cd to cache folder '$Cachebasefolder'."
+  [ $? ] && [ -n "$(echo "$Cachebasefolder" | grep .cache/x11docker)" ] && Orphanedfolders=$(echo $(find "$Cachebasefolder" -mindepth 1 -maxdepth 1 -type d | sed s%$Cachebasefolder/%%))
   Orphanedcontainers="$(docker ps -a --filter name=x11docker_X --format "{{.Names}}")"
   Orphanedcontainers="$(env IFS='' echo $Orphanedcontainers)"
   if [ -z "$Orphanedcontainers" ] && [ -z "$Orphanedfolders" ] ; then 
@@ -582,13 +582,13 @@ checkorphaned() {       # --cleanup : check for non-removed containers and left 
   else
     note "Found orphaned containers: 
   $Orphanedcontainers"
-    note "Found orphaned folders in $Cacherootfolder:
+    note "Found orphaned folders in $Cachebasefolder:
   $Orphanedfolders" 
     for Line in $Orphanedfolders ; do
-      [ -d "$Cacherootfolder/$Line/share" ] && [ ! -e "$Cacherootfolder/$Line/share/timetosaygoodbye" ] && {
+      [ -d "$Cachebasefolder/$Line/share" ] && [ ! -e "$Cachebasefolder/$Line/share/timetosaygoodbye" ] && {
         note "Found possibly active container $Line.
   Will summon it to terminate itself."
-        touch "$Cacherootfolder/$Line/share/timetosaygoodbye"  # terminating possibly running x11docker sessions
+        touch "$Cachebasefolder/$Line/share/timetosaygoodbye"  # terminating possibly running x11docker sessions
         sleep 3
       }
     done
@@ -851,8 +851,7 @@ mkfile() {              # create file $1 owned by $Hostuser
   chgrp $Hostusergid "${1:-}"
   [ -n "${2:-}" ] && chmod ${2:-} "${1:-}" ||:
 }
-depends() {
-  # Check dependencies on host for X server option ${1:-}
+depends() {             # check dependencies on host for X server option $1
   # Return 1 if something is missing
   local Return Message
   case $Autochooseserver in
@@ -919,7 +918,7 @@ depends() {
         Return=1
       } ;;
     --hostwayland|--xwayland)
-      [ "$Hostwayland" ] || {
+      [ "$Hostwaylandsocket" ] || {
         $Message "${1:-} needs a running Wayland compositor. WAYLAND_DISPLAY is empty."
         Return=1
       } ;;
@@ -927,7 +926,7 @@ depends() {
         [ -z "$Newxvt" ] && {
           if [ ! -e "/etc/X11/Xwrapper.config" ] || [ -z "$(cat /etc/X11/Xwrapper.config | grep "allowed_users" | grep "anybody")" ] ; then
             warning "Your configuration does not allow you to start
-  a second core Xorg server from within X.
+  a second core Xorg server from within X. Option --xorg will probably fail.
   (As a default configuration, only root or console users can do that).
   
   Recommended easy solution: install nested X server 'Xephyr'.
@@ -944,7 +943,6 @@ depends() {
       needs_root_rights=yes
   If the file does not exist already, you can create it.
   On Ubuntu 16.04 and debian 9 you need package xserver-xorg-legacy."
-            Return=1
           fi
         }
     ;;
@@ -959,16 +957,17 @@ depends() {
 { #### part: declare variables
 trap finish EXIT
 
-export IFS=$' \n\t'                                 # set IFS to default
-exec 3>&2                                           # second stderr channel
-exec 4>&2                                           # stderr channel for --stderr
-exec 6>&1                                           # second stdout channel
+export IFS=$' \n\t'                             # set IFS to default
+# redirects for use in parts with >xy 2>xy
+exec 3>&2                                       # stderr channel for warning() and error()
+exec 4>&2                                       # stderr channel for --stderr
+exec 6>&1                                       # second stdout channel
 
-pstree -ps $$ | grep -q sshd && Ssh="yes" || Ssh="no"
-tty | grep -q tty && Tty="yes" || Tty="no"          # check if running on X or on tty
+pstree -ps $$ | grep -q sshd && Ssh="yes" || Ssh="no"  # check if running over SSH
+tty | grep -q tty            && Tty="yes" || Tty="no"  # check if running on X or on tty
 [ "$Tty" = "no" ] && [ -z "$DISPLAY" ] && [ "$Ssh" = "yes" ] && Tty="yes"
-export PATH="$PATH:/usr/games:/usr/local/bin"       # may miss for root, but can be needed for --exe and --xfishtank
-export PATH="$PATH:/usr/sbin:/sbin"                 # may miss for unprivileged users, but can be needed for `ip`
+export PATH="$PATH:/usr/games:/usr/local/bin"          # may miss for root, but can be needed for --exe and --xfishtank
+export PATH="$PATH:/usr/sbin:/sbin"                    # may miss for unprivileged users, but can be needed for `ip`
 
 Bgpidfile=backgroundpids                        # file to store pids and names of background processes that shut be killed on exit
 Timetosaygoodbye=timetosaygoodbye               # file giving term signal to all parties
@@ -994,58 +993,57 @@ Hostgidvideo=""                                 # host GID of group video. Can d
 Groupadd=""                                     # option --group-add: additional groups for container user
 
 # Gaining root privileges to run docker
-Passwordprompt=""                               # way to ask for password. one of pkexec, su, sudo, gksu, gksudo, auto
-Getroot=""                                      # prefix for commands needing root (only dockerrc script)
-Sudo=""                                         # "sudo" or empty
-Needpassword="yes"                              # Need password? assume yes, check later
+Passwordfrontend=""                             # --pw: method to prompt for password. one of pkexec, su, sudo, gksu, gksudo, kdesu, kdesudo, lxsu, lxsudo, beesu, auto, none
+Passwordcommand=""                              # generated command for password prompt
+Sudo=""                                         # "sudo", "sudo -n", or empty
+Passwordneeded="yes"                            # password needed to run docker? assume yes, check later
 
 # Cache folders
-Cacherootfolder=""                              # cache folder to store temporary files
-Cachefolder=""
-Sharefolder=share                               # subfolder for shared files
+Cachebasefolder=""                              # base cache folder to store temporary files
+Cachefolder=""                                  # subfolder of $Cachebasefolder for current container
+Sharefolder=share                               # subfolder of $Cachefolder for files shared with container
 Cshare=/x11docker                               # mountpoint of $Sharefolder in container
 
 # Parsed arguments
 X11dockermode="run"                             # can be either "xonly", "run" or "exe", depends on options. while parsing, xonly changes to run or exe
-X11dockerargs="$*"                              # arguments for x11docker
+X11dockerargs="$*"                              # arguments for x11docker, stored for logfile and for --starter
 Imagename=""                                    # name of image to run
 Imagecommand=""                                 # image command [+args]
-Hostexe=""                                      # can contain host executable
-Dockeroptions=""                                # options for docker after -- and before image name
+Imagenametr=""                                  # image name with : and / replaced by - for use with container name and --home folder
+Hostexe=""                                      # contains host executable
+Dockeroptions=""                                # custom options for "docker run". Provide after -- and before image name, encapsulated with "" (or without whitespaces)
 
 # docker variables
-Containername=""                                # name of container set by x11docker to make --cleanup able to find orphaned containers
-Containerpid=""                                 # process ID of script process with docker container
-Nonewprivileges="yes"
+Containername=""                                # generated container name
+Containerpid=""                                 # container PID
+Nonewprivileges="yes"                           # docker run option --security-opt=no-new-privileges. Disabled by options like --cap-default, --sudouser, --dbus-system
 
 # docker related files
-Dockerrc=dockerrc                               # init script run by docker. Creates $Imagecommandscript
-Imagecommandscript=x11docker.CMD.sh             # name of shared script containing image command
-Dockerlogfile=docker.log                        # file to log output of docker
-Containerpidfile=container.pid                  # file to store process ID of script -c docker
-Containeridfile=container.id                    # file to store process ID of script -c docker
-Containerip=container.ip                        # IP adress of container
-Setupscript=containersetup.sh
+Dockerrc=dockerrc                               # generated script to check image, set up host and create $Imagecommandscript
+Setupscript=containersetup.sh                   # generated script to set up container. runs as root in container.
+Imagecommandscript=x11docker.CMD.sh             # generated script starting image comand in container
+Dockerlogfile=docker.log                        # file to log output of container
+Containerpidfile=container.pid                  # file to store container PID
+Containeridfile=container.id                    # file to store container ID 
+Containerip=container.ip                        # file to store container IP
 
 # X server config files, log files and such stuff
-Xinitrc=xinitrc                                 # file to store xinitrc commands
-Xinitlogfile=xinit.log                          # file to log output of X server
-Xtermrc=xtermrc                                 # file for password prompt script
-Pullrc=pullrc                                   # file for pull dialog script
-Compositorlogfile=compositor.log                # file to log output of Weston or KWin 
-Compositorpidfile=compositor.pid                # process id of compositor
+Xinitrc=xinitrc                                 # generated xinitrc script
+Xtermrc=xtermrc                                 # generated script for password prompt
+Pullrc=pullrc                                   # generated script for pull dialog
+Xinitlogfile=xinit.log                          # logfile for xinit/X server
 Xpraserverlogfile=xpraserver.log                # logfile for xpra server
 Xpraclientlogfile=xpraclient.log                # logfile for xpra client
-Westonini=weston.ini                            # config file for weston
-Customwestonini=""                              # custom config file for weston
-Xdummyconf=xdummy.xorg.conf                     # xorg.conf for dummy video driver
+Westonini=weston.ini                            # generated config file for weston
+Customwestonini=""                              # --westonini: custom config file for weston
+Xdummyconf=xdummy.xorg.conf                     # generated xorg.conf for dummy video driver
 Xdummywrapper=Xdummywrapper                     # fork from xpra to wrap Xorg for Xdummy
-Xservercookie=Xservercookie                     # file to store new X server cookies
-Xclientcookie=Xclientcookie                     # file to store new X client cookies
-Xkbkeymapfile=xkb_keymap                        # file to store output of 'setxkbmap -display $Hostdisplay -print'
+Xservercookie=Xservercookie                     # generated X server cookie
+Xclientcookie=Xclientcookie                     # generated X client cookie. Normally same as $Xservercookie, except for --hostdisplay and --nxagent
+Xkbkeymapfile=xkb_keymap                        # file to store output of host keymap in xinitrc: 'setxkbmap -display $Hostdisplay -print'
 
 # stdin stdout stderr
-Cmdstdinfile=stdin                              # stdin for image command piped to x11docker
+Cmdstdinfile=stdin                              # stdin for image command. fifo/named pipe to forward stdin of x11docker to image command 
 Cmdstdoutlogfile=stdout                         # stdout for image command
 Cmdstderrlogfile=stderr                         # stderr for image command
 
@@ -1091,11 +1089,11 @@ Nvidiaversion=""                                #   "        "    nvidia driver 
 Alpineglibc=""                                  #   "        "    apk package file with glibc compatibility layer for alpine, needed to install nvidia driver on musl libc systems
 
 # Screensize and related X server adjustments
-Screensize=""                                   # option --size  XxY
+Screensize=""                                   # option --size XxY
 Xaxis=""                                        # virtual screen width
 Yaxis=""                                        # virtual screen height
 Modeline=""                                     # screen modeline describing display size, see "man cvt"
-Maxxaxis=""                                     # describes maximal screen size of display to support fullscreen beside windowed desktop
+Maxxaxis=""                                     # maximal screen size of display to support fullscreen beside windowed desktop
 Maxyaxis=""
 Fullscreen="no"                                 # option '-f, --fullscreen': use fullscreen mode (Xephyr only)
 Scaling="0"                                     # option --scale: Scaling factor for xpra and weston
@@ -1104,16 +1102,16 @@ Dpi=""                                          # option --dpi: dots per inch to
 Outputcount="1"                                 # option --output-count, quantum of virtual screens for Weston and Xephyr
 
 # Wayland and Weston
-Hostwayland="$WAYLAND_DISPLAY"                  # store host wayland display
+Hostwaylandsocket="$WAYLAND_DISPLAY"            # store host wayland socket name
+Newwaylandsocket=""                                # Wayland socket of $Compositorcommand
 Compositorcommand=""                            # command to start Weston or KWin
-Waylandsocket=""                                # Wayland socket for Xwayland in weston
 Waylandtoolkitenv=("XDG_SESSION_TYPE=wayland GDK_BACKEND=wayland QT_QPA_PLATFORM=wayland CLUTTER_BACKEND=wayland SDL_VIDEODRIVER=wayland ELM_DISPLAY=wl ELM_ACCEL=opengl ECORE_EVAS_ENGINE=wayland_egl")
-Compositorpid=""                                # pid of weston or kwin
-Westonoutput=""                                 # Xn, WLn or monitor identifier
-Sharewayland="no"                               # option --sharewayland: Share wayland socket and WAYLAND_DISPLAY
-Setwaylandenv="no"                              # option --setwaylandenv: Set environment variables $Waylandtoolkitenv
-Dbuslaunch="no"                                 # option '--dbus': run image command with dbus-launch
-Dbusdaemon="no"                                 # option '--dbus-dameon': set up dbus daemon in container
+Westonoutput=""                                 # Xn, WLn (nested mode) or monitor identifier (drm mode on tty)
+Sharewayland="no"                               # share wayland socket and WAYLAND_DISPLAY
+Setwaylandenv="no"                              # set environment variables $Waylandtoolkitenv
+Compositorpid=""                                # PID of weston or kwin_wayland
+Compositorpidfile=compositor.pid                # file to store PID of compositor
+Compositorlogfile=compositor.log                # logfile for weston or kwin_wayland 
 
 # Available terminal emulators
 Passwordterminal=""                             # terminal emulator to use for password prompt (if no terminal emulator is needed, it will be 'bash -c')
@@ -1129,7 +1127,6 @@ Sharevolumes=""                                 # option --volume: host folders 
 Sharevolumescount="0"                           # counts shared folders in array
 Shareclipboard="no"                             # option '-c, --clipboard' enable clipboard sharing
 Shareclipboardscript=clipboard.bash             #    "              "      script used for text clipboard sharing
-Customenvironment=""                            # option '--env': set custom environment variables 
 Pulseaudio="no"                                 #   "                    use pulseaudio yes/no
 Pulseserver=""
 Pulseaudioconf=pulseclient.conf
@@ -1139,7 +1136,6 @@ Alsa="no"                                       # option --alsa: enable ALSA sou
 Noentrypoint="no"                               # option --no-entrypoint: disable entrypoint in image
 Internetaccess="yes"                            # option --no-internet: disable internet access
 Langwunsch=""                                   # option --lang: search or create UTF-8 locale and set LANG
-Workdir=""                                      # option --workdir: set working directory
 
 # verbosity options
 Verbose="no"                                    # option '-v, --verbose': if "yes", be verbose
@@ -1152,7 +1148,8 @@ Verbosecolors="yes"                             # colored output for --verbose a
 Debug="no"                                      # option --debug: Throw it all out
 DebugPS4='+ \033[32m${LINENO}:${FUNCNAME[0]:+${FUNCNAME[0]}(): }\033[0m'
 
-# developer options
+# advanced options
+Customenvironment=""                            # option '--env': set custom environment variables 
 Capdropall="yes"                                # option --cap-default: (don't) drop all container capabilities
 Adminusercaps="no"                              # options --sudouser, --systemd: add capabilities for general sys administration
 Switchcontaineruser="no"                        # options for init systems: user switching to toggle login daemons
@@ -1160,11 +1157,14 @@ Switchcontainerusercaps="no"                    # options --dbus, --sudouser and
 Sharehostipc="no"                               # option --hostipc, set --ipc=host.
 Sharehostnet="no"                               # option --hostnet, set --ipc=net
 Preservecachefiles="no"                         # if yes, dont delete cache files
-Initsystem="tini"
 Capsysadmin="no"                                # option --sys-admin: add capability SYS_ADMIN (deprecated)
 Sharecgroup="no"                                # options --systemd, --cgroup: share /sys/fs/cgroup
 Runfromhost=""                                  # option --runfromhost: add host command to xinitrc
 Runasroot=""                                    # option --runasroot: add command running as root to container setup script
+Workdir=""                                      # option --workdir: set working directory
+Initsystem="tini"
+Dbuslaunch="no"                                 # option '--dbus': run image command with dbus-launch
+Dbusdaemon="no"                                 # option '--dbus-dameon': set up dbus daemon in container
 
 # X authentication
 Xauthentication="yes"                           # option '--no-auth' use cookie authentication yes/no
@@ -1295,7 +1295,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
          --no-entrypoint) Noentrypoint="yes" ;;            # don't use ENTRYPOINT of image
          --no-internet)Internetaccess="no" ;;              # disallow internet access
          --workdir)    Workdir="$(escapestring "${2:-}")" ; shift ;; # set working directory
-         --pw)         Passwordprompt="${2:-}" ; shift ;;  # frontend for password prompt
+         --pw)         Passwordfrontend="${2:-}" ; shift ;;  # frontend for password prompt
          --runfromhost|--add) Runfromhost="${2:-}" ; shift # add custom host command in xinitrc
                        [ "${1:-}" = "--add" ] && warning "Option --add changed to --runfromhost and is deprecated.
   Please use --runfromhost instead." ;;  
@@ -1352,7 +1352,7 @@ $Customenvironment"    ;  shift ;;                         # set custom environm
          
        ## host folders
          --homedir)    Benutzerhosthomefolder="${2:-}" ; Benutzerhosthome="yes" ; shift ;; # set host folder to share as home folder instead of ~/x11docker/NAME
-         --cachedir)   Cacherootfolder="${2:-}" ; shift ;; # set cache folder instead of default $Cacherootfolder
+         --cachedir)   Cachebasefolder="${2:-}" ; shift ;; # set cache folder instead of default $Cachebasefolder
          --sharedir)   [ -e "${2:-}" ] && {                # share host folder at same location in container with rw access
                          Sharevolumescount=$(($Sharevolumescount + 1))
                          Sharevolumes[$Sharevolumescount]="${2:-}"
@@ -1454,7 +1454,7 @@ $Customenvironment"    ;  shift ;;                         # set custom environm
   You need to specify option --cachedir.
   (Also specify --homedir if you want to use option --home)."
   
-  [ -z "$Cacherootfolder" ] && Cacherootfolder="$Hostuserhome/.cache/x11docker"
+  [ -z "$Cachebasefolder" ] && Cachebasefolder="$Hostuserhome/.cache/x11docker"
   
   # Need host GIDs to use in container
   Hostgidaudio=$(getent group audio | cut -d: -f3)
@@ -1464,23 +1464,26 @@ $Customenvironment"    ;  shift ;;                         # set custom environm
 { #### part: some init
 
   # base cache folder
-  $Mksu "mkdir -p $Cacherootfolder"         || error "Could not create cache folder
-  $Cacherootfolder"
-  writeaccess $Hostuseruid $Cacherootfolder || error "User $Hostuser does not have write access to
-  cache folder $Cacherootfolder"  # can happen with --cachedir
+  $Mksu "mkdir -p $Cachebasefolder"         || error "Could not create cache folder
+  $Cachebasefolder"
+  writeaccess $Hostuseruid $Cachebasefolder || error "User $Hostuser does not have write access to
+  cache folder $Cachebasefolder"  # can happen with --cachedir
   
   # Logfiles
   Mycookie=$(mcookie | cut -b1-6)
   [ -z "$Mycookie" ] && Mycookie=$RANDOM
 
-  export Logfifo=$Cacherootfolder/$Mycookie.fifo
+  export Logfifo=$Cachebasefolder/$Mycookie.fifo
   mkfifo $Logfifo
   exec 7<>$Logfifo
 
-  Logfile=                                             # temporary location declared later
-  Logbackup="$Cacherootfolder/x11docker.log"       # afterward copy of $Logfile in $Cacherootfolder  
+  Logfile=                                         # temporary location declared later
+  Logbackup="$Cachebasefolder/x11docker.log"       # afterward copy of $Logfile in $Cachebasefolder  
   
-  verbose "$(date) $(source /etc/os-release ; echo "$PRETTY_NAME") $(Xorg -version 2>&1 | grep X.Org)
+  verbose "x11docker version $Version 
+docker version: $(docker --version)
+Xorg version:  $(Xorg -version 2>&1 | grep X.Org)
+Host system: $(source /etc/os-release ; echo "$PRETTY_NAME")
 Command: $0 $X11dockerargs
 Parsed options: $Parsedoptions"
 
@@ -1491,8 +1494,8 @@ Parsed options: $Parsedoptions"
     trap 'traperror $? $LINENO $BASH_LINENO "$BASH_COMMAND" $(printf "::%s" ${FUNCNAME[@]})'  ERR
   }
   
-  [ "$Cacherootfolder" != "$(echo $Cacherootfolder | sed -e 's/ *//g')" ] && error "Cache root folder must not contain whitespaces.
-  $Cacherootfolder"
+  [ "$Cachebasefolder" != "$(echo $Cachebasefolder | sed -e 's/ *//g')" ] && error "Cache root folder must not contain whitespaces.
+  $Cachebasefolder"
     
   # options --install --update --remove
   [ -n "$Installermode" ] && {
@@ -1508,22 +1511,6 @@ Parsed options: $Parsedoptions"
     exit
   }
   
-  [ "$Tty" = "no" ] && [ -z "$Hostdisplay" ] && warning "Environment variable DISPLAY is empty, but
-  it seems x11docker was started within X, not from console. 
-  Please set DISPLAY and XAUTHORITY.
-  If you have started x11docker with su or sudo, su/sudo may be configured to
-  unset X environment variables. It may work if you run x11docker with
-    sudo -E x11docker [...]
-  If your system does not support 'sudo -E', you can try
-    sudo env DISPLAY=\$DISPLAY XAUTHORITY=\$XAUTHORITY x11docker [...]
-  Otherwise, you can use tools like gksu/gksudo/kdesu/kdesudo/lxsu/lxsudo."
-  
-  [ "$Sudouser" = "yes" ] && warning "You allow $Benutzer sudo permissions (password: x11docker).
-  Also, the container gains additional capabilities to allow sudo and su.
-  This is a severe reduction of default x11docker security.
-  If an application breaks out of container, it can harm your system
-  in every way without you noticing."
-  
   # check whether x11docker runs on tty1-tty6, number can be changed with --vt N
   # console users have to use their own tty for X since debian 9
   [ "$Tty" = "yes" ] && [ "$Newxvt" = "" ] && {
@@ -1538,6 +1525,8 @@ Parsed options: $Parsedoptions"
     $Mksu "mkdir -p $XDG_RUNTIME_DIR"
     $Mksu "chmod 700 $XDG_RUNTIME_DIR"
   }
+  
+  # --westonini
   [ -n "$Customwestonini" ] && [ ! -e "$Customwestonini" ] && { 
     warning "Custom weston.ini (option --westonini) not found.
   $Customwestonini"
@@ -1545,27 +1534,19 @@ Parsed options: $Parsedoptions"
   }
   
   # validate $WAYLAND_DISPLAY
-  [ -n "$Hostwayland" ] && [ ! -S "$XDG_RUNTIME_DIR/$Hostwayland" ] && {
-    warning "WAYLAND_DISPLAY $Hostwayland is set, but does not exist
+  [ -n "$Hostwaylandsocket" ] && [ ! -S "$XDG_RUNTIME_DIR/$Hostwaylandsocket" ] && {
+    warning "WAYLAND_DISPLAY $Hostwaylandsocket is set, but does not exist
   or is not a socket.
-  $XDG_RUNTIME_DIR/$Hostwayland"
-    Hostwayland=""
+  $XDG_RUNTIME_DIR/$Hostwaylandsocket"
+    Hostwaylandsocket=""
   }
-  
-  [ "$Capdropall" = "no" ] && warning "Option --cap-default disables security hardening
-  for containers. Granting docker's default capabilities is considered insecure."
-  
-  [ "$Capsysadmin" = "yes" ] && warning "Option --sys-admin may be dangerous.
-  It adds insecure capability SYS_ADMIN to container.
-  It is needed to run debian 9 images with option --systemd.
-  Debian 10 images run well without --sys-admin."  
 }
 
-{ #### part: check X server dependencies, use fallbacks if needed, auto-choose X server
+{ #### part: check X server dependencies, auto-choose X server
 
   ## default option '--auto': Try to automatically choose best matching and available X server
   [ "$Autochooseserver" = "yes" ] && {                             Xserver="--xpra"
-    [ -n "$Hostwayland" ]                                       && Xserver="--xpra-xwayland"
+    [ -n "$Hostwaylandsocket" ]                                 && Xserver="--xpra-xwayland"
     [ "$Gpu" = "yes" ]                                          && Xserver="--xpra-xwayland"
     [ "$Xfishtank" = "yes" ]    && [ "$Desktopmode" = "no" ]    && Xserver="--xephyr"
     [ "$Desktopmode" = "yes"  ]                                 && Xserver="--xephyr"
@@ -1577,8 +1558,8 @@ Parsed options: $Parsedoptions"
     [ -n "$Rotation" ]                                          && Xserver="--weston-xwayland"
     [ "$Scaling" != "0" ]       && [ "$Gpu" = "yes" ]           && Xserver="--xpra-xwayland"
     [ "$Scaling" != "0" ]       && [ "$Gpu" = "no" ]            && Xserver="--xpra"
-    [ -z "$Hostdisplay" ]       && [ -n "$Hostwayland" ]        && Xserver="--weston-xwayland"
-    [ "$Sharewayland" = "yes" ] && [ "$Xserver" != "-hostdisplay" ] && { [ -n "$Hostwayland" ] && [ "$Desktopmode" = "no" ] && Xserver="--hostwayland" || Xserver="--weston" ; }
+    [ -z "$Hostdisplay" ]       && [ -n "$Hostwaylandsocket" ]  && Xserver="--weston-xwayland"
+    [ "$Sharewayland" = "yes" ] && { [ -n "$Hostwaylandsocket" ] && [ "$Desktopmode" = "no" ] && Xserver="--hostwayland" || Xserver="--weston" ; }
   }
 
   [ "$Gpu" = "yes" ] && case $Xserver in
@@ -1603,17 +1584,36 @@ Parsed options: $Parsedoptions"
       Xserver="--xdummy-xwayland"
     ;;
   esac
+
+  
+  [ "$Tty" = "no" ] && [ -z "$Hostdisplay" ] && {
+    warning "Environment variable DISPLAY is empty, but
+  it seems x11docker was started within X, not from console. 
+  Please set DISPLAY and XAUTHORITY.
+  If you have started x11docker with su or sudo, su/sudo may be configured to
+  unset X environment variables. It may work if you run x11docker with
+    sudo -E x11docker [...]
+  If your system does not support 'sudo -E', you can try
+    sudo env DISPLAY=\$DISPLAY XAUTHORITY=\$XAUTHORITY x11docker [...]
+  Otherwise, you can use tools like gksu/gksudo/kdesu/kdesudo/lxsu/lxsudo."
+  
+    [ -n "${PKEXEC_UID:-}" ] && note "It seems you have started x11docker with pkexec.
+  Can not determine DISPLAY and XAUTHORITY, can not use your X server.
+  To allow other X server options, please provide environment variables with
+    pkexec env DISPLAY=\$DISPLAY XAUTHORITY=\$XAUTHORITY x11docker [ARGS]."
+    Xserver="--xorg"
+  }
   
   ## check if dependencies for chosen X server are installed, fall back to best alternatives if not
   [ "$Xserver" = "--xephyr" ]          && { depends --xephyr          || Xserver="--nxagent" ; }
-  [ "$Xserver" = "--xvfb" ]            && { depends --xvfb            || Xserver="--xdummy" ; }
-  [ "$Xserver" = "--hostwayland" ]     && { depends --hostwayland     || Xserver="--weston" ; }
-  [ "$Xserver" = "--nxagent" ]         && { depends --nxagent         || { [ "$Desktopmode" = "yes" ] && Xserver="--xephyr" || Xserver="--xpra" ; } ; }
-  [ "$Xserver" = "--xpra" ]            && { depends --xpra            || { depends --nxagent && Xserver="--nxagent" || Xserver="--xephyr" ; } ; }
+  [ "$Xserver" = "--xvfb" ]            && { depends --xvfb            || Xserver="--xdummy"  ; }
+  [ "$Xserver" = "--hostwayland" ]     && { depends --hostwayland     || Xserver="--weston"  ; }
+  [ "$Xserver" = "--nxagent" ]         && { depends --nxagent         || { [ "$Desktopmode" = "yes" ] && Xserver="--xephyr"        || Xserver="--xpra" ; } ; }
+  [ "$Xserver" = "--xpra" ]            && { depends --xpra            || { depends --nxagent          && Xserver="--nxagent"       || Xserver="--xephyr" ; } ; }
   [ "$Xserver" = "--xorg" ]            && { depends --xorg            || Xserver="--weston-xwayland" ; }
   [ "$Xserver" = "--xpra-xwayland" ]   && { depends --xpra            || Xserver="--weston-xwayland" ; }
   [ "$Xserver" = "--xwayland" ]        && { depends --xwayland        || Xserver="--weston-xwayland" ; }
-  [ "$Xserver" = "--xpra-xwayland" ]   && { depends --xpra-xwayland   || { [ "$Desktopmode" = "yes" ] && Xserver=--kwin-xwayland || Xserver=--hostdisplay ; } ; }
+  [ "$Xserver" = "--xpra-xwayland" ]   && { depends --xpra-xwayland   || { [ "$Desktopmode" = "yes" ] && Xserver="--kwin-xwayland" || Xserver="--hostdisplay" ; } ; }
   [ "$Xserver" = "--kwin-xwayland" ]   && { depends --kwin-xwayland   || Xserver="--weston-xwayland" ; }
   [ "$Xserver" = "--kwin" ]            && { depends --kwin            || Xserver="--weston" ; }
   [ "$Xserver" = "--weston-xwayland" ] && { depends --weston-xwayland || Xserver="--kwin-xwayland" ; }
@@ -1622,95 +1622,37 @@ Parsed options: $Parsedoptions"
   
    # Xephyr as fallback for all options. Last fallback: Xorg
   depends $Xserver || Xserver="--xephyr"
-  [ "$Xserver" = "--xephyr" ]          && { depends --xephyr          || {
-                                            depends --kwin-xwayland   && Xserver="--kwin-xwayland" 
-                                            depends xpra              && Xserver="--xpra"
-                                            depends nxagent           && Xserver="--nxagent"
-                                              }
+  [ "$Xserver" = "--xephyr" ]         && {  depends --xephyr || {
+                                              depends --kwin-xwayland   && Xserver="--kwin-xwayland" 
+                                              depends --weston-xwayland && Xserver="--weston-xwayland" 
+                                              depends --xpra            && Xserver="--xpra"
+                                              depends --nxagent         && Xserver="--nxagent"
+                                            }
     [ "$Gpu" = "yes" ] && case $Desktopmode in
-      yes)                                  depends --weston-xwayland && Xserver="--weston-xwayland" || Xserver=--xorg ;;
-      no)                                   depends --hostdisplay     && Xserver="--hostdisplay"     || Xserver=--xorg ;;
+      yes)                                  depends --weston-xwayland && Xserver="--weston-xwayland" ;;
+      no)                                   depends --hostdisplay     && Xserver="--hostdisplay" ;;
     esac
-  }
-
-  [ "$Xserver" = "--nxagent" ] && [ "$Hostsystem" = "mageia" ] && {
-    [ "$Desktopmode" = "no" ] && [ "$Autochooseserver" = "yes" ] && Desktopmode="yes" && Windowmanager="auto"
-    [ "$Desktopmode" = "no" ] && warning "nxagent version 3.5.0 on Mageia 6 is known to crash
-    in seamless mode. (Detected version: '$(strings --bytes 20 /usr/libexec/nx/nxagent | grep "NXAGENT - Version")').
-    If you encounter issues, please try seamless --xpra (secure), 
-    --hostdisplay (insecure), or run --nxagent in desktop mode with a
-    host window manager (--wm=WINDOWMANAGER or --wm=auto or short -wm)."
+    depends $Xserver || Xserver="--xorg"
   }
   
-  case $Xserver in
-    --xpra|--xpra-xwayland)
-      Xpraversion="$(xpra --version)"
-      verlt "$Xpraversion" "xpra v1.0" && {
-        note "Your xpra version '$Xpraversion' is out of date. It is
-  recommended to install latest stable from www.xpra.org, or at least v1.0."
-        [ "$Desktopmode" = "yes" ] && {
-          note "Your xpra version does not support desktop mode.
-  Fallback: Will try to use core Xorg (option --xorg)."
-          Xserver="--xorg"
-        } ||:
-      } || {
-        Xpraoptions="$Xpraoptions --webcam=no"
-      }
-
-      [ "$Desktopmode" = "yes" ] && verlt "$Xpraversion" "xpra v2.2-r17117" && note "Xpra desktop mode works best since xpra v2.2-r17117.
-  You have installed lower version $Xpraversion.
-  It is recommended to use Xephyr (option --xephyr) instead.
-  Rendering issues can be reduced disabling OpenGL in Xpra tray icon. Screen
-  size issues can be avoided with non-integer scaling (f.e. --scale=1.01)."
-    ;;
-  esac
-  
-  [ -n "${PKEXEC_UID:-}" ] && [ -z "$Hostdisplay" ] && [ "$Tty" = "no" ] && [ "$Autochooseserver" = "yes" ] && {
-    note "It seems you have started x11docker with pkexec.
-  Can not determine DISPLAY and XAUTHORITY, can not use your X server.
-  To allow other X server options, please provide environment variables with
-    pkexec env DISPLAY=\$DISPLAY XAUTHORITY=\$XAUTHORITY x11docker [ARGS]
-  Fallback: Will try to use Xorg (option --xorg)."
-    Xserver="--xorg"
-  }
-  
-  depends $Xserver                || error "Did not find a possibility to provide a display.
-    Recommendations:
-    To run within an X server, install one or all of:
+  depends $Xserver || error "Did not find a possibility to provide a display.
+  Recommendations:
+    To run within an already running X server, install one or all of:
       nxagent Xephyr xpra
     To run with GPU acceleration, install:
       weston Xwayland xpra xdotool
     To run from TTY or within Wayland, install:
       weston Xwayland"
+  
   [ "$Autochooseserver" = "yes" ] && note "Using X server option $Xserver"
   
-  [ "$Xserver" = "--xorg" ] && {
-    [ "$Hostsystem" = "opensuse" ] && [ "$Tty" = "no" ] && warning "openSUSE does not support starting a second Xorg server
-  from within X. Possible solutions: install nested X server 'Xephyr',
-  or for --gpu support: install 'Weston' and 'Xwayland'.
-
-  Or switch to console tty1...tty6 with <CTRL><ALT><F1>...<F6>
-  and start x11docker there."
-  
-    [ "$Autochooseserver" = "yes" ] && [ -n "$Hostdisplay" ] && note "Could not find Xephyr or an alternative
-  to run desktop in container. 
-  Fallback: Will try to run a second core Xorg server (option --xorg)."
-  
-    note "You can switch between X servers and console terminals
-  with [CTRL][ALT][F1]...[F12]."
-  
-    warning "On debian 9, switching often between multiple X servers can 
-  cause a crash of one X server. This bug may be debian specific and is 
-  probably some sort of race condition. If you know more about this or it 
-  occurs on other systems, too, please report."
-
-    [ "$Autochooseserver" = "yes" ] && [ -z "$Imagename" ] && error "Will not run an empty Xorg in auto-choosing mode.
+  [ "$Xserver" = "--xorg" ] && [ "$Autochooseserver" = "yes" ] && [ -z "$Imagename" ] && error "Will not run an empty Xorg in auto-choosing mode.
   If you want this, please use option --xorg explicitly."
-  }
 }
 
-{ #### part: check multiple option interferences
+{ #### part: check multiple option interferences, change settings if needed
 
+  # check if a host window manager is needed
   [ "$Desktopmode" = "no" ] && [ -z "$Windowmanager" ] && case $Xserver in
     --xephyr|--weston-xwayland|--kwin-xwayland|--xorg|--xwayland) 
       Windowmanager="auto" 
@@ -1727,12 +1669,10 @@ Parsed options: $Parsedoptions"
     ;;
   esac
   
-  [ "$Tty" = "yes" ] && Fullscreen="no" # avoid weston error on tty. --fullscreen is nonsense here at all.
+   # --fullscreen is nonsense on tty at all. Avoids weston error on tty. 
+  [ "$Tty" = "yes" ] && Fullscreen="no"
   
-  [ "$Xserver" = "--hostdisplay" ] && [ "$Autochooseserver" = "yes" ] && note "To allow protection against X security leaks,
-  please install xpra, nxagent and/or Xephyr (recommended),
-  or run a second Xorg server with options --xorg --wm=auto."
-    
+  # --gpu
   [ "$Gpu" = "yes" ] && {
     case $Xserver in
       --xpra|--xdummy|--nxagent|--xephyr)
@@ -1743,17 +1683,21 @@ Parsed options: $Parsedoptions"
     esac
   }
   
+  # trusted or untrusted cookies. untrusted cookies are default for --hostdisplay
   [ "$Gpu" = "yes" ]               && Forcetrusted="yes"
   [ "$Xserver" = "--hostdisplay" ] && Trusted="no"
   [ "$Forcetrusted" = "yes" ]      && Trusted="yes"
   
- [ "$Xserver" = "--hostdisplay" ] &&  [ "$Sharehostipc" = "no" ] && [ "$Gpu" = "yes" ] && {
+  # --hostdisplay --gpu
+  [ "$Xserver" = "--hostdisplay" ] && [ "$Sharehostipc" = "no" ] && [ "$Gpu" = "yes" ] && {
     note "To allow GPU acceleration (option --gpu) with --hostdisplay,
   x11docker will share host resources with insecure option --hostipc 
   and allow trusted cookies with option --trusted."
     Sharehostipc="yes"
+    Trusted="yes"
   }
   
+  # --hostdisplay with untrusted cookies: check xdpyinfo
   [ "$Xserver" = "--hostdisplay" ] && [ "$Trusted" = "no" ] && {
     command -v xdpyinfo >/dev/null && {
       xdpyinfo | grep -q SECURITY || {
@@ -1768,6 +1712,7 @@ Parsed options: $Parsedoptions"
   Please install 'xdpyinfo'."
   }
   
+  # --clipboard
   [ "$Shareclipboard" = "yes" ] && { 
     case $Xserver in
       --weston|--kwin) note "Sharing clipboard with $Xserver is not supported" ;;
@@ -1784,6 +1729,7 @@ Parsed options: $Parsedoptions"
     esac
   }
   
+  # --hostdisplay with SSH
   [ "$Xserver" = "--hostdisplay" ] && [ "$Ssh" = "yes" ] && {
     [ "$Sharehostipc" = "no" ] || [ "$Trusted" = "no" ] || [ "$Sharehostnet" = "no" ]  && {
       warning "For SSH connection with option --hostdisplay
@@ -1796,29 +1742,7 @@ Parsed options: $Parsedoptions"
     }
   }
   
-  [ "$Xserver" = "--hostdisplay" ] && {
-    [ "$Trusted" = "no" ] && {
-      warning "Option --hostdisplay provides only low container isolation!
-  It is recommended to use another X server option like --xpra or --nxagent.
-  
-  To improve security with --hostdisplay x11docker uses untrusted cookies.
-  This can lead to strange behaviour of some applications.
-  
-  If you encounter issues, enable option --clipboard that disables security
-  settings for --hostdisplay by the way."
-    } || {
-      warning "Option --hostdisplay with trusted cookies provides 
-      QUITE BAD CONTAINER ISOLATION !
-  Keylogging and controlling host applications is possible!"
-      [ "$Sharehostipc" = "no" ] && warning "Using --hostdisplay with --trusted but without 
-  insecure option --hostipc can lead to graphical issues and RAM access errors."
-    }
-    [ "$Desktopmode" = "yes" ] && note "Can not avoid to use host window manager
-  along with option --hostdisplay. 
-  You may get strange interferences with your host desktop.
-  Can be interesting though, having two overlapping desktops."
-  }
-
+  # --hostnet --no-internet
   [ "$Sharehostnet" = "yes" ] && [ "$Internetaccess" = "no" ] && {
     note "You have chosen --hostnet and --no-internet. That does not work.
   You can not share host network stack (--hostnet) and forbid internet access
@@ -1827,24 +1751,12 @@ Parsed options: $Parsedoptions"
     Sharehostnet="no"
   }
   
-  [ "$Sharehostipc" = "yes" ] && warning "Security risk:
-  Option --hostipc causes severe reduction of container isolation!
-  Drawback: IPC namespace remapping is disabled.
-  Advantage: X extension MIT-SHM is possible."
-  [ "$Sharehostnet" = "yes" ] && warning "Security risk: 
-  Option --hostnet causes severe reduction of container isolation!
-  Network namespacing is disabled.
-  Drawback: Container shares host network stack.
-  Advantage: dbus communication between host and container is possible."
-  
-  [ "$Fullscreen" = "yes" ] && {
-    case $Xserver in
-      --xephyr|--weston|--weston-xwayland|--nxagent|--xpra|--xpra-xwayland) ;;
-      --xdummy|--xdummy-xwayland|--xvfb|--xorg) ;;
-      *) note "$Xserver does not support option --fullscreen" ;;
-    esac
-  }
-  
+  # check xpra version
+  case $Xserver in
+    --xpra|--xpra-xwayland) Xpraversion="$(xpra --version)" ;;
+  esac
+
+  # --scale
   [ "$Scaling" != "0" ] && {
     case $Xserver in
       --weston|--weston-xwayland)
@@ -1871,7 +1783,7 @@ Parsed options: $Parsedoptions"
     case $Xserver in
       --xpra|--xpra-xwayland)
         verlt "$Xpraversion" "xpra v0.16" && {
-          note "Your xpra version is too old and does not support --scale.
+          note "Your xpra version is quite old and does not support --scale.
   You need at least xpra version 0.16
   Fallback: disabling option --scale"
           Scaling="0"
@@ -1904,6 +1816,7 @@ Parsed options: $Parsedoptions"
     esac
   }
   
+  # --rotate
   [ -n "$Rotation" ] && {
     case $Xserver in
       --weston|--weston-xwayland|--xorg)
@@ -1923,27 +1836,23 @@ Parsed options: $Parsedoptions"
   }
   [ "$Rotation" = "0" ] && Rotation="normal"
   
+  # xrandr: --scale --size --rotate
   command -v xrandr >/dev/null || case $Xserver in
     --xorg) { [ "$Scaling" != "0" ] || [ -n "$Rotation" ] || [ -n "$Screensize" ] ; } && note "Option --xorg needs 'xrandr' to support
   options --size, --scale and --rotate.
   Please install 'xrandr'."
     ;;
   esac
-    
-  case $Xserver in
-    --weston|--kwin|--hostwayland)
-     note "You are running a pure Wayland environment.
-  X applications without Wayland support will fail."
-    [ "$Xserver" = "--kwin" ] && note "kwin_wayland (option --kwin) does not support the xdg_shell
-  interface in all versions. Some GTK3 Wayland applications depend on it.
-  If application startup fails, try --weston instead."
+  
+  # --dpi
+  [ -n "$Dpi" ] && case $Xserver in
+    --weston|--kwin|--hostwayland|--hostdisplay) 
+      note "Option --dpi has no effect with option $Xserver" 
+      Dpi=
     ;;
   esac
-
-  [ -n "$Dpi" ] && case $Xserver in
-    --weston|--kwin|--hostwayland|--hostdisplay) note "Option --dpi has no effect with option $Xserver" ;;
-  esac
   
+  # --output-count
   [ "$Outputcount" != "1" ] && {
     case $Xserver in
       --xephyr|--weston|--kwin|--weston-xwayland|--kwin-xwayland) 
@@ -1964,17 +1873,9 @@ Parsed options: $Parsedoptions"
         Outputcount="1"
       ;;
     esac
-    case $Xserver in
-      --weston-xwayland) note "Xwayland sometimes does not position itself well
-  at origin 0+0 of first virtual screen, and some screens appear to be unused. 
-  You may need to move Xwayland manually with [META]+[LeftMouseButton].
-  (Bug report at https://bugzilla.redhat.com/show_bug.cgi?id=1498665 )" ;;
-      --xephyr) note "Xinerama support would be best for multiple outputs,
-  but is disabled in Xephyr because Xephyr does not handle it well.
-  Different window managers handle this different. Just try out." ;;
-    esac
   }
   
+  # --xfishtank: fish tank
   [ "$Xfishtank" = "yes" ] && {
     command -v xfishtank >/dev/null || {
       note "xfishtank not found. Can not show a fish tank.
@@ -1990,13 +1891,152 @@ Parsed options: $Parsedoptions"
       ;;
     esac
   }
+}
+
+{ #### part: some messages depending on options, but not changing settings
+
+  # X server specific messages
+  case $Xserver in
+    --hostdisplay)
+      [ "$Autochooseserver" = "yes" ] && note "To allow protection against X security leaks,
+  please install one or more of:
+    xpra, nxagent, Xephyr, weston+Xwayland, kwin_wayland+Xwayland or Xnest.
+  or run a second Xorg server with option --xorg."
+      [ "$Trusted" = "no" ] && {
+        warning "Option --hostdisplay provides only low container isolation!
+  It is recommended to use another X server option like --xpra or --nxagent.
   
+  To improve security with --hostdisplay x11docker uses untrusted cookies.
+  This can lead to strange behaviour of some applications.
+  
+  If you encounter issues, enable option --clipboard that disables security
+  settings for --hostdisplay by the way."
+      } || {
+        warning "Option --hostdisplay with trusted cookies provides 
+      QUITE BAD CONTAINER ISOLATION !
+  Keylogging and controlling host applications is possible!"
+        [ "$Sharehostipc" = "no" ] && warning "Using --hostdisplay with --trusted but without 
+  insecure option --hostipc can lead to graphical issues and RAM access errors."
+      }
+      [ "$Desktopmode" = "yes" ] && note "Can not avoid to use host window manager
+  along with option --hostdisplay. 
+  You may get strange interferences with your host desktop.
+  Can be interesting though, having two overlapping desktops."
+    ;;
+    
+    --xorg)
+      [ "$Hostsystem" = "opensuse" ] && [ "$Tty" = "no" ] && warning "openSUSE does not support starting a second Xorg server
+  from within X. Possible solutions: install nested X server 'Xephyr',
+  or for --gpu support: install 'Weston' and 'Xwayland'.
+  Or switch to console tty1...tty6 with <CTRL><ALT><F1>...<F6>
+  and start x11docker there."
+      [ "$Autochooseserver" = "yes" ] && [ -n "$Hostdisplay" ] && note "Could not find Xephyr, Xnest, xpra,
+  nxagent, weston+Xwayland or kwin_wayland+Xwayland to run a nested X server.
+  Consider to install one of them."
+      note "You can switch between X servers and console terminals
+  with [CTRL][ALT][F1]...[F12]."
+      warning "On debian 9, switching often between multiple X servers can 
+  cause a crash of one X server. This bug may be debian specific and is 
+  probably some sort of race condition. If you know more about this or it 
+  occurs on other systems, too, please report."
+    ;;
+    
+    --xpra|--xpra-xwayland)
+      verlt "$Xpraversion" "xpra v1.0" && {
+        note "Your xpra version '$Xpraversion' is out of date. It is
+  recommended to install latest stable from www.xpra.org, or at least v1.0."
+        [ "$Desktopmode" = "yes" ] && {
+          note "Your xpra version does not support desktop mode.
+  Please use another X server option like --nxagent or --xephyr."
+        } ||:
+      } || {
+        Xpraoptions="$Xpraoptions --webcam=no"
+      }
+      [ "$Desktopmode" = "yes" ] && verlt "$Xpraversion" "xpra v2.2-r17117" && note "Xpra desktop mode works best since xpra v2.2-r17117.
+  You have installed lower version $Xpraversion.
+  It is recommended to use Xephyr (option --xephyr) instead.
+  Rendering issues can be reduced disabling OpenGL in Xpra tray icon. Screen
+  size issues can be avoided with non-integer scaling (f.e. --scale=1.01)."
+    ;;
+  
+    --nxagent)
+      [ "$Hostsystem" = "mageia" ] && {
+        [ "$Desktopmode" = "no" ] && [ "$Autochooseserver" = "yes" ] && Desktopmode="yes" && Windowmanager="auto"
+        [ "$Desktopmode" = "no" ] && warning "nxagent version 3.5.0 on Mageia 6 is known to crash
+  in seamless mode. (Detected version: '$(strings --bytes 20 /usr/libexec/nx/nxagent | grep "NXAGENT - Version")').
+  If you encounter issues, please try seamless --xpra (secure), 
+  --hostdisplay (insecure), or run --nxagent in desktop mode with a
+  host window manager (--wm=WINDOWMANAGER or --wm=auto or short -wm)."
+      }
+    ;;
+    
+    --weston|--kwin|--hostwayland)
+      note "You are running a pure Wayland environment.
+  X applications without Wayland support will fail."
+      [ "$Xserver" = "--kwin" ] && note "kwin_wayland (option --kwin) does not support the xdg_shell
+  interface in all versions. Some GTK3 Wayland applications depend on it.
+  If application startup fails, try --weston instead."
+    ;;
+  esac
+  
+  # --fullscreen
+  [ "$Fullscreen" = "yes" ] && {
+    case $Xserver in
+      --xephyr|--weston|--weston-xwayland|--nxagent|--xpra|--xpra-xwayland) ;;
+      --xdummy|--xdummy-xwayland|--xvfb|--xorg) ;;
+      *) note "$Xserver does not support option --fullscreen" ;;
+    esac
+  }
+  
+  # --hostipc
+  [ "$Sharehostipc" = "yes" ] && warning "Security risk:
+  Option --hostipc causes severe reduction of container isolation!
+  Drawback: IPC namespace remapping is disabled.
+  Advantage: X extension MIT-SHM is possible."
+  
+  # --hostnet
+  [ "$Sharehostnet" = "yes" ] && warning "Security risk: 
+  Option --hostnet causes severe reduction of container isolation!
+  Network namespacing is disabled.
+  Drawback: Container shares host network stack.
+  Advantage: dbus communication between host and container is possible."
+  
+  # --keymap: XKB keyboard layount
   [ -n "$Xkblayout" ] && case $Xserver in
     --kwin|--kwin-xwayland)
       [ "$Tty" = "yes" ] && note "Option --keymap does not work with option $Xserver
   if running from console."
     ;;
-  esac
+  esac  
+  
+  # --output-count
+  [ "$Outputcount" != "1" ] && {
+    case $Xserver in
+      --weston-xwayland) note "Xwayland sometimes does not position itself well
+  at origin 0+0 of first virtual screen, and some screens appear to be unused. 
+  You may need to move Xwayland manually with [META]+[LeftMouseButton].
+  (Bug report at https://bugzilla.redhat.com/show_bug.cgi?id=1498665 )" ;;
+      --xephyr) note "Xinerama support would be best for multiple outputs,
+  but is disabled in Xephyr because Xephyr does not handle it well.
+  Different window managers handle this different. Just try out." ;;
+    esac
+  }
+  
+  # --cap-default
+  [ "$Capdropall" = "no" ] && warning "Option --cap-default disables security hardening
+  for containers. Granting docker's default capabilities is considered insecure."
+  
+  # --sys-admin
+  [ "$Capsysadmin" = "yes" ] && warning "Option --sys-admin may be dangerous.
+  It adds insecure capability SYS_ADMIN to container.
+  It is needed to run debian 9 images with option --systemd.
+  Debian 10 images run well without --sys-admin."
+  
+  # --sudouser
+  [ "$Sudouser" = "yes" ] && warning "Option --sudouser severly reduces container security.
+  Container gains additional capabilities to allow sudo and su.
+  If an application breaks out of container, it can harm your system
+  in every way without you noticing. Password: x11docker"
 }
 
 { #### part: check free display, create temporary cache subfolder and cache files
@@ -2018,8 +2058,9 @@ Parsed options: $Parsedoptions"
       --kwin-xwayland)                   Newdisplaynumber="750" ;;
       --nothing)                         Newdisplaynumber="900" ;; # dummy number to look for free cache folder
     esac
-    # search free X socket number, passing already used cache folders
-    while [ -n "$(find /tmp/.X11-unix/X$Newdisplaynumber /tmp/.X$Newdisplaynumber-lock /tmp/.X11-unix/X$Newdisplaynumber $XDG_RUNTIME_DIR/wayland-$Newdisplaynumber $Cacherootfolder/X$Newdisplaynumber-* 2>/dev/null)" ] ; do
+    
+    # search free X socket number and free Wayland socket number, passing already used cache folders
+    while [ -n "$(find /tmp/.X11-unix/X$Newdisplaynumber /tmp/.X$Newdisplaynumber-lock /tmp/.X11-unix/X$Newdisplaynumber $XDG_RUNTIME_DIR/wayland-$Newdisplaynumber $Cachebasefolder/X$Newdisplaynumber-* 2>/dev/null)" ] ; do
       Newdisplaynumber=$(($Newdisplaynumber + 1))
     done
   }
@@ -2030,7 +2071,10 @@ Parsed options: $Parsedoptions"
   [ -z "$Newxvt" ] && Newxvt="vt$Newdisplaynumber"     # FIXME: assuming instead of knowing whether VT is free
   [ "$Xserver" != "--hostdisplay" ] && [ -n "$(find $Newxsocket $Newxlock 2>/dev/null)" ] && error "Display $Newdisplay is already in use."
   
-  Cachefolder="$Cacherootfolder/X$Newdisplaynumber-$(echo $Imagename | tr / - | cut -d: -f1)"
+  Imagenametr=$(echo $Imagename | tr / - | cut -d: -f1)
+  [ "$Imagenametr" ] || Imagenametr=${Xserver#--}
+  
+  Cachefolder="$Cachebasefolder/X$Newdisplaynumber-$Imagenametr"
   [ -d "$Cachefolder" ] && error "Cache folder already exists:
   $Cachefolder"
   
@@ -2072,7 +2116,7 @@ Parsed options: $Parsedoptions"
   Xpraserverlogfile="$Cachefolder/$Xpraserverlogfile"       && mkfile $Xpraserverlogfile
   Xpraclientlogfile="$Cachefolder/$Xpraclientlogfile"       && mkfile $Xpraclientlogfile
   Compositorlogfile="$Cachefolder/$Compositorlogfile"       && mkfile $Compositorlogfile
-  Compositorpidfile="$Cachefolder/$Compositorpidfile"
+  Compositorpidfile="$Cachefolder/$Compositorpidfile"       && mkfile $Compositorpidfile
   Pulseaudioconf="$Cachefolder/$Pulseaudioconf"             && mkfile $Pulseaudioconf
   Bgpidfile="$Cachefolder/$Bgpidfile"                       && mkfile $Bgpidfile
   Imagecommandscript="$Sharefolder/$Imagecommandscript"     && mkfile $Imagecommandscript
@@ -2095,6 +2139,7 @@ Parsed options: $Parsedoptions"
 }
 
 { #### part: create $Hostxenv: Environment variables for host X display
+  # get cookie from host display
   [ -n "$Hostdisplay" ] && {
     xauth nlist $Hostdisplay 2>/dev/null | $Mksu "xauth -f $Hostxauthority nmerge - 2>/dev/null"
     chown $Hostuser $Hostxauthority
@@ -2104,6 +2149,7 @@ Parsed options: $Parsedoptions"
     Hostxauthority=""
     Hostxsocket=""
   }
+  
   Hostxenv="DISPLAY=$Hostdisplay"  
   [ -s "$Hostxauthority" ] && {
     Hostxenv="$Hostxenv XAUTHORITY=$Hostxauthority"  
@@ -2112,10 +2158,11 @@ Parsed options: $Parsedoptions"
     Hostxauthority=
     unset XAUTHORITY
   }
+  
   [ -n "$Hostxsocket" ] && Hostxenv="$Hostxenv XSOCKET=$Hostxsocket"  
-  [ -n "$Hostwayland" ] && Hostxenv="$Hostxenv WAYLAND_DISPLAY=$Hostwayland"
+  [ -n "$Hostwaylandsocket" ] && Hostxenv="$Hostxenv WAYLAND_DISPLAY=$Hostwaylandsocket"
   Hostxenv="$Hostxenv XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
-  [ -n "$Hostdisplay" ] && [ -z "$Hostxauthority" ] && warning "Your host X server seems to run without any cookies."
+  [ -n "$Hostdisplay" ] && [ -z "$Hostxauthority" ] && warning "Your host X server seems to run without cookie authorisation."
 }
 
 { #### part: check physical and virtual screen size
@@ -2340,12 +2387,15 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
 ' >> "$Hostuserhome/.config/compiz-1/compizconfig/Default.ini"
           }  ;;
         enlightenment|e17|e16|e19|e20|e) Windowmanager="enlightenment_start" ;;
-        gnome|gnome-shell|gnome-session) # crashes without option '--sm-disable', crashes host X, too!
-          Windowmanager="gnome-shell --sm-disable" ;;
         matchbox) Windowmanager="matchbox-window-manager"  ;;
         mate|mate-session) Windowmanager="mate-session -f" ;;
         mate-wm) Windowmanager="marco --sm-disable"  ;;
         openbox) Windowmanager="openbox --sm-disable" ;;
+        gnome-shell|gnome-session) warning "$Windowmanager is known to cause segfaults.
+  Please choose another one."
+        Windowmanager="gnome-shell --sm-disable" ;;
+        budgie-wm|mutter) warning "$Windowmanager is known to cause segfaults.
+  Please choose another one." ;;
       esac
         
       [ -n "$Windowmanager" ] && case $(basename $Windowmanager | awk '{print $1}') in
@@ -2367,6 +2417,7 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
 }
 
 { #### part: check sound (options --pulseaudio and --alsa)
+
   # option '--pulseaudio'
   [ "$Pulseaudio" = "yes" ] && {
     warning "Option --pulseaudio allows container applications
@@ -2578,6 +2629,7 @@ fi
   +extension Composite"
     ;;
     *)
+      # general X server options
       Xserveroptions="$Xserveroptions -retro"
       Xserveroptions="$Xserveroptions \\
   +extension Composite +extension RANDR +extension RENDER +extension GLX\\
@@ -2586,7 +2638,7 @@ fi
   -extension X-Resource +extension SECURITY +extension DAMAGE"
       Xserveroptions="$Xserveroptions \\
   -extension XINERAMA -xinerama"
-      { [ "$Sharehostipc" = "yes" ] || [ "$X11dockermode" = "exe" ] ; } && {
+      { [ "$Sharehostipc" = "yes" ] || [ "$X11dockermode" = "exe" ] ; } && { # --hostipc needed for shared memory.
         Xserveroptions="$Xserveroptions +extension MIT-SHM"
       } || { 
         Xserveroptions="$Xserveroptions -extension MIT-SHM"
@@ -2594,6 +2646,8 @@ fi
       }
     ;;
   esac
+  
+  # cookie authentication
   [ "$Xauthentication" = "yes" ] && Xserveroptions="$Xserveroptions \\
   -auth $Xservercookie"
   
@@ -2624,7 +2678,7 @@ fi
   -extension XTEST -tst"
       case $Xserver in
         --xpra|--xpra-xwayland) warning "You have disabled extension XTEST with --no-xtest.
-  Xpra will not be able to provide keyboard and mouse." ;;
+  Xpra will not be able to manage keyboard and mouse." ;;
       esac
     ;;
   esac
@@ -2664,6 +2718,7 @@ fi
     ;;
   esac
 
+  # xpra specials
   case $Xserver in
     --xpra|--xpra-xwayland)
       # disable --dpi for buggy versions
@@ -2684,13 +2739,12 @@ fi
     ;;
   esac
 
+  # --dpi
   [ -n "$Dpi" ] && { :
     Xserveroptions="$Xserveroptions -dpi $Dpi"
     Xpraoptions="$Xpraoptions --dpi $Dpi"
   }
   
-  Waitforgoodbye="mywatch 'ls $Timetosaygoodbye 2>/dev/null'" 
-
   # Prepare weston.ini: config file for Weston
   case $Xserver in
     --weston|--weston-xwayland|--xpra-xwayland|--xdummy-xwayland)
@@ -2709,12 +2763,13 @@ startup-animation=fade
 " >> "$Westonini"
       [ -n "$Xkblayout" ] && echo "keymap_layout=$Xkblayout" >> "$Westonini"
       [ -z "$Xkblayout" ] && [ "$Tty" = "yes" ] && echo "$(echo -n "keymap_layout=" && cat /etc/default/keyboard | grep XKBLAYOUT | cut -d= -f2 | cut -d'"' -f2)" >> "$Westonini"
-      [ -n "$Hostwayland" ] && [ "$Xserver" != "--xpra-xwayland" ] && [ "$Hostsystem" != "ubuntu" ] && [ "$Fullscreen" = "no" ] && {
+      [ -n "$Hostwaylandsocket" ] && [ "$Xserver" != "--xpra-xwayland" ] && [ "$Hostsystem" != "ubuntu" ] && [ "$Fullscreen" = "no" ] && {
         Westonoutput="WL"
       } || {
         [ -n "$Hostdisplay" ] && Westonoutput="X"
       }
-      [ -z "$Westonoutput" ] && [ -n "$Hostwayland" ] && Westonoutput="WL"
+      [ -z "$Westonoutput" ] && [ -n "$Hostwaylandsocket" ] && Westonoutput="WL"
+      
       [ "$Tty" = "yes" ] && { 
         [ -n "$Screensize" ] || [ "$Scaling" != "0" ] || [ -n "$Rotation" ] && {
           # short start&stop of Weston to grep name of monitor
@@ -2732,6 +2787,7 @@ $(tail "$Compositorlogfile")"
     ;;
   esac
 
+  # create command to run X server
   case $Xserver in
     --xorg)
       Xserveroptions="$Xserveroptions \\
@@ -2795,15 +2851,15 @@ $(tail "$Compositorlogfile")"
     --xwayland) 
       Xcommand="$(command -v Xwayland) $Newdisplay \\
   $Xserveroptions"
-      Waylandsocket="$Hostwayland"
+      Newwaylandsocket="$Hostwaylandsocket"
     ;;
     
     --xpra-xwayland|--xdummy-xwayland)
       Xcommand="$(command -v Xwayland) $Newdisplay \\
   $Xserveroptions"
-      [ -z "$Hostwayland" ] && Waylandsocket="wayland-$Newdisplaynumber" || {
-        Waylandsocket="$Hostwayland"
-        [ "$Scaling" != "0" ] && [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] && Waylandsocket="wayland-$Newdisplaynumber"
+      [ -z "$Hostwaylandsocket" ] && Newwaylandsocket="wayland-$Newdisplaynumber" || {
+        Newwaylandsocket="$Hostwaylandsocket"
+        [ "$Scaling" != "0" ] && [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] && Newwaylandsocket="wayland-$Newdisplaynumber"
       }
       echo "[output]" >> $Westonini
       case $Westonoutput in
@@ -2812,7 +2868,7 @@ $(tail "$Compositorlogfile")"
       esac
       echo "mode=$Screensize" >> $Westonini
       [ -n "$Customwestonini" ] && Westonini="$Customwestonini"
-      Compositorcommand="weston --config='$Westonini' --socket=$Waylandsocket"
+      Compositorcommand="weston --config='$Westonini' --socket=$Newwaylandsocket"
       case $Westonoutput in
         WL) Compositorcommand="$Compositorcommand --backend=wayland-backend.so" ;;
         X)  Compositorcommand="$Compositorcommand --backend=x11-backend.so" ;;
@@ -2829,7 +2885,7 @@ $(tail "$Compositorlogfile")"
       [ "$Xserver" = "--weston-xwayland" ] && Xcommand="$(command -v Xwayland) $Newdisplay \\
   $Xserveroptions"
       [ "$Xserver" = "--weston" ]          && Sharewayland="yes"
-      Waylandsocket="wayland-$Newdisplaynumber"
+      Newwaylandsocket="wayland-$Newdisplaynumber"
       [ -n "$Westonoutput" ] && for ((Count=1 ; Count<=$Outputcount ; Count++)) ; do
         [ "$Westonoutput" = "WL" ] || [ "$Westonoutput" = "X" ] || { 
           Count=""
@@ -2843,7 +2899,7 @@ mode=$Screensize
         [ -n "$Rotation" ]    && echo "transform=$Rotation" >> $Westonini
       done
       [ -n "$Customwestonini" ] && Westonini="$Customwestonini"
-      Compositorcommand="weston --socket=$Waylandsocket --config='$Westonini'"
+      Compositorcommand="weston --socket=$Newwaylandsocket --config='$Westonini'"
       [ "$Fullscreen" = "yes" ] && Compositorcommand="$Compositorcommand --fullscreen"
       [ "$Outputcount" = "1" ]  || Compositorcommand="$Compositorcommand --output-count=$Outputcount"
       case $Westonoutput in
@@ -2861,8 +2917,8 @@ mode=$Screensize
     --kwin-xwayland)
       Xcommand="$(command -v Xwayland) $Newdisplay \\
   $Xserveroptions"
-      Waylandsocket="wayland-$Newdisplaynumber"
-      Compositorcommand="kwin_wayland --xwayland --socket=$Waylandsocket --width=$Xaxis --height=$Yaxis --output-count=$Outputcount" 
+      Newwaylandsocket="wayland-$Newdisplaynumber"
+      Compositorcommand="kwin_wayland --xwayland --socket=$Newwaylandsocket --width=$Xaxis --height=$Yaxis --output-count=$Outputcount" 
       [ "$Xkblayout" ] && Compositorcommand="KWIN_XKB_DEFAULT_KEYMAP=$Xkblayout $Compositorcommand" 
       Compositorcommand="env QT_XKB_CONFIG_ROOT=/usr/share/X11/xkb $Compositorcommand" 
       case $Tty in
@@ -2872,9 +2928,9 @@ mode=$Screensize
     ;;
     
     --kwin)
-      Waylandsocket="wayland-$Newdisplaynumber"
+      Newwaylandsocket="wayland-$Newdisplaynumber"
       Sharewayland="yes"
-      Compositorcommand="kwin_wayland --xwayland --socket=$Waylandsocket --width=$Xaxis --height=$Yaxis --output-count='$Outputcount'" 
+      Compositorcommand="kwin_wayland --xwayland --socket=$Newwaylandsocket --width=$Xaxis --height=$Yaxis --output-count='$Outputcount'" 
       #[ "$Xkblayout" ] && Compositorcommand="KWIN_XKB_DEFAULT_KEYMAP=$Xkblayout $Compositorcommand" 
       Compositorcommand="env QT_XKB_CONFIG_ROOT=/usr/share/X11/xkb $Compositorcommand"
       case $Tty in
@@ -2953,11 +3009,11 @@ esac
 </keystrokes>' >> "$NXAGENT_KEYSTROKEFILE"
     ;;
     
-    --hostwayland) Waylandsocket="$Hostwayland" ;;
+    --hostwayland) Newwaylandsocket="$Hostwaylandsocket" ;;
     --hostdisplay|--nothing) ;;
   esac
   
-  [ "$Sharewayland" = "yes" ] && [ -z "$Waylandsocket" ] && Sharewayland="no" && note "No wayland socket to share"
+  [ "$Sharewayland" = "yes" ] && [ -z "$Newwaylandsocket" ] && note "No wayland socket to share" && Sharewayland="no" 
 }
 
 { #### part: create $Newxenv: Environment variables
@@ -2977,9 +3033,9 @@ esac
     ;;
   esac
   [ "$Sharewayland" = "yes" ] && {
-    [ -n "$Waylandsocket" ]                              &&  Newxenv="$Newxenv WAYLAND_DISPLAY=$Waylandsocket"
-    [ -z "$Waylandsocket" ] && [ -n "$Hostwayland" ]     &&  Newxenv="$Newxenv WAYLAND_DISPLAY=$Hostwayland"
-    [ -z "$Waylandsocket" ] && [ -z "$Hostwayland" ]     &&  { note "No wayland environment to share,
+    [ -n "$Newwaylandsocket" ]                              &&  Newxenv="$Newxenv WAYLAND_DISPLAY=$Newwaylandsocket"
+    [ -z "$Newwaylandsocket" ] && [ -n "$Hostwaylandsocket" ]     &&  Newxenv="$Newxenv WAYLAND_DISPLAY=$Hostwaylandsocket"
+    [ -z "$Newwaylandsocket" ] && [ -z "$Hostwaylandsocket" ]     &&  { note "No wayland environment to share,
   neither from host nor from $Xserver (--sharewayland)"
       Sharewayland="no" 
     }  ||  Newxenv="$Newxenv XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
@@ -3086,48 +3142,48 @@ done
 
 { #### part: check password prompt frontend (pkexec, su, sudo, ...)
   # check if x11docker can run docker without prompting for password
-  [ "$Passwordprompt" = "none" ] && Needpassword="no"
-  [ -z "$Passwordprompt" ] && sudo -n env >/dev/null 2>&1 && Passwordprompt="sudo" && Needpassword="no"
-  [ -z "$Passwordprompt" ] && docker info >/dev/null 2>&1 && Passwordprompt="none" && Needpassword="no"
+  [ "$Passwordfrontend" = "none" ] && Passwordneeded="no"
+  [ -z "$Passwordfrontend" ] && sudo -n env >/dev/null 2>&1 && Passwordfrontend="sudo" && Passwordneeded="no"
+  [ -z "$Passwordfrontend" ] && docker info >/dev/null 2>&1 && Passwordfrontend="none" && Passwordneeded="no"
 
   # check sudo. Check is not reliable, compare https://unix.stackexchange.com/questions/383918/su-or-sudo-how-to-know-which-one-will-work
   ### FIXME: just guessing that members of group sudo or wheel are allowed to run commands docker and env as root
-  [ -z "$Passwordprompt" ] && { sudo -ln docker >/dev/null 2>&1  ||  id | grep -q '(sudo)'  ||  id | grep -q '(wheel)' ; } && command -v sudo >/dev/null && {
-    [ -z "$Hostdisplay$Newdisplay" ] && Passwordprompt="sudo"
+  [ -z "$Passwordfrontend" ] && { sudo -ln docker >/dev/null 2>&1  ||  id | grep -q '(sudo)'  ||  id | grep -q '(wheel)' ; } && command -v sudo >/dev/null && {
+    [ -z "$Hostdisplay$Newdisplay" ] && Passwordfrontend="sudo"
     sudo -ln env >/dev/null 2>&1  ||  id | grep -q '(sudo)'  ||  id | grep -q '(wheel)'  && {
-      [ -z "$Passwordprompt" ] && command -v gksudo  >/dev/null && Passwordprompt="gksudo" 
-      [ -z "$Passwordprompt" ] && command -v lxsudo  >/dev/null && Passwordprompt="lxsudo"
-      [ -z "$Passwordprompt" ] && command -v kdesudo >/dev/null && Passwordprompt="kdesudo"
+      [ -z "$Passwordfrontend" ] && command -v gksudo  >/dev/null && Passwordfrontend="gksudo" 
+      [ -z "$Passwordfrontend" ] && command -v lxsudo  >/dev/null && Passwordfrontend="lxsudo"
+      [ -z "$Passwordfrontend" ] && command -v kdesudo >/dev/null && Passwordfrontend="kdesudo"
     }
-    [ -z "$Passwordprompt" ] && Passwordprompt="sudo"
+    [ -z "$Passwordfrontend" ] && Passwordfrontend="sudo"
   }
   
   # check su
   [ -n "$Hostdisplay$Newdisplay" ] && {
-    [ -z "$Passwordprompt" ] && command -v gksu  >/dev/null && Passwordprompt="gksu"
-    [ -z "$Passwordprompt" ] && command -v lxsu  >/dev/null && Passwordprompt="lxsu"
-    [ -z "$Passwordprompt" ] && command -v kdesu >/dev/null && Passwordprompt="kdesu"
-    [ -z "$Passwordprompt" ] && command -v beesu >/dev/null && Passwordprompt="beesu"
+    [ -z "$Passwordfrontend" ] && command -v gksu  >/dev/null && Passwordfrontend="gksu"
+    [ -z "$Passwordfrontend" ] && command -v lxsu  >/dev/null && Passwordfrontend="lxsu"
+    [ -z "$Passwordfrontend" ] && command -v kdesu >/dev/null && Passwordfrontend="kdesu"
+    [ -z "$Passwordfrontend" ] && command -v beesu >/dev/null && Passwordfrontend="beesu"
   }
-  [ -z "$Passwordprompt" ] && Passwordprompt="su" # default if everything else fails
+  [ -z "$Passwordfrontend" ] && Passwordfrontend="su" # default if everything else fails
 
-  # Getroot: prefix to start dockerrc. Sudo: prefix to start docker in dockerrc
-  case $Passwordprompt in
-    pkexec|"") Getroot="bash -c"                                                ; Passwordterminal="bash -c" ;;
-    su)        Getroot="su -c"                                                  ;;
-    sudo)      Getroot="bash -c"                                                ; Sudo="sudo -E " ;;
-    gksu)      Getroot="gksu    --message 'x11docker $Imagename'"               ; Passwordterminal="bash -c" ;;
-    gksudo)    Getroot="gksudo  --message 'x11docker $Imagename'"               ; Passwordterminal="bash -c" ;;
-    lxsu)      Getroot="lxsu"                                                   ; Passwordterminal="bash -c" ;;
-    lxsudo)    Getroot="lxsudo"                                                 ; Passwordterminal="bash -c" ;;
-    kdesu)     Getroot="kdesu -c"                                               ; Passwordterminal="bash -c" ;;
-    kdesudo)   Getroot="kdesudo --comment 'x11docker $Imagename'"               ; Passwordterminal="bash -c" ;;
-    beesu)     Getroot="beesu -c"                                               ; Passwordterminal="bash -c" ;;
-    none)      Getroot="bash -c"                                                ; Passwordterminal="bash -c" ;;
-    *) error "Unknown password prompt '$Passwordprompt' (option --pw).
+  # Passwordcommand: prefix to start dockerrc. Sudo: prefix to start docker in dockerrc
+  case $Passwordfrontend in
+    pkexec|"") Passwordcommand="bash -c"                                                ; Passwordterminal="bash -c" ;;
+    su)        Passwordcommand="su -c"                                                  ;;
+    sudo)      Passwordcommand="bash -c"                                                ; Sudo="sudo -E " ;;
+    gksu)      Passwordcommand="gksu    --message 'x11docker $Imagename'"               ; Passwordterminal="bash -c" ;;
+    gksudo)    Passwordcommand="gksudo  --message 'x11docker $Imagename'"               ; Passwordterminal="bash -c" ;;
+    lxsu)      Passwordcommand="lxsu"                                                   ; Passwordterminal="bash -c" ;;
+    lxsudo)    Passwordcommand="lxsudo"                                                 ; Passwordterminal="bash -c" ;;
+    kdesu)     Passwordcommand="kdesu -c"                                               ; Passwordterminal="bash -c" ;;
+    kdesudo)   Passwordcommand="kdesudo --comment 'x11docker $Imagename'"               ; Passwordterminal="bash -c" ;;
+    beesu)     Passwordcommand="beesu -c"                                               ; Passwordterminal="bash -c" ;;
+    none)      Passwordcommand="bash -c"                                                ; Passwordterminal="bash -c" ;;
+    *) error "Unknown password prompt '$Passwordfrontend' (option --pw).
   Possible: su sudo gksu gksudo lxsu lxsudo kdesu kdesudo beesu pkexec none" ;;
   esac
-  command -v $(echo $Getroot|cut -d' ' -f1) >/dev/null || error "Password prompt frontend $(echo $Getroot|cut -d' ' -f1) not found"
+  command -v $(echo $Passwordcommand|cut -d' ' -f1) >/dev/null || error "Password prompt frontend $(echo $Passwordcommand|cut -d' ' -f1) not found"
 }
 
 { #### part: check terminal for password prompt of su or sudo and for 'docker pull'
@@ -3153,7 +3209,7 @@ done
   Please install one of:
   ${Terminallist%"NOLUCK"}"
   
-  [ -z "$Hostdisplay" ] && [ -n "$Waylandsocket" ] && {
+  [ -z "$Hostdisplay" ] && [ -n "$Newwaylandsocket" ] && {
     case $Pullterminal in 
       qterminal) Pullterminal="env QT_QPA_PLATFORM=wayland $Pullterminal" ;;
       konsole) Pullterminal="env QT_QPA_PLATFORM=wayland dbus-launch $Pullterminal --nofork" ;;
@@ -3219,7 +3275,7 @@ done
   case $Benutzerhosthome in
     yes)
       # if no home folder on host is specified (--homedir), create a standard one in ~/.local/share/x11docker
-      [ -z "$Benutzerhosthomefolder" ] && Benutzerhosthomefolder="$Benutzerhome/.local/share/x11docker/$(echo $Imagename | tr / - | tr : - )$Hostexebasename"
+      [ -z "$Benutzerhosthomefolder" ] && Benutzerhosthomefolder="$Benutzerhome/.local/share/x11docker/$Imagenametr$Hostexebasename"
       [ -d "$Benutzerhosthomefolder" ] || {
         [ "$Startuser" = "root" ] && su $Benutzer -c "mkdir -p '$Benutzerhosthomefolder'"
         [ "$Benutzer" = "$Hostuser" ] && $Mksu "mkdir -p '$Benutzerhosthomefolder'" && {
@@ -3379,7 +3435,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     run) Dockercommand="docker run -d --tty"
       [ "$Preservecachefiles" = "no" ] && Dockercommand="$Dockercommand --rm"
       
-      Containername="x11docker_X${Newdisplaynumber}_${Mycookie}_$(echo $Imagename | tr / _ | tr : _ )"
+      Containername="x11docker_X${Newdisplaynumber}_${Mycookie}_$Imagenametr"
       Dockercommand="$Dockercommand --name=$Containername"
   
       [ "$Benutzeruid" = "0" ]     && Sudouser="yes"
@@ -3513,13 +3569,9 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
         done
       }
       
-      # especially needed for --systemd, but others, too
-      case $Initsystem in
-        systemd|sysvinit|openrc|runit)
-      [ "$Dbusdaemon" = "yes" ] && Dockercommand="$Dockercommand \\
-  --tmpfs /tmp --tmpfs /run --tmpfs /var/run --tmpfs /run/lock"
-        ;;
-      esac
+      # Needed especially for --systemd and --dbus-daemon
+      Dockercommand="$Dockercommand \\
+  --tmpfs /run --tmpfs /run/lock"
       
       # entrypoint is checked in dockerrc
       Dockercommand="$Dockercommand \\
@@ -3558,7 +3610,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       esac
       # Wayland socket will be softlinked to XDG_RUNTIME_DIR in x11docker.CMD.sh
       [ "$Sharewayland" = "yes" ] && Dockercommand="$Dockercommand \\
-  -v $XDG_RUNTIME_DIR/$Waylandsocket:/$Waylandsocket:rw"
+  -v $XDG_RUNTIME_DIR/$Newwaylandsocket:/$Newwaylandsocket:rw"
       
       ## option --gpu : share graphics adapter device files
       [ "$Gpu" = "yes" ] && {
@@ -3626,7 +3678,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   # run docker
   
   echo "#! /bin/bash"
-  declare -f waitforfilecreation verbose warning note notestdout escapestring
+  declare -f waitforfilecreation verbose warning note printstdout escapestring
   [ "$Debug" = "yes" ] && {
     echo "PS4='$DebugPS4'"
     echo "set -x"
@@ -3783,9 +3835,9 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   [ "$Sharewayland" = "yes" ] && {
     echo "  echo ''"
     echo "  echo '# Wayland environment'"
-    echo "  echo 'export WAYLAND_DISPLAY=$Waylandsocket'"
-    echo "  echo 'ln -s /$Waylandsocket \$XDG_RUNTIME_DIR/$Waylandsocket'"
-    echo "  echo 'ls -la \$XDG_RUNTIME_DIR/$Waylandsocket'"
+    echo "  echo 'export WAYLAND_DISPLAY=$Newwaylandsocket'"
+    echo "  echo 'ln -s /$Newwaylandsocket \$XDG_RUNTIME_DIR/$Newwaylandsocket'"
+    echo "  echo 'ls -la \$XDG_RUNTIME_DIR/$Newwaylandsocket'"
   }
   [ "$Setwaylandenv" = "yes" ] && {
     for Line in $Waylandtoolkitenv ; do echo "  echo export $Line" ; done
@@ -3877,7 +3929,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "echo x11docker: container ID: \$Containerid"
   echo "[ -z \"\$Containerid\" ] && echo 'x11docker ERROR: Startup of docker failed. Did not receive a container ID.' >&2 && exit 1"
   echo "echo \$Containerid >> $Containeridfile"
-  [ "$Showcontainerid" = "yes" ] && echo "notestdout \"\$(cat $Containeridfile)\""
+  [ "$Showcontainerid" = "yes" ] && echo "printstdout \"\$(cat $Containeridfile)\""
   echo "docker logs -f \$Containerid >> $Dockerlogfile 2>&1 &"
   echo ""
   echo "# wait for container to be ready"
@@ -4224,7 +4276,7 @@ start() {
   echo "}"
   echo "trap touchxtermready EXIT"
   echo "export TERM=xterm SHELL=/bin/bash"
-  [ "$Needpassword" = "yes" ] && case $Passwordprompt in
+  [ "$Passwordneeded" = "yes" ] && case $Passwordfrontend in
     su|sudo)
       echo "echo -e \"Created docker command for $Imagename $Imagecommand:"
       echo ""
@@ -4234,10 +4286,10 @@ start() {
       echo "echo -n 'Password: '"
     ;;
   esac
-  case $Passwordprompt in
-    gksudo|lxsudo)  echo "$Getroot bash $Dockerrc  >>$Dockerlogfile 2>&1" ;;
+  case $Passwordfrontend in
+    gksudo|lxsudo)  echo "$Passwordcommand bash $Dockerrc  >>$Dockerlogfile 2>&1" ;;
     pkexec)         echo "pkexec env DISPLAY=\$DISPLAY XAUTHORITY=\$XAUTHORITY bash $Dockerrc  >>$Dockerlogfile 2>&1" ;;
-    *)              echo "$Getroot \"${Sudo}bash $Dockerrc >>$Dockerlogfile 2>&1\"" ;;
+    *)              echo "$Passwordcommand \"${Sudo}bash $Dockerrc >>$Dockerlogfile 2>&1\"" ;;
   esac
   echo "exit"
 } >> $Xtermrc
@@ -4369,7 +4421,7 @@ start() {
   esac
 
   [ "$Setwaylandenv" = "yes" ] && for Line in $Waylandtoolkitenv ; do echo "export $Line" ;  done
-  [ "$Sharewayland"  = "yes" ] &&       [ -n "$Waylandsocket" ]    && echo "export WAYLAND_DISPLAY=$Waylandsocket"
+  [ "$Sharewayland"  = "yes" ] &&       [ -n "$Newwaylandsocket" ]    && echo "export WAYLAND_DISPLAY=$Newwaylandsocket"
   
   case $Xserver in
     --weston|--kwin|--hostwayland|--nothing) ;;
@@ -4495,30 +4547,30 @@ start() {
 } >> $Xinitrc
 
 { #### part: options --verbose, --stdout,--stderr and x11docker.log
-    verbose "x11docker version $Version"
-    Wisdom="$(fortudne -s 2>/dev/null || echo "Install fortunes to find wisdom.")"
-    verbose "Host system: $Hostsystem
-  $(cowsday "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
+    Wisdom="$(fortune -s 2>/dev/null || echo "Install fortunes to find wisdom.")"
+    verbose "
+$(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
     [ "$Xserver" != "--nothing" ] && {
       verbose "X or Wayland server option: $Xserver"
       verbose "Virtual screen size: $Screensize"
-      verbose "Real screen size: $(xrandr 2>/dev/null | grep Screen)"
+      verbose "Physical screen size: $(xrandr 2>/dev/null | grep Screen)"
       verbose "Environment variables: 
   $Newxenv"
     }
-    verbose "Docker version: $(docker --version)"
     verbose "Image name: $Imagename"
     verbose "Image command: $Imagecommand"
+    [ "$Hostexe" ] && verbose "Host command: $Hostexe"
     verbose "Users and terminal:
   x11docker was started by: $Startuser
   As host user serves (running X, storing cache): $Hostuser
   Container user will be:   $Benutzer
   Container user password:  x11docker
-  Getting permission to run docker with: $Getroot $Sudo
+  Getting permission to run docker with: $Passwordcommand $Sudo
   Running X and other user commands with: $Mksu
   Terminal for password frontend: $Passwordterminal
   Terminal to show docker pull progress: $Pullterminal
-  Running on console: $Tty"
+  Running on console: $Tty
+  Running over SSH: $Ssh"
     verbose "Current cache folder: $Cachefolder"
     [ -n "$Xcommand" ] && verbose "Created X server command:
   $Xcommand" 
@@ -4630,11 +4682,6 @@ Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' '
   Last lines of xinit logfile:
 $(tail $Xinitlogfile)"
   
-  [ -s "$Compositorpidfile" ] && {
-    Compositorpid=$(cat $Compositorpidfile)
-    ps -p $Compositorpid >/dev/null 2>&1 && storepid $Compositorpid compositor
-  }
-  
   # --xpra / --xpra-xwayland: start xpra server&client
   case $Xserver in      
     --xpra|--xpra-xwayland) 
@@ -4656,7 +4703,8 @@ $(tail $Xinitlogfile)"
         chmod 700 /run/user/$Hostuseruid
       }
       
-      while [ ! -e "$Timetosaygoodbye" ] && [ -e "$Cachefolder" ] ; do
+      # loop to check for crashing xpra server or client. restart them if needed.
+      while [ ! -e "$Timetosaygoodbye" ] && [ -p "$Logfifo" ] ; do
         ps -p $Xpraserverpid >/dev/null 2>&1 || {
           [ -n "$Xpraserverpid" ] && { 
             Xpracrashcount=$((Xpracrashcount + 1))
@@ -4709,10 +4757,11 @@ $(tail $Dockerlogfile)"
   # option '--showenv': show display infos on stdout (after X server is ready)
   [ "$Showdisplayenvironment" = "yes" ] && echo $Newxenv
   # create easy to find file with latest created X environment for custom access
-  mkfile "$Cacherootfolder/Xenv.latest"
-  for Line in $Newxenv ; do echo $Line >> "$Cacherootfolder/Xenv.latest" ; done
+  mkfile "$Cachebasefolder/Xenv.latest"
+  for Line in $Newxenv ; do echo $Line >> "$Cachebasefolder/Xenv.latest" ; done
   
   #### watch X server and/or Wayland compositor ####
+  Compositorpid=$(cat $Compositorpidfile)
   case $Xserver in
     --nothing|--hostwayland) ;;
     --weston|--kwin)
@@ -4753,11 +4802,11 @@ $(tail $Compositorlogfile)"
       [ "$Fullscreen" = "yes" ] && export $Newxenv ### FIXME could cause trouble with Wayland if terminal is not Wayland capable
 
       # start docker in xtermrc
-      case $Passwordprompt in
+      case $Passwordfrontend in
         su|sudo)
           [ "$Passwordterminal" = "bash -c" ] && Passwordterminal=""
           #[ -z "$Passwordterminal" ] && exec </dev/tty
-          case $Needpassword in
+          case $Passwordneeded in
             no) /bin/bash $Xtermrc ;; 
             yes) $Passwordterminal /bin/bash $Xtermrc ;;
           esac
@@ -4829,11 +4878,11 @@ $(tail $Dockerlogfile)"
       $Mksu                                              "bash  $Xinitrc                       >> $Xinitlogfile  2>&1 " 
     ;;
     --xpra-xwayland|--xdummy-xwayland)
-      [ -z "$Hostwayland" ] || { [ "$Scaling" != "0" ] && [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] ;} && {
+      [ -z "$Hostwaylandsocket" ] || { [ "$Scaling" != "0" ] && [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] ;} && {
         # Weston is needed for Xwayland if no Wayland is running already, and also 
         # if option scale has a value smaller than 1 to provide a virtual display larger than monitor
         $Mksu "$Compositorcommand                                                              >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
-        waitforfilecreation $XDG_RUNTIME_DIR/$Waylandsocket
+        waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
         waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                       || error "Weston startup failed. Can not run $Xserver.
   Last lines of weston log:
 $(tail $Compositorlogfile)"
@@ -4841,20 +4890,20 @@ $(tail $Compositorlogfile)"
         # hide weston window
         $Mksu "xdotool windowunmap 0x$(printf '%x\n' $(cat $Compositorlogfile | grep 'window id' | rev | cut -d' ' -f1 | rev))"
       }
-      $Mksu "env WAYLAND_DISPLAY=$Waylandsocket           xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
+      $Mksu "env WAYLAND_DISPLAY=$Newwaylandsocket           xinit $Xinitrc -- $Xcommand       >> $Xinitlogfile  2>&1 " 
     ;;
     --weston-xwayland)
       $Mksu "$Compositorcommand                                                                >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
-      waitforfilecreation $XDG_RUNTIME_DIR/$Waylandsocket
+      waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
       waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                         || error "Weston startup failed. Can not run $Xserver.
   Last lines of weston log:
 $(tail $Compositorlogfile)"
       storepid $(cat $Compositorpidfile) compositor
-      $Mksu "env WAYLAND_DISPLAY=$Waylandsocket           xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
+      $Mksu "env WAYLAND_DISPLAY=$Newwaylandsocket           xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
     ;;
     --weston)
       $Mksu "$Compositorcommand                                                                >> $Compositorlogfile 2>&1  & echo \$! >>$Compositorpidfile"
-      waitforfilecreation $XDG_RUNTIME_DIR/$Waylandsocket
+      waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
       waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                         || error "Weston startup failed. Can not run $Xserver.
   Last lines of weston log:
 $(tail $Compositorlogfile)"
@@ -4862,17 +4911,18 @@ $(tail $Compositorlogfile)"
       $Mksu                                              "bash  $Xinitrc                       >> $Xinitlogfile  2>&1" 
     ;;
     --kwin-xwayland)
-      $Mksu "$Compositorcommand --exit-with-session='$Waitforgoodbye'                          >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
-      waitforfilecreation $XDG_RUNTIME_DIR/$Waylandsocket
+      Waitforgoodbye="mywatch 'ls $Timetosaygoodbye 2>/dev/null'" 
+      $Mksu "$Compositorcommand                                                                >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
+      waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
       waitforlogentry kwin   $Compositorlogfile "X-Server"                                     || error "Kwin startup failed. Can not run $Xserver.
   Last lines of kwin log:
 $(tail $Compositorlogfile)"
       storepid $(cat $Compositorpidfile) compositor
-      $Mksu "env WAYLAND_DISPLAY=$Waylandsocket           xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
+      $Mksu "env WAYLAND_DISPLAY=$Newwaylandsocket           xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
     ;;
     --kwin)
-      $Mksu "dbus-launch $Compositorcommand --exit-with-session='$Waitforgoodbye'              >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
-      waitforfilecreation $XDG_RUNTIME_DIR/$Waylandsocket
+      $Mksu "dbus-launch $Compositorcommand                                                    >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
+      waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
       waitforlogentry kwin   $Compositorlogfile "X-Server"                                     || error "Kwin startup failed. Can not run $Xserver.
   Last lines of kwin log:
 $(tail $Compositorlogfile)"
@@ -4888,7 +4938,8 @@ $(tail $Compositorlogfile)"
 
 ######### ToDo notes for development
 todo() {
-# Replace Logfile1 with mkfifo and exec <> &7
+# docker is terminated first. check without group docker
+
 # --group-add: compare host and container GID? warn if group misses in container, or create it?
 # BUG opensuse/arch: issues with x11docker/fluxbox, background missing, sometimes no context menu. where is the difference?
 
@@ -4900,7 +4951,6 @@ todo() {
 #                -> cinnamon starts up with lots of (harmless?) error messages
 #                -> deepin needs --pulseaudio again
 # check fgconsole
-# bestwu/deepin: why sh is replaced by bash?
 # check echo especially in sh scripts, replace with printf if needed (#25)
 # avoid possible confusions --home --sharedir. --sharedir mounts can overlap --home folder. What about softlinks with existing target in --home? Maybe avoid /home/$USER at all
 # --xpra --desktop restarts client if closing desktop window
