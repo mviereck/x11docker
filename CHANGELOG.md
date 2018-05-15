@@ -9,10 +9,14 @@ Project website: https://github.com/mviereck/x11docker
 ### Changed
  - Logfile handling with fifo/named pipe.
  - `--auto`: Tightened dependency check.
+ - some code cleanup
 ### Fixed
  - Don't set `-title` in `Xephyr` command. Xephyr bug: Releasing keyboard
    and mouse after grab (ctrl+shift) does not work with `-title`. 
    [(#44)](https://github.com/mviereck/x11docker/issues/44)
+ - `--exe`: Don't pass file descriptors to host executeable.
+ - `--wayland` Works with prissy GTK3 applications (e.g. xfce4-terminal) again,
+   needed user switching in `--dbus-system` for unknown reasons.
    
 ## [4.2.1](https://github.com/mviereck/x11docker/releases/tag/v4.2.1) - 2018-05-10
 ## Added
