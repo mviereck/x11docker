@@ -18,7 +18,7 @@ in running containers are discarded after use.
    - Restricts container capabilities to bare minimum.
    - Container user is same as host user to avoid root in container.
  - No dependencies inside of docker images.
- - No obliging [dependencies](#dependencies) on host beside X and docker. Recommended: `xpra` and `Xephyr`.
+ - No obliging [dependencies](#dependencies) on host beside X and docker. Recommended: `nxagent`, `xpra` and `Xephyr`.
  - [Wayland](#wayland) support.
  - [Optional features](#options): 
    - [Persistent data storage](#shared-folders-and-home-in-container) with shared host folders and a persistant `HOME` in container.
@@ -468,11 +468,12 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
 
  - Single GUI application in container: 
    - Terminal: `x11docker x11docker/xfce xfce4-terminal`
+   - [Telegram messenger](https://telegram.org/) with persistant `HOME` for configuration storage: `x11docker --home xorilog/telegram`
    - Fractal generator [XaoS](https://github.com/patrick-nw/xaos): `x11docker patricknw/xaos`
    - Glxgears with hardware acceleration: `x11docker --gpu x11docker/xfce glxgears`
    - Firefox with shared Download folder: `x11docker --hostipc --sharedir $HOME/Downloads jess/firefox`
    - Chromium browser: `x11docker -- jess/chromium --no-sandbox`
-   - Tor browser: `x11docker jess/tor-browser`
+   - [Tor browser](https://www.torproject.org/projects/torbrowser.html): `x11docker jess/tor-browser`
    - Atom editor with your host home as container home: `x11docker --homedir=$HOME jess/atom`
    - VLC media player with shared Video folder and pulseaudio sound: 
      - `x11docker --pulseaudio --sharedir=$HOME/Videos jess/vlc`
