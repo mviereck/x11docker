@@ -468,7 +468,8 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
 
  - Single GUI application in container: 
    - Terminal: `x11docker x11docker/xfce xfce4-terminal`
-   - [Telegram messenger](https://telegram.org/) with persistant `HOME` for configuration storage: `x11docker --home xorilog/telegram`
+   - [Telegram messenger](https://telegram.org/) with persistant `HOME` for configuration storage: 
+     - `x11docker --home xorilog/telegram`
    - Fractal generator [XaoS](https://github.com/patrick-nw/xaos): `x11docker patricknw/xaos`
    - Glxgears with hardware acceleration: `x11docker --gpu x11docker/xfce glxgears`
    - Firefox with shared Download folder: `x11docker --hostipc --sharedir $HOME/Downloads jess/firefox`
@@ -512,11 +513,11 @@ Sample screenshots can be found in [screenshot branch](https://github.com/mviere
 `x11docker --desktop x11docker/lxde-wine`
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxde-wine.png "LXDE desktop in docker")
 
-`x11docker --desktop x11docker/mate`
-![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-mate.png "Mate desktop in docker")
+`x11docker --desktop --gpu x11docker/plasma`
+![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-plasma.png "KDE plasma desktop in docker")
 
 `x11docker --desktop x11docker/lxqt`
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxqt.png "LXQT desktop in docker"))
 
-`x11docker --desktop --dbus-system --gpu x11docker/deepin`
+`x11docker --desktop --systemd --gpu x11docker/deepin`
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-deepin.png "deepin desktop in docker")
