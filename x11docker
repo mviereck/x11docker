@@ -348,6 +348,11 @@ $Message" 2>/dev/null
   } || return 1
   return 0
 }
+traperror() {           # trap ERR: --debug: Output for 'set -o errtrace'
+  warning "Command at Line ${2:-} returned with error code ${1:-}:
+  ${4:-}
+  ${3:-} - ${5:-}" 
+}
 error() {               # show error messages on stderr and exit
   Message="$*
   
@@ -389,14 +394,412 @@ note() {                # show notice messages
 " >&7
   return 0
 }
-printstdout() {         # write something on stdout
-  echo "$*" >&6
-}
 verbose() {             # show verbose messages
   # only logfile notes here, terminal output is done with tail in part:verbose
   [ "$Logfifo" ] && echo "x11docker: $*
 " >&7
   return 0
+}
+printstdout() {         # write something on stdout
+  echo "$*" >&6
+}
+finish() {              # trap EXIT routine to clean up background processes and cache
+  local Pid Name Zeit Catlogfilepid
+  trap - EXIT
+  verbose "terminating x11docker."
+  
+  # check for background processes stored in $Bgpidfile
+  [ -s "$Bgpidfile" ] && {
+    while read -r Line ; do 
+      Pid=$(echo $Line  | awk '{print $1}')
+      Name=$(echo $Line | awk '{print $2}')
+      
+      ps -p $Pid --no-headers >/dev/null && {
+        verbose "terminating background pid $Pid of $Name: $(ps -p $Pid --no-headers)"
+        
+        case $Name in
+          windowmanager) 
+            Windowmanager="$(basename "$Windowmanager" | cut -d' ' -f1)"
+            ps -p $Pid | grep $Windowmanager >/dev/null           && kill $Pid
+          ;;
+          xpraserver|xpraclient)
+            ps -p $Pid | grep 'xpra' >/dev/null                   && kill $Pid
+          ;;
+          compositor)
+            ps -p $Pid | grep -E 'weston|kwin_wayland' >/dev/null && kill $Pid
+          ;;
+          x11docker-run|waitfortheend|xpraloop|watchpidlist)
+            ps -p $Pid | grep x11docker >/dev/null                && kill $Pid
+          ;;
+          tailstdout|tailstderr)
+            #ps -p $Pid | grep x11docker >/dev/null                && kill $Pid
+            Pid=
+          ;;
+          catstdin)
+            ps -p $Pid >/dev/null                                 && kill $Pid
+          ;;
+          catlogfile)
+            Catlogfilepid=$Pid
+            Pid=
+          ;;
+          hostexe|shareclipboard)
+            ps -p $Pid | grep 'bash' >/dev/null                   && kill $Pid
+          ;;
+          xfishtank)
+            ps -p $Pid | grep 'xfishtank' >/dev/null              && kill $Pid
+          ;;
+          container) 
+            [ -n "$Sudo" ] && Sudo="sudo -n" # no password prompt here, rather fail
+            $Sudo docker stop $Containername >/dev/null 2>&1 || {
+              ! $Sudo docker images >/dev/null 2>&1 || { [ -n "$($Sudo docker ps --filter name=$Containername --quiet 2>&1)" ] || ps -p $Pid >/dev/null ; } && {
+                note "Found remaining container process. Most probably the X session was
+  interrupted. Can not stop container because x11docker does not run as root.
+  Will wait up to 10 seconds for docker to finish."
+                Zeit=$(date +%s)
+                while ps -p $Pid >/dev/null ; do
+                  note "waiting for container to terminate ..."
+                  sleep 1
+                  [ 10 -lt $(($(date +%s) - $Zeit)) ] && break ||:
+                done
+                if ps -p $Pid >/dev/null ; then
+                  note "docker container didn't terminate as it should. 
+  Will not clean cache to avoid file permission issues. 
+  You can remove the new container with command:
+docker rm -f $Containername
+  Afterwards, remove cache files with:
+rm -R $Cachefolder
+  or let x11docker do the cleanup work for you: 
+x11docker --cleanup"
+                  Preservecachefiles="yes"
+                else
+                  note "docker container terminated successfully"
+                fi
+              }
+            }
+          ;;
+          *) # should never happen (tm)
+            note "Found remaining background process $Line"
+            ps -p $Pid
+            kill $Pid
+          ;;
+        esac
+        [ "$Pid" ] && ps -p $Pid --no-headers >/dev/null && {
+          sleep 1
+          ps -p $Pid --no-headers >/dev/null && verbose "Issue terminating $Line" && kill -s KILL $Pid
+        }
+      }
+    done < <(tac $Bgpidfile)
+  }
+  
+  [ "$Logfile" ] && {
+    [ "$Verbose" = "yes" ] && sleep 1
+    $Mksu "cp '$Logfile' '$Logbackup'"
+    kill $Catlogfilepid
+  }
+  
+  exec >&3- >&4- >&6- >&7- >&9-
+  [ "$Logfifo" ] && rm "$Logfifo"
+
+  [ "$Preservecachefiles" = "no" ] && echo "$Cachefolder" | grep -q .cache && echo "$Cachefolder" | grep -q x11docker && [ "x11docker" != "$(basename "$Cachefolder")" ] && rm -f -R "$Cachefolder"
+  exit ${1:-0}
+}
+saygoodbye() {          # create file signaling watching processes to terminate
+  verbose "time to say goodbye"
+  [ -e "$Sharefolder" ] && {
+    echo timetosaygoodbye >> $Timetosaygoodbye
+    echo timetosaygoodbye >> $Timetosaygoodbyefifo
+  }
+}
+mywatch() {             # repeat $1 untils its output changes
+  local Watchoutput
+  # --interval must be integer for centos and fedora watch despite contrary documentation in manpage
+  verbose "Watching: sh -c '${1:-}'
+  Current output:
+$(sh -c "${1:-}" ||:)"
+  env TERM=linux watch --interval 1 --chgexit --no-title -- "sh -c '${1:-}' | sha1sum" >/dev/null 2>&1
+  #Watchoutput="$(sh -c "${1:-}" 2>&1)"
+  #while rocknroll ; do
+  #  [ "$Watchoutput" = "$(sh -c "${1:-}" 2>&1)" ] || break
+  #  sleep 1
+  #done
+  verbose "Stopped watching: sh -c '${1:-}'
+  Current output:
+$(sh -c "${1:-}" ||:)"
+}
+watchpidlist() {        # watch list of important pids
+  # terminate x11docker if a PID in $Pidwatchlist terminates
+  # serves mainly watching X server, Wayland compositor, container and hostexe
+  # echo PIDs to watch into >&9
+  local Pid
+  while rocknroll ; do
+    read -t1 Pid <&9
+    [ "$Pid" ] && {
+      Pidwatchlist="$Pidwatchlist $Pid"
+      verbose "watching $(ps --no-headers -p $Pid)"
+    }
+    for Pid in $Pidwatchlist; do
+      #ps -p $Pid >/dev/null 2>&1 || saygoodbye
+      [ -e /proc/$Pid ] || saygoodbye
+    done
+  done
+}
+rocknroll() {           # check if x11docker is still running
+  [ -s "$Timetosaygoodbye" ] && return 1
+  [ -e "$Logfifo" ]          || return 1
+  return 0
+}
+waitfortheend() {       # wait for end of x11docker, optional for end of pid $1, too
+  # signal is byte in $Timetosaygoodbyefifo
+  # optional: pids to watch, terminate x11docker if pid dismisses
+  
+  # check for pids to watch in options
+  for i in 1 2 3 4 5 6 7 8 9 ; do
+    [ "$i" -gt "$#" ] && break
+    [ "$1" ] && echo $1 >> $Pidwatchfifo
+    shift
+  done
+  
+  # decent read to wait for signal to terminate
+  bash -c "read -n1 <$Timetosaygoodbyefifo"
+}
+waitforfilecreation() { # similar to inotify-wait: wait up to 15s for file $1 to be created
+  # $1 file to wait for
+  # $2 time to wait. default: 15s. possible: infinity
+  local Zeit Warten Dauer Count
+  Zeit=$(date +%s)
+  verbose "Waiting for file creation of ${1:-}"
+  case ${2:-} in
+    "")           Warten=15 ;;
+    infinity|inf) Warten=32000 ;; # nearly infinity in fast-moving today ...
+    *)            Warten=${2:-} ;;
+  esac
+  while [ ! "$(find  "${1:-}" 2>/dev/null)" ] ; do
+    Count=$(( Count + 1 ))
+    Dauer=$(( $(date +%s) - $Zeit ))
+    sleep $(awk "BEGIN { print $Count * 0.1 }")
+    [ $Warten -lt $Dauer ] && {
+      warning "Failed to wait for file creation of
+  ${1:-}"
+      return 1
+    }
+    verbose "waiting since ${Dauer}s for ${1:-} to be created, will wait up to $Warten seconds."
+    rocknroll || {
+      verbose "stopped waiting for ${1:-} due to terminating signal."
+      return 1
+    }
+  done
+  verbose "Found new created file $(ls ${1:-})"
+  return 0
+}
+waitforfilecontent() {  # wait for file $1 to be not empty
+  # $1 file to look at
+  local Zeit Warten Dauer Count
+  Zeit=$(date +%s)
+  Warten=15
+  verbose "Waiting for file content in ${1:-}"
+  while [ ! -s "${1:-}" ] ; do
+    Count=$(( Count + 1 ))
+    Dauer=$(( $(date +%s) - $Zeit ))
+    sleep $(awk "BEGIN { print $Count * 0.1 }")
+    [ $Warten -lt $Dauer ]  && return 1
+    verbose "waiting since ${Dauer}s for ${1:-} to have content, will wait up to $Warten seconds."
+    rocknroll || {
+      verbose "stopped waiting for file content of ${1:-} due to terminating signal."
+      return 1
+    }  done
+  verbose "Found file content in ${1:-}"
+  return 0
+}
+waitforlogentry() {     # wait for entry $3 in logfile $2 of application $1
+  # $1 is the application we are waiting for to be ready
+  # $2 points to logfile
+  # $3 keyword to wait for 
+  local Zeit Warten Dauer Count
+  Zeit=$(date +%s)
+  Warten=60
+  while ! cat "${2:-}" | grep -q "${3:-}" ; do
+    Count=$(( Count + 1 ))
+    Dauer=$(( $(date +%s) - $Zeit ))
+#    verbose "waiting since $(expr $(date +%s) - $Zeit)s for ${1:-} to be ready..."
+    verbose "waiting since ${Dauer}s for ${1:-} to be ready..."
+    sleep $(awk "BEGIN { print $Count * 0.1 }")
+    [ $Warten -lt $Dauer ] && return 1
+    rocknroll || {
+      verbose "stopped waiting for logentry in ${2:-} of ${1:-} due to terminating signal."
+      return 1
+    }  done
+  verbose "${1:-} is ready."
+  return 0
+}
+storepid () {           # store pids and names of background processes in file $Bgpidfile
+  # store Pid and process name of background processes in file
+  # $1 should be Pid, $2 should be name of process
+  # for use on exit / with trap to clean up with background processes
+  # this subroutine has a twin in xinitrc
+  echo ${1:-} ${2:-} >> $Bgpidfile
+  disown ${1:-} 2>/dev/null
+  verbose "stored background pid ${1:-} of ${2:-}"
+}
+no_xhost() {            # remove any access to X server granted by xhost
+  local Line
+  xhost
+  xhost | tail -n +2  /dev/stdin | while read -r Line ; do  # read all but the first line (header)
+    xhost -$Line                                         # disable every entry
+  done
+  xhost -                                                # enable access control
+  [ "$(xhost | wc -l)" -gt "1" ] && { 
+    warning "Remaining xhost permissions found on display $DISPLAY
+$(xhost)"
+    return 1
+  }
+  return 0
+}
+mkfile() {              # create file $1 owned by $Hostuser
+  :> "${1:-}"
+  chown $Hostuser    "${1:-}"
+  chgrp $Hostusergid "${1:-}"
+  [ -n "${2:-}" ] && chmod ${2:-} "${1:-}" ||:
+}
+depends() {             # check dependencies on host for X server option $1
+  # Return 1 if something is missing
+  local Return Message
+  Return="0"
+  case $Autochooseserver in
+    yes) Message=verbose ;;
+    no)  Message=warning ;;
+  esac
+  case ${1:-} in
+    --xpra|--xpra-xwayland)
+      command -v "xpra" >/dev/null || { 
+        $Message "${1:-}: xpra not found."
+        Return=1
+      } ;;
+    --xephyr)
+      command -v "Xephyr" >/dev/null || command -v "Xnest" >/dev/null || { 
+        $Message "${1:-}: Neither Xephyr nor Xnest found."
+        Return=1
+      } ;;
+    --nxagent)
+      command -v "nxagent" >/dev/null || { 
+        $Message "${1:-}: nxagent not found."
+        Return=1
+      } ;;
+    --xvfb)
+      command -v "Xvfb" >/dev/null || { 
+        $Message "${1:-}: Xvfb not found."
+        Return=1
+      } ;;
+    --xorg|--xdummy)
+      command -v "Xorg" >/dev/null || { 
+        $Message "${1:-}: Xorg not found."
+        Return=1
+      } ;;
+  esac
+  case ${1:-} in
+    --weston|--xpra-xwayland|--weston-xwayland|--xdummy-xwayland)
+      command -v "weston" >/dev/null || { 
+        $Message "${1:-}: weston not found."
+        Return=1
+      } ;;
+    --kwin|--kwin-xwayland)
+      command -v "kwin_wayland" >/dev/null || { 
+        $Message "${1:-}: kwin_wayland not found."
+        Return=1
+      } ;;
+  esac
+  case ${1:-} in
+    --xpra-xwayland|--weston-xwayland|--kwin-xwayland|--xwayland|--xdummy-xwayland)
+      command -v "Xwayland" >/dev/null || { 
+        $Message "${1:-}: Xwayland not found."
+        Return=1
+      } ;;
+  esac
+  case ${1:-} in
+    --xpra-xwayland|--xdummy-xwayland)
+      command -v "xdotool" >/dev/null || { 
+        $Message "${1:-}: xdotool not found."
+        Return=1
+      } ;;
+  esac
+  case ${1:-} in
+    --hostdisplay|--xpra|--xpra-xwayland|--xephyr|--nxagent)
+      [ "$Hostdisplay" ] || {
+        $Message "${1:-} needs a running X server. DISPLAY is empty."
+        Return=1
+      } ;;
+    --hostwayland|--xwayland)
+      [ "$Hostwaylandsocket" ] || {
+        $Message "${1:-} needs a running Wayland compositor. WAYLAND_DISPLAY is empty."
+        Return=1
+      } ;;
+    --xorg)
+        [ -z "$Newxvt" ] && {
+          if [ ! -e "/etc/X11/Xwrapper.config" ] || [ -z "$(cat /etc/X11/Xwrapper.config | grep "allowed_users" | grep "anybody")" ] ; then
+            warning "Your configuration does not allow you to start
+  a second core Xorg server from within X. Option --xorg will probably fail.
+  (As a default configuration, only root or console users can do that).
+  
+  Recommended easy solution: install nested X server 'Xephyr'.
+  Solution with --gpu support: install 'Weston' and 'Xwayland'.
+  
+  Or you can switch to console tty1...tty6 with <CTRL><ALT><F1>...<F6>
+  and start x11docker there.
+  
+  Setup to start a second Xorg X server from within already running X:
+  Edit file '/etc/X11/Xwrapper.config' and replace line:
+      allowed_users=console
+  with lines
+      allowed_users=anybody
+      needs_root_rights=yes
+  If the file does not exist already, you can create it.
+  On Ubuntu 16.04 and debian 9 you need package xserver-xorg-legacy."
+          fi
+        }
+    ;;
+  esac
+  [ "$Return" = "1" ] && {
+    $Message "${1:-} not possible: missing dependencies."
+    Autochooseserver="yes"
+  }
+  return ${Return:-0}
+}
+checkorphaned() {       # --cleanup : check for non-removed containers and left cache files
+  local Orphanedcontainers Orphanedfolders Line
+  note "x11docker will check for orphaned containers from earlier sessions.
+  This can happen if docker was not closed successfully. 
+  x11docker will look for those containers and will clean up x11docker cache.
+  Caution: any currently running x11docker sessions will be terminated, too."
+  Orphanedcontainers=""
+  Orphanedfolders=""
+  cd $Cachebasefolder || error "Could not cd to cache folder '$Cachebasefolder'."
+  [ $? ] && [ -n "$(echo "$Cachebasefolder" | grep .cache/x11docker)" ] && Orphanedfolders=$(echo $(find "$Cachebasefolder" -mindepth 1 -maxdepth 1 -type d | sed s%$Cachebasefolder/%%))
+  Orphanedcontainers="$(docker ps -a --filter name=x11docker_X --format "{{.Names}}")"
+  Orphanedcontainers="$(env IFS='' echo $Orphanedcontainers)"
+  if [ -z "$Orphanedcontainers" ] && [ -z "$Orphanedfolders" ] ; then 
+    note "No orphaned containers or cache files found. good luck!"
+  else
+    note "Found orphaned containers: 
+  $Orphanedcontainers"
+    note "Found orphaned folders in $Cachebasefolder:
+  $Orphanedfolders" 
+    for Line in $Orphanedfolders ; do
+      [ -d "$Cachebasefolder/$Line/share" ] && [ ! -s "$Cachebasefolder/$Line/share/timetosaygoodbye" ] && {
+        note "Found possibly active container $Line.
+  Will summon it to terminate itself."
+        echo timetosaygoodbye > "$Cachebasefolder/$Line/share/timetosaygoodbye"  # terminating possibly running x11docker sessions
+        sleep 2
+      }
+    done
+    [ -n "$Orphanedcontainers" ] && {
+      note "Removing containers with: docker rm -f $Orphanedcontainers
+$(bash -c "docker rm -f $Orphanedcontainers" 2>&1)"
+    }
+    [ -n "$Orphanedfolders" ] && {
+      note "Removing cache files with: rm -R -f $Orphanedfolders
+$(rm -R -f $Orphanedfolders 2>&1)"
+    }
+  fi
+  note "Ready."
 }
 installer() {           # --install, --update, --update-master, --remove: Installer for x11docker
   # --install:
@@ -565,185 +968,11 @@ $(sed -n '/'$Key1'/,/'$Key2'/p' /usr/share/doc/x11docker/CHANGELOG.md | head -n-
 
   note "Ready."
 }
-checkorphaned() {       # --cleanup : check for non-removed containers and left cache files
-  local Orphanedcontainers Orphanedfolders Line
-  note "x11docker will check for orphaned containers from earlier sessions.
-  This can happen if docker was not closed successfully. 
-  x11docker will look for those containers and will clean up x11docker cache.
-  Caution: any currently running x11docker sessions will be terminated, too."
-  Orphanedcontainers=""
-  Orphanedfolders=""
-  cd $Cachebasefolder || error "Could not cd to cache folder '$Cachebasefolder'."
-  [ $? ] && [ -n "$(echo "$Cachebasefolder" | grep .cache/x11docker)" ] && Orphanedfolders=$(echo $(find "$Cachebasefolder" -mindepth 1 -maxdepth 1 -type d | sed s%$Cachebasefolder/%%))
-  Orphanedcontainers="$(docker ps -a --filter name=x11docker_X --format "{{.Names}}")"
-  Orphanedcontainers="$(env IFS='' echo $Orphanedcontainers)"
-  if [ -z "$Orphanedcontainers" ] && [ -z "$Orphanedfolders" ] ; then 
-    note "No orphaned containers or cache files found. good luck!"
-  else
-    note "Found orphaned containers: 
-  $Orphanedcontainers"
-    note "Found orphaned folders in $Cachebasefolder:
-  $Orphanedfolders" 
-    for Line in $Orphanedfolders ; do
-      [ -d "$Cachebasefolder/$Line/share" ] && [ ! -e "$Cachebasefolder/$Line/share/timetosaygoodbye" ] && {
-        note "Found possibly active container $Line.
-  Will summon it to terminate itself."
-        touch "$Cachebasefolder/$Line/share/timetosaygoodbye"  # terminating possibly running x11docker sessions
-        sleep 3
-      }
-    done
-    [ -n "$Orphanedcontainers" ] && {
-      note "Removing containers with: docker rm -f $Orphanedcontainers
-$(bash -c "docker rm -f $Orphanedcontainers" 2>&1)"
-    }
-    [ -n "$Orphanedfolders" ] && {
-      note "Removing cache files with: rm -R -f $Orphanedfolders
-$(rm -R -f $Orphanedfolders 2>&1)"
-    }
-  fi
-  note "Ready."
-}
-storepid () {           # store pids and names of background processes in file $Bgpidfile
-  # store Pid and process name of background processes in file
-  # $1 should be Pid, $2 should be name of process
-  # for use on exit / with trap to clean up with background processes
-  # this subroutine has a twin in xinitrc
-  echo ${1:-} ${2:-} >> $Bgpidfile
-  disown ${1:-} 2>/dev/null
-  verbose "stored background pid ${1:-} of ${2:-}"
-}
-saygoodbye() {          # create file signaling watching processes to terminate
-  verbose "Creating $Timetosaygoodbye"
-  [ -e "$Sharefolder" ] && $Mksu "touch $Timetosaygoodbye"
-}
-finish() {              # trap EXIT routine to clean up background processes and cache
-  local Pid Name Zeit Catlogfilepid
-  trap - EXIT
-  verbose "terminating x11docker."
-  
-  # check for background processes stored in $Bgpidfile
-  [ -s "$Bgpidfile" ] && {
-    while read -r Line ; do 
-      Pid=$(echo $Line  | awk '{print $1}')
-      Name=$(echo $Line | awk '{print $2}')
-      
-      ps -p $Pid --no-headers >/dev/null && {
-        verbose "terminating background pid $Pid of $Name: $(ps -p $Pid --no-headers)"
-        
-        case $Name in
-          windowmanager) 
-            Windowmanager="$(basename "$Windowmanager" | cut -d' ' -f1)"
-            ps -p $Pid | grep $Windowmanager >/dev/null           && kill $Pid
-          ;;
-          xpraserver|xpraclient)
-            ps -p $Pid | grep 'xpra' >/dev/null                   && kill $Pid
-          ;;
-          compositor)
-            ps -p $Pid | grep -E 'weston|kwin_wayland' >/dev/null && kill $Pid
-          ;;
-          x11docker-run|mywatch|xpraloop)
-            ps -p $Pid | grep x11docker >/dev/null                && kill $Pid
-          ;;
-          tailstdout|tailstderr)
-            #ps -p $Pid | grep x11docker >/dev/null                && kill $Pid
-            Pid=
-          ;;
-          catstdin)
-            ps -p $Pid >/dev/null                                 && kill $Pid
-          ;;
-          catlogfile)
-            Catlogfilepid=$Pid
-            Pid=
-          ;;
-          hostexe|shareclipboard)
-            ps -p $Pid | grep 'bash' >/dev/null                   && kill $Pid
-          ;;
-          xfishtank)
-            ps -p $Pid | grep 'xfishtank' >/dev/null              && kill $Pid
-          ;;
-          container) 
-            [ -n "$Sudo" ] && Sudo="sudo -n" # no password prompt here, rather fail
-            $Sudo docker stop $Containername >/dev/null 2>&1 || {
-              ! $Sudo docker images >/dev/null 2>&1 || { [ -n "$($Sudo docker ps --filter name=$Containername --quiet 2>&1)" ] || ps -p $Pid >/dev/null ; } && {
-                note "Found remaining container process. Most probably the X session was
-  interrupted. Can not stop container because x11docker does not run as root.
-  Will wait up to 10 seconds for docker to finish."
-                Zeit=$(date +%s)
-                while ps -p $Pid >/dev/null ; do
-                  note "waiting for container to terminate ..."
-                  sleep 1
-                  [ 10 -lt $(($(date +%s) - $Zeit)) ] && break ||:
-                done
-                if ps -p $Pid >/dev/null ; then
-                  note "docker container didn't terminate as it should. 
-  Will not clean cache to avoid file permission issues. 
-  You can remove the new container with command:
-docker rm -f $Containername
-  Afterwards, remove cache files with:
-rm -R $Cachefolder
-  or let x11docker do the cleanup work for you: 
-x11docker --cleanup"
-                  Preservecachefiles="yes"
-                else
-                  note "docker container terminated successfully"
-                fi
-              }
-            }
-          ;;
-          *) # should never happen (tm)
-            note "Found remaining background process $Line"
-            ps -p $Pid
-            kill $Pid
-          ;;
-        esac
-        [ "$Pid" ] && ps -p $Pid --no-headers >/dev/null && {
-          sleep 1
-          ps -p $Pid --no-headers >/dev/null && verbose "Issue terminating $Line" && kill -s KILL $Pid
-        }
-      }
-    done < <(tac $Bgpidfile)
-  }
-  
-  [ "$Logfile" ] && {
-    [ "$Verbose" = "yes" ] && sleep 1
-    $Mksu "cp '$Logfile' '$Logbackup'"
-    kill $Catlogfilepid
-  }
-  
-  exec >&3- >&4- >&6- >&7-
-  [ "$Logfifo" ] && rm "$Logfifo"
-
-  [ "$Preservecachefiles" = "no" ] && echo "$Cachefolder" | grep -q .cache && echo "$Cachefolder" | grep -q x11docker && [ "x11docker" != "$(basename "$Cachefolder")" ] && rm -f -R "$Cachefolder"
-  exit ${1:-0}
-}
-traperror() {           # trap ERR: --debug: Output for 'set -o errtrace'
-  warning "Command at Line ${2:-} returned with error code ${1:-}:
-  ${4:-}
-  ${3:-} - ${5:-}" 
-}
 verlte() {              # version number check $1 less than or equal $2
   [  "${1:-}" = "$(echo -e "${1:-}\n${2:-}" | sort -V | head -n1)" ] && return 0 || return 1
 }
 verlt() {               # version number check $1 less than $2 
   [ "${1:-}" = "${2:-}" ] && return 1 || { verlte "${1:-}" "${2:-}" && return 0 || return 1 ; }
-}
-mywatch() {             # repeat $1 untils its output changes
-  local Watchoutput
-  # --interval must be integer for centos and fedora despite contrary documentation in manpage
-  verbose "Watching: sh -c '${1:-}'
-  Current output:
-$(sh -c "${1:-}" ||:)"
-  # watch should serve this job better than a loop, but it has a bug and is not relieable. It fails in about 1% of cases.
-  #env TERM=linux watch --interval 1 --chgexit --no-title -- "sh -c '${1:-}' | sha1sum" >/dev/null 2>&1
-  Watchoutput="$(sh -c "${1:-}" 2>&1)"
-  while sleep 1 ; do
-    [ "$Watchoutput" = "$(sh -c "${1:-}" 2>&1)" ] || break
-    #[ -e "$Timetosaygoodbye" ] && break
-    [ -p "$Logfifo" ] || break
-  done
-  verbose "Stopped watching: sh -c '${1:-}'
-  Current output:
-$(sh -c "${1:-}" ||:)"
 }
 isnum() {               # check if $1 is a number
   [ "1" = "$(awk -v a="${1:-}" 'BEGIN {print (a == a + 0)}')" ]
@@ -767,199 +996,6 @@ writeaccess() {         # check if useruid $1 has write access to folder $2
     [ "w" = "$(getfacl -pn "${2:-}" | grep user:${1:-}: | rev | cut -c2)" ] && return 0 || return 1   # FIXME: could check write access for gid, if uid access fails.
   fi 
 }
-waitforfilecreation() { # similar to inotify-wait: wait up to 15s for file $1 to be created
-  # $1 file to wait for
-  # $2 time to wait. default: 15s. possible: infinity
-  local Zeit Warten Dauer Count
-  Zeit=$(date +%s)
-  verbose "Waiting for file creation of ${1:-}"
-  case ${2:-} in
-    "")           Warten=15 ;;
-    infinity|inf) Warten=32000 ;; # nearly infinity in fast-moving today ...
-    *)            Warten=${2:-} ;;
-  esac
-  while [ ! "$(find  "${1:-}" 2>/dev/null)" ] ; do
-    Count=$(( Count + 1 ))
-    Dauer=$(( $(date +%s) - $Zeit ))
-    sleep $(awk "BEGIN { print $Count * 0.1 }")
-    [ $Warten -lt $Dauer ] && {
-      warning "Failed to wait for file creation of
-  ${1:-}"
-      return 1
-    }
-    verbose "waiting since ${Dauer}s for ${1:-} to be created, will wait up to $Warten seconds."
-    [ -e "$Timetosaygoodbye" ] && {
-      verbose "stopped waiting for ${1:-} due to terminating signal."
-      return 1
-    }
-  done
-  verbose "Found new created file $(ls ${1:-})"
-  sleep 0.1
-  return 0
-}
-waitforfilecontent() {  # wait for file $1 to be not empty
-  # $1 file to look at
-  local Zeit Warten Dauer Count
-  Zeit=$(date +%s)
-  Warten=15
-  verbose "Waiting for file content in ${1:-}"
-  while [ ! -s "${1:-}" ] ; do
-    Count=$(( Count + 1 ))
-    Dauer=$(( $(date +%s) - $Zeit ))
-    sleep $(awk "BEGIN { print $Count * 0.1 }")
-    [ $Warten -lt $Dauer ]  && return 1
-    verbose "waiting since ${Dauer}s for ${1:-} to have content, will wait up to $Warten seconds."
-    [ -e "$Timetosaygoodbye" ] && {
-      verbose "stopped waiting for file content of ${1:-} due to terminating signal."
-      return 1
-    }  done
-  verbose "Found file content in ${1:-}"
-  return 0
-}
-waitforlogentry() {     # wait for entry $3 in logfile $2 of application $1
-  # $1 is the application we are waiting for to be ready
-  # $2 points to logfile
-  # $3 keyword to wait for 
-  local Zeit Warten Dauer Count
-  Zeit=$(date +%s)
-  Warten=60
-  while ! cat "${2:-}" | grep -q "${3:-}" ; do
-    Count=$(( Count + 1 ))
-    Dauer=$(( $(date +%s) - $Zeit ))
-#    verbose "waiting since $(expr $(date +%s) - $Zeit)s for ${1:-} to be ready..."
-    verbose "waiting since ${Dauer}s for ${1:-} to be ready..."
-    sleep $(awk "BEGIN { print $Count * 0.1 }")
-    [ $Warten -lt $Dauer ] && return 1
-    [ -e "$Timetosaygoodbye" ] && {
-      verbose "stopped waiting for logentry in ${2:-} of ${1:-} due to terminating signal."
-      return 1
-    }  done
-  verbose "${1:-} is ready."
-  return 0
-}
-no_xhost() {            # remove any access to X server granted by xhost
-  local Line
-  xhost
-  xhost | tail -n +2  /dev/stdin | while read -r Line ; do  # read all but the first line (header)
-    xhost -$Line                                         # disable every entry
-  done
-  xhost -                                                # enable access control
-  [ "$(xhost | wc -l)" -gt "1" ] && { 
-    warning "Remaining xhost permissions found on display $DISPLAY
-$(xhost)"
-    return 1
-  }
-  return 0
-}
-mkfile() {              # create file $1 owned by $Hostuser
-  :> "${1:-}"
-  chown $Hostuser    "${1:-}"
-  chgrp $Hostusergid "${1:-}"
-  [ -n "${2:-}" ] && chmod ${2:-} "${1:-}" ||:
-}
-depends() {             # check dependencies on host for X server option $1
-  # Return 1 if something is missing
-  local Return Message
-  Return="0"
-  case $Autochooseserver in
-    yes) Message=verbose ;;
-    no)  Message=warning ;;
-  esac
-  case ${1:-} in
-    --xpra|--xpra-xwayland)
-      command -v "xpra" >/dev/null || { 
-        $Message "${1:-}: xpra not found."
-        Return=1
-      } ;;
-    --xephyr)
-      command -v "Xephyr" >/dev/null || command -v "Xnest" >/dev/null || { 
-        $Message "${1:-}: Neither Xephyr nor Xnest found."
-        Return=1
-      } ;;
-    --nxagent)
-      command -v "nxagent" >/dev/null || { 
-        $Message "${1:-}: nxagent not found."
-        Return=1
-      } ;;
-    --xvfb)
-      command -v "Xvfb" >/dev/null || { 
-        $Message "${1:-}: Xvfb not found."
-        Return=1
-      } ;;
-    --xorg|--xdummy)
-      command -v "Xorg" >/dev/null || { 
-        $Message "${1:-}: Xorg not found."
-        Return=1
-      } ;;
-  esac
-  case ${1:-} in
-    --weston|--xpra-xwayland|--weston-xwayland|--xdummy-xwayland)
-      command -v "weston" >/dev/null || { 
-        $Message "${1:-}: weston not found."
-        Return=1
-      } ;;
-    --kwin|--kwin-xwayland)
-      command -v "kwin_wayland" >/dev/null || { 
-        $Message "${1:-}: kwin_wayland not found."
-        Return=1
-      } ;;
-  esac
-  case ${1:-} in
-    --xpra-xwayland|--weston-xwayland|--kwin-xwayland|--xwayland|--xdummy-xwayland)
-      command -v "Xwayland" >/dev/null || { 
-        $Message "${1:-}: Xwayland not found."
-        Return=1
-      } ;;
-  esac
-  case ${1:-} in
-    --xpra-xwayland|--xdummy-xwayland)
-      command -v "xdotool" >/dev/null || { 
-        $Message "${1:-}: xdotool not found."
-        Return=1
-      } ;;
-  esac
-  case ${1:-} in
-    --hostdisplay|--xpra|--xpra-xwayland|--xephyr|--nxagent)
-      [ "$Hostdisplay" ] || {
-        $Message "${1:-} needs a running X server. DISPLAY is empty."
-        Return=1
-      } ;;
-    --hostwayland|--xwayland)
-      [ "$Hostwaylandsocket" ] || {
-        $Message "${1:-} needs a running Wayland compositor. WAYLAND_DISPLAY is empty."
-        Return=1
-      } ;;
-    --xorg)
-        [ -z "$Newxvt" ] && {
-          if [ ! -e "/etc/X11/Xwrapper.config" ] || [ -z "$(cat /etc/X11/Xwrapper.config | grep "allowed_users" | grep "anybody")" ] ; then
-            warning "Your configuration does not allow you to start
-  a second core Xorg server from within X. Option --xorg will probably fail.
-  (As a default configuration, only root or console users can do that).
-  
-  Recommended easy solution: install nested X server 'Xephyr'.
-  Solution with --gpu support: install 'Weston' and 'Xwayland'.
-  
-  Or you can switch to console tty1...tty6 with <CTRL><ALT><F1>...<F6>
-  and start x11docker there.
-  
-  Setup to start a second Xorg X server from within already running X:
-  Edit file '/etc/X11/Xwrapper.config' and replace line:
-      allowed_users=console
-  with lines
-      allowed_users=anybody
-      needs_root_rights=yes
-  If the file does not exist already, you can create it.
-  On Ubuntu 16.04 and debian 9 you need package xserver-xorg-legacy."
-          fi
-        }
-    ;;
-  esac
-  [ "$Return" = "1" ] && {
-    $Message "${1:-} not possible: missing dependencies."
-    Autochooseserver="yes"
-  }
-  return ${Return:-0}
-}
 
 { #### part: declare variables
 trap finish EXIT
@@ -978,6 +1014,9 @@ export PATH="$PATH:/usr/sbin:/sbin"                    # may miss for unprivileg
 
 Bgpidfile=backgroundpids                        # file to store pids and names of background processes that shut be killed on exit
 Timetosaygoodbye=timetosaygoodbye               # file giving term signal to all parties
+Timetosaygoodbyefifo=timetosaygoodbye.fifo
+Pidwatchfifo=pidwatchfifo
+Pidwatchlist=""
 
 # x11docker log 
 Logfile=""
@@ -1022,12 +1061,12 @@ Imagename=""                                    # name of image to run
 Imagecommand=""                                 # image command [+args]
 Imagenametr=""                                  # image name with : and / replaced by - for use with container name and --home folder
 Hostexe=""                                      # contains host executable
-Dockeroptions=""                                # custom options for "docker run". Provide after -- and before image name, encapsulated with "" (or without whitespaces)
+Customdockeroptions=""                                # custom options for "docker run". Provide after -- and before image name, encapsulated with "" (or without whitespaces)
 
 # docker variables
 Containername=""                                # generated container name
 Containerpid=""                                 # container PID
-Nonewprivileges="yes"                           # docker run option --security-opt=no-new-privileges. Disabled by options like --cap-default, --sudouser, --dbus-system
+Nonewprivileges=""                              # docker run option --security-opt=no-new-privileges. Default: yes. Disabled by options like --cap-default, --sudouser, --dbus-system
 
 # docker related files
 Dockerrc=dockerrc                               # generated script to check image, set up host and create $Imagecommandscript
@@ -1170,7 +1209,7 @@ Preservecachefiles="no"                         # if yes, dont delete cache file
 Capsysadmin="no"                                # option --sys-admin: add capability SYS_ADMIN (deprecated)
 Runfromhost=""                                  # option --runfromhost: add host command to xinitrc
 Runasroot=""                                    # option --runasroot: add command running as root to container setup script
-Workdir=""                                      # option --workdir: set working directory
+Workdir="/tmp"                                  # option --workdir: set working directory
 
 # init and dbus
 Initsystem="tini"                               # options --systemd --openrc --runit --sysvinit --tini --no-init:Init system in container
@@ -1284,7 +1323,8 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
                        Desktopmode="yes" ;;
       -W|--wayland)    Sharewayland="yes"                  # set up wayland environment, regards --desktop
                        Setwaylandenv="yes"
-                       Dbusdaemon="yes" ;;
+                       Dbusdaemon="yes" 
+                       [ "$Nonewprivileges" ] || Nonewprivileges="yes" ;;
                        
      #### Appearance
       -f|--fullscreen) Fullscreen="yes"  ;;                # fullscreen mode for Xephyr and Weston
@@ -1401,7 +1441,7 @@ $Customenvironment"    ;  shift ;;                         # set custom environm
       ##### custom docker options / image name + image command
       --) shift
         while [ $# -gt 0 ] ; do
-          [ -n "${1:-}" ] && [ -z "$Imagename" ] && [ "$(echo "${1:-}" | cut -c1)"  = "-" ]  && Dockeroptions="$Dockeroptions ${1:-}"
+          [ -n "${1:-}" ] && [ -z "$Imagename" ] && [ "$(echo "${1:-}" | cut -c1)"  = "-" ]  && Customdockeroptions="$Customdockeroptions ${1:-}"
           [ -n "${1:-}" ] && [ -z "$Imagename" ] && [ "$(echo "${1:-}" | cut -c1)" != "-" ]  && Imagename="${1:-}" && shift
           [ -n "${1:-}" ] && [ -n "$Imagename" ] && Imagecommand="$Imagecommand$(escapestring "${1:-}") "
           shift
@@ -2114,7 +2154,9 @@ Parsed options: $Parsedoptions"
     ;;
   esac
   
-  Timetosaygoodbye="$Sharefolder/$Timetosaygoodbye"
+  Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo" && $Mksu "mkfifo $Timetosaygoodbyefifo"
+  Timetosaygoodbye="$Sharefolder/$Timetosaygoodbye"         && mkfile $Timetosaygoodbye
+  Pidwatchfifo=$Cachefolder/$Pidwatchfifo                   && $Mksu "mkfifo $Pidwatchfifo" && exec 9<>$Pidwatchfifo  
   Xinitrc="$Cachefolder/$Xinitrc"                           && mkfile $Xinitrc
   Xinitlogfile="$Cachefolder/$Xinitlogfile"                 && mkfile $Xinitlogfile
   Xtermrc="$Cachefolder/$Xtermrc"                           && mkfile $Xtermrc
@@ -2151,6 +2193,10 @@ Parsed options: $Parsedoptions"
   # redirect stdin to named pipe. Named pipe is shared with container and used as stdin of image command in x11docker.CMD.sh
   mkfifo   $Cmdstdinfile
   cat <&0 >$Cmdstdinfile & storepid $! catstdin
+
+  # start watching pids. Compare waitfortheend()
+  echo $$>$Pidwatchfifo
+  watchpidlist & storepid $! watchpidlist
 }
 
 { #### part: create $Hostxenv: Environment variables for host X display
@@ -2302,7 +2348,7 @@ Parsed options: $Parsedoptions"
   You would not have this issue with free nouveau driver on host."
   
       note "Installation of proprietary closed source nvidia driver
-  fails in containers based on musl libc like NixOS an.
+  fails in containers based on musl libc like NixOS and Alpine.
   Installation in openSUSE containers fails with a self-extraction error.
     
   For openSUSE images you can try to create a custom installation 
@@ -2324,6 +2370,7 @@ Parsed options: $Parsedoptions"
   
   You can look here for a driver installer:
     https://www.nvidia.com/Download/index.aspx
+    https://http.download.nvidia.com/
   A direct download URL may be:
    https://http.download.nvidia.com/XFree86/Linux-x86_64/$Nvidiaversion/NVIDIA-Linux-x86_64-$Nvidiaversion.run
   If you got a driver, store it at one of the following locations:
@@ -2964,10 +3011,17 @@ mode=$Screensize
         [ -n "$Screensize" ] && Nxagentoptions="$Nxagentoptions,geometry=$Screensize" 
       }
       # set keyboard layout
-      command -v setxkbmap >/dev/null && { 
-        Nxagentoptions=$Nxagentoptions,keyboard=$(setxkbmap -query | grep rules | rev | cut -d" " -f1 | rev)/$(setxkbmap -query | grep layout | rev | cut -d" " -f1 | rev)
-      } || note "Could not check your keyboard layout due to missing setxkbmap
+      case $Xkblayout in
+        "") # --keymap not set? set layout from host.
+          command -v setxkbmap >/dev/null && { 
+            Nxagentoptions=$Nxagentoptions,keyboard=$(setxkbmap -query | grep rules | rev | cut -d" " -f1 | rev)/$(setxkbmap -query | grep layout | rev | cut -d" " -f1 | rev)
+          } || note "Could not check your keyboard layout due to missing setxkbmap
   If you get mismatching keys, please install setxkbmap."
+        ;;
+        *) # --keymap
+          Nxagentoptions=$Nxagentoptions,keyboard="evdev/$Xkblayout"
+        ;;
+      esac
       Nxagentoptions="$Nxagentoptions$Newdisplay"
       mkfile "$Cachefolder/nxagentoptions"
       echo $Nxagentoptions >> "$Cachefolder/nxagentoptions"
@@ -3001,7 +3055,7 @@ case $dialog in
   pulldown) ;;
   yesnosuspend) 
     kill $pid 
-    touch "'$Timetosaygoodbye'"
+    echo timetosaygoodbye >> '$Timetosaygoodbye'
   ;;
 esac
 ' >> "$NX_CLIENT"
@@ -3073,7 +3127,7 @@ esac
       command -v xclip >/dev/null && {
         echo "#! /bin/bash
 # share clipboard between X servers $Hostdisplay and $Newdisplay
-while [ ! -e '"$Timetosaygoodbye"' ] ; do
+while [ ! -s "$Timetosaygoodbye" ] ; do
     # read content of clipboard of first X server
     D1CLIP=\"\$(env XAUTHORITY=$Hostxauthority xclip -selection clipboard -o -display $Hostdisplay)\"
     # check if clipboard of first X server has changed; if yes, send new content to second X server
@@ -3376,7 +3430,7 @@ WantedBy=multi-user.target
 Description=x11docker watch service
 [Service]
 Type=simple
-ExecStart=/bin/sh -c 'while sleep 1; do systemctl is-active x11docker-startcmd >/dev/null || { su --shell /bin/sh $Benutzer -c touch $Cshare/timetosaygoodbye ; systemctl halt ; } ; [ -e $Cshare/timetosaygoodbye ] && systemctl halt ; done'
+ExecStart=/bin/sh -c 'while sleep 1; do systemctl is-active x11docker-startcmd >/dev/null || { su --shell /bin/sh $Benutzer -c echo timetosaygoodbye >>$Cshare/timetosaygoodbye ; systemctl halt ; } ; [ -s $Cshare/timetosaygoodbye ] && systemctl halt ; done'
 [Install]
 WantedBy=x11docker.target
 " >> $Systemdwatch
@@ -3437,7 +3491,11 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   
       [ "$Benutzeruid" = "0" ]     && Sudouser="yes"
       [ "$Sudouser" = "yes" ]      && Adminusercaps="yes"
-      [ "$Dbusdaemon" = "yes" ]    && Switchcontaineruser="yes" && Nonewprivileges="no"
+      [ "$Dbusdaemon" = "yes" ]    && {
+        Switchcontaineruser="yes"
+        [ "$Nonewprivileges" ] || Nonewprivileges="no"
+      }
+      [ "$Nonewprivileges" ]   || Nonewprivileges="yes"
       
       case $Initsystem in
         none|tini)
@@ -3467,7 +3525,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       case $Initsystem in
         none) ;;
         tini) Dockercommand="$Dockercommand \\
-  --volume $Tinibinary:/tini:ro" ;;
+  --volume $Tinibinary:$Cshare/tini:ro" ;;
   
         systemd)
           Switchcontaineruser="yes"
@@ -3507,24 +3565,28 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       esac
       
       [ "$Switchcontaineruser" = "yes" ] && Switchcontainerusercaps="yes"
-      [ "$Capdropall" = "yes" ] && {
-        [ "$Adminusercaps" = "yes" ] && {
-          Switchcontainerusercaps="yes"
-          Nonewprivileges="no"
-          Dockercommand="$Dockercommand \\
+      case "$Capdropall" in
+        "yes")
+          [ "$Adminusercaps" = "yes" ] && {
+            Switchcontainerusercaps="yes"
+            Nonewprivileges="no"
+            Dockercommand="$Dockercommand \\
   --cap-add CHOWN       --cap-add KILL\\
   --cap-add FSETID      --cap-add FOWNER  --cap-add SETPCAP"
-        }
-        [ "$Switchcontainerusercaps" = "yes" ] && {
-          Dockercommand="$Dockercommand \\
+          }
+          [ "$Switchcontainerusercaps" = "yes" ] && {
+            Dockercommand="$Dockercommand \\
   --cap-add SETUID      --cap-add SETGID  --cap-add DAC_OVERRIDE\\
   --cap-add AUDIT_WRITE"
-        }
-        # option --dbusdaemon: dbus needs CHOWN for XDG_RUNTIME_DIR
-        [ "$Dbusdaemon" = "yes" ] && [ "$Adminusercaps" = "no" ] && Dockercommand="$Dockercommand \\
+          }
+          # option --dbusdaemon: dbus needs CHOWN for XDG_RUNTIME_DIR
+          [ "$Dbusdaemon" = "yes" ] && [ "$Adminusercaps" = "no" ] && Dockercommand="$Dockercommand \\
   --cap-add CHOWN"
-        :
-      } || Nonewprivileges="no"
+        ;;
+        no) Nonewprivileges="no" ;;
+      esac
+      
+      #Nonewprivileges=yes ### TEST seems to work with --systemd --runit --openrc --dbus-system. Some dbus related errors, but not fatal. 
       
       case $Nonewprivileges in
         yes) Dockercommand="$Dockercommand \\
@@ -3532,7 +3594,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
         no) warning "Container runs without --security-opt=no-new-privileges.
   That reduces default x11docker container security hardening.
   This is the case for options:
-    --wayland --dbus-system --sudouser --cap-default
+    --dbus-system --sudouser --cap-default
     --systemd --sysvinit --openrc --runit"
           [ "$Setwaylandenv" = "yes" ] && note "For more restricted Wayland setups 
   including --security-opt=no-new-privileges you can drop option --wayland
@@ -3643,10 +3705,9 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       [ "$Pulseaudio" = "yes" ]        && Dockercommand="$Dockercommand \\
   -v $Pulseaudiosocketdir:/pulse:rw \\
   -v $Cachefolder/pulseclient.conf:/etc/pulse/client.conf:rw"
-      ## option --workdir
-      [ "$Workdir" ] && Dockercommand="$Dockercommand \\
-  --workdir $Workdir" || Dockercommand="$Dockercommand \\
-  --workdir /tmp"
+      ## option --workdir or /tmp
+      Dockercommand="$Dockercommand \\
+  --workdir $Workdir"
       
       # option --env: add custom environment. Only needed here for possible 'docker exec'. Otherwise set in x11docker.CMD.sh
       IFS=$'\n'
@@ -3657,11 +3718,18 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       IFS=$' \t\n'
   
       # add custom docker arguments, imagename and imagecommand
+      [ "$Customdockeroptions" ] && Dockercommand="$Dockercommand \\
+  $Customdockeroptions"
       Dockercommand="$Dockercommand \\
-  $Dockeroptions"
+  --"
       case $Switchcontaineruser in
-        no)       Dockercommand="$Dockercommand  --  $Imagename /bin/sh - $Cshare/x11docker.CMD.sh" ;;   # dockerrc runs containersetup.sh
-        yes)      Dockercommand="$Dockercommand  --  $Imagename /bin/sh - $Cshare/containersetup.sh" ;;  # containersetup.sh runs x11docker.CMD.sh
+        no)       Dockercommand="$Dockercommand $Imagename /bin/sh - $Cshare/x11docker.CMD.sh" ;;   # dockerrc runs containersetup.sh with 'docker exec'
+        yes)      
+          case $Initsystem in
+            tini) Dockercommand="$Dockercommand $Imagename $Cshare/tini -- /bin/sh - $Cshare/containersetup.sh" ;;  # containersetup.sh runs x11docker.CMD.sh
+            *)    Dockercommand="$Dockercommand $Imagename /bin/sh - $Cshare/containersetup.sh" ;;  # containersetup.sh runs x11docker.CMD.sh
+          esac
+        ;;
       esac
     ;;
   esac
@@ -3673,7 +3741,9 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   # run docker
   
   echo "#! /bin/bash"
-  declare -f waitforfilecreation verbose warning note printstdout escapestring
+  declare -f waitforfilecreation rocknroll verbose warning note printstdout escapestring
+  echo "Timetosaygoodbye=$Timetosaygoodbye"
+  echo "Logfifo=$Logfifo"
   [ "$Debug" = "yes" ] && {
     echo "PS4='$DebugPS4'"
     echo "set -x"
@@ -3708,7 +3778,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "}"
   echo ""
   
-  [ "$Tinibinary" ] && echo "Tini=\"/tini --\""
+  [ "$Tinibinary" ] && echo "Tini=\"$Cshare/tini --\""
   case $Noentrypoint in
     yes) echo "Entrypoint=" ;;
     no)
@@ -3953,6 +4023,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   [ "$Debug" = "yes" ] && echo "set -x"
   echo "echo 'x11docker: setup as root in container'"
   echo ""
+  #echo "set -x"
   
   echo "# create some system dirs with needed permissions"
   echo "mkdir -v -p /var/lib/dbus /var/run/dbus"
@@ -4217,8 +4288,9 @@ start() {
   
   echo ":> /x11docker.setupready"
   [ "$Switchcontaineruser" = "yes" ] && {   # if "no", x11docker.CMD.sh is executed in command line $Dockercommand
+    [ "Nonewprivileges" = "no" ] && echo "Exec=exec"
     case $Initsystem in
-      tini|none)             echo "exec /bin/su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh" ;;
+      tini|none)             echo "\$Exec /bin/su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh" ;;
       runit|openrc|sysvinit) echo "exec /sbin/init" ;;
       systemd)
         echo 'Systemd=/lib/systemd/systemd'
@@ -4285,7 +4357,8 @@ start() {
 
   # declaring functions echoes them into xinitrc
   declare -f storepid
-  declare -f mywatch
+  declare -f waitfortheend
+  echo "Timetosaygoodbyefifo=$Timetosaygoodbyefifo"
   declare -f no_xhost 
   declare -f warning 
   declare -f verbose
@@ -4362,7 +4435,7 @@ start() {
       echo "[ '$Xauthentication' = 'no' ] || [ ! -s '$Xclientcookie' ] && unset XAUTHORITY && warning 'X server $Newdisplay runs without cookie authentication.'"
       
       case "$Xserver" in
-        --hostdisplay) ;;
+        --hostdisplay|--nxagent) ;;
         *)
           echo "verbose 'disabling any possible access to new X server possibly granted by xhost'"
           echo "no_xhost"
@@ -4528,7 +4601,7 @@ start() {
   }
   
   echo "touch $Cachefolder/Xready"
-  echo "mywatch 'ls $Timetosaygoodbye 2>/dev/null #xinitrc'"
+  echo "waitfortheend"
 } >> $Xinitrc
 
 { #### part: options --verbose, --stdout,--stderr and x11docker.log
@@ -4615,12 +4688,15 @@ After finish: $Logbackup"
                                       s/^x11docker/${Esc}[32m\0${Esc}[0m/ " >&3 & ;;
       esac
     }
+    
     # options --stdout, --stderr
     [ "$Showstdout" = "yes" ] && {
       waitforfilecontent $Containeridfile infinity
       tail --pid=$$ --retry -n +1 -F $Cmdstdoutlogfile >&6 2>/dev/null
     } & storepid $! tailstdout
-    [ "$Showstderr" = "yes" ] && tail --pid=$$ --retry -n +1 -F $Cmdstderrlogfile >&4 2>/dev/null & storepid $! tailstderr
+    [ "$Showstderr" = "yes" ] && {
+      tail --pid=$$ --retry -n +1 -F $Cmdstderrlogfile >&4 2>/dev/null
+    } & storepid $! tailstderr
 }
 
 { #### part: option '--starter': create desktop starter
@@ -4689,7 +4765,8 @@ $(tail $Xinitlogfile)"
       }
       
       # loop to check for crashing xpra server or client. restart them if needed.
-      while [ ! -e "$Timetosaygoodbye" ] && [ -p "$Logfifo" ] ; do
+      Xpracrashcount="0"
+      while rocknroll ; do
         ps -p $Xpraserverpid >/dev/null 2>&1 || {
           [ -n "$Xpraserverpid" ] && { 
             Xpracrashcount=$((Xpracrashcount + 1))
@@ -4726,6 +4803,7 @@ $(tail $Dockerlogfile)"
           }
         }
         ps -p $Xpraclientpid >/dev/null 2>&1 && kill $Xpraclientpid
+        #[ -n "$Xpraclientpid" ] && [ "$Desktopmode" = "yes" ] && [ "$Xpracrashcount" = "0" ] && saygoodbye ### FIXME does not terminate x11docker
         verbose "starting Xpra client"
         [ -n "$Xpraclientpid" ] && note "Restarting Xpra client."
         $Mksu "env $Hostxenv XPRA_PADDING_COLORS='0,0.2,1' $Xpraclientcommand" >> $Xpraclientlogfile 2>&1 &
@@ -4733,7 +4811,7 @@ $(tail $Dockerlogfile)"
         storepid $Xpraclientpid xpraclient
 
         sleep 1
-        ps -p $Xpraclientpid >/dev/null 2>&1 && mywatch "ls $Timetosaygoodbye 2>/dev/null; ps -p $Xpraclientpid -o pid ; ps -p $Xpraserverpid -o pid #xpra"
+        ps -p $Xpraclientpid >/dev/null 2>&1 && mywatch "ps -p $Xpraclientpid -o pid ; ps -p $Xpraserverpid -o pid #xpra"
         sleep 1
       done & storepid $! xpraloop
     ;;
@@ -4752,30 +4830,22 @@ $(tail $Dockerlogfile)"
     --weston|--kwin)
       {  # catch closing compositor window
         sleep 1
-        ps -p $Compositorpid >/dev/null 2>&1 && {
-          mywatch "ls $Timetosaygoodbye 2>/dev/null; ps -p $Compositorpid -o pid #compositor" ||:
-        } || error "Startup of compositor failed.
+        ps -p $Compositorpid >/dev/null 2>&1 && waitfortheend $Compositorpid || error "Startup of compositor failed.
   Last lines of compositor log:
 $(tail $Compositorlogfile)"
-        saygoodbye
-      } & storepid $! mywatch
+      } & storepid $! waitfortheend
     ;;
     --weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland)
       {  # catch closing X server or compositor window
         sleep 1
-        ps -p $Compositorpid >/dev/null 2>&1 && {
-          mywatch "ls $Timetosaygoodbye $Newxsocket 2>/dev/null ; ps -p $Compositorpid -o pid #compositor+Xserver" ||:
-        } || error "Startup of compositor or X failed.
+        ps -p $Compositorpid >/dev/null 2>&1 && waitfortheend $Compositorpid || error "Startup of compositor or X failed.
   Last lines of compositor log:
 $(tail $Compositorlogfile)"
-        saygoodbye
-      } & storepid $! mywatch
+      } & storepid $! waitfortheend
     ;;
     *)
-      {  # catch closing X server
-        mywatch "ls $Timetosaygoodbye $Newxsocket 2>/dev/null #Xserver"
-        saygoodbye
-      } & storepid $! mywatch
+      # catch closing X server
+      waitfortheend & storepid $! waitfortheend
     ;;
   esac
 
@@ -4817,10 +4887,7 @@ $(tail $Cmdstderrlogfile)"
         storepid $Containerpid container
         
         # wait for docker until it terminates. bash builtin wait does not work in this case
-        ps -p $Containerpid >/dev/null 2>&1 && mywatch "ls $Timetosaygoodbye 2>/dev/null; ps -p $Containerpid -o pid #container" 
-        :
-      } || { 
-        error "docker startup was not successfull.
+        ps -p $Containerpid >/dev/null 2>&1 && waitfortheend $Containerpid || error "docker startup was not successfull.
   Maybe you mistyped your password, or image does not exist.
   Or the chosen password frontend does not match your setup;
   you can try option --pw with e.g. --pw=su or --pw=sudo.
@@ -4829,7 +4896,7 @@ $(tail $Dockerlogfile)"
       }
     ;;
     
-    exe) 
+    exe) # --exe
       # run host application without docker. includes --xonly
       { echo "#! /bin/bash"
         echo "export $Newxenv"
@@ -4837,15 +4904,13 @@ $(tail $Dockerlogfile)"
           echo "export HOME='$Benutzerhosthomefolder'"
           echo "cd '$Benutzerhosthomefolder'"
         }
-        echo "exec >&3- >&4- >&6- >&7-"
+        echo "exec >&3- >&4- >&6- >&7- >&9-"
         echo "exec $Hostexe <$Cmdstdinfile >>$Cmdstdoutlogfile 2>>$Cmdstderrlogfile"
       } >> $Imagecommandscript
       cat $Imagecommandscript | nl -ba >> $Dockerlogfile
       $Mksubenutzer "bash $Imagecommandscript" & Hostexepid=$! && storepid $! hostexe
       sleep 1 # wait for possible startup failure
-      ps -p $Hostexepid >/dev/null 2>&1 && {
-        mywatch "ls $Timetosaygoodbye 2>/dev/null; ps -p $Hostexepid -o pid #hostexe" ||:
-      } || error "Startup of '$Hostexe' failed.
+      ps -p $Hostexepid >/dev/null 2>&1 && waitfortheend $Hostexepid || error "Startup of '$Hostexe' failed.
   Last lines of log:
 $(tail $Dockerlogfile)"
     ;;
@@ -4856,16 +4921,16 @@ $(tail $Dockerlogfile)"
 { #### part: start X server
   case $Xserver in
     --xorg|--xpra|--xephyr|--xdummy|--xvfb|--xwayland|--nxagent)
-      $Mksu                                              "xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1" 
+      $Mksu "exec                                         xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1" 
     ;;
     --hostdisplay|--hostwayland)
-      $Mksu                                              "bash  $Xinitrc                       >> $Xinitlogfile  2>&1 " 
+      $Mksu "exec                                         bash  $Xinitrc                       >> $Xinitlogfile  2>&1 " 
     ;;
     --xpra-xwayland|--xdummy-xwayland)
       [ -z "$Hostwaylandsocket" ] || { [ "$Scaling" != "0" ] && [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] ;} && {
         # Weston is needed for Xwayland if no Wayland is running already, and also 
         # if option scale has a value smaller than 1 to provide a virtual display larger than monitor
-        $Mksu "$Compositorcommand                                                              >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
+        $Mksu "exec $Compositorcommand                                                         >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
         waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
         waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                       || error "Weston startup failed. Can not run $Xserver.
   Last lines of weston log:
@@ -4874,16 +4939,16 @@ $(tail $Compositorlogfile)"
         # hide weston window
         $Mksu "xdotool windowunmap 0x$(printf '%x\n' $(cat $Compositorlogfile | grep 'window id' | rev | cut -d' ' -f1 | rev))"
       }
-      $Mksu "env WAYLAND_DISPLAY=$Newwaylandsocket           xinit $Xinitrc -- $Xcommand       >> $Xinitlogfile  2>&1 " 
+      $Mksu "exec env WAYLAND_DISPLAY=$Newwaylandsocket   xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
     ;;
     --weston-xwayland)
-      $Mksu "$Compositorcommand                                                                >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
+      $Mksu "exec $Compositorcommand                                                           >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
       waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
       waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                         || error "Weston startup failed. Can not run $Xserver.
   Last lines of weston log:
 $(tail $Compositorlogfile)"
       storepid $(cat $Compositorpidfile) compositor
-      $Mksu "env WAYLAND_DISPLAY=$Newwaylandsocket           xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
+      $Mksu "exec env WAYLAND_DISPLAY=$Newwaylandsocket   xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
     ;;
     --weston)
       $Mksu "$Compositorcommand                                                                >> $Compositorlogfile 2>&1  & echo \$! >>$Compositorpidfile"
@@ -4892,10 +4957,9 @@ $(tail $Compositorlogfile)"
   Last lines of weston log:
 $(tail $Compositorlogfile)"
       storepid $(cat $Compositorpidfile) compositor
-      $Mksu                                              "bash  $Xinitrc                       >> $Xinitlogfile  2>&1" 
+      $Mksu "exec                                         bash  $Xinitrc                       >> $Xinitlogfile  2>&1" 
     ;;
     --kwin-xwayland)
-      Waitforgoodbye="mywatch 'ls $Timetosaygoodbye 2>/dev/null'" 
       $Mksu "$Compositorcommand                                                                >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
       waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
       waitforlogentry kwin   $Compositorlogfile "X-Server"                                     || error "Kwin startup failed. Can not run $Xserver.
@@ -4922,8 +4986,11 @@ $(tail $Compositorlogfile)"
 
 ######### ToDo notes for development
 todo() {
+# --cleanup: >&9- issue in finish()
+# xpraloop: saygoodbye does not terminate
 # check password frontend check: runs gksu although sudo is available
 # --hostuser: mkfifo to wayland socket possible?
+# new option --no-new-privileges?
 
 # --group-add: compare host and container GID? warn if group misses in container, or create it?
 # BUG opensuse/arch: issues with x11docker/fluxbox, background missing, sometimes no context menu. where is the difference?
