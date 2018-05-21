@@ -354,6 +354,7 @@ traperror() {           # trap ERR: --debug: Output for 'set -o errtrace'
   ${3:-} - ${5:-}" 
 }
 error() {               # show error messages on stderr and exit
+  sleep 1
   Message="$*
   
   Type 'x11docker --help' for usage information
@@ -377,7 +378,6 @@ echo -e "
   [ "$Logfifo" ] && echo "x11docker ERROR: $Message
 " >&7
 
-  saygoodbye
   finish 1
 }
 warning() {             # show warning messages
@@ -497,14 +497,17 @@ x11docker --cleanup"
     kill $Catlogfilepid
   }
   
-  exec >&3- >&4- >&6- >&7- >&9-
+  # close additional file descriptors
+  for i in 3 4 6 7 9; do
+    { >&$i ;} 2>/dev/null && exec >&$i- 
+  done
   [ "$Logfifo" ] && rm "$Logfifo"
 
   [ "$Preservecachefiles" = "no" ] && echo "$Cachefolder" | grep -q .cache && echo "$Cachefolder" | grep -q x11docker && [ "x11docker" != "$(basename "$Cachefolder")" ] && rm -f -R "$Cachefolder"
   exit ${1:-0}
 }
 saygoodbye() {          # create file signaling watching processes to terminate
-  verbose "time to say goodbye"
+  verbose "time to say goodbye $*"
   [ -e "$Sharefolder" ] && {
     echo timetosaygoodbye >> $Timetosaygoodbye
     echo timetosaygoodbye >> $Timetosaygoodbyefifo
@@ -539,7 +542,7 @@ watchpidlist() {        # watch list of important pids
     }
     for Pid in $Pidwatchlist; do
       #ps -p $Pid >/dev/null 2>&1 || saygoodbye
-      [ -e /proc/$Pid ] || saygoodbye
+      [ -e /proc/$Pid ] || saygoodbye "(watchpidlist $Pid)"
     done
   done
 }
@@ -1066,7 +1069,7 @@ Customdockeroptions=""                                # custom options for "dock
 # docker variables
 Containername=""                                # generated container name
 Containerpid=""                                 # container PID
-Nonewprivileges=""                              # docker run option --security-opt=no-new-privileges. Default: yes. Disabled by options like --cap-default, --sudouser, --dbus-system
+Nonewprivileges="yes"                           # docker run option --security-opt=no-new-privileges. Default: yes. Disabled by options --cap-default and --sudouser.
 
 # docker related files
 Dockerrc=dockerrc                               # generated script to check image, set up host and create $Imagecommandscript
@@ -1323,8 +1326,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
                        Desktopmode="yes" ;;
       -W|--wayland)    Sharewayland="yes"                  # set up wayland environment, regards --desktop
                        Setwaylandenv="yes"
-                       Dbusdaemon="yes" 
-                       [ "$Nonewprivileges" ] || Nonewprivileges="yes" ;;
+                       Dbusdaemon="yes" ;;
                        
      #### Appearance
       -f|--fullscreen) Fullscreen="yes"  ;;                # fullscreen mode for Xephyr and Weston
@@ -3355,7 +3357,7 @@ done
   Benutzerpasswdentry="$Benutzer:x:$Benutzeruid:$Benutzergid:$Benutzer,,,:$Benutzerhome:/bin/sh"
 }
 
-{ #### part: check tini binary; create init service files (options --tini, --systemd, --runit, --openrc)
+{ #### part: create init service files (options --systemd, --runit, --openrc) and check tini binary (--tini).
   case $Initsystem in
     none) ;;
     tini) 
@@ -3491,11 +3493,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   
       [ "$Benutzeruid" = "0" ]     && Sudouser="yes"
       [ "$Sudouser" = "yes" ]      && Adminusercaps="yes"
-      [ "$Dbusdaemon" = "yes" ]    && {
-        Switchcontaineruser="yes"
-        [ "$Nonewprivileges" ] || Nonewprivileges="no"
-      }
-      [ "$Nonewprivileges" ]   || Nonewprivileges="yes"
+      [ "$Dbusdaemon" = "yes" ]    && Switchcontainerusercaps="yes"
       
       case $Initsystem in
         none|tini)
@@ -3529,11 +3527,11 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   
         systemd)
           Switchcontaineruser="yes"
-          Nonewprivileges="no"
           Sharecgroup="yes"
           Dockercommand="$Dockercommand \\
-  --stop-signal SIGRTMIN+3\\
+  --stop-signal SIGRTMIN+3 \\
   --cap-add FSETID      --cap-add FOWNER  --cap-add SETPCAP \\
+  --cap-add SYS_BOOT \\
   -v $Systemdtarget:/etc/systemd/system/x11docker.target:ro \\
   -v $Systemdstartcmd:/etc/systemd/system/x11docker-startcmd.service:ro \\
   -v $Systemdwatch:/etc/systemd/system/x11docker-watch.service:ro \\
@@ -3543,7 +3541,6 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
         
         runit)
           Switchcontaineruser="yes"
-          Nonewprivileges="no"
           Dockercommand="$Dockercommand \\
   --stop-signal HUP     --env VIRTUALIZATION=docker \\
   --cap-add SYS_BOOT    --cap-add KILL"
@@ -3551,14 +3548,12 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
         
         openrc)
           Switchcontaineruser="yes"
-          Nonewprivileges="no"
           Dockercommand="$Dockercommand \\
   --cap-add SYS_BOOT    --cap-add KILL"
         ;;
         
         sysvinit)
           Switchcontaineruser="yes"
-          Nonewprivileges="no"
           Dockercommand="$Dockercommand \\
   --cap-add SYS_BOOT    --cap-add KILL"
         ;;
@@ -3584,24 +3579,6 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   --cap-add CHOWN"
         ;;
         no) Nonewprivileges="no" ;;
-      esac
-      
-      #Nonewprivileges=yes ### TEST seems to work with --systemd --runit --openrc --dbus-system. Some dbus related errors, but not fatal. 
-      
-      case $Nonewprivileges in
-        yes) Dockercommand="$Dockercommand \\
-  --security-opt no-new-privileges" ;;
-        no) warning "Container runs without --security-opt=no-new-privileges.
-  That reduces default x11docker container security hardening.
-  This is the case for options:
-    --dbus-system --sudouser --cap-default
-    --systemd --sysvinit --openrc --runit"
-          [ "$Setwaylandenv" = "yes" ] && note "For more restricted Wayland setups 
-  including --security-opt=no-new-privileges you can drop option --wayland
-  and use one of options '--weston', '--kwin' or '--hostwayland'.
-  QT5 applications also need options '--dbus  --env QT_QPA_PLATFORM=wayland'.
-  But GTK3 applications must run without option '--dbus'."
-        ;;
       esac
   
       # SELinux restrictions for containers must be disabled to allow access to X socket. Flags z or Z do not help.
@@ -3775,6 +3752,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "  Imagecommand=\"\$(docker inspect --format='{{.Config.Cmd}}' $Imagename)\""
   echo "  Imagecommand=\"\${Imagecommand#[}\""
   echo "  Imagecommand=\"\${Imagecommand%]}\""
+  echo "  Imagecommand=\"\${Imagecommand#/bin/sh -c }\""
   echo "}"
   echo ""
   
@@ -4095,6 +4073,14 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     no) echo "rm /etc/sudoers" ;;
   esac
   echo ""
+  
+  # disable possible custom PAM setups that could allow root in container
+  [ "$Sudouser" = "no" ] && {
+    echo "# restrict PAM configuration of su and sudo"
+    echo "echo 'auth sufficient pam_rootok.so' > /etc/pam.d/su  # allow root to switch user without a password" 
+    echo "rm /etc/pam.d/sudo"
+    echo ""
+  }
 
   [ "$Nvidiadriver" ] && {
     echo "Installationwillsucceed=maybe"
@@ -4122,11 +4108,11 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     echo "  modprobe and xz are needed by nvidia installer."
     echo "  Install them in image to speed up container startup."
     echo "  Will try to install them. That slows down container startup.'"
-    echo "    apt-get update && apt-get install -y     kmod xz-utils  # debian"         #ok
-    echo "    dnf install -y kmod xz || yum install -y kmod xz        # fedora, centos" #ok
-    echo "    xbps-install -Sy                         kmod xz        # void"           #ok
-    echo "    pacman -Sy --noconfirm                   kmod xz        # arch"           #ok
-    echo "    emerge --ask n                           kmod xz        # gentoo"         #ok
+    echo "    apt-get update && apt-get install -y     kmod xz-utils  # debian"
+    echo "    dnf install -y kmod xz || yum install -y kmod xz        # fedora, centos"
+    echo "    xbps-install -Sy                         kmod xz        # void"
+    echo "    pacman -Sy --noconfirm                   kmod xz        # arch"
+    echo "    emerge --ask n                           kmod xz        # gentoo"
     echo "    zypper --non-interactive install         kmod xz        # opensuse"       #ok, but nvidia-installer extraction fails
     echo "  }"
     echo "  echo 'x11docker WARNING: Installing proprietary closed source NVIDIA driver $Nvidiaversion. That slows down container startup.'"
@@ -4143,7 +4129,6 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       echo "rm /etc/dbus-1/system.d/org.freedesktop.systemd1.conf /usr/share/dbus-1/system-services/org.freedesktop.systemd1.service /usr/share/dbus-1/services/org.freedesktop.systemd1.service"
     ;;
   esac
-
   case $Initsystem in
     tini|none)
       case $Dbusdaemon in
@@ -4156,11 +4141,15 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
           echo "done"
           [ "$Nonewprivileges" = "yes" ] && {
             echo "# support for dbus daemon with no-new-privileges"
-            echo "echo 'x11docker: starting polkitd'"
-            echo "/usr/lib/policykit-1/polkitd &"
-            echo "echo 'x11docker: starting accounts-daemon'"
-            echo "/usr/lib/accountsservice/accounts-daemon &"
-          }
+            echo "[ -x /usr/lib/policykit-1/polkitd ] && {"
+            echo "  echo 'x11docker: starting polkitd'"
+            echo "  /usr/lib/policykit-1/polkitd &"
+            echo "}"
+            echo "[ -x /usr/lib/accountsservice/accounts-daemon ] && {"
+            echo "  echo 'x11docker: starting accounts-daemon'"
+            echo "  /usr/lib/accountsservice/accounts-daemon &"
+            echo "}"
+          } ||:
         ;;
       esac
     ;;
@@ -4220,8 +4209,6 @@ start() {
       echo "rc-update add x11docker.service default"
       echo "echo 'x11docker: enabling dbus service'"
       echo "rc-update add dbus default"
-      echo "# disable getty in inittab" 
-      echo "sed -i 's/.*getty/##getty disabled by x11docker## \0/' /etc/inittab"
       echo "# tell openrc that it runs in docker"
       echo "sed -e 's/#rc_sys=\"\"/rc_sys=\"docker\"/g' -i /etc/rc.conf"
     ;;
@@ -4230,11 +4217,10 @@ start() {
       echo "sed -i '/exit 0/d' /etc/rc.local"
       echo "echo 'su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh || echo \"x11docker: Exit code \$?\"' >> /etc/rc.local"
       echo "echo 'shutdown -hP 0' >> /etc/rc.local"
-      echo "# disable getty in inittab" 
-      echo "sed -i 's/.*getty/##getty disabled by x11docker## \0/' /etc/inittab"
     ;;  
   esac
-  echo ""
+  echo "# disable getty in inittab" 
+  echo "sed -i 's/.*getty/##getty disabled by x11docker## \0/' /etc/inittab"
 
   [ "$Langwunsch" ] && {
     echo "echo \"x11docker: Searching for language locale matching $Langwunsch\""
@@ -4288,10 +4274,13 @@ start() {
   
   echo ":> /x11docker.setupready"
   [ "$Switchcontaineruser" = "yes" ] && {   # if "no", x11docker.CMD.sh is executed in command line $Dockercommand
-    [ "Nonewprivileges" = "no" ] && echo "Exec=exec"
     case $Initsystem in
-      tini|none)             echo "\$Exec /bin/su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh" ;;
-      runit|openrc|sysvinit) echo "exec /sbin/init" ;;
+      tini|none)
+        echo "exec /bin/su - -s /bin/sh $Benutzer $Cshare/x11docker.CMD.sh" 
+      ;;
+      runit|openrc|sysvinit) 
+        echo "exec /sbin/init"
+      ;;
       systemd)
         echo 'Systemd=/lib/systemd/systemd'
         echo '[ -e "$Systemd" ] || Systemd=/bin/systemd'
@@ -4874,7 +4863,7 @@ $(tail $Compositorlogfile)"
       [ -s "$Containerpidfile" ] && { 
         Containerpid=$(cat $Containerpidfile)
         ps -p $Containerpid >/dev/null 2>&1 || {
-          [ "$Xserver" = "--nothing" ] && saygoodbye || {
+          [ "$Xserver" = "--nothing" ] && saygoodbye "(--nothing)" || {
             error "Docker startup seems to have failed! 
 
   Last lines of docker.log:
@@ -4915,7 +4904,7 @@ $(tail $Dockerlogfile)"
 $(tail $Dockerlogfile)"
     ;;
   esac
-  saygoodbye
+  saygoodbye "(x11docker-run)"
 } & storepid $! x11docker-run
 
 { #### part: start X server
@@ -4986,15 +4975,15 @@ $(tail $Compositorlogfile)"
 
 ######### ToDo notes for development
 todo() {
-# --cleanup: >&9- issue in finish()
-# xpraloop: saygoodbye does not terminate
+# --systemd now needs SYS_BOOT. check for content of $Timetosaygoodbye fails? watch service fails?
 # check password frontend check: runs gksu although sudo is available
-# --hostuser: mkfifo to wayland socket possible?
-# new option --no-new-privileges?
-
-# --group-add: compare host and container GID? warn if group misses in container, or create it?
+# xpraloop: saygoodbye does not terminate
 # BUG opensuse/arch: issues with x11docker/fluxbox, background missing, sometimes no context menu. where is the difference?
 
+# --no-init no-new-privileges switchuser: exec fails, but why? currently not switching user, issue cannot happen.
+# replace su with capsh? (missing in alpine) But how to trigger logind?
+# --hostuser: mkfifo to wayland socket possible?
+# --group-add: compare host and container GID? warn if group misses in container, or create it?
 # work on traperror(). 'set -u' possible without a stop?
 # --update: regard possible location in /opt
 # escape more option arguments: custom docker options, --workdir, --user, --homedir, --sharedir, --wm, --lang, --xhost

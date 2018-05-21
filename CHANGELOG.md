@@ -10,8 +10,14 @@ Project website: https://github.com/mviereck/x11docker
  - Logfile handling with fifo/named pipe.
  - `--auto`: Tightened dependency check.
  - Improved process watching using less resources. Faster shutdown.
- - `--wayland`: restricted dbus setup with `--security-opt=no-new-privileges`
  - Some code cleanup.
+ - Remove `/bin/sh -c` from extracted CMD image command.
+ - `--security-opt=no-new-privileges` for init systems and `--dbus-system`.
+   Now default for all options except `--sudouser` and `--cap-default`.
+ - Restrict or delete `/etc/pam.d/su` and delete `/etc/pam.d/sudo`.
+   Avoids security leak that would allow switching to root in container
+   if `PAM` configuration allows it and capabilities for `su` are given.
+ - `--systemd`: Added capability `SYS_BOOT`. May be removed again later.
 ### Fixed
  - Don't set `-title` in `Xephyr` command. Xephyr bug: Releasing keyboard
    and mouse after grab (ctrl+shift) does not work with `-title`. 
