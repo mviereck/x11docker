@@ -17,7 +17,6 @@ Project website: https://github.com/mviereck/x11docker
  - Restrict or delete `/etc/pam.d/su` and delete `/etc/pam.d/sudo`.
    Avoids security leak that would allow switching to root in container
    if `PAM` configuration allows it and capabilities for `su` are given.
- - `--systemd`: Added capability `SYS_BOOT`. May be removed again later.
 ### Fixed
  - Don't set `-title` in `Xephyr` command. Xephyr bug: Releasing keyboard
    and mouse after grab (ctrl+shift) does not work with `-title`. 
