@@ -7,22 +7,25 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 ## [Unreleased]
 ### Changed
+ - `--security-opt=no-new-privileges` for init systems and `--dbus-system`.
+   Now default for all options except `--sudouser` and `--cap-default`.
+ - `--dbus-system` and `init` system options: Run all except a few dbus
+   system services manually and show security warning message. Manual
+   start needed due to `no-new-privileges`, polkit setuid helper fails.
+ - Minimize or delete `/etc/pam.d/su` and delete `/etc/pam.d/sudo`.
+   Avoids security leak that would allow switching to root in container
+   if `PAM` configuration allows it and capabilities for `su` are given.
+ - Remove `/bin/sh -c` from extracted CMD image command.
  - Logfile handling with fifo/named pipe.
  - `--auto`: Tightened dependency check.
  - Improved process watching using less resources. Faster shutdown.
  - Some code cleanup.
- - Remove `/bin/sh -c` from extracted CMD image command.
- - `--security-opt=no-new-privileges` for init systems and `--dbus-system`.
-   Now default for all options except `--sudouser` and `--cap-default`.
- - Restrict or delete `/etc/pam.d/su` and delete `/etc/pam.d/sudo`.
-   Avoids security leak that would allow switching to root in container
-   if `PAM` configuration allows it and capabilities for `su` are given.
 ### Fixed
  - Don't set `-title` in `Xephyr` command. Xephyr bug: Releasing keyboard
    and mouse after grab (ctrl+shift) does not work with `-title`. 
    [(#44)](https://github.com/mviereck/x11docker/issues/44)
- - `--nxagent`: fixed keyboard layout issue, don't use setxkbmap.
-   Regard `--keymap`.
+ - `--nxagent`: Fixed keyboard layout issue, don't use setxkbmap.
+ - `--nxagent`:  Regard `--keymap`.
  - `--exe`: Don't pass file descriptors to host executeable.
  - `--wayland` Works with prissy GTK3 applications (e.g. xfce4-terminal) again,
    needed user switching in `--dbus-system` for unknown reasons.
