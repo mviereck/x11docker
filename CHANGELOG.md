@@ -26,9 +26,11 @@ Project website: https://github.com/mviereck/x11docker
    [(#44)](https://github.com/mviereck/x11docker/issues/44)
  - `--nxagent`: Fixed keyboard layout issue, don't use setxkbmap.
  - `--nxagent`:  Regard `--keymap`.
+ - `--nxagent`: Removed extension Composite, caused some issues.
  - `--exe`: Don't pass file descriptors to host executeable.
  - `--wayland` Works with prissy GTK3 applications (e.g. xfce4-terminal) again,
    needed user switching in `--dbus-system` for unknown reasons.
+ - `--showid` failed with sudo due to missing file descriptors. Using mkfifo now.
    
 ## [4.2.1](https://github.com/mviereck/x11docker/releases/tag/v4.2.1) - 2018-05-10
 ## Added

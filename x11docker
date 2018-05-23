@@ -428,7 +428,7 @@ finish() {              # trap EXIT routine to clean up background processes and
           compositor)
             ps -p $Pid | grep -E 'weston|kwin_wayland' >/dev/null && kill $Pid
           ;;
-          x11docker-run|waitfortheend|xpraloop|watchpidlist)
+          x11docker-run|waitfortheend|xpraloop|watchpidlist|watchfifo)
             ps -p $Pid | grep x11docker >/dev/null                && kill $Pid
           ;;
           tailstdout|tailstderr)
@@ -544,6 +544,30 @@ watchpidlist() {        # watch list of important pids
       #ps -p $Pid >/dev/null 2>&1 || saygoodbye
       [ -e /proc/$Pid ] || saygoodbye "(watchpidlist $Pid)"
     done
+  done
+}
+watchwarningfifo() {    # watch for warning messages out of container or dockerrc
+  # FIXME needs improvements. reads only one line, further get lost. sometimes getting empty line
+  local Line=
+  while rocknroll ; do
+    IFS= read -r Line <$Warningfifo
+    [ "$Line" ] && warning "$Line"
+  done
+}
+watchnotefifo() {       # watch for note messages out of container or dockerrc
+  # FIXME needs improvements. reads only one line, further get lost. sometimes getting empty line
+  local Line=
+  while rocknroll ; do
+    IFS= read -r Line <$Notefifo
+    [ "$Line" ] && note "$Line"
+  done
+}
+watchstdoutfifo() {     # watch for stdout messages out of container or dockerrc
+  # FIXME needs improvements. reads only one line, further get lost. sometimes getting empty line
+  local Line=
+  while rocknroll ; do
+    IFS= read -r Line <$Stdoutfifo
+    [ "$Line" ] && printstdout "$Line"
   done
 }
 rocknroll() {           # check if x11docker is still running
@@ -1020,6 +1044,9 @@ Timetosaygoodbye=timetosaygoodbye               # file giving term signal to all
 Timetosaygoodbyefifo=timetosaygoodbye.fifo
 Pidwatchfifo=pidwatchfifo
 Pidwatchlist=""
+Warningfifo=warning.fifo
+Notefifo=note.fifo
+Stdoutfifo=stdout.fifo
 
 # x11docker log 
 Logfile=""
@@ -2159,7 +2186,10 @@ Parsed options: $Parsedoptions"
   
   Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo" && $Mksu "mkfifo $Timetosaygoodbyefifo"
   Timetosaygoodbye="$Sharefolder/$Timetosaygoodbye"         && mkfile $Timetosaygoodbye
-  Pidwatchfifo=$Cachefolder/$Pidwatchfifo                   && $Mksu "mkfifo $Pidwatchfifo" && exec 9<>$Pidwatchfifo  
+  Pidwatchfifo="$Cachefolder/$Pidwatchfifo"                 && $Mksu "mkfifo $Pidwatchfifo" && exec 9<>$Pidwatchfifo  
+  Warningfifo="$Sharefolder/$Warningfifo"                   && $Mksu "mkfifo $Warningfifo && chmod 666 $Warningfifo"
+  Notefifo="$Sharefolder/$Notefifo"                         && $Mksu "mkfifo $Notefifo    && chmod 666 $Notefifo"
+  Stdoutfifo="$Sharefolder/$Stdoutfifo"                     && $Mksu "mkfifo $Stdoutfifo  && chmod 666 $Stdoutfifo"
   Xinitrc="$Cachefolder/$Xinitrc"                           && mkfile $Xinitrc
   Xinitlogfile="$Cachefolder/$Xinitlogfile"                 && mkfile $Xinitlogfile
   Xtermrc="$Cachefolder/$Xtermrc"                           && mkfile $Xtermrc
@@ -2188,18 +2218,22 @@ Parsed options: $Parsedoptions"
 
   Logfile="$Sharefolder/x11docker.log"                      && mkfile $Logfile
   
-  Cmdstdinfile="$Sharefolder/$Cmdstdinfile"
+  Cmdstdinfile="$Sharefolder/$Cmdstdinfile"                 && $Mksu "mkfifo $Cmdstdinfile"
   Cmdstdoutlogfile="$Sharefolder/$Cmdstdoutlogfile"         && mkfile $Cmdstdoutlogfile 666
   Cmdstderrlogfile="$Sharefolder/$Cmdstderrlogfile"         && mkfile $Cmdstderrlogfile 666
   mkfile "$Sharefolder/environment"
   
   # redirect stdin to named pipe. Named pipe is shared with container and used as stdin of image command in x11docker.CMD.sh
-  mkfifo   $Cmdstdinfile
   cat <&0 >$Cmdstdinfile & storepid $! catstdin
 
   # start watching pids. Compare waitfortheend()
   echo $$>$Pidwatchfifo
   watchpidlist & storepid $! watchpidlist
+  
+  # start watching for warning out of container
+  watchwarningfifo & storepid $! watchfifo
+  watchnotefifo    & storepid $! watchfifo
+  watchstdoutfifo  & storepid $! watchfifo
 }
 
 { #### part: create $Hostxenv: Environment variables for host X display
@@ -2681,8 +2715,6 @@ fi
   case $Xserver in
     --nxagent)
       { [ "$Sharehostipc" = "yes" ] || [ "$X11dockermode" = "exe" ] ; } && Xserveroptions="$Xserveroptions -shmem -shpix" || Xserveroptions="$Xserveroptions -noshmem -noshpix"
-      Xserveroptions="$Xserveroptions \\
-  +extension Composite"
     ;;
     *)
       # general X server options
@@ -3007,6 +3039,7 @@ mode=$Screensize
       export NXAGENT_KEYSTROKEFILE="$Cachefolder/nx_keys"
       Xcommand="$(command -v nxagent) $Newdisplay $Xserveroptions $Nxagentoptions \\
   -keystrokefile $NXAGENT_KEYSTROKEFILE"
+#      Xcommand="$(echo $Xcommand | sed 's/+extension Composite.*//')"
       # create file for additional nxagent options
       Nxagentoptions="nx/nx"
       [ "$Shareclipboard" = "yes" ] && Nxagentoptions="$Nxagentoptions,clipboard=both" || Nxagentoptions="$Nxagentoptions,clipboard=none"
@@ -3726,9 +3759,12 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   # run docker
   
   echo "#! /bin/bash"
-  declare -f waitforfilecreation rocknroll verbose warning note printstdout escapestring
+  declare -f waitforfilecreation rocknroll escapestring
   echo "Timetosaygoodbye=$Timetosaygoodbye"
   echo "Logfifo=$Logfifo"
+  echo "exec 3<>$Warningfifo"
+  echo "exec 4<>$Notefifo"
+  echo "exec 6<>$Stdoutfifo"
   [ "$Debug" = "yes" ] && {
     echo "PS4='$DebugPS4'"
     echo "set -x"
@@ -3750,7 +3786,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "  waitforfilecreation $Cachefolder/pullready"
   echo "  docker inspect --type=image $Imagename > /dev/null 2>&1 || {"
   echo "    echo ''"
-  echo "    echo \"ERROR: Image '$Imagename' not found locally and not pulled from docker hub. \" >&2"
+  echo "    echo \"ERROR: Image '$Imagename' not found locally and not pulled from docker hub.\" >&3"
   echo "    exit 1"
   echo "  }"
   echo "}"  
@@ -3762,7 +3798,6 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "  Imagecommand=\"\${Imagecommand%]}\""
   echo "  Imagecommand=\"\${Imagecommand#/bin/sh -c }\""
   echo "}"
-  echo ""
   
   [ "$Tinibinary" ] && echo "Tini=\"$Cshare/tini --\"" || echo "Tini="
   case $Noentrypoint in
@@ -3776,26 +3811,23 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       case $Initsystem in
         systemd|sysvinit|runit|openrc)
           echo "echo \"\$Entrypoint\" | grep -qE '/init|/systemd' && {"
-          echo "  note \"There seems to be an init system in ENTRYPOINT of image:"
-          echo "  \$Entrypoint"
-          echo "  Will disable it as x11docker already runs an init with option --$Initsystem."
-          echo "  To allow this ENTRYPOINT, run x11docker with option --no-init.\""
+          echo "  echo \"There seems to be an init system in ENTRYPOINT of image: \$Entrypoint. \
+Will disable it as x11docker already runs an init with option --$Initsystem. \
+To allow this ENTRYPOINT, run x11docker with option --no-init.\" >&4"
           echo "  Entrypoint="
           echo "}"
         ;;
         tini)
           echo "echo \"\$Entrypoint\" | grep -qE '/tini|/init|/systemd' && {"
-          echo "  note \"There seems to be an init system in ENTRYPOINT of image:"
-          echo "  \$Entrypoint"
-          echo "  x11docker will run this instead of tini from host."
-          echo "  You can disable this ENTRYPOINT with option --no-entrypoint.\""
+          echo "  echo \"There seems to be an init system in ENTRYPOINT of image: \$Entrypoint. \
+x11docker will run this instead of tini from host. \
+You can disable this ENTRYPOINT with option --no-entrypoint.\" >&4"
           echo "  Tini="
           echo "}"
         ;;
         none)
           echo "echo \"\$Entrypoint\" | grep -qE '/tini|/init|/systemd' && {"
-          echo "  note \"There seems to be an init system in ENTRYPOINT of image:"
-          echo "  \$Entrypoint\""
+          echo "  echo \"There seems to be an init system in ENTRYPOINT of image: \$Entrypoint\" >&4"
           echo "}"
         ;;
       esac
@@ -3803,7 +3835,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   esac
   echo ""
 
-  echo "[ -z \"\$Imagecommand\$Entrypoint\" ] && echo 'x11docker WARNING: No image command specified and no CMD or ENTRYPOINT found in image.'"
+  echo "[ -z \"\$Imagecommand\$Entrypoint\" ] && echo 'No image command specified and no CMD or ENTRYPOINT found in image.' >&3"
   echo ""
   
   #### create x11docker.CMD.sh ####
@@ -3945,20 +3977,34 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     [ "$Initsystem" = "systemd" ] && Wantcgroup=systemd || Wantcgroup=elogind
     findmnt /sys/fs/cgroup/$Wantcgroup >/dev/null || {
       echo "[ '$Wantcgroup' = 'systemd' ] || docker run --rm --entrypoint env $Imagename which elogind >/dev/null && {"
-      echo '  [ "$(id -u)" = "0" ] && note "Creating cgroup mountpoint for '$Wantcgroup'."'
+      echo '  [ "$(id -u)" = "0" ] && echo "Creating cgroup mountpoint for '$Wantcgroup'." >&4'
       echo '  [ "$(id -u)" != "0" ] && {'
-      echo "    warning 'Want to create and mount a cgroup for $Wantcgroup."
-      echo "  As x11docker currently does not run as root, this will probably fail."
-      echo "  Please either run x11docker as root, or run with option --pw=su or --pw=sudo,"
-      echo "  or create cgroup mountpoint yourself with:"
-      echo "    mkdir -p /sys/fs/cgroup/$Wantcgroup"
-      echo "    mount -t cgroup cgroup /sys/fs/cgroup/$Wantcgroup -o none,name=$Wantcgroup"
-      echo "  If you get a read-only error message, remove write protection with:"
-      echo "    mount -o remount,rw cgroup /sys/fs/cgroup"
-      echo "  You can restore write protection after cgroup creation with:"
-      echo "    mount -o remount,ro cgroup /sys/fs/cgroup'"
-      [ "$Wantcgroup" = "elogind" ] && echo "    note 'If you do not want, need or have elogind in container, "
-      echo "  just ignore warning above.'"
+      echo "    echo 'Want to create and mount a cgroup for $Wantcgroup. \
+As x11docker currently does not run as root, this will probably fail. \
+Please either run x11docker as root, or run with option --pw=su or --pw=sudo, \
+or create cgroup mountpoint yourself with:' >&3" 
+      echo "    echo '  mkdir -p /sys/fs/cgroup/$Wantcgroup' >&4"
+      echo "    echo '  mount -t cgroup cgroup /sys/fs/cgroup/$Wantcgroup -o none,name=$Wantcgroup' >&4"
+      echo "    echo 'If you get a read-only error message, remove write protection with:' >&4"
+      echo "    echo '  mount -o remount,rw cgroup /sys/fs/cgroup' >&4"
+      echo "    echo 'You can restore write protection after cgroup creation with:' >&4"
+      echo "    echo '  mount -o remount,ro cgroup /sys/fs/cgroup' >&4"
+      [ "$Wantcgroup" = "elogind" ] && {
+        echo "    echo 'If you do not want, need or have elogind in container, just ignore warning above.' >&4"
+        echo "    echo 'Run x11docker as root to automatically create elogind cgroup.' >&4"
+      }
+      #echo "    warning 'Want to create and mount a cgroup for $Wantcgroup."
+      #echo "  As x11docker currently does not run as root, this will probably fail."
+      #echo "  Please either run x11docker as root, or run with option --pw=su or --pw=sudo,"
+      #echo "  or create cgroup mountpoint yourself with:"
+      #echo "    mkdir -p /sys/fs/cgroup/$Wantcgroup"
+      #echo "    mount -t cgroup cgroup /sys/fs/cgroup/$Wantcgroup -o none,name=$Wantcgroup"
+      #echo "  If you get a read-only error message, remove write protection with:"
+      #echo "    mount -o remount,rw cgroup /sys/fs/cgroup"
+      #echo "  You can restore write protection after cgroup creation with:"
+      #echo "    mount -o remount,ro cgroup /sys/fs/cgroup'"
+      #[ "$Wantcgroup" = "elogind" ] && echo "    note 'If you do not want, need or have elogind in container, "
+      #echo "  just ignore warning above.'"
       echo "  }"
       findmnt /sys/fs/cgroup -O ro >/dev/null && {
         echo "  mount -o remount,rw cgroup /sys/fs/cgroup"
@@ -3976,9 +4022,10 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   
   echo ""
   echo "echo x11docker: container ID: \$Containerid"
-  echo "[ -z \"\$Containerid\" ] && echo 'x11docker ERROR: Startup of docker failed. Did not receive a container ID.' >&2 && exit 1"
+  echo "[ -z \"\$Containerid\" ] && echo 'ERROR: Startup of docker failed. Did not receive a container ID.' >&3 && exit 1"
   echo "echo \$Containerid >> $Containeridfile"
-  [ "$Showcontainerid" = "yes" ] && echo "printstdout \"\$(cat $Containeridfile)\""
+#  [ "$Showcontainerid" = "yes" ] && echo "printstdout \"\$(cat $Containeridfile)\""
+  [ "$Showcontainerid" = "yes" ] && echo "echo \"\$(cat $Containeridfile)\" >&6"
   echo "docker logs -f \$Containerid >> $Dockerlogfile 2>&1 &"
   echo ""
   echo "# wait for container to be ready"
@@ -4008,6 +4055,8 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "# commands in this script are executed as root in container"
   [ "$Debug" = "yes" ] && echo "set -x"
   echo "echo 'x11docker: setup as root in container'"
+  echo ""
+  echo "exec 3<>$Cshare/warning.fifo"
   echo ""
   
   # prepare X environment
@@ -4092,23 +4141,23 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     echo "rm -v /etc/pam.d/sudo"
     echo ""
   }
-
+    
   # --gpu with closed source nvidia driver
   [ "$Nvidiadriver" ] && {
     echo "Installationwillsucceed=maybe"
     echo "ldd 2>&1 | grep 'musl libc' && {"
     echo "  Installationwillsucceed=no"
-    echo "  echo 'x11docker WARNING: Found musl libc in image. Closed source NVIDIA driver"
-    echo "  is not not installable. Use free nouveau driver on host and ask NVIDIA corp."
-    echo "  to publish driver source code to allow you using your hardware."
-    echo "  Fallback: Skipping installation of nvidia driver.'"
+    echo "  echo 'x11docker WARNING: Found musl libc in image. \
+Closed source NVIDIA driver is not not installable. \
+Use free nouveau driver on host and ask NVIDIA corporation to publish driver source code to allow you using your hardware. \
+Fallback: Skipping installation of nvidia driver.' >&3"
     echo "}"
     echo "case \$Containersystem in"
     echo "  opensuse)"
     echo "    Installationwillsucceed=no"
-    echo "    echo \"x11docker WARNING: automated nvidia driver installation fails in \$Containersystem."
-    echo "  You can try to install nvidia driver $Nvidiaversion in image."
-    echo "  Otherwise, use free nouveau driver on host.\""
+    echo "    echo \"x11docker WARNING: automated nvidia driver installation fails in \$Containersystem. \
+You can try to install nvidia driver $Nvidiaversion in image. \
+Otherwise, use free nouveau driver on host.\" >&3"
     echo "  ;;"
     echo "esac"
     echo "[ \"\$Installationwillsucceed\" = \"maybe\" ] && [ -z \"\$(find . -name *${Nvidiaversion}* -print 2>/dev/null)\" ] && {" 
@@ -4116,10 +4165,11 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     echo "  # Install nvidia driver"
     echo "  { command -v modprobe && command -v xz ; } || {"
     echo "    # Try to install modprobe"
-    echo "    echo 'x11docker WARNING: Did not find modprobe/kmod or xz in image."
-    echo "  modprobe and xz are needed by nvidia installer."
-    echo "  Install them in image to speed up container startup."
-    echo "  Will try to install them. That slows down container startup.'"
+    echo "    echo 'Slow startup due to missing kmod or xz in image for nvidia installer. Install them in image to speed up container startup. Will try to install them. That slows down container startup.' >&4"
+#    echo "    echo 'x11docker WARNING: Did not find modprobe/kmod or xz in image."
+#    echo "  modprobe and xz are needed by nvidia installer."
+#    echo "  Install them in image to speed up container startup."
+#    echo "  Will try to install them. That slows down container startup.'"
     echo "    apt-get update && apt-get install -y     kmod xz-utils  # debian"
     echo "    dnf install -y kmod xz || yum install -y kmod xz        # fedora, centos"
     echo "    xbps-install -Sy                         kmod xz        # void"
@@ -4127,10 +4177,10 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     echo "    emerge --ask n                           kmod xz        # gentoo"
     echo "    zypper --non-interactive install         kmod xz        # opensuse"       #ok, but nvidia-installer extraction fails
     echo "  }"
-    echo "  echo 'x11docker WARNING: Installing proprietary closed source NVIDIA driver $Nvidiaversion. That slows down container startup.'"
+    echo "  echo 'Installing proprietary closed source NVIDIA driver $Nvidiaversion. That slows down container startup.' >&3"
     echo "  sh $Cshare/NVIDIA-$Nvidiaversion.run  --accept-license --no-runlevel-check  --no-questions --ui=none --no-kernel-module --no-kernel-module-source --no-backup --tmpdir /tmp2"
     echo "  rm -R /tmp2 && unset TMPDIR"
-    echo "} || echo 'x11docker: Skipping installation of $Cshare/NVIDIA-$Nvidiaversion.run'"
+    echo "} || echo 'Skipping installation of $Cshare/NVIDIA-$Nvidiaversion.run' >&3"
     echo ""
   }
   
@@ -4216,7 +4266,7 @@ start() {
   # start dbus daemon and dbus services
   case $Dbusdaemon in
     yes)
-      warning "Will run DBus services as root in container.
+      warning "Will run DBus system services as root in container.
   If the image contains malicious applications started by DBus service files,
   they may abuse their root privileges and may try to break out of container."
   
@@ -4239,7 +4289,7 @@ start() {
           echo "  [ -e /run/dbus/system_bus_socket ] && break"
           echo "  sleep 0.1"
           echo "done"
-          echo "[ -e /run/dbus/system_bus_socket ] || echo x11docker WARNING: DBus startup seems to have failed. system bus socket not found."
+          echo "[ -e /run/dbus/system_bus_socket ] || echo 'DBus startup seems to have failed. system bus socket not found.' >&3"
           
           [ "$Nonewprivileges" = "yes" ] && {
             echo "# support for dbus daemon with no-new-privileges"
@@ -4303,14 +4353,13 @@ start() {
     echo "echo \"\$Locales\" | grep -q \$Langland.utf8  && Langcontainer=\$Langland.utf8"
     echo "echo $Langwunsch | grep -E 'C|C.UTF-8|C.utf8|POSIX' >/dev/null && Langcontainer=$Langwunsch"
     echo "[ -z \"\$Langcontainer\" ] && {"
-    echo "  [ -e /usr/share/i18n/SUPPORTED ] || echo \"x11docker ERROR: /usr/share/i18n/SUPPORTED not found."
-    echo "  Please install locale package in image (belongs to glibc).\""
+    echo "  [ -e /usr/share/i18n/SUPPORTED ] || echo '/usr/share/i18n/SUPPORTED not found. Please install locale package in image (belongs to glibc).' >&3"
     echo "  Langcontainer=\$Langland.utf8"
     echo "  echo \"x11docker: Creating language locale \$Langcontainer\""
-    echo "  command -v localedef >/dev/null || echo \"x11docker ERROR: command localedef not found in image.\""
+    echo "  command -v localedef >/dev/null || echo 'Command localedef not found in image. Need it for language locale creation (--lang).' >&3"
     echo "  localedef --verbose --force -i \$Langland -f UTF-8 \$Langcontainer || echo \"x11docker: localedef exit code: \$?\""
     echo "  locale -a | grep -q \"\$Langcontainer\" || {"
-    echo "    echo \"x11docker ERROR: locale creation of \$Langcontainer failed.\""
+    echo "    echo \"locale creation of \$Langcontainer failed.\" >&3"
     echo "    Langcontainer=''"
     echo "  }"
     echo "} || {"
@@ -4319,7 +4368,7 @@ start() {
     echo "[ \"\$Langcontainer\" ] && {"
     echo "  echo \"\$Langcontainer\" > /x11docker.LANG"
     echo "  echo \"LANG=\$Langcontainer\" > /etc/default/locale"
-    echo "} || echo \"x11docker WARNING: desired locale for '--lang=$Langwunsch' not found and not created.\""
+    echo "} || echo 'Desired locale for '--lang=$Langwunsch' not found and not created.'>&3"
     echo "echo \"x11docker: Output of locale -a:\""
     echo "locale -a"
     echo ""
@@ -4402,6 +4451,7 @@ start() {
       echo "echo -n 'Password: '"
     ;;
   esac
+
   case $Passwordfrontend in
     gksudo|lxsudo)  echo "$Passwordcommand bash $Dockerrc  >>$Dockerlogfile 2>&1" ;;
     pkexec)         echo "pkexec env DISPLAY=\$DISPLAY XAUTHORITY=\$XAUTHORITY bash $Dockerrc  >>$Dockerlogfile 2>&1" ;;
@@ -5045,7 +5095,9 @@ $(tail $Compositorlogfile)"
 
 ######### ToDo notes for development
 todo() {
-# mkfifo for warning() and note() to support messages from within container?
+# BUG --showid fails with sudo: file descriptor closed
+
+# watchwarningfifo() only displays first line.
 # BUG opensuse/arch: issues with x11docker/fluxbox, background missing, sometimes no context menu. where is the difference?
 # run several code pathes with --debug
 # --dbus-system: find way to start dbus services with dbus itself
