@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 ## [Unreleased]
+### Added
+ - `--stdin`: Forward stdin of x11docker to image command.
 ### Changed
  - `--security-opt=no-new-privileges` for init systems and `--dbus-system`.
    Now default for all options except `--sudouser` and `--cap-default`.
@@ -16,6 +18,8 @@ Project website: https://github.com/mviereck/x11docker
    Avoids security leak that would allow switching to root in container
    if `PAM` configuration allows it and capabilities for `su` are given.
  - Remove `/bin/sh -c` from extracted CMD image command.
+ - Regard `WORKDIR` in image, use it instead of `HOME`. 
+   [(#45)](https://github.com/mviereck/x11docker/issues/45)
  - Logfile handling with fifo/named pipe.
  - `--auto`: Tightened dependency check.
  - Improved process watching using less resources. Faster shutdown.
@@ -31,6 +35,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--wayland` Works with prissy GTK3 applications (e.g. xfce4-terminal) again,
    needed user switching in `--dbus-system` for unknown reasons.
  - `--showid` failed with sudo due to missing file descriptors. Using mkfifo now.
+ - Don't forward stdin as default, can cause trouble if empty. use `--stdin` instead.
    
 ## [4.2.1](https://github.com/mviereck/x11docker/releases/tag/v4.2.1) - 2018-05-10
 ## Added
