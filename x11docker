@@ -399,15 +399,15 @@ verbose() {             # show verbose messages
   # only logfile notes here, terminal output is done with tail in part:verbose
   [ "$Logfifo" ] && echo "x11docker: $*
 " >&7
+  [ "$Debug" = "yes" ] && note "$*"
   return 0
-}
-printstdout() {         # write something on stdout
-  echo "$*" >&6
 }
 finish() {              # trap EXIT routine to clean up background processes and cache
   local Pid= Name= Zeit= Catlogfilepid=
-  trap - EXIT
+  trap - EXIT 
   verbose "terminating x11docker."
+  
+#  [ -e "$Logfifo" ] || exit 1  # catch 
   
   # check for background processes stored in $Bgpidfile
   [ -s "$Bgpidfile" ] && {
@@ -429,11 +429,14 @@ finish() {              # trap EXIT routine to clean up background processes and
           compositor)
             ps -p $Pid | grep -E 'weston|kwin_wayland' >/dev/null && kill $Pid
           ;;
-          x11docker-run|waitfortheend|xpraloop|watchpidlist|watchfifo)
+          waitfortheend|xpraloop|watchpidlist|watchfifo)
+            ps -p $Pid | grep x11docker >/dev/null                && kill $Pid
+          ;;
+          x11docker-run)
+            saygoodbye "finish()->subshell"  # catch case where error()/finish() is called within subshell
             ps -p $Pid | grep x11docker >/dev/null                && kill $Pid
           ;;
           tailstdout|tailstderr)
-            #ps -p $Pid | grep x11docker >/dev/null                && kill $Pid
             Pid=
           ;;
           catstdin)
@@ -492,26 +495,28 @@ x11docker --cleanup"
     done < <(tac $Bgpidfile)
   }
   
+  saygoodbye "finish()"
+  
   [ "$Logfile" ] && {
     [ "$Verbose" = "yes" ] && sleep 1
     $Mksu "cp '$Logfile' '$Logbackup'"
     kill $Catlogfilepid
   }
-  
+
   # close additional file descriptors
-  for i in 3 4 6 7 9; do
+  for i in 3 4 6 7 8 9; do
     { >&$i ;} 2>/dev/null && exec >&$i- 
   done
-  [ "$Logfifo" ] && rm "$Logfifo"
-
+  [ -e "$Logfifo" ]              && rm "$Logfifo"
+  [ -e "$Timetosaygoodbyefifo" ] && rm "$Timetosaygoodbyefifo"
   [ "$Preservecachefiles" = "no" ] && echo "$Cachefolder" | grep -q .cache && echo "$Cachefolder" | grep -q x11docker && [ "x11docker" != "$(basename "$Cachefolder")" ] && rm -f -R "$Cachefolder"
   exit ${1:-0}
 }
 saygoodbye() {          # create file signaling watching processes to terminate
-  verbose "time to say goodbye $*"
+  verbose "time to say goodbye ($*)"
   [ -e "$Sharefolder" ] && {
     echo timetosaygoodbye >> $Timetosaygoodbye
-    echo timetosaygoodbye >> $Timetosaygoodbyefifo
+    echo timetosaygoodbye >&8
   }
 }
 mywatch() {             # repeat $1 untils its output changes
@@ -542,37 +547,52 @@ watchpidlist() {        # watch list of important pids
       verbose "watching $(ps --no-headers -p $Pid)"
     }
     for Pid in $Pidwatchlist; do
+      [ "$Debug" = "yes" ] && echo "watching $(ps --no-headers -p $Pid)"
       #ps -p $Pid >/dev/null 2>&1 || saygoodbye
-      [ -e /proc/$Pid ] || saygoodbye "(watchpidlist $Pid)"
+      [ -e /proc/$Pid ] || saygoodbye "watchpidlist $Pid"
     done
   done
 }
 watchwarningfifo() {    # watch for warning messages out of container or dockerrc
-  # FIXME needs improvements. reads only one line, further get lost. sometimes getting empty line
-  local Line=
+  # message in fifo must end with EOF
+  local Line= Message=
   while rocknroll ; do
     IFS= read -r Line <$Warningfifo
-    [ "$Line" ] && warning "$Line"
+    Message="$Message
+$Line"
+    grep -q EOF <<< $Message && {
+      Message="$(echo "$Message" | sed 's/EOF.*// ; /./,$!d')"
+      warning "$Message"
+      Message=
+    }
   done
 }
 watchnotefifo() {       # watch for note messages out of container or dockerrc
-  # FIXME needs improvements. reads only one line, further get lost. sometimes getting empty line
-  local Line=
+  # message in fifo must end with EOF
+  local Line= Message=
   while rocknroll ; do
     IFS= read -r Line <$Notefifo
-    [ "$Line" ] && note "$Line"
+    Message="$Message
+$Line"
+    grep -q EOF <<< $Message && {
+      Message="$(echo "$Message" | sed 's/EOF.*// ; /./,$!d')"
+      note "$Message"
+      Message=
+    }
   done
 }
 watchstdoutfifo() {     # watch for stdout messages out of container or dockerrc
-  # FIXME needs improvements. reads only one line, further get lost. sometimes getting empty line
+  # Only submit one line at a time!
   local Line=
   while rocknroll ; do
     IFS= read -r Line <$Stdoutfifo
-    [ "$Line" ] && printstdout "$Line"
+    [ "$Line" ] && echo "$Line"
   done
 }
 rocknroll() {           # check if x11docker is still running
+  [ "$Debug" = "yes" ] && echo "Rock'n'Roll"
   [ -s "$Timetosaygoodbye" ] && return 1
+  [ -e "$Timetosaygoodbye" ] || return 1
   [ -e "$Logfifo" ]          || return 1
   return 0
 }
@@ -589,6 +609,10 @@ waitfortheend() {       # wait for end of x11docker, optional for end of pid $1,
   
   # decent read to wait for signal to terminate
   bash -c "read -n1 <$Timetosaygoodbyefifo"
+#  while sleep 1 ; do
+#    [ "$Debug" = "yes" ] && echo "waiting for the end"
+#    [ -s $Timetosaygoodbye ] && break
+#  done
 }
 waitforfilecreation() { # similar to inotify-wait: wait up to 15s for file $1 to be created
   # $1 file to wait for
@@ -791,7 +815,7 @@ depends() {             # check dependencies on host for X server option $1
   }
   return ${Return:-0}
 }
-checkorphaned() {       # --cleanup : check for non-removed containers and left cache files
+cleanup() {             # --cleanup : check for non-removed containers and left cache files
   local Orphanedcontainers= Orphanedfolders= Line=
   note "x11docker will check for orphaned containers from earlier sessions.
   This can happen if docker was not closed successfully. 
@@ -827,7 +851,12 @@ $(bash -c "docker rm -f $Orphanedcontainers" 2>&1)"
 $(rm -R -f $Orphanedfolders 2>&1)"
     }
   fi
-  note "Ready."
+  note "Removing remaining files with: rm $Cachebasefolder/*"
+  rm $Cachebasefolder/*
+  note "Removing cache base folder with: rmdir -v $Cachebasefolder"
+  cd
+  rmdir -v $Cachebasefolder
+  note "Cleanup ready."
 }
 installer() {           # --install, --update, --update-master, --remove: Installer for x11docker
   # --install:
@@ -928,13 +957,12 @@ installer() {           # --install, --update, --update-master, --remove: Instal
     ;;
     --remove)
       note "removing x11docker from your system"
+      cleanup
       [ -x /usr/local/bin/x11docker ] && {    # from older installations. /usr/bin is default now as /usr/local/bin can miss in $PATH for root
-        /usr/local/bin/x11docker --cleanup
         rm -v /usr/local/bin/x11docker
         rm -v /usr/local/bin/x11docker-gui
       }
       [ -x /usr/bin/x11docker ] && {
-        /usr/bin/x11docker --cleanup
         rm -v /usr/bin/x11docker
         rm -v /usr/bin/x11docker-gui
       }
@@ -1024,7 +1052,6 @@ writeaccess() {         # check if useruid $1 has write access to folder $2
     [ "w" = "$(getfacl -pn "${2:-}" | grep user:${1:-}: | rev | cut -c2)" ] && return 0 || return 1   # FIXME: could check write access for gid, if uid access fails.
   fi 
 }
-
 { #### part: declare variables
 trap finish EXIT
 
@@ -1032,7 +1059,6 @@ export IFS=$' \n\t'                             # set IFS to default
 # redirects for use in parts with >xy 2>xy
 exec 3>&2                                       # stderr channel for warning() and error()
 exec 4>&2                                       # stderr channel for --stderr
-exec 6>&1                                       # stdout channel for --stdout and printstdout()
 
 pstree -ps $$ | grep -q sshd && Ssh="yes" || Ssh="no"  # check if running over SSH
 tty | grep -q tty            && Tty="yes" || Tty="no"  # check if running on X or on tty
@@ -1124,6 +1150,7 @@ Xclientcookie=Xclientcookie                     # generated X client cookie. Nor
 Xkbkeymapfile=xkb_keymap                        # file to store output of host keymap in xinitrc: 'setxkbmap -display $Hostdisplay -print'
 
 # stdin stdout stderr
+Forwardstdin="no"                               # option --stdin: forward stdin to image command
 Cmdstdinfile=stdin                              # stdin for image command. fifo/named pipe to forward stdin of x11docker to image command 
 Cmdstdoutlogfile=stdout                         # stdout for image command
 Cmdstderrlogfile=stderr                         # stderr for image command
@@ -1592,7 +1619,7 @@ Parsed options: $Parsedoptions"
   # option --cleanup: check for non-removed containers and left cache files
   [ "$Checkorphaned" = "yes" ] && {
     docker images >/dev/null 2>&1 || error "'x11docker --cleanup' must run as root."   ### FIXME: could be more flexible
-    checkorphaned
+    cleanup
     exit
   }
   
@@ -2187,7 +2214,7 @@ Parsed options: $Parsedoptions"
     ;;
   esac
   
-  Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo" && $Mksu "mkfifo $Timetosaygoodbyefifo"
+  Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo" && $Mksu "mkfifo $Timetosaygoodbyefifo" && exec 8<>$Timetosaygoodbyefifo
   Timetosaygoodbye="$Sharefolder/$Timetosaygoodbye"         && mkfile $Timetosaygoodbye
   Pidwatchfifo="$Cachefolder/$Pidwatchfifo"                 && $Mksu "mkfifo $Pidwatchfifo" && exec 9<>$Pidwatchfifo  
   Warningfifo="$Sharefolder/$Warningfifo"                   && $Mksu "mkfifo $Warningfifo && chmod 666 $Warningfifo"
@@ -3791,7 +3818,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "  waitforfilecreation $Cachefolder/pullready"
   echo "  docker inspect --type=image $Imagename > /dev/null 2>&1 || {"
   echo "    echo ''"
-  echo "    echo \"ERROR: Image '$Imagename' not found locally and not pulled from docker hub.\" >&3"
+  echo "    echo \"ERROR: Image '$Imagename' not found locally and not pulled from docker hub.EOF\" >&3"
   echo "    exit 1"
   echo "  }"
   echo "}"  
@@ -3816,23 +3843,26 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       case $Initsystem in
         systemd|sysvinit|runit|openrc)
           echo "echo \"\$Entrypoint\" | grep -qE '/init|/systemd' && {"
-          echo "  echo \"There seems to be an init system in ENTRYPOINT of image: \$Entrypoint. \
-Will disable it as x11docker already runs an init with option --$Initsystem. \
-To allow this ENTRYPOINT, run x11docker with option --no-init.\" >&4"
+          echo "  echo \"There seems to be an init system in ENTRYPOINT of image:
+    \$Entrypoint
+  Will disable it as x11docker already runs an init with option --$Initsystem.
+  To allow this ENTRYPOINT, run x11docker with option --no-init.EOF\" >&4"
           echo "  Entrypoint="
           echo "}"
         ;;
         tini)
           echo "echo \"\$Entrypoint\" | grep -qE '/tini|/init|/systemd' && {"
-          echo "  echo \"There seems to be an init system in ENTRYPOINT of image: \$Entrypoint. \
-x11docker will run this instead of tini from host. \
-You can disable this ENTRYPOINT with option --no-entrypoint.\" >&4"
+          echo "  echo \"There seems to be an init system in ENTRYPOINT of image: 
+    \$Entrypoint
+  x11docker will run this instead of tini from host.
+  You can disable this ENTRYPOINT with option --no-entrypoint.EOF\" >&4"
           echo "  Tini="
           echo "}"
         ;;
         none)
           echo "echo \"\$Entrypoint\" | grep -qE '/tini|/init|/systemd' && {"
-          echo "  echo \"There seems to be an init system in ENTRYPOINT of image: \$Entrypoint\" >&4"
+          echo "  echo \"There seems to be an init system in ENTRYPOINT of image: 
+  \$Entrypoint EOF\" >&4"
           echo "}"
         ;;
       esac
@@ -3840,7 +3870,7 @@ You can disable this ENTRYPOINT with option --no-entrypoint.\" >&4"
   esac
   echo ""
 
-  echo "[ -z \"\$Imagecommand\$Entrypoint\" ] && echo 'No image command specified and no CMD or ENTRYPOINT found in image.' >&3"
+  echo "[ -z \"\$Imagecommand\$Entrypoint\" ] && echo 'No image command specified and no CMD or ENTRYPOINT found in image.EOF' >&3"
   echo ""
   
   #### create x11docker.CMD.sh ####
@@ -3891,13 +3921,10 @@ You can disable this ENTRYPOINT with option --no-entrypoint.\" >&4"
     done
   }
   echo   "  echo 'export HOME=\"$Benutzerhome\"'"
-  echo   "  echo 'cd \"\$HOME\"'"
-  [ "$Workdir" = "/tmp" ] && {
-    echo "Workdir=\$(docker inspect --format='{{.Config.WorkingDir}}' $Imagename)"
-    echo '[ "$Workdir" ] && echo "cd $Workdir"' 
-  } || {
-    echo "  echo 'cd $Workdir'"
-  }
+  echo   "  echo 'cd \"\$HOME\"'"                                                    # HOME as default working directory
+  echo   "  Workdir=\$(docker inspect --format='{{.Config.WorkingDir}}' $Imagename)" # WORKDIR in image
+  echo   '  [ "$Workdir" ] && echo "[ -d \"$Workdir\" ] && cd \"$Workdir\"   # WORKDIR in image"' 
+  [ "$Workdir" = "/tmp" ] || echo "  echo 'cd $Workdir'"                             # x11docker option --workdir
   echo   "  echo ''"
   
   [ -n "$Newdisplay" ] && {
@@ -3913,7 +3940,7 @@ You can disable this ENTRYPOINT with option --no-entrypoint.\" >&4"
     echo "  echo ''"
     echo "  echo 'Dbus=\"\$(dbus-launch --help >/dev/null 2>&1 && echo dbus-launch)\"'"
     echo "  echo '[ -z \"\$Dbus\" ] && Dbus=\"\$(dbus-run-session --help >/dev/null 2>&1 && echo dbus-run-session)\"'"
-    echo "  echo '[ -z \"\$Dbus\" ] && echo \"x11docker WARNING: Did not find dbus-launch or dbus-run-session (option --dbus).\" >&2'"
+    echo "  echo '[ -z \"\$Dbus\" ] && echo \"Did not find dbus-launch or dbus-run-session (option --dbus).EOF\" >&3'"
   } 
   echo   "  echo 'echo x11docker: running dbus user session with: \${Dbus:-(none)} >&2'"
   echo   "  echo ''"
@@ -3981,6 +4008,7 @@ You can disable this ENTRYPOINT with option --no-entrypoint.\" >&4"
   echo "cat $Imagecommandscript | nl -ba >> $Dockerlogfile"
   echo ""
 
+
   # check and create cgroup mountpoint for systemd or elogind
   [ "$Sharecgroup" = "yes" ] && {
     [ "$Initsystem" = "systemd" ] && Wantcgroup=systemd || Wantcgroup=elogind
@@ -3988,32 +4016,21 @@ You can disable this ENTRYPOINT with option --no-entrypoint.\" >&4"
       echo "[ '$Wantcgroup' = 'systemd' ] || docker run --rm --entrypoint env $Imagename which elogind >/dev/null && {"
       echo '  [ "$(id -u)" = "0" ] && echo "Creating cgroup mountpoint for '$Wantcgroup'." >&4'
       echo '  [ "$(id -u)" != "0" ] && {'
-      echo "    echo 'Want to create and mount a cgroup for $Wantcgroup. \
-As x11docker currently does not run as root, this will probably fail. \
-Please either run x11docker as root, or run with option --pw=su or --pw=sudo, \
-or create cgroup mountpoint yourself with:' >&3" 
-      echo "    echo '  mkdir -p /sys/fs/cgroup/$Wantcgroup' >&4"
-      echo "    echo '  mount -t cgroup cgroup /sys/fs/cgroup/$Wantcgroup -o none,name=$Wantcgroup' >&4"
-      echo "    echo 'If you get a read-only error message, remove write protection with:' >&4"
-      echo "    echo '  mount -o remount,rw cgroup /sys/fs/cgroup' >&4"
-      echo "    echo 'You can restore write protection after cgroup creation with:' >&4"
-      echo "    echo '  mount -o remount,ro cgroup /sys/fs/cgroup' >&4"
-      [ "$Wantcgroup" = "elogind" ] && {
-        echo "    echo 'If you do not want, need or have elogind in container, just ignore warning above.' >&4"
-        echo "    echo 'Run x11docker as root to automatically create elogind cgroup.' >&4"
-      }
-      #echo "    warning 'Want to create and mount a cgroup for $Wantcgroup."
-      #echo "  As x11docker currently does not run as root, this will probably fail."
-      #echo "  Please either run x11docker as root, or run with option --pw=su or --pw=sudo,"
-      #echo "  or create cgroup mountpoint yourself with:"
-      #echo "    mkdir -p /sys/fs/cgroup/$Wantcgroup"
-      #echo "    mount -t cgroup cgroup /sys/fs/cgroup/$Wantcgroup -o none,name=$Wantcgroup"
-      #echo "  If you get a read-only error message, remove write protection with:"
-      #echo "    mount -o remount,rw cgroup /sys/fs/cgroup"
-      #echo "  You can restore write protection after cgroup creation with:"
-      #echo "    mount -o remount,ro cgroup /sys/fs/cgroup'"
-      #[ "$Wantcgroup" = "elogind" ] && echo "    note 'If you do not want, need or have elogind in container, "
-      #echo "  just ignore warning above.'"
+      echo "    echo 'Want to create and mount a cgroup for $Wantcgroup.
+  As x11docker currently does not run as root, this will probably fail.
+  Please either run x11docker as root, or run with option --pw=su or --pw=sudo.
+  
+  Alternatively, create cgroup mountpoint yourself with:
+    mkdir -p /sys/fs/cgroup/$Wantcgroup
+    mount -t cgroup cgroup /sys/fs/cgroup/$Wantcgroup -o none,name=$Wantcgroup
+    
+  If you get a read-only error message, remove write protection with:
+    mount -o remount,rw cgroup /sys/fs/cgroup
+    
+  You can restore write protection after cgroup creation with:
+    mount -o remount,ro cgroup /sys/fs/cgroup EOF' >&4"
+      [ "$Wantcgroup" = "elogind" ] && echo "echo 'If you do not want, need or have elogind in container,
+  just ignore message above. EOF' >&4"
       echo "  }"
       findmnt /sys/fs/cgroup -O ro >/dev/null && {
         echo "  mount -o remount,rw cgroup /sys/fs/cgroup"
@@ -4031,9 +4048,8 @@ or create cgroup mountpoint yourself with:' >&3"
   
   echo ""
   echo "echo x11docker: container ID: \$Containerid"
-  echo "[ -z \"\$Containerid\" ] && echo 'ERROR: Startup of docker failed. Did not receive a container ID.' >&3 && exit 1"
+  echo "[ -z \"\$Containerid\" ] && echo 'ERROR: Startup of docker failed. Did not receive a container ID.EOF' >&3 && exit 1"
   echo "echo \$Containerid >> $Containeridfile"
-#  [ "$Showcontainerid" = "yes" ] && echo "printstdout \"\$(cat $Containeridfile)\""
   [ "$Showcontainerid" = "yes" ] && echo "echo \"\$(cat $Containeridfile)\" >&6"
   echo "docker logs -f \$Containerid >> $Dockerlogfile 2>&1 &"
   echo ""
@@ -4042,7 +4058,14 @@ or create cgroup mountpoint yourself with:' >&3"
   echo "  sleep 0.2"
   echo "  docker exec $Containername sh -c : && { echo 'x11docker: container is up and running.' ; break ; } || echo \"x11docker: container not ready on \$Count. attempt, trying again.\" "
   echo "done"
-  echo "cat $Dockerlogfile | grep -v grep | grep -E 'Error response from daemon|OCI runtime exec' && exit 1 ||:"  # repeat possible error message to make it visible in error() after verbose Count loop
+#  echo "cat $Dockerlogfile | grep -v grep | grep -E 'Error response from daemon|OCI runtime exec' && exit 1 ||:"  # repeat possible error message to make it visible in error() after verbose Count loop
+  echo "Failure=\"\$(cat $Dockerlogfile | grep -v grep | grep -E 'Error response from daemon|OCI runtime exec')\""
+  echo "[ \"\$Failure\" ] && {"
+  echo "  echo \"Got error message from docker daemon:
+\$Failure EOF\" >&3"
+  echo "  echo \"\$Failure\""  # repeat possible error message to make it visible in error() after verbose Count loop
+  echo "  exit 1"
+  echo "}"
   echo ""
 
   
@@ -4066,7 +4089,6 @@ or create cgroup mountpoint yourself with:' >&3"
   echo "echo 'x11docker: setup as root in container'"
   echo ""
   echo "exec 3<>$Cshare/warning.fifo"
-  echo ""
   
   # prepare X environment
   echo "# create some system dirs with needed permissions"
@@ -4136,10 +4158,8 @@ or create cgroup mountpoint yourself with:' >&3"
   echo "echo '# /etc/sudoers created by x11docker' > /etc/sudoers"
   echo "echo 'root ALL=(ALL) ALL'                 >> /etc/sudoers"
   case $Sudouser in
-    yes)
-      echo "echo '$Benutzer ALL=(ALL) ALL'        >> /etc/sudoers"
-    ;;
-    no) echo "rm -v /etc/sudoers" ;;
+    yes) echo "echo '$Benutzer ALL=(ALL) ALL'     >> /etc/sudoers" ;;
+    no)  echo "rm -v /etc/sudoers" ;;
   esac
   echo ""
   
@@ -4156,17 +4176,17 @@ or create cgroup mountpoint yourself with:' >&3"
     echo "Installationwillsucceed=maybe"
     echo "ldd 2>&1 | grep 'musl libc' && {"
     echo "  Installationwillsucceed=no"
-    echo "  echo 'x11docker WARNING: Found musl libc in image. \
-Closed source NVIDIA driver is not not installable. \
-Use free nouveau driver on host and ask NVIDIA corporation to publish driver source code to allow you using your hardware. \
-Fallback: Skipping installation of nvidia driver.' >&3"
+    echo "  echo 'Found musl libc in image. Closed source NVIDIA driver
+is incompatible. Use free nouveau driver on host and ask NVIDIA corporation
+to publish driver source code to allow you using your hardware.
+Fallback: Skipping installation of nvidia driver.EOF' >&3"
     echo "}"
     echo "case \$Containersystem in"
     echo "  opensuse)"
     echo "    Installationwillsucceed=no"
-    echo "    echo \"x11docker WARNING: automated nvidia driver installation fails in \$Containersystem. \
-You can try to install nvidia driver $Nvidiaversion in image. \
-Otherwise, use free nouveau driver on host.\" >&3"
+    echo "    echo \"Nvidia driver installation fails in \$Containersystem.
+  You can try to install nvidia driver $Nvidiaversion in image.
+  Otherwise, use free nouveau driver on host.EOF\" >&3"
     echo "  ;;"
     echo "esac"
     echo "[ \"\$Installationwillsucceed\" = \"maybe\" ] && [ -z \"\$(find . -name *${Nvidiaversion}* -print 2>/dev/null)\" ] && {" 
@@ -4174,11 +4194,10 @@ Otherwise, use free nouveau driver on host.\" >&3"
     echo "  # Install nvidia driver"
     echo "  { command -v modprobe && command -v xz ; } || {"
     echo "    # Try to install modprobe"
-    echo "    echo 'Slow startup due to missing kmod or xz in image for nvidia installer. Install them in image to speed up container startup. Will try to install them. That slows down container startup.' >&4"
-#    echo "    echo 'x11docker WARNING: Did not find modprobe/kmod or xz in image."
-#    echo "  modprobe and xz are needed by nvidia installer."
-#    echo "  Install them in image to speed up container startup."
-#    echo "  Will try to install them. That slows down container startup.'"
+    echo "    echo 'Did not find modprobe/kmod or xz in image.
+  modprobe and xz are needed by nvidia installer.
+  Install them in image to speed up container startup.
+  Will try to install them. That slows down container startup.EOF' >&3"
     echo "    apt-get update && apt-get install -y     kmod xz-utils  # debian"
     echo "    dnf install -y kmod xz || yum install -y kmod xz        # fedora, centos"
     echo "    xbps-install -Sy                         kmod xz        # void"
@@ -4186,10 +4205,11 @@ Otherwise, use free nouveau driver on host.\" >&3"
     echo "    emerge --ask n                           kmod xz        # gentoo"
     echo "    zypper --non-interactive install         kmod xz        # opensuse"       #ok, but nvidia-installer extraction fails
     echo "  }"
-    echo "  echo 'Installing proprietary closed source NVIDIA driver $Nvidiaversion. That slows down container startup.' >&3"
+    echo "  echo 'Installing proprietary closed source NVIDIA driver 
+  version $Nvidiaversion. That slows down container startup.EOF' >&3"
     echo "  sh $Cshare/NVIDIA-$Nvidiaversion.run  --accept-license --no-runlevel-check  --no-questions --ui=none --no-kernel-module --no-kernel-module-source --no-backup --tmpdir /tmp2"
     echo "  rm -R /tmp2 && unset TMPDIR"
-    echo "} || echo 'Skipping installation of $Cshare/NVIDIA-$Nvidiaversion.run' >&3"
+    echo "} || echo 'Skipping installation of $Cshare/NVIDIA-$Nvidiaversion.run EOF' >&3"
     echo ""
   }
   
@@ -4298,7 +4318,7 @@ start() {
           echo "  [ -e /run/dbus/system_bus_socket ] && break"
           echo "  sleep 0.1"
           echo "done"
-          echo "[ -e /run/dbus/system_bus_socket ] || echo 'DBus startup seems to have failed. system bus socket not found.' >&3"
+          echo "[ -e /run/dbus/system_bus_socket ] || echo 'DBus startup seems to have failed. system bus socket not found.EOF' >&3"
           
           [ "$Nonewprivileges" = "yes" ] && {
             echo "# support for dbus daemon with no-new-privileges"
@@ -4314,13 +4334,13 @@ start() {
             echo "[ -x /usr/lib/policykit-1/polkitd ] && {"
             echo "  echo 'x11docker: DBus: starting PolicyKit'"
             echo "  /usr/lib/policykit-1/polkitd &"
-            echo "  /usr/lib/dbus-1.0/dbus-daemon-launch-helper org.freedesktop.PolicyKit1.service"
+            #echo "  /usr/lib/dbus-1.0/dbus-daemon-launch-helper org.freedesktop.PolicyKit1.service"
             echo "  waitforservice org.freedesktop.PolicyKit1"
             echo "}"
             echo "[ -x /usr/lib/accountsservice/accounts-daemon ] && {"
             echo "  echo 'x11docker: DBus: starting Accounts daemon'"
             echo "  /usr/lib/accountsservice/accounts-daemon &"
-            echo "  /usr/lib/dbus-1.0/dbus-daemon-launch-helper org.freedesktop.Accounts.service"
+            #echo "  /usr/lib/dbus-1.0/dbus-daemon-launch-helper org.freedesktop.Accounts.service"
             echo "  waitforservice org.freedesktop.Accounts"
             echo "}"
             echo "# start all other dbus system services (except some failing candidates)"
@@ -4332,7 +4352,7 @@ start() {
             echo "    *)"
             echo "      echo x11docker: DBus: starting service \$Name: \$Command"
             echo "      sh -c \"\$Command\" &"
-            echo "      /usr/lib/dbus-1.0/dbus-daemon-launch-helper \$Name"
+            #echo "      /usr/lib/dbus-1.0/dbus-daemon-launch-helper \$Name"
             echo "      waitforservice \$Name"
             echo "    ;;"
             echo "  esac"
@@ -4362,13 +4382,15 @@ start() {
     echo "echo \"\$Locales\" | grep -q \$Langland.utf8  && Langcontainer=\$Langland.utf8"
     echo "echo $Langwunsch | grep -E 'C|C.UTF-8|C.utf8|POSIX' >/dev/null && Langcontainer=$Langwunsch"
     echo "[ -z \"\$Langcontainer\" ] && {"
-    echo "  [ -e /usr/share/i18n/SUPPORTED ] || echo '/usr/share/i18n/SUPPORTED not found. Please install locale package in image (belongs to glibc).' >&3"
+    echo "  [ -e /usr/share/i18n/SUPPORTED ] || echo \"Error: /usr/share/i18n/SUPPORTED not found.
+  Please install locale package in image (belongs to glibc).EOF\" >&3"
     echo "  Langcontainer=\$Langland.utf8"
     echo "  echo \"x11docker: Creating language locale \$Langcontainer\""
-    echo "  command -v localedef >/dev/null || echo 'Command localedef not found in image. Need it for language locale creation (--lang).' >&3"
+    echo "  command -v localedef >/dev/null || echo 'Command localedef not found in image. 
+  Need it for language locale creation (--lang).EOF' >&3"
     echo "  localedef --verbose --force -i \$Langland -f UTF-8 \$Langcontainer || echo \"x11docker: localedef exit code: \$?\""
     echo "  locale -a | grep -q \"\$Langcontainer\" || {"
-    echo "    echo \"locale creation of \$Langcontainer failed.\" >&3"
+    echo "    echo \"locale creation of \$Langcontainer failed.EOF\" >&3"
     echo "    Langcontainer=''"
     echo "  }"
     echo "} || {"
@@ -4377,7 +4399,7 @@ start() {
     echo "[ \"\$Langcontainer\" ] && {"
     echo "  echo \"\$Langcontainer\" > /x11docker.LANG"
     echo "  echo \"LANG=\$Langcontainer\" > /etc/default/locale"
-    echo "} || echo 'Desired locale for '--lang=$Langwunsch' not found and not created.'>&3"
+    echo "} || echo 'Desired locale for '--lang=$Langwunsch' not found and not created.EOF' >&3"
     echo "echo \"x11docker: Output of locale -a:\""
     echo "locale -a"
     echo ""
@@ -4385,7 +4407,7 @@ start() {
   
   # --pulseaudio check
   [ "$Pulseaudio" = "yes" ] && {
-    echo "command -v pulseaudio >/dev/null || echo \"x11docker ERROR: pulseaudio not found in image (option --pulseaudio)\""
+    echo "command -v pulseaudio >/dev/null || echo \"pulseaudio not found in image (option --pulseaudio),EOF\" >&3"
     echo ""
   }  
   
@@ -4452,10 +4474,7 @@ start() {
   echo "export TERM=xterm SHELL=/bin/bash"
   [ "$Passwordneeded" = "yes" ] && case $Passwordfrontend in
     su|sudo)
-      echo "echo -e \"Created docker command for $Imagename $Imagecommand:"
-      echo ""
-      echo "$(echo $Dockercommand | sed 's,\\,\\\\ \n,g')"
-      echo "\""
+      echo "echo 'x11docker $Imagename $Imagecommand:'"
       echo "echo 'Please type in your password to run docker on display $Newdisplay'"
       echo "echo -n 'Password: '"
     ;;
@@ -4476,6 +4495,7 @@ start() {
   # declaring functions echoes them into xinitrc
   declare -f storepid
   declare -f waitfortheend
+  echo "Timetosaygoodbye=$Timetosaygoodbye"
   echo "Timetosaygoodbyefifo=$Timetosaygoodbyefifo"
   declare -f no_xhost 
   declare -f warning 
@@ -4810,7 +4830,7 @@ After finish: $Logbackup"
     # options --stdout, --stderr
     [ "$Showstdout" = "yes" ] && {
       waitforfilecontent $Containeridfile infinity
-      tail --pid=$$ --retry -n +1 -F $Cmdstdoutlogfile >&6 2>/dev/null
+      tail --pid=$$ --retry -n +1 -F $Cmdstdoutlogfile 2>/dev/null
     } & storepid $! tailstdout
     [ "$Showstderr" = "yes" ] && {
       tail --pid=$$ --retry -n +1 -F $Cmdstderrlogfile >&4 2>/dev/null
@@ -4921,7 +4941,7 @@ $(tail $Dockerlogfile)"
           }
         }
         ps -p $Xpraclientpid >/dev/null 2>&1 && kill $Xpraclientpid
-        [ -n "$Xpraclientpid" ] && [ "$Desktopmode" = "yes" ] && [ "$Xpracrashcount" = "0" ] && saygoodbye ### FIXME does not terminate x11docker
+        [ -n "$Xpraclientpid" ] && [ "$Desktopmode" = "yes" ] && [ "$Xpracrashcount" = "0" ] && saygoodbye "xpra" ### FIXME does not terminate x11docker
         verbose "starting Xpra client"
         [ -n "$Xpraclientpid" ] && note "Restarting Xpra client."
         $Mksu "env $Hostxenv XPRA_PADDING_COLORS='0,0.2,1' $Xpraclientcommand" >> $Xpraclientlogfile 2>&1 &
@@ -4992,7 +5012,7 @@ $(tail $Compositorlogfile)"
       [ -s "$Containerpidfile" ] && { 
         Containerpid=$(cat $Containerpidfile)
         ps -p $Containerpid >/dev/null 2>&1 || {
-          [ "$Xserver" = "--nothing" ] && saygoodbye "(--nothing)" || {
+          [ "$Xserver" = "--nothing" ] && saygoodbye "--nothing" || {
             error "Docker startup seems to have failed! 
 
   Last lines of docker.log:
@@ -5017,13 +5037,18 @@ $(tail $Dockerlogfile)"
     exe) # --exe
       # run host application without docker. includes --xonly
       { echo "#! /bin/bash"
+        [ "$Debug" = "yes" ] && echo "set -Eux"
         echo "export $Newxenv"
         [ "$Benutzerhosthome" = "yes" ] && {
           echo "export HOME='$Benutzerhosthomefolder'"
           echo "cd '$Benutzerhosthomefolder'"
         }
-        echo "exec >&3- >&4- >&6- >&7- >&9-"
-        echo "exec $Hostexe <$Cmdstdinfile >>$Cmdstdoutlogfile 2>>$Cmdstderrlogfile"
+        [ "$Workdir" = "/tmp" ] || echo "cd '$Workdir'"
+        echo "# close additional file descriptors"
+        echo "for i in 3 4 6 7 8 9; do"
+        echo "  { >&\$i ;} 2>/dev/null && exec >&\$i-"
+        echo "done"
+        echo "exec $Hostexe $( [ "$Forwardstdin" = "yes" ] && echo "<$Cmdstdinfile") >>$Cmdstdoutlogfile 2>>$Cmdstderrlogfile"
       } >> $Imagecommandscript
       cat $Imagecommandscript | nl -ba >> $Dockerlogfile
       $Mksubenutzer "bash $Imagecommandscript" & Hostexepid=$! && storepid $! hostexe
@@ -5033,7 +5058,7 @@ $(tail $Dockerlogfile)"
 $(tail $Dockerlogfile)"
     ;;
   esac
-  saygoodbye "(x11docker-run)"
+  saygoodbye "x11docker-run"
 } & storepid $! x11docker-run
 
 { #### part: start X server
@@ -5104,7 +5129,7 @@ $(tail $Compositorlogfile)"
 
 ######### ToDo notes for development
 todo() {
-# clean up watchfifo. find way to read more than 1 line.
+# error code $? is 0 if error() is called within subshell x11docker-run
 
 # watchwarningfifo() only displays first line.
 # BUG opensuse/arch: issues with x11docker/fluxbox, background missing, sometimes no context menu. where is the difference?
