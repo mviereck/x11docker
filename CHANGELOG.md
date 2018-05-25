@@ -37,6 +37,7 @@ Project website: https://github.com/mviereck/x11docker
    needed user switching in `--dbus-system` for unknown reasons.
  - `--showid` failed with sudo due to missing file descriptors. Using mkfifo now.
  - Don't forward stdin as default, can cause trouble if empty. use `--stdin` instead.
+ - `--xorg`: disable screen saver [(#46)](https://github.com/mviereck/x11docker/issues/46)
    
 ## [4.2.1](https://github.com/mviereck/x11docker/releases/tag/v4.2.1) - 2018-05-10
 ## Added

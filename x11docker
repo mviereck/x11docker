@@ -405,7 +405,7 @@ verbose() {             # show verbose messages
 " >&7
   return 0
 }
-debugnote() {               # show debug output $*
+debugnote() {           # show debug output $*
   [ "$Debugmode" = "yes" ] && {
     case $Verbose in
       yes) echo "DEBUGNOTE: $*" >&7 ;;
@@ -490,7 +490,7 @@ $(ps -p $Pid)"
             kill $Pid
           ;;
         esac
-        checkpid $Pid && {
+        [ "$Pid" ] && ps -p $Pid >/dev/null && {
           sleep 1
           checkpid $Pid && note "Issue terminating $Line" && kill -s KILL $Pid
         }
@@ -2783,7 +2783,7 @@ fi
 }
 
 { #### part: create command to start X server and/or Wayland compositor
-  Xserveroptions="-nolisten tcp -dpms"
+  Xserveroptions="-nolisten tcp -dpms -s off"
   case $Xserver in
     --nxagent)
       { [ "$Sharehostipc" = "yes" ] || [ "$X11dockermode" = "exe" ] ; } && Xserveroptions="$Xserveroptions -shmem -shpix" || Xserveroptions="$Xserveroptions -noshmem -noshpix"
@@ -3464,6 +3464,41 @@ done
 }
 
 { #### part: create init service files (options --systemd, --runit, --openrc) and check tini binary (--tini).
+
+  # enable dbus
+  case $Initsystem in
+    systemd)
+      Dbusdaemon="yes"
+    ;;
+    sysvinit|openrc|runit) 
+      Dbusdaemon="yes"
+      [ "$Sharecgroup" = "no" ] && note "If you want to use elogind in container,
+  you also need to set option --sharecgroup."
+  
+      # DBus service for shutdown of init systems. Watches $Timetosaygoodbyefifo
+      Dbuswatchservice="$Sharefolder/org.x11docker.watch.service" && mkfile $Dbuswatchservice
+      Dbuswatchservicescript="$Sharefolder/dbus.watch" && mkfile $Dbuswatchservicescript
+      echo "[D-BUS service]
+Name=org.x11docker.watch
+Exec=/bin/sh $Cshare/dbus.watch
+User=root
+" >> $Dbuswatchservice
+      echo "#! /bin/sh
+read Dummy <$Cshare/timetosaygoodbye.fifo
+echo timetosaygoodbye >$Cshare/timetosaygoodbye.fifo
+# kill su process to terminate x11docker.CMD.sh
+Pid=\$(pstree -cp | grep '\-su(' | head -n1 | sed 's/^.*-su(//' | cut -d')' -f1)
+kill \$Pid
+sleep 1
+kill -s KILL \$Pid
+" >> $Dbuswatchservicescript
+    ;;
+  esac
+  
+  # DBus watch service
+  #[ "$Dbusdaemon" = "yes" ] && {
+  #}
+  
   case $Initsystem in
     none) ;;
     tini) 
@@ -3573,17 +3608,6 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       warning "Option --sysvinit slightly degrades container isolation.
   Beside some user switching capabilities x11docker would disable otherwise
   it adds capability SYS_BOOT."
-    ;;
-  esac
-  
-  case $Initsystem in
-    sysvinit|openrc|runit) 
-      Dbusdaemon="yes"
-      [ "$Sharecgroup" = "no" ] && note "If you want to use elogind in container,
-  you also need to set option --sharecgroup."
-    ;;
-    systemd)
-      Dbusdaemon="yes"
     ;;
   esac
 }
@@ -4343,6 +4367,8 @@ start() {
       case $Initsystem in
         systemd) ;;
         *)
+          [ "Switchcontaineruser" = "yes" ] && echo "cp $Cshare/org.x11docker.watch.service /usr/share/dbus-1/system-services/"
+
           echo "echo x11docker: DBus: removing failing services"
           echo "for Line in \$(find /usr/share/dbus-1/system-services -type f); do"
           echo "  Name=\"\$(cat \$Line | grep Name= | cut -d= -f2)\""
@@ -4384,12 +4410,16 @@ start() {
             #echo "  /usr/lib/dbus-1.0/dbus-daemon-launch-helper org.freedesktop.Accounts.service"
             echo "  waitforservice org.freedesktop.Accounts"
             echo "}"
+            echo "set -x"
             echo "# start all other dbus system services (except some failing candidates)"
             echo "for Line in \$(find /usr/share/dbus-1/system-services -type f); do"
             echo "  Name=\"\$(cat \$Line | grep Name= | cut -d= -f2)\""
             echo "  Command=\"\$(cat \$Line | grep Exec= | cut -d= -f2)\""
             echo "  case \$Name in"
             echo "    org.freedesktop.PolicyKit1|org.freedesktop.Accounts) ;;"
+            echo "    org.x11docker.watch)"
+            echo "      sh -c \"\$Command\" &"
+            echo "    ;;"
             echo "    *)"
             echo "      echo x11docker: DBus: starting service \$Name: \$Command"
             echo "      sh -c \"\$Command\" &"
@@ -4398,6 +4428,7 @@ start() {
             echo "    ;;"
             echo "  esac"
             echo "done"
+            echo "set +x"
           } ||:
         ;;
       esac
