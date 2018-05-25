@@ -110,6 +110,7 @@ Special options:
                        For custom access to new X server. Get environment with:
                          read xenv < <(x11docker --showenv [...])
      --showid          Echo container ID on stdout.
+     --showpid1        Echo host PID of container PID 1 on stdout.
      --runfromhost CMD Run host command CMD on new X server (you may need & ).
      --runasroot CMD   Run command CMD as root in container on startup.
      --pw FRONTEND     Choose frontend for password prompt. Possible FRONTEND:
@@ -379,6 +380,7 @@ echo -e "
   [ "$Logfifo" ] && echo "x11docker ERROR: $Message
 " >&7
 
+  [ -d "$Cachefolder" ] && $Mksu "touch $Cachefolder/error"
   finish 1
 }
 warning() {             # show warning messages
@@ -397,26 +399,38 @@ note() {                # show notice messages
 }
 verbose() {             # show verbose messages
   # only logfile notes here, terminal output is done with tail in part:verbose
+  # if $1=-d than run debug(), too
+  [ "$1" = "-d" ] && shift && debugnote "$*"
   [ "$Logfifo" ] && echo "x11docker: $*
 " >&7
-  [ "$Debug" = "yes" ] && note "$*"
+  return 0
+}
+debugnote() {               # show debug output $*
+  [ "$Debugmode" = "yes" ] && {
+    case $Verbose in
+      yes) echo "DEBUGNOTE: $*" >&7 ;;
+      no)  echo "${Esc}[35mDEBUGNOTE:${Esc}[0m $*" >&3 ;;
+    esac
+  }
   return 0
 }
 finish() {              # trap EXIT routine to clean up background processes and cache
-  local Pid= Name= Zeit= Catlogfilepid=
+  local Pid= Name= Zeit= Catlogfilepid= Exitcode= Pid1pid=
   trap - EXIT 
-  verbose "terminating x11docker."
-  
-#  [ -e "$Logfifo" ] || exit 1  # catch 
-  
+
+  Pid1pid=$(cat $Containerpid1pidfile)
+
+  verbose -d "terminating x11docker."
+  checkpid $Pid1pid && verbose -d "process tree of container:
+$(pstree $Pid1pid ||:)"
+    
   # check for background processes stored in $Bgpidfile
   [ -s "$Bgpidfile" ] && {
     while read -r Line ; do 
       Pid=$(echo $Line  | awk '{print $1}')
       Name=$(echo $Line | awk '{print $2}')
-      
-      ps -p $Pid --no-headers >/dev/null && {
-        verbose "terminating background pid $Pid of $Name: $(ps -p $Pid --no-headers)"
+      checkpid $Pid && {
+        verbose -d "terminating background pid $Pid of $Name: $(ps -p $Pid --no-headers)"
         
         case $Name in
           windowmanager) 
@@ -453,20 +467,56 @@ finish() {              # trap EXIT routine to clean up background processes and
             ps -p $Pid | grep 'xfishtank' >/dev/null              && kill $Pid
           ;;
           container) 
+            Containerpid=$Pid
+            Pid=
+            # Send TERM to PID1 of container
+            checkpid $Pid1pid 2>&1 && {
+              kill $Pid1pid 2>/dev/null || note "Could not kill PID 1 of container: $(ps --no-headers -p $Pid1pid)"
+              # Give container a bit time for graceful shutdown
+              for Count in 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0; do
+                checkpid $Pid1pid || break
+                sleep 0.1
+              done
+            }
+            # Try 'docker stop' if TERM failed
             [ -n "$Sudo" ] && Sudo="sudo -n" # no password prompt here, rather fail
-            $Sudo docker stop $Containername >/dev/null 2>&1 || {
-              ! $Sudo docker images >/dev/null 2>&1 || { [ -n "$($Sudo docker ps --filter name=$Containername --quiet 2>&1)" ] || ps -p $Pid >/dev/null ; } && {
-                note "Found remaining container process. Most probably the X session was
+            checkpid $Containerpid && {
+              $Sudo docker stop $Containername >>$Dockerlogfile 2>&1 || verbose -d "docker stop failed"
+            }
+          ;;
+          *) # should never happen (tm)
+            note "Found remaining background process $Line
+$(ps -p $Pid)"
+            kill $Pid
+          ;;
+        esac
+        checkpid $Pid && {
+          sleep 1
+          checkpid $Pid && note "Issue terminating $Line" && kill -s KILL $Pid
+        }
+      }
+    done < <(tac $Bgpidfile)
+  }
+  
+  saygoodbye "finish()"
+
+  # Check if container is still running.
+  # if kill failed in loop above, most times terminating X server will already have stopped GUI applications.
+  checkpid $Containerpid && { 
+    $Sudo docker stop $Containername >>$Dockerlogfile 2>&1 || {
+      note "Found remaining container process. Most probably the X session was
   interrupted. Can not stop container because x11docker does not run as root.
   Will wait up to 10 seconds for docker to finish."
-                Zeit=$(date +%s)
-                while ps -p $Pid >/dev/null ; do
-                  note "waiting for container to terminate ..."
-                  sleep 1
-                  [ 10 -lt $(($(date +%s) - $Zeit)) ] && break ||:
-                done
-                if ps -p $Pid >/dev/null ; then
-                  note "docker container didn't terminate as it should. 
+      Zeit=$(date +%s)
+      while checkpid $Containerpid ; do
+        note "waiting for container to terminate ..."
+        sleep 1
+        [ 10 -lt $(($(date +%s) - $Zeit)) ] && break
+#        debugnote "process tree of container:
+#$(pstree $Pid1pid)"
+      done
+      if checkpid $Containerpid ; then
+        note "docker container didn't terminate as it should. 
   Will not clean cache to avoid file permission issues. 
   You can remove the new container with command:
 docker rm -f $Containername
@@ -474,35 +524,22 @@ docker rm -f $Containername
 rm -R $Cachefolder
   or let x11docker do the cleanup work for you: 
 x11docker --cleanup"
-                  Preservecachefiles="yes"
-                else
-                  note "docker container terminated successfully"
-                fi
-              }
-            }
-          ;;
-          *) # should never happen (tm)
-            note "Found remaining background process $Line"
-            ps -p $Pid
-            kill $Pid
-          ;;
-        esac
-        [ "$Pid" ] && ps -p $Pid --no-headers >/dev/null && {
-          sleep 1
-          ps -p $Pid --no-headers >/dev/null && verbose "Issue terminating $Line" && kill -s KILL $Pid
-        }
-      }
-    done < <(tac $Bgpidfile)
+        Preservecachefiles="yes"
+      else
+        note "docker container terminated successfully"
+      fi
+    }
   }
-  
-  saygoodbye "finish()"
-  
+    
   [ "$Logfile" ] && {
     [ "$Verbose" = "yes" ] && sleep 1
     $Mksu "cp '$Logfile' '$Logbackup'"
     kill $Catlogfilepid
   }
 
+  Exitcode=${1:-0}
+  [ -e "$Cachefolder/error" ] && Exitcode=1
+   
   # close additional file descriptors
   for i in 3 4 6 7 8 9; do
     { >&$i ;} 2>/dev/null && exec >&$i- 
@@ -510,10 +547,11 @@ x11docker --cleanup"
   [ -e "$Logfifo" ]              && rm "$Logfifo"
   [ -e "$Timetosaygoodbyefifo" ] && rm "$Timetosaygoodbyefifo"
   [ "$Preservecachefiles" = "no" ] && echo "$Cachefolder" | grep -q .cache && echo "$Cachefolder" | grep -q x11docker && [ "x11docker" != "$(basename "$Cachefolder")" ] && rm -f -R "$Cachefolder"
-  exit ${1:-0}
+  
+  exit $Exitcode
 }
 saygoodbye() {          # create file signaling watching processes to terminate
-  verbose "time to say goodbye ($*)"
+  verbose -d "time to say goodbye ($*)"
   [ -e "$Sharefolder" ] && {
     echo timetosaygoodbye >> $Timetosaygoodbye
     echo timetosaygoodbye >&8
@@ -522,7 +560,7 @@ saygoodbye() {          # create file signaling watching processes to terminate
 mywatch() {             # repeat $1 untils its output changes
   local Watchoutput=
   # --interval must be integer for centos and fedora watch despite contrary documentation in manpage
-  verbose "Watching: sh -c '${1:-}'
+  verbose -d "Watching: sh -c '${1:-}'
   Current output:
 $(sh -c "${1:-}" ||:)"
   env TERM=linux watch --interval 1 --chgexit --no-title -- "sh -c '${1:-}' | sha1sum" >/dev/null 2>&1
@@ -531,33 +569,37 @@ $(sh -c "${1:-}" ||:)"
   #  [ "$Watchoutput" = "$(sh -c "${1:-}" 2>&1)" ] || break
   #  sleep 1
   #done
-  verbose "Stopped watching: sh -c '${1:-}'
+  verbose -d "Stopped watching: sh -c '${1:-}'
   Current output:
 $(sh -c "${1:-}" ||:)"
 }
 watchpidlist() {        # watch list of important pids
-  # terminate x11docker if a PID in $Pidwatchlist terminates
+  # terminate x11docker if a PID in $Watchpidlist terminates
   # serves mainly watching X server, Wayland compositor, container and hostexe
   # echo PIDs to watch into >&9
   local Pid=
   while rocknroll ; do
     read -t1 Pid <&9 ||:
     [ "$Pid" ] && {
-      Pidwatchlist="$Pidwatchlist $Pid"
-      verbose "watching $(ps --no-headers -p $Pid)"
+      Watchpidlist="$Watchpidlist $Pid"
+      verbose -d "watching $(ps --no-headers -p $Pid)"
     }
-    for Pid in $Pidwatchlist; do
-      [ "$Debug" = "yes" ] && echo "watching $(ps --no-headers -p $Pid)"
-      #ps -p $Pid >/dev/null 2>&1 || saygoodbye
-      [ -e /proc/$Pid ] || saygoodbye "watchpidlist $Pid"
+    for Pid in $Watchpidlist; do
+      checkpid $Pid || {
+        saygoodbye "watchpidlist $Pid"
+        verbose -d "watchpidlist: PID $Pid has terminated"
+      }
     done
   done
+}
+setonwatchpidlist() {   # add PID $1 to watchpidlist()
+  echo $1 >&9
 }
 watchwarningfifo() {    # watch for warning messages out of container or dockerrc
   # message in fifo must end with EOF
   local Line= Message=
   while rocknroll ; do
-    IFS= read -r Line <$Warningfifo
+    IFS= read -r Line <$Warningfifo ||:
     Message="$Message
 $Line"
     grep -q EOF <<< $Message && {
@@ -571,7 +613,7 @@ watchnotefifo() {       # watch for note messages out of container or dockerrc
   # message in fifo must end with EOF
   local Line= Message=
   while rocknroll ; do
-    IFS= read -r Line <$Notefifo
+    IFS= read -r Line <$Notefifo ||:
     Message="$Message
 $Line"
     grep -q EOF <<< $Message && {
@@ -585,34 +627,20 @@ watchstdoutfifo() {     # watch for stdout messages out of container or dockerrc
   # Only submit one line at a time!
   local Line=
   while rocknroll ; do
-    IFS= read -r Line <$Stdoutfifo
+    IFS= read -r Line <$Stdoutfifo ||:
     [ "$Line" ] && echo "$Line"
   done
 }
 rocknroll() {           # check if x11docker is still running
-  [ "$Debug" = "yes" ] && echo "Rock'n'Roll"
   [ -s "$Timetosaygoodbye" ] && return 1
   [ -e "$Timetosaygoodbye" ] || return 1
   [ -e "$Logfifo" ]          || return 1
   return 0
 }
-waitfortheend() {       # wait for end of x11docker, optional for end of pid $1, too
+waitfortheend() {       # wait for end of x11docker
   # signal is byte in $Timetosaygoodbyefifo
-  # optional: pids to watch, terminate x11docker if pid dismisses
-  
-  # check for pids to watch in options
-  for i in 1 2 3 4 5 6 7 8 9 ; do
-    [ "$i" -gt "$#" ] && break
-    [ "$1" ] && echo $1 >> $Pidwatchfifo
-    shift
-  done
-  
   # decent read to wait for signal to terminate
   bash -c "read -n1 <$Timetosaygoodbyefifo"
-#  while sleep 1 ; do
-#    [ "$Debug" = "yes" ] && echo "waiting for the end"
-#    [ -s $Timetosaygoodbye ] && break
-#  done
 }
 waitforfilecreation() { # similar to inotify-wait: wait up to 15s for file $1 to be created
   # $1 file to wait for
@@ -683,14 +711,16 @@ waitforlogentry() {     # wait for entry $3 in logfile $2 of application $1
   verbose "${1:-} is ready."
   return 0
 }
-storepid () {           # store pids and names of background processes in file $Bgpidfile
+storepid () {           # store pid $1 and name $2 of background process in file $Bgpidfile.
   # store Pid and process name of background processes in file
-  # $1 should be Pid, $2 should be name of process
   # for use on exit / with trap to clean up with background processes
   # this subroutine has a twin in xinitrc
   echo ${1:-} ${2:-} >> $Bgpidfile
-  verbose "stored background pid ${1:-} of ${2:-}"
-  disown ${1:-} 2>/dev/null || verbose "can not disown ${1:-} ${2:-}"
+  verbose -d "stored background pid ${1:-} of ${2:-}"
+  disown ${1:-} 2>/dev/null || verbose -d "can not disown ${1:-} ${2:-}"
+}
+checkpid() {            # check if PID $1 is active
+  [ -e /proc/${1:-0} ] 
 }
 no_xhost() {            # remove any access to X server granted by xhost
   local Line=
@@ -1069,8 +1099,8 @@ export PATH="$PATH:/usr/sbin:/sbin"                    # may miss for unprivileg
 Bgpidfile=backgroundpids                        # file to store pids and names of background processes that shut be killed on exit
 Timetosaygoodbye=timetosaygoodbye               # file giving term signal to all parties
 Timetosaygoodbyefifo=timetosaygoodbye.fifo
-Pidwatchfifo=pidwatchfifo
-Pidwatchlist=""
+Watchpidfifo=watchpidfifo
+Watchpidlist=""
 Warningfifo=warning.fifo
 Notefifo=note.fifo
 Stdoutfifo=stdout.fifo
@@ -1078,6 +1108,7 @@ Stdoutfifo=stdout.fifo
 # x11docker log 
 Logfile=""
 Logfifo=""
+Esc="$(printf '\033')"
 
 # Users
 Startuser="$(id -un)"                           # user who started x11docker
@@ -1132,7 +1163,8 @@ Imagecommandscript=x11docker.CMD.sh             # generated script starting imag
 Dockerlogfile=docker.log                        # file to log output of container
 Containerpidfile=container.pid                  # file to store container PID
 Containeridfile=container.id                    # file to store container ID 
-Containerip=container.ip                        # file to store container IP
+Containeripfile=container.ip                    # file to store container IP
+Containerpid1pidfile=container.pid1pid          # file to store host PID of container PID 1
 
 # X server config files, log files and such stuff
 Xinitrc=xinitrc                                 # generated xinitrc script
@@ -1251,8 +1283,9 @@ Showstderr="no"                                 # option --stderr: show image co
 Silent="no"                                     # option --silent: do not show messages
 Showdisplayenvironment="no"                     # option -E, --env: output of environment variables of new display on stdout
 Showcontainerid="no"                            # option --showid: output of container id on stdout
+Showcontainerpid1pid="no"                       # option --showpid1: output of host PID of container PID 1
 Verbosecolors="yes"                             # colored output for --verbose and delete some systemd error messages.
-Debug="no"                                      # option --debug: Throw it all out
+Debugmode="no"                                  # option --debug: Throw it all out
 DebugPS4='+ \033[32m${LINENO}:${FUNCNAME[0]:+${FUNCNAME[0]}(): }\033[0m'
 
 # advanced options
@@ -1329,7 +1362,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
   Longoptions="$Longoptions,no-xhost,trusted,untrusted,dbus,dbus-system,pw:,no-internet,workdir:"                          # advanced options
   Longoptions="$Longoptions,tini,no-init,systemd,runit,openrc,sysvinit,sys-admin,sharecgroup"                              # init system options
   Longoptions="$Longoptions,starter,cleanup,license,licence,help,version,install,update,update-master,remove,wmlist"       # special options without starting X server
-  Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,xtest,no-xtest,env:,showenv,showid"                                # X and environment options
+  Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,xtest,no-xtest,env:,showenv,showid,showpid1"                       # X and environment options
   Longoptions="$Longoptions,verbose,silent,debug,stdout,stderr,stdin"                                                      # verbose options
   Longoptions="$Longoptions,hostipc,hostnet,ps,cache,cap-default,no-entrypoint,sudouser,hostuser:,group-add:"              # capabilities, users
   Longoptions="$Longoptions,cachedir:,homedir:,westonini:,sharedir:,keymap:,runfromhost:,runasroot:"                       # developer options
@@ -1418,7 +1451,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
          --stdout)     Showstdout="yes" ;;                 # show stdout of image command
          --stderr)     Showstderr="yes" ;;                 # show stderr of image command
          --silent)     Silent="yes" ; exec 3>/dev/null ;;  # do not show warnings or errors
-         --debug)      Debug="yes" ;;                      # debugging mode
+         --debug)      Debugmode="yes" ;;                      # debugging mode
                
      #### Developer options
        ## User settings
@@ -1443,6 +1476,7 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
        ## Environment
          --showid)     Showcontainerid="yes" ;;            # output of container id on stdout
          --showenv)    Showdisplayenvironment="yes" ;;     # output of display number and cookie file on stdout. Catch with  ~$ read xdenv < <(x11docker --showenv)
+         --showpid1)   Showcontainerpid1pid="yes" ;;       # output of host PID of container PID 1
          --env)        Customenvironment="$(escapestring "${2:-}")
 $Customenvironment"    ;  shift ;;                         # set custom environment variables
          --vt)         Newxvt="vt${2:-}" ;       shift ;;  # set virtual console to use
@@ -1592,6 +1626,11 @@ $Customenvironment"    ;  shift ;;                         # set custom environm
   Logfile=                                         # temporary location declared later
   Logbackup="$Cachebasefolder/x11docker.log"       # afterward copy of $Logfile in $Cachebasefolder  
   
+  grep -q beta <<<$Version && note "You are running a beta version of x11docker.
+  Beta versions change often and may introduce new bugs.
+  If you prefer latest stable release, run 'x11docker --update'.
+  If you prefer to follow development, run 'x11docker --update-master'."
+  
   verbose "x11docker version $Version 
 docker version: $(docker --version)
 Xorg version:  $(Xorg -version 2>&1 | grep X.Org)
@@ -1599,7 +1638,7 @@ Host system: $(source /etc/os-release ; echo "$PRETTY_NAME")
 Command: $0 $X11dockerargs
 Parsed options: $Parsedoptions"
 
-  [ "$Debug" = "yes" ] && {
+  [ "$Debugmode" = "yes" ] && {
     #PS4="$DebugPS4"    # useful output for set -x
     #set -x             # show every executed line
     set -Eu -o pipefail
@@ -2216,7 +2255,7 @@ Parsed options: $Parsedoptions"
   
   Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo" && $Mksu "mkfifo $Timetosaygoodbyefifo" && exec 8<>$Timetosaygoodbyefifo
   Timetosaygoodbye="$Sharefolder/$Timetosaygoodbye"         && mkfile $Timetosaygoodbye
-  Pidwatchfifo="$Cachefolder/$Pidwatchfifo"                 && $Mksu "mkfifo $Pidwatchfifo" && exec 9<>$Pidwatchfifo  
+  Watchpidfifo="$Cachefolder/$Watchpidfifo"                 && $Mksu "mkfifo $Watchpidfifo" && exec 9<>$Watchpidfifo  
   Warningfifo="$Sharefolder/$Warningfifo"                   && $Mksu "mkfifo $Warningfifo && chmod 666 $Warningfifo"
   Notefifo="$Sharefolder/$Notefifo"                         && $Mksu "mkfifo $Notefifo    && chmod 666 $Notefifo"
   Stdoutfifo="$Sharefolder/$Stdoutfifo"                     && $Mksu "mkfifo $Stdoutfifo  && chmod 666 $Stdoutfifo"
@@ -2227,9 +2266,10 @@ Parsed options: $Parsedoptions"
   Dockerlogfile="$Cachefolder/$Dockerlogfile"               && mkfile $Dockerlogfile
   Containerpidfile="$Cachefolder/$Containerpidfile"         && mkfile $Containerpidfile
   Containeridfile="$Cachefolder/$Containeridfile"           && mkfile $Containeridfile
+  Containerpid1pidfile="$Cachefolder/$Containerpid1pidfile" && mkfile $Containerpid1pidfile
   Dockerrc="$Cachefolder/$Dockerrc"                         && mkfile $Dockerrc
   Setupscript="$Sharefolder/$Setupscript"                   && mkfile $Setupscript
-  Containerip="$Cachefolder/$Containerip"                   && mkfile $Containerip
+  Containeripfile="$Cachefolder/$Containeripfile"           && mkfile $Containeripfile
   Xservercookie="$Cachefolder/$Xservercookie"               && mkfile $Xservercookie
   Xclientcookie="$Sharefolder/$Xclientcookie"               && mkfile $Xclientcookie
   Hostxauthority="$Cachefolder/$Hostxauthority"             && mkfile $Hostxauthority
@@ -2259,7 +2299,7 @@ Parsed options: $Parsedoptions"
   }
 
   # start watching pids. Compare waitfortheend()
-  echo $$>$Pidwatchfifo
+  setonwatchpidlist $$
   watchpidlist & storepid $! watchpidlist
   
   # start watching for warning out of container
@@ -3791,18 +3831,18 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   # run docker
   
   echo "#! /bin/bash"
-  declare -f waitforfilecreation rocknroll escapestring
+  declare -f waitforfilecreation warning verbose rocknroll escapestring
   echo "Timetosaygoodbye=$Timetosaygoodbye"
   echo "Logfifo=$Logfifo"
   echo "exec 3<>$Warningfifo"
   echo "exec 4<>$Notefifo"
   echo "exec 6<>$Stdoutfifo"
-  [ "$Debug" = "yes" ] && {
+  [ "$Debugmode" = "yes" ] && {
     echo "PS4='$DebugPS4'"
     echo "set -x"
     declare -f traperror | sed 's/Command/dockerrc: Command/'
     echo "set -Eu"
-    echo "trap 'traperror \$? \$LINENO \$BASH_LINENO \"\$BASH_COMMAND\" \$(printf \"::%s\" \${FUNCNAME[@]})'  ERR"
+    echo "trap 'traperror \$? \$LINENO \$BASH_LINENO \"\$BASH_COMMAND\" \$(printf \"::%s\" \${FUNCNAME[@]}EOF)'  ERR"
   }
   
   echo "Imagename=\"$Imagename\""
@@ -3876,7 +3916,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   #### create x11docker.CMD.sh ####
   echo   "# create x11docker.CMD.sh (shared with container and given as image command to docker run)"
   echo   "{ echo '#! /bin/sh'"
-  [ "$Debug" = "yes" ] && echo "echo 'set -x'"
+  [ "$Debugmode" = "yes" ] && echo "echo 'set -x'"
   echo   "  echo '# created startscript for docker run: x11docker.CMD.sh'"
   echo   "  echo '# runs as unprivileged user in container'"
   echo   "  echo 'echo x11docker: Running unprivileged user commands in container'"
@@ -4058,8 +4098,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "  sleep 0.2"
   echo "  docker exec $Containername sh -c : && { echo 'x11docker: container is up and running.' ; break ; } || echo \"x11docker: container not ready on \$Count. attempt, trying again.\" "
   echo "done"
-#  echo "cat $Dockerlogfile | grep -v grep | grep -E 'Error response from daemon|OCI runtime exec' && exit 1 ||:"  # repeat possible error message to make it visible in error() after verbose Count loop
-  echo "Failure=\"\$(cat $Dockerlogfile | grep -v grep | grep -E 'Error response from daemon|OCI runtime exec')\""
+  echo "Failure=\"\$(cat $Dockerlogfile | grep -v grep | grep -E 'Error response from daemon|OCI runtime exec' ||:)\""
   echo "[ \"\$Failure\" ] && {"
   echo "  echo \"Got error message from docker daemon:
 \$Failure EOF\" >&3"
@@ -4068,10 +4107,12 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "}"
   echo ""
 
-  
-  #echo "sleep 1 # wait a moment until IP is available. Currently, IP is only needed for --pulseaudio"
-  echo "docker inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername >> $Containerip"
-  echo "echo x11docker: container IP: \$(cat $Containerip)"
+  echo "docker inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername >> $Containeripfile"
+  echo "echo x11docker: container IP: \$(cat $Containeripfile)"
+  echo ""
+  echo "docker inspect --format '{{.State.Pid}}' $Containername >> $Containerpid1pidfile"
+  echo "echo x11docker: host PID of container PID 1: \$(cat $Containerpid1pidfile)"
+  [ "$Showcontainerpid1pid" = "yes" ] && echo "echo \"\$(cat $Containerpid1pidfile)\" >&6"
   echo ""
   echo "# get PID of container"
   echo "Containerpid=\$(ps ax | grep \$Containerid | grep -v grep | grep -v ' logs' | awk '{print \$1}')"
@@ -4085,7 +4126,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "#! /bin/sh"
   echo "# set up docker container as root before ongoing in unprivileged x11docker.CMD.sh"
   echo "# commands in this script are executed as root in container"
-  [ "$Debug" = "yes" ] && echo "set -x"
+  [ "$Debugmode" = "yes" ] && echo "set -x"
   echo "echo 'x11docker: setup as root in container'"
   echo ""
   echo "exec 3<>$Cshare/warning.fifo"
@@ -4451,7 +4492,7 @@ start() {
 
 { #### part: create pullrc: interactive script to pull image from docker hub
   echo "#! /bin/bash"
-  [ "$Debug" = "yes" ] && echo "set -x"
+  [ "$Debugmode" = "yes" ] && echo "set -x"
   echo "touchpullready() {"
   echo "  $Mksu 'touch $Cachefolder/pullready'"
   echo "}"
@@ -4466,7 +4507,7 @@ start() {
 
 { #### part: create xtermrc: prompt for password and run dockerrc
   echo "#! /bin/bash"
-  [ "$Debug" = "yes" ] && echo "set -x"
+  #[ "$Debugmode" = "yes" ] && echo "set -x"
   echo "touchxtermready() {"
   echo "  $Mksu 'touch $Cachefolder/xtermready'"
   echo "}"
@@ -4490,7 +4531,7 @@ start() {
 
 { #### part: create xinitrc: set up X environment, create cookies
   echo "#! /bin/sh"
-  [ "$Debug" = "yes" ] && echo "set -x"
+  [ "$Debugmode" = "yes" ] && echo "set -x"
 
   # declaring functions echoes them into xinitrc
   declare -f storepid
@@ -4806,7 +4847,6 @@ After finish: $Logbackup"
                                    $Xinitlogfile $Compositorlogfile 2>/dev/null >&7 &
     cat <&7 >$Logfile & storepid $! catlogfile
     # option --verbose
-    Esc="$(printf '\033')"
     [ "$Verbose" = "yes" ] && { 
       [ "$Initsystem" = "systemd" ] && note "x11docker deletes some systemd error messages
   that are harmless but numerous to get a better readable output.
@@ -4819,6 +4859,7 @@ After finish: $Logbackup"
                                       s/\(ERROR\|Error\|error\|FAILURE\|FATAL\|Fatal\|fatal\)/${Esc}[41m\1${Esc}[0m/g;
                                       s/\(Failed\|failed\|Failure\|failure\)/${Esc}[31m\1${Esc}[0m/g;
                                       s/\(WARNING\|Warning\|warning\)/${Esc}[33m\1${Esc}[0m/g;
+                                      s/\(DEBUGNOTE\)/${Esc}[35m\1${Esc}[0m/g;
                                       s/^==>.*/${Esc}[4m\0${Esc}[0m/;
                                       s/\(Starting\)/${Esc}[32m\0${Esc}[0m/;
                                       s/\(Started\|Reached target\)/${Esc}[42m\0${Esc}[0m/;
@@ -4905,7 +4946,7 @@ $(tail $Xinitlogfile)"
       # loop to check for crashing xpra server or client. restart them if needed.
       Xpracrashcount="0"
       while rocknroll ; do
-        ps -p $Xpraserverpid >/dev/null 2>&1 || {
+        checkpid $Xpraserverpid || {
           [ -n "$Xpraserverpid" ] && { 
             Xpracrashcount=$((Xpracrashcount + 1))
             [ "$Xpracrashcount" -eq 1 ] && {
@@ -4940,7 +4981,7 @@ $(tail $Xpraserverlogfile)
 $(tail $Dockerlogfile)"
           }
         }
-        ps -p $Xpraclientpid >/dev/null 2>&1 && kill $Xpraclientpid
+        checkpid $Xpraclientpid && kill $Xpraclientpid
         [ -n "$Xpraclientpid" ] && [ "$Desktopmode" = "yes" ] && [ "$Xpracrashcount" = "0" ] && saygoodbye "xpra" ### FIXME does not terminate x11docker
         verbose "starting Xpra client"
         [ -n "$Xpraclientpid" ] && note "Restarting Xpra client."
@@ -4949,7 +4990,7 @@ $(tail $Dockerlogfile)"
         storepid $Xpraclientpid xpraclient
 
         sleep 1
-        ps -p $Xpraclientpid >/dev/null 2>&1 && mywatch "ps -p $Xpraclientpid -o pid ; ps -p $Xpraserverpid -o pid #xpra"
+        checkpid $Xpraclientpid && mywatch "ps -p $Xpraclientpid -o pid ; ps -p $Xpraserverpid -o pid #xpra"
         sleep 1
       done & storepid $! xpraloop
     ;;
@@ -4964,26 +5005,26 @@ $(tail $Dockerlogfile)"
   #### watch X server and/or Wayland compositor ####
   Compositorpid=$(cat $Compositorpidfile)
   case $Xserver in
-    --nothing|--hostwayland) ;;
+    --nothing|--hostwayland|--hostdisplay) ;;
     --weston|--kwin)
       {  # catch closing compositor window
         sleep 1
-        ps -p $Compositorpid >/dev/null 2>&1 && waitfortheend $Compositorpid || error "Startup of compositor failed.
+        checkpid $Compositorpid && setonwatchpidlist $Compositorpid || error "Startup of compositor failed.
   Last lines of compositor log:
 $(tail $Compositorlogfile)"
-      } & storepid $! waitfortheend
+      } && waitfortheend & storepid $! waitfortheend
     ;;
     --weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland)
       {  # catch closing X server or compositor window
         sleep 1
-        ps -p $Compositorpid >/dev/null 2>&1 && waitfortheend $Compositorpid || error "Startup of compositor or X failed.
+        checkpid $Compositorpid && setonwatchpidlist $Compositorpid || error "Startup of compositor or X failed.
   Last lines of compositor log:
 $(tail $Compositorlogfile)"
-      } & storepid $! waitfortheend
+      } && waitfortheend & storepid $! waitfortheend
     ;;
     *)
       # catch closing X server
-      waitfortheend & storepid $! waitfortheend
+      setonwatchpidlist $(pgrep -a xinit | grep "xinit $Xinitrc" | awk '{print $1}')
     ;;
   esac
 
@@ -5011,7 +5052,12 @@ $(tail $Compositorlogfile)"
       sleep 1 # wait for late messages of docker daemon
       [ -s "$Containerpidfile" ] && { 
         Containerpid=$(cat $Containerpidfile)
-        ps -p $Containerpid >/dev/null 2>&1 || {
+        checkpid $Containerpid && {
+          storepid $Containerpid container
+          setonwatchpidlist $(cat $Containerpid1pidfile)
+          verbose -d "Process tree of container:
+$(pstree -cp $(cat $Containerpid1pidfile))"
+        } || {
           [ "$Xserver" = "--nothing" ] && saygoodbye "--nothing" || {
             error "Docker startup seems to have failed! 
 
@@ -5022,22 +5068,20 @@ $(tail $Dockerlogfile)
 $(tail $Cmdstderrlogfile)"
           }
         }
-        storepid $Containerpid container
-        
-        # wait for docker until it terminates. bash builtin wait does not work in this case
-        ps -p $Containerpid >/dev/null 2>&1 && waitfortheend $Containerpid || error "docker startup was not successfull.
+      }
+      # wait for docker until it terminates. bash builtin wait does not work in this case
+      checkpid $Containerpid && setonwatchpidlist $Containerpid || error "docker startup was not successfull.
   Maybe you mistyped your password, or image does not exist.
   Or the chosen password frontend does not match your setup;
   you can try option --pw with e.g. --pw=su or --pw=sudo.
   Last lines of docker logfile:
 $(tail $Dockerlogfile)"
-      }
     ;;
     
     exe) # --exe
       # run host application without docker. includes --xonly
       { echo "#! /bin/bash"
-        [ "$Debug" = "yes" ] && echo "set -Eux"
+        [ "$Debugmode" = "yes" ] && echo "set -Eux"
         echo "export $Newxenv"
         [ "$Benutzerhosthome" = "yes" ] && {
           echo "export HOME='$Benutzerhosthomefolder'"
@@ -5053,11 +5097,12 @@ $(tail $Dockerlogfile)"
       cat $Imagecommandscript | nl -ba >> $Dockerlogfile
       $Mksubenutzer "bash $Imagecommandscript" & Hostexepid=$! && storepid $! hostexe
       sleep 1 # wait for possible startup failure
-      ps -p $Hostexepid >/dev/null 2>&1 && waitfortheend $Hostexepid || error "Startup of '$Hostexe' failed.
+      checkpid $Hostexepid && setonwatchpidlist $Hostexepid || error "Startup of '$Hostexe' failed.
   Last lines of log:
 $(tail $Dockerlogfile)"
     ;;
   esac
+  waitfortheend
   saygoodbye "x11docker-run"
 } & storepid $! x11docker-run
 
@@ -5129,16 +5174,15 @@ $(tail $Compositorlogfile)"
 
 ######### ToDo notes for development
 todo() {
-# error code $? is 0 if error() is called within subshell x11docker-run
+# finish() --sysvinit --openrc --runit: add service to shut down on timetosaygoodbye
+# disable dbus service bluez, maybe others, too. check deepin dockerfile
 
-# watchwarningfifo() only displays first line.
 # BUG opensuse/arch: issues with x11docker/fluxbox, background missing, sometimes no context menu. where is the difference?
 # run several code pathes with --debug
 # --dbus-system: find way to start dbus services with dbus itself
 
 # --no-init no-new-privileges switchuser: exec fails, but why?
-# check out capsh. replace su with capsh? (missing in alpine) But how to trigger logind?
-# --hostuser: mkfifo to wayland socket possible?
+# check out capsh. replace su with capsh? (missing in alpine) But how to trigger login?
 # --group-add: compare host and container GID? warn if group misses in container, or create it?
 # work on traperror(). 'set -u' possible without a stop?
 # --update: regard possible location in /opt

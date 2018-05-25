@@ -1,17 +1,19 @@
 # x11docker: ![x11docker logo](x11docker.png) Run GUI applications in docker
 ## Avoid X security leaks and improve container security
 
-Graphical applications or desktops in docker are similar in usage to a Virtual
-Machine. They are isolated from host, and it is possible to run applications 
-that would not run on host due to missing dependencies. For example, it is 
-possible to run latest development versions or outdated versions of 
-applications, or multiple versions at the same time.
+Graphical applications and desktops in docker are similar in usage to a Virtual
+Machine. They are isolated from host in several ways. 
+It is possible to run applications that would not run on host due to missing 
+dependencies. 
+For example, you can run latest development versions or outdated 
+versions of applications, or even multiple versions at the same time.
 
-Practical differences to a VM: docker containers need much less resources. 
-x11docker discardes containers after use. Persistant data and configuration 
-storage is done with shared folders. 
-Persistant container system changes can be done in Dockerfile; system changes
-in running containers are discarded after use.
+Practical differences to a VM: 
+Docker containers need much less resources. 
+x11docker discardes containers after use. 
+Persistant data and configuration storage is done with shared folders. 
+Persistant container system changes can be done in Dockerfile. 
+System changes in running containers are discarded after use.
 
  - Avoids X security leaks by running [additional X servers](#choice-of-x-servers-and-wayland-compositors).
  - Improves container [security](#security):
@@ -471,7 +473,7 @@ Some example images can be found on docker hub: https://hub.docker.com/u/x11dock
    - [Telegram messenger](https://telegram.org/) with persistant `HOME` for configuration storage: 
      - `x11docker --home xorilog/telegram`
    - Fractal generator [XaoS](https://github.com/patrick-nw/xaos): `x11docker patricknw/xaos`
-   - Glxgears with hardware acceleration: `x11docker --gpu x11docker/xfce glxgears`
+   - GLXgears with hardware acceleration: `x11docker --gpu x11docker/xfce glxgears`
    - Firefox with shared Download folder: `x11docker --hostipc --sharedir $HOME/Downloads jess/firefox`
    - Chromium browser: `x11docker -- jess/chromium --no-sandbox`
    - [Tor browser](https://www.torproject.org/projects/torbrowser.html): `x11docker jess/tor-browser`

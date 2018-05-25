@@ -8,6 +8,7 @@ Project website: https://github.com/mviereck/x11docker
 ## [Unreleased]
 ### Added
  - `--stdin`: Forward stdin of x11docker to image command.
+ - `--showpid1`: Echo host PID of container PID 1 on stdout.
 ### Changed
  - `--security-opt=no-new-privileges` for init systems and `--dbus-system`.
    Now default for all options except `--sudouser` and `--cap-default`.
