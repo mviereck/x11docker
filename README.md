@@ -20,7 +20,7 @@ System changes in running containers are discarded after use.
    - Restricts container capabilities to bare minimum.
    - Container user is same as host user to avoid root in container.
  - No dependencies inside of docker images.
- - No obliging [dependencies](#dependencies) on host beside X and docker. Recommended: `nxagent`, `xpra` and `Xephyr`.
+ - No obliging [dependencies](#dependencies) on host beside X and docker. Recommended: `nxagent` and `Xephyr`.
  - [Wayland](#wayland) support.
  - [Optional features](#options): 
    - [Persistent data storage](#shared-folders-and-home-in-container) with shared host folders and a persistant `HOME` in container.
@@ -149,9 +149,7 @@ x11docker checks dependencies for chosen options on startup and shows terminal m
 
 _Basics:_
  - If no additional X server is installed, only less isolated option `--hostdisplay` will work out of the box within X, and option `--xorg` from console. (To use `--xorg` within X, look at [setup for option --xorg](#setup-for-option---xorg)).
- - As a **well working base** for convenience and security, it is recommended to install `xpra` (seamless applications) and `Xephyr` (desktop mode).
-   - It is recommended to use latest stable xpra version from [http://xpra.org](http://xpra.org/). 
-   - Alternativly, you can install `nxagent` for both seamless and desktop mode.
+ - As a **well working base** for convenience and security, it is recommended to install [`nxagent`](https://packages.debian.org/experimental/nxagent) (seamless applications and desktop mode) or `Xephyr` (desktop mode).
  - Already installed on most systems with an X server: `xrandr`, `xauth` and `xdpyinfo`.
  
 _Advanced usage:_
@@ -162,7 +160,7 @@ _Advanced usage:_
    - Option `--pulseaudio` needs `pulseaudio` on host _and_ in image. 
  - **Hardware acceleration** with option `--gpu`
    - Works best with open source drivers on host and OpenGL/Mesa in image. In most cases everything will work out of the box with just setting `--gpu`.
-   - To provide good X isolation: Beside `xpra`, also install `Xwayland`, `weston` and `xdotool` on host. Without these, you still can use `--gpu` with `--hostdisplay` and `--xorg`.
+   - To provide good X isolation: Install `Xwayland` and `weston` for desktop mode, and additionally `xpra` and `xdotool` for seamless mode. Without these, you still can use `--gpu` with `--hostdisplay` and `--xorg`.
    - Packages for OpenGL/Mesa in image:
      - debian and Ubuntu images: `mesa-utils mesa-utils-extra`.
      - CentOS and fedora images: `glx-utils mesa-dri-drivers`
@@ -180,7 +178,6 @@ _Advanced usage:_
      - Alternativly, you can install a driver version matching your host setup in image yourself. Note that this image will not be portable anymore.
  
 _Rarer needed dependencies for special options:_
- - `--nxagent` provides a fast and lightweight alternative to `xpra` and `Xephyr`. Needs [`nxagent`](https://packages.debian.org/experimental/nxagent) to be installed.
  - `--kwin` and `--kwin-xwayland` need `kwin_wayland`, included in modern `kwin` packages.
  - `--xdummy` needs dummy video driver `xserver-xorg-video-dummy` (debian) or `xorg-x11-drv-dummy` (fedora).
  - `--xvfb` needs `Xvfb`
