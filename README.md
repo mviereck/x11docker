@@ -84,7 +84,7 @@ x11docker assumes that you want to run a single application in seamless mode, i.
   - Seamless mode is supported with options `--xpra` and `--nxagent`. As a fallback insecure option `--hostdisplay` is possible.
     - If neither `xpra` nor `nxagent` are installed, but x11docker finds a desktop capable X server like `Xephyr`, it avoids insecure option `--hostdisplay` and runs Xephyr with a host window manager.
     - You can specify a host window manager with option `--wm WINDOWMANAGER`, for example `--wm openbox`.
-  - Desktop mode is supported with all X server options except `--hostdisplay`. If available, x11docker prefers `Xephyr` and `nxagent` 
+  - Desktop mode with `--desktop` is supported with all X server options except `--hostdisplay`. If available, x11docker prefers `Xephyr` and `nxagent` 
 ## Shared folders and HOME in container
 Changes in a running docker image are lost, the created docker container will be discarded. For persistent data storage you can share host directories:
  - Option `--home` creates a host directory in `~/x11docker/IMAGENAME` that is shared with the container and mounted as home directory. Files in container home and configuration changes will persist. 
@@ -368,19 +368,6 @@ mount -t cgroup cgroup /sys/fs/cgroup/systemd -o none,name=systemd
 Some desktop environments and applications need a running dbus daemon and/or dbus user session. 
  - use `--dbus-system` to run dbus system daemon. This includes option `--dbus`. Some desktops like cinnamon or deepin depend more on dbus system daemon than on a full blown init system.
  - use `--dbus` to run image command with `dbus-launch` (fallback: `dbus-run-session`) for a dbus user session.
-
-# Developer options
-Collection of rarer needed but sometimes useful options. Most of interest:
- - `--showid`: Show container ID on stdout.
- - `--showenv`: Show X environment variables on stdout.
- - `--env VAR=VALUE`: Set environment variable in container.
- - `--cap-default`: Allow default docker container capabilities.
- - `--user USER`: Specify a container user different from current host user.
- - `--display N`: Specify X display number for new X server.
- - `--runfromhost CMD`: Run command from host on new X server.
- - `--runasroot CMD`: Run command as root on container startup.
-
-![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/x11docker-developer.png "developer options")
 
 # Network setup
 ## SSH X forwarding

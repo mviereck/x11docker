@@ -10,7 +10,7 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="4.3.0-beta"
+Version="4.3.0"
 
 usage() {               # --help: show usage information
   echo "
@@ -418,7 +418,7 @@ finish() {              # trap EXIT routine to clean up background processes and
   local Pid= Name= Zeit= Catlogfilepid= Exitcode= Pid1pid=
   trap - EXIT 
 
-  Pid1pid=$(cat $Containerpid1pidfile)
+  Pid1pid=$(cat $Containerpid1pidfile 2>/dev/null)
 
   verbose -d "terminating x11docker."
   checkpid $Pid1pid && verbose -d "process tree of container:
@@ -498,7 +498,10 @@ $(ps -p $Pid)"
     done < <(tac $Bgpidfile)
   }
   
-  saygoodbye "finish()"
+  saygoodbye "finish"
+  
+  # catch case where finish is called by error in a subshell. finish should handle following part in main process.
+  [ "$$" = "$BASHPID" ] || return 0
 
   # Check if container is still running.
   # if kill failed in loop above, most times terminating X server will already have stopped GUI applications.
@@ -558,17 +561,11 @@ saygoodbye() {          # create file signaling watching processes to terminate
   }
 }
 mywatch() {             # repeat $1 untils its output changes
-  local Watchoutput=
   # --interval must be integer for centos and fedora watch despite contrary documentation in manpage
   verbose -d "Watching: sh -c '${1:-}'
   Current output:
 $(sh -c "${1:-}" ||:)"
   env TERM=linux watch --interval 1 --chgexit --no-title -- "sh -c '${1:-}' | sha1sum" >/dev/null 2>&1
-  #Watchoutput="$(sh -c "${1:-}" 2>&1)"
-  #while rocknroll ; do
-  #  [ "$Watchoutput" = "$(sh -c "${1:-}" 2>&1)" ] || break
-  #  sleep 1
-  #done
   verbose -d "Stopped watching: sh -c '${1:-}'
   Current output:
 $(sh -c "${1:-}" ||:)"
@@ -664,7 +661,7 @@ waitforfilecreation() { # similar to inotify-wait: wait up to 15s for file $1 to
     }
     verbose "waiting since ${Dauer}s for ${1:-} to be created, will wait up to $Warten seconds."
     rocknroll || {
-      verbose "stopped waiting for ${1:-} due to terminating signal."
+      verbose -d "stopped waiting for ${1:-} due to terminating signal."
       return 1
     }
   done
@@ -684,7 +681,7 @@ waitforfilecontent() {  # wait for file $1 to be not empty
     [ $Warten -lt $Dauer ]  && return 1
     verbose "waiting since ${Dauer}s for ${1:-} to have content, will wait up to $Warten seconds."
     rocknroll || {
-      verbose "stopped waiting for file content of ${1:-} due to terminating signal."
+      verbose -d "stopped waiting for file content of ${1:-} due to terminating signal."
       return 1
     }  done
   verbose "Found file content in ${1:-}"
@@ -697,15 +694,14 @@ waitforlogentry() {     # wait for entry $3 in logfile $2 of application $1
   local Zeit= Warten= Dauer= Count=
   Zeit=$(date +%s)
   Warten=60
-  while ! cat "${2:-}" | grep -q "${3:-}" ; do
+  while ! grep -q "${3:-}" <"${2:-}" ; do
     Count=$(( Count + 1 ))
     Dauer=$(( $(date +%s) - $Zeit ))
-#    verbose "waiting since $(expr $(date +%s) - $Zeit)s for ${1:-} to be ready..."
     verbose "waiting since ${Dauer}s for ${1:-} to be ready..."
     sleep $(awk "BEGIN { print $Count * 0.1 }")
     [ $Warten -lt $Dauer ] && return 1
     rocknroll || {
-      verbose "stopped waiting for logentry in ${2:-} of ${1:-} due to terminating signal."
+      verbose -d "stopped waiting for logentry in ${2:-} of ${1:-} due to terminating signal."
       return 1
     }  done
   verbose "${1:-} is ready."
@@ -854,7 +850,7 @@ cleanup() {             # --cleanup : check for non-removed containers and left 
   Orphanedcontainers=""
   Orphanedfolders=""
   cd $Cachebasefolder || error "Could not cd to cache folder '$Cachebasefolder'."
-  [ $? ] && [ -n "$(echo "$Cachebasefolder" | grep .cache/x11docker)" ] && Orphanedfolders=$(echo $(find "$Cachebasefolder" -mindepth 1 -maxdepth 1 -type d | sed s%$Cachebasefolder/%%))
+  [ $? ] && grep -q .cache/x11docker <<<$Cachebasefolder && Orphanedfolders=$(find "$Cachebasefolder" -mindepth 1 -maxdepth 1 -type d | sed s%$Cachebasefolder/%%)
   Orphanedcontainers="$(docker ps -a --filter name=x11docker_X --format "{{.Names}}")"
   Orphanedcontainers="$(env IFS='' echo $Orphanedcontainers)"
   if [ -z "$Orphanedcontainers" ] && [ -z "$Orphanedfolders" ] ; then 
@@ -899,7 +895,7 @@ installer() {           # --install, --update, --update-master, --remove: Instal
   #   - download and install latest master version from github
   # --remove
   #   - remove installed files
-  local X11dockericonfile= Key1= Key2= Oldversion= Newversion=
+  local Key1= Key2= Oldversion= Newversion=
   export PATH="$PATH:/usr/local/bin"  # avoid bug on opensuse where root does not have this in $PATH. Will become obsolete as new default is /usr/bin
   
   # Prepairing
@@ -1207,6 +1203,9 @@ Newxlock=""                                     # .Xn-lock - exists for running 
 Xserveroptions=""                               # created options for new X server
 Xpraservercommand=""                            # created xpra server command
 Xpraclientcommand=""                            # created xpra client command
+Xpraserverpid=""
+Xpraclientpid=""
+Xpracrashcount=""
 Xpraoptions=""                                  # options for xpra server and client
 Xprashm=""                                      # content XPRA_XSHM=0 disables usage of MIT-SHM in xpra
 Xpraversion=""                                  # $(xpra --version) to decide some xpra options and messages
@@ -1244,7 +1243,7 @@ Outputcount="1"                                 # option --output-count, quantum
 Hostwaylandsocket="$WAYLAND_DISPLAY"            # store host wayland socket name
 Newwaylandsocket=""                             # Wayland socket of $Compositorcommand
 Compositorcommand=""                            # command to start Weston or KWin
-Waylandtoolkitenv=("XDG_SESSION_TYPE=wayland GDK_BACKEND=wayland QT_QPA_PLATFORM=wayland CLUTTER_BACKEND=wayland SDL_VIDEODRIVER=wayland ELM_DISPLAY=wl ELM_ACCEL=opengl ECORE_EVAS_ENGINE=wayland_egl")
+Waylandtoolkitenv="XDG_SESSION_TYPE=wayland GDK_BACKEND=wayland QT_QPA_PLATFORM=wayland CLUTTER_BACKEND=wayland SDL_VIDEODRIVER=wayland ELM_DISPLAY=wl ELM_ACCEL=opengl ECORE_EVAS_ENGINE=wayland_egl"
 Westonoutput=""                                 # Xn, WLn (nested mode) or monitor identifier (drm mode on tty)
 Sharewayland="no"                               # share wayland socket and WAYLAND_DISPLAY
 Setwaylandenv="no"                              # set environment variables $Waylandtoolkitenv
@@ -2437,7 +2436,7 @@ Parsed options: $Parsedoptions"
   
   # check for closed source nvidia driver on host, provide automated installation, warn about disadvantages
   [ "$Gpu" = "yes" ] && [ -e "/proc/driver/nvidia" ] && {
-    Nvidiaversion=$(cat /proc/driver/nvidia/version | head -n1 | awk '{ print $8 }')
+    Nvidiaversion=$(head -n1 </proc/driver/nvidia/version | awk '{ print $8 }')
     verbose "Detected nvidia driver version $Nvidiaversion on host."
     Nvidiadriver=$(find /usr/local/share/x11docker/NVIDIA* $Hostuserhome/.local/share/x11docker/NVIDIA* 2>/dev/null | grep $Nvidiaversion )
     
@@ -2622,7 +2621,7 @@ enable-shm = false
     note "You can specify the sound card to use setting environment
   variable ALSA_CARD. Example:  --env ALSA_CARD=Generic
   Following sound cards found on your system:
-$(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
+$(grep ':' </proc/asound/cards | cut -d"[" -f2 | cut -d"]" -f1)
   Option --alsa allows a general access to real sound cards. 
   To use virtual ALSA devices like dmix, too, install ALSA libraries in image.
   (Example: debian images would need package libasound2)."
@@ -2922,7 +2921,7 @@ startup-animation=fade
 [keyboard]
 " >> "$Westonini"
       [ -n "$Xkblayout" ] && echo "keymap_layout=$Xkblayout" >> "$Westonini"
-      [ -z "$Xkblayout" ] && [ "$Tty" = "yes" ] && echo "$(echo -n "keymap_layout=" && cat /etc/default/keyboard | grep XKBLAYOUT | cut -d= -f2 | cut -d'"' -f2)" >> "$Westonini"
+      [ -z "$Xkblayout" ] && [ "$Tty" = "yes" ] && echo "$(echo -n "keymap_layout=" && grep XKBLAYOUT <"/etc/default/keyboard" | cut -d= -f2 | cut -d'"' -f2)" >> "$Westonini"
       [ -n "$Hostwaylandsocket" ] && [ "$Xserver" != "--xpra-xwayland" ] && [ "$Hostsystem" != "ubuntu" ] && [ "$Fullscreen" = "no" ] && {
         Westonoutput="WL"
       } || {
@@ -2938,7 +2937,7 @@ startup-animation=fade
           waitforlogentry weston $Compositorlogfile "connector" || error "Weston startup failed. Can not run $Xserver.
   Last lines of weston log:
 $(tail "$Compositorlogfile")"
-          Westonoutput="$(cat $Compositorlogfile | grep Output | grep connector | head -n1 | cut -d ' ' -f3 | rev | cut -c2- | rev)"
+          Westonoutput="$(grep Output <$Compositorlogfile | grep connector | head -n1 | cut -d ' ' -f3 | rev | cut -c2- | rev)"
           kill $Compositorpid
           mkfile "$Compositorlogfile"
           mkfile "$Compositorpidfile"
@@ -3353,13 +3352,13 @@ done
   # Makes problems if X and Wayland are independently available at same time: xfce4-terminal
   # Works, but does not appear: 'guake -te'
   
-  Terminallist=("xterm lxterm lxterminal stterm sakura termit pterm terminator terminology Eterm konsole qterminal gnome-terminal mate-terminal mrxvt rxvt xvt kterm mlterm xfce4-terminal NOLUCK")
+  Terminallist="xterm lxterm lxterminal stterm sakura termit pterm terminator terminology Eterm konsole qterminal gnome-terminal mate-terminal mrxvt rxvt xvt kterm mlterm xfce4-terminal NOLUCK"
   [ -z "$Hostdisplay$Newdisplay" ] && {
     case $Xserver in
-      --weston|--hostwayland)  Terminallist=("konsole qterminal gnome-terminal NOLUCK") ;;
-      --kwin)                  Terminallist=("konsole NOLUCK") ;;
-      --nothing)               Terminallist=("bash NOLUCK") ;;
-      *)                       Terminallist=("konsole NOLUCK") ;;
+      --weston|--hostwayland)  Terminallist="konsole qterminal gnome-terminal NOLUCK" ;;
+      --kwin)                  Terminallist="konsole NOLUCK" ;;
+      --nothing)               Terminallist="bash NOLUCK" ;;
+      *)                       Terminallist="konsole NOLUCK" ;;
     esac
   }
   
@@ -4367,7 +4366,7 @@ start() {
       case $Initsystem in
         systemd) ;;
         *)
-          [ "Switchcontaineruser" = "yes" ] && echo "cp $Cshare/org.x11docker.watch.service /usr/share/dbus-1/system-services/"
+          [ "$Switchcontaineruser" = "yes" ] && echo "cp $Cshare/org.x11docker.watch.service /usr/share/dbus-1/system-services/"
 
           echo "echo x11docker: DBus: removing failing services"
           echo "for Line in \$(find /usr/share/dbus-1/system-services -type f); do"
@@ -4854,18 +4853,18 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
         verbose "Created docker command:
   $Dockercommand"
         verbose "Created containersetup.sh:
-$(cat $Setupscript | nl -ba)"
+$(nl -ba <$Setupscript)"
         verbose "Created dockerrc:
-$(cat $Dockerrc | nl -ba)" 
+$(nl -ba <$Dockerrc)" 
         verbose "Created xtermrc:
-$(cat $Xtermrc | nl -ba)"
+$(nl -ba <$Xtermrc)"
       ;;
       exe) verbose "Running host application: $Hostexe" ;;
     esac
     verbose "Created xinitrc:
-$(cat $Xinitrc | nl -ba)"
+$(nl -ba <$Xinitrc)"
     [ -s "$Westonini" ] && verbose "Created weston.ini:
-$(cat "$Westonini" | nl -ba)"
+$(nl -ba <$Westonini)"
     verbose "Logfile: $Logfile
 In container: $Cshare/x11docker.log
 After finish: $Logbackup"
@@ -4924,7 +4923,8 @@ After finish: $Logbackup"
 " -i "$Name" Name
     [ -z "$Name" ] && exit ### FIXME: check for valid file name / invalid chars?
     
-    Parsedoptions=$(echo $Parsedoptions | sed 's/--starter/ /')
+    #Parsedoptions=$(echo $Parsedoptions | sed 's/--starter/ /')
+    Parsedoptions=${Parsedoptions//--starter/}
     mkfile "$Cachefolder/$Name.desktop"
     { 
       echo "#!/usr/bin/xdg-open
@@ -4975,7 +4975,6 @@ $(tail $Xinitlogfile)"
       }
       
       # loop to check for crashing xpra server or client. restart them if needed.
-      Xpracrashcount="0"
       while rocknroll ; do
         checkpid $Xpraserverpid || {
           [ -n "$Xpraserverpid" ] && { 
@@ -5018,8 +5017,8 @@ $(tail $Dockerlogfile)"
         [ -n "$Xpraclientpid" ] && note "Restarting Xpra client."
         $Mksu "env $Hostxenv XPRA_PADDING_COLORS='0,0.2,1' $Xpraclientcommand" >> $Xpraclientlogfile 2>&1 &
         Xpraclientpid=$!
+        
         storepid $Xpraclientpid xpraclient
-
         sleep 1
         checkpid $Xpraclientpid && mywatch "ps -p $Xpraclientpid -o pid ; ps -p $Xpraserverpid -o pid #xpra"
         sleep 1
@@ -5086,7 +5085,7 @@ $(tail $Compositorlogfile)"
         checkpid $Containerpid && {
           storepid $Containerpid container
           setonwatchpidlist $(cat $Containerpid1pidfile)
-          verbose -d "Process tree of container:
+          verbose -d "Process tree of container (maybe not complete yet):
 $(pstree -cp $(cat $Containerpid1pidfile))"
         } || {
           [ "$Xserver" = "--nothing" ] && saygoodbye "--nothing" || {
@@ -5125,7 +5124,7 @@ $(tail $Dockerlogfile)"
         echo "done"
         echo "exec $Hostexe $( [ "$Forwardstdin" = "yes" ] && echo "<$Cmdstdinfile") >>$Cmdstdoutlogfile 2>>$Cmdstderrlogfile"
       } >> $Imagecommandscript
-      cat $Imagecommandscript | nl -ba >> $Dockerlogfile
+      nl -ba <$Imagecommandscript >> $Dockerlogfile
       $Mksubenutzer "bash $Imagecommandscript" & Hostexepid=$! && storepid $! hostexe
       sleep 1 # wait for possible startup failure
       checkpid $Hostexepid && setonwatchpidlist $Hostexepid || error "Startup of '$Hostexe' failed.
@@ -5133,6 +5132,8 @@ $(tail $Dockerlogfile)"
 $(tail $Dockerlogfile)"
     ;;
   esac
+  debugnote "Process tree of x11docker:
+$(pstree -cp $$)"
   waitfortheend
   saygoodbye "x11docker-run"
 } & storepid $! x11docker-run
@@ -5156,7 +5157,7 @@ $(tail $Dockerlogfile)"
 $(tail $Compositorlogfile)"
         storepid $(cat $Compositorpidfile) compositor
         # hide weston window
-        $Mksu "xdotool windowunmap 0x$(printf '%x\n' $(cat $Compositorlogfile | grep 'window id' | rev | cut -d' ' -f1 | rev))"
+        $Mksu "xdotool windowunmap 0x$(printf '%x\n' $(grep 'window id' $Compositorlogfile | rev | cut -d' ' -f1 | rev))"
       }
       $Mksu "exec env WAYLAND_DISPLAY=$Newwaylandsocket   xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
     ;;
@@ -5205,7 +5206,6 @@ $(tail $Compositorlogfile)"
 
 ######### ToDo notes for development
 todo() {
-# finish() --sysvinit --openrc --runit: add service to shut down on timetosaygoodbye
 # disable dbus service bluez, maybe others, too. check deepin dockerfile
 
 # BUG opensuse/arch: issues with x11docker/fluxbox, background missing, sometimes no context menu. where is the difference?

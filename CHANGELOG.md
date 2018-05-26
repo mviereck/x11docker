@@ -5,7 +5,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html) since version 4.0.0.
 
 Project website: https://github.com/mviereck/x11docker
-## [Unreleased]
+## [4.3.0](https://github.com/mviereck/x11docker/releases/tag/v4.3.0) - 2018-05-26
 ### Added
  - `--stdin`: Forward stdin of x11docker to image command.
  - `--showpid1`: Echo host PID of container PID 1 on stdout.
@@ -24,6 +24,7 @@ Project website: https://github.com/mviereck/x11docker
  - Logfile handling with fifo/named pipe.
  - `--auto`: Tightened dependency check.
  - Improved process watching using less resources. Faster shutdown.
+ - `--x11docker-gui`: New structure using tabs.
  - Some code cleanup.
 ### Fixed
  - Don't set `-title` in `Xephyr` command. Xephyr bug: Releasing keyboard
