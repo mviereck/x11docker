@@ -561,14 +561,21 @@ saygoodbye() {          # create file signaling watching processes to terminate
   }
 }
 mywatch() {             # repeat $1 untils its output changes
-  # --interval must be integer for centos and fedora watch despite contrary documentation in manpage
-  verbose -d "Watching: sh -c '${1:-}'
+  local Watchoutput=
+  Watchoutput="$(sh -c "${1:-}" 2>&1)"
+  
+  verbose -d "Watching output of: sh -c \"'${1:-}'\" 2>&1
   Current output:
-$(sh -c "${1:-}" ||:)"
-  env TERM=linux watch --interval 1 --chgexit --no-title -- "sh -c '${1:-}' | sha1sum" >/dev/null 2>&1
-  verbose -d "Stopped watching: sh -c '${1:-}'
+$Watchoutput"
+
+while rocknroll; do
+    [ "$Watchoutput" = "$(sh -c "${1:-}" 2>&1)" ] || break
+    sleep 1
+  done
+
+  verbose -d "Stopped watching output of: sh -c \"'${1:-}'\" 2>&1
   Current output:
-$(sh -c "${1:-}" ||:)"
+$(sh -c "${1:-}" 2>&1)"
 }
 watchpidlist() {        # watch list of important pids
   # terminate x11docker if a PID in $Watchpidlist terminates
@@ -692,18 +699,31 @@ waitforlogentry() {     # wait for entry $3 in logfile $2 of application $1
   # $2 points to logfile
   # $3 keyword to wait for 
   local Zeit= Warten= Dauer= Count=
+  
   Zeit=$(date +%s)
   Warten=60
+  
   while ! grep -q "${3:-}" <"${2:-}" ; do
+  
+    grep -i -q error <"${2:-}" && {
+      warning "Found error message for ${1:-} in logfile
+  ${2:-}
+$(grep -i error  <"${2:-}")"
+      return 1
+    }
+    
     Count=$(( Count + 1 ))
     Dauer=$(( $(date +%s) - $Zeit ))
     verbose "waiting since ${Dauer}s for ${1:-} to be ready..."
     sleep $(awk "BEGIN { print $Count * 0.1 }")
     [ $Warten -lt $Dauer ] && return 1
+    
     rocknroll || {
       verbose -d "stopped waiting for logentry in ${2:-} of ${1:-} due to terminating signal."
       return 1
-    }  done
+    }
+  done
+  
   verbose "${1:-} is ready."
   return 0
 }
@@ -1695,21 +1715,22 @@ Parsed options: $Parsedoptions"
 { #### part: check X server dependencies, auto-choose X server
 
   ## default option '--auto': Try to automatically choose best matching and available X server
-  [ "$Autochooseserver" = "yes" ] && {                             Xserver="--xpra"
-    [ -n "$Hostwaylandsocket" ]                                 && Xserver="--xpra-xwayland"
-    [ "$Gpu" = "yes" ]                                          && Xserver="--xpra-xwayland"
-    [ "$Xfishtank" = "yes" ]    && [ "$Desktopmode" = "no" ]    && Xserver="--xephyr"
-    [ "$Desktopmode" = "yes"  ]                                 && Xserver="--xephyr"
-    [ -z "$Imagename" ]                                       && { Xserver="--xephyr" ; Desktopmode="yes" ; }
-    [ "$Xserver" = "--xephyr" ] && { depends --xephyr           || Xserver="--weston-xwayland" ; } # try weston if Xephyr and Xnest are missing
-    [ "$Gpu" = "yes" ]          && [ "$Xserver" = "--xephyr" ]  && Xserver="--weston-xwayland"
-    [ -z "$Hostdisplay" ]                                       && Xserver="--xorg"
-    [ "$Outputcount" != "1" ]                                   && Xserver="--weston-xwayland"
-    [ -n "$Rotation" ]                                          && Xserver="--weston-xwayland"
-    [ "$Scaling" != "0" ]       && [ "$Gpu" = "yes" ]           && Xserver="--xpra-xwayland"
-    [ "$Scaling" != "0" ]       && [ "$Gpu" = "no" ]            && Xserver="--xpra"
-    [ -z "$Hostdisplay" ]       && [ -n "$Hostwaylandsocket" ]  && Xserver="--weston-xwayland"
+  [ "$Autochooseserver" = "yes" ] && {                              Xserver="--xpra"
+    [ -n "$Hostwaylandsocket" ]                                  && Xserver="--xpra-xwayland"
+    [ "$Gpu" = "yes" ]                                           && Xserver="--xpra-xwayland"
+    [ "$Xfishtank" = "yes" ]    && [ "$Desktopmode" = "no" ]     && Xserver="--xephyr"
+    [ "$Desktopmode" = "yes"  ]                                  && Xserver="--xephyr"
+    [ -z "$Imagename" ]                                        && { Xserver="--xephyr" ; Desktopmode="yes" ; }
+    [ "$Xserver" = "--xephyr" ] && { depends --xephyr            || Xserver="--weston-xwayland" ; } # try weston if Xephyr and Xnest are missing
+    [ "$Gpu" = "yes" ]          && [ "$Xserver" = "--xephyr" ]   && Xserver="--weston-xwayland"
+    [ -z "$Hostdisplay" ]                                        && Xserver="--xorg"
+    [ "$Outputcount" != "1" ]                                    && Xserver="--weston-xwayland"
+    [ -n "$Rotation" ]                                           && Xserver="--weston-xwayland"
+    [ "$Scaling" != "0" ]       && [ "$Gpu" = "yes" ]            && Xserver="--xpra-xwayland"
+    [ "$Scaling" != "0" ]       && [ "$Gpu" = "no" ]             && Xserver="--xpra"
+    [ -z "$Hostdisplay" ]       && [ -n "$Hostwaylandsocket" ]   && Xserver="--weston-xwayland"
     [ "$Sharewayland" = "yes" ] && { [ -n "$Hostwaylandsocket" ] && [ "$Desktopmode" = "no" ] && Xserver="--hostwayland" || Xserver="--weston" ; }
+    { [ "$Xserver" = "--xpra" ] || [ "$Xserver" = "--xephyr" ];} && Xserver="--nxagent"
   }
 
   [ "$Gpu" = "yes" ] && case $Xserver in
@@ -1810,7 +1831,7 @@ Parsed options: $Parsedoptions"
         case $Gpu in
           no)  note "Did not find a nice solution to run a seamless application
   on your desktop. (Only insecure option --hostdisplay would work).
-  It is recommended to install xpra (www.xpra.org) or nxagent." ;;
+  It is recommended to install nxagent or xpra." ;;
           yes) note "Did not find a nice solution to run a seamless application with
   option --gpu on your desktop. (Only insecure option --hostdisplay would work).
   It is recommended to install xpra, weston, Xwayland and xdotool." ;;
@@ -1853,7 +1874,7 @@ Parsed options: $Parsedoptions"
       xdpyinfo | grep -q SECURITY || {
         note "Your X server does not support untrusted cookies.
   Have to use trusted cookies and to enable insecure option --hostipc.
-  Consider to use options --xpra or --nxagent instead of --hostdisplay."
+  Consider to use options --nxagent or --xpra instead of --hostdisplay."
         Trusted="yes"
         Sharehostipc="yes"
       } 
@@ -1885,7 +1906,7 @@ Parsed options: $Parsedoptions"
       warning "For SSH connection with option --hostdisplay
   x11docker must enable options --hostipc, --hostnet and --trusted.
   It is recommended to user other X server options 
-  like --xpra, --nxagent or --xephyr."
+  like --nxagent, --xpra or --xephyr."
       Sharehostipc="yes"
       Sharehostnet="yes"
       Trusted="yes"
@@ -2053,11 +2074,11 @@ Parsed options: $Parsedoptions"
     --hostdisplay)
       [ "$Autochooseserver" = "yes" ] && note "To allow protection against X security leaks,
   please install one or more of:
-    xpra, nxagent, Xephyr, weston+Xwayland, kwin_wayland+Xwayland or Xnest.
+    nxagent, xpra, Xephyr, weston+Xwayland, kwin_wayland+Xwayland or Xnest.
   or run a second Xorg server with option --xorg."
       [ "$Trusted" = "no" ] && {
         warning "Option --hostdisplay provides only low container isolation!
-  It is recommended to use another X server option like --xpra or --nxagent.
+  It is recommended to use another X server option like --nxagent or --xpra.
   
   To improve security with --hostdisplay x11docker uses untrusted cookies.
   This can lead to strange behaviour of some applications.
@@ -2083,8 +2104,8 @@ Parsed options: $Parsedoptions"
   or for --gpu support: install 'Weston' and 'Xwayland'.
   Or switch to console tty1...tty6 with <CTRL><ALT><F1>...<F6>
   and start x11docker there."
-      [ "$Autochooseserver" = "yes" ] && [ -n "$Hostdisplay" ] && note "Could not find Xephyr, Xnest, xpra,
-  nxagent, weston+Xwayland or kwin_wayland+Xwayland to run a nested X server.
+      [ "$Autochooseserver" = "yes" ] && [ -n "$Hostdisplay" ] && note "Could not find Xephyr, Xnest, nxagent,
+  xpra, weston+Xwayland or kwin_wayland+Xwayland to run a nested X server.
   Consider to install one of them."
       note "You can switch between X servers and console terminals
   with [CTRL][ALT][F1]...[F12]."
@@ -2097,7 +2118,7 @@ Parsed options: $Parsedoptions"
     --xpra|--xpra-xwayland)
       verlt "$Xpraversion" "xpra v1.0" && {
         note "Your xpra version '$Xpraversion' is out of date. It is
-  recommended to install latest stable from www.xpra.org, or at least v1.0."
+  recommended to install at least xpra v1.0."
         [ "$Desktopmode" = "yes" ] && {
           note "Your xpra version does not support desktop mode.
   Please use another X server option like --nxagent or --xephyr."
@@ -2107,9 +2128,16 @@ Parsed options: $Parsedoptions"
       }
       [ "$Desktopmode" = "yes" ] && verlt "$Xpraversion" "xpra v2.2-r17117" && note "Xpra desktop mode works best since xpra v2.2-r17117.
   You have installed lower version $Xpraversion.
-  It is recommended to use Xephyr (option --xephyr) instead.
+  It is recommended to use --nxagent or --xephyr instead.
   Rendering issues can be reduced disabling OpenGL in Xpra tray icon. Screen
   size issues can be avoided with non-integer scaling (e.g. --scale=1.01)."
+      verlte "$Xpraversion" "xpra v2.2.5" || {
+        warning "Current xpra versions greater than v2.2.5
+  have a bug that forces x11docker to share host ipc namespace.
+  Your xpra version is $Xpraversion.
+  Please use another X server option like --nxagent or --xephyr."
+        Sharehostipc="yes"
+      }
     ;;
   
     --nxagent)
@@ -4712,10 +4740,19 @@ start() {
   esac
       
   case $Xserver in 
-    --xpra) # --xpra --desktop: New mode for window smaller than fullscreen
+    --xpra|--xpra-xwayland)
+      # --xpra --desktop: New mode for window smaller than fullscreen
       echo "xrandr --newmode $Modeline"
       echo "xrandr --addmode \$Output $(echo $Modeline | cut -d " " -f1)"
       echo "xrandr --output  \$Output --mode $(echo $Modeline | cut -d " " -f1)"
+      
+      verlt "$Xpraversion" "xpra v2.3" || {
+        warning "Your xpra version has a cookie authentication issue.
+  Installed version is: $Xpraversion
+  Recommended: Downgrade to xpra v2.2.5
+  Fallback: Setting 'xhost +SI:localuser:$Benutzer'"
+        echo "xhost +SI:localuser:$Benutzer"
+      }
     ;;
     --xorg) # --xorg: --scale, --size, --rotate
       echo "xrandr | grep connected | grep -v disconnected && {"
@@ -4974,7 +5011,8 @@ $(tail $Xinitlogfile)"
         chmod 700 /run/user/$Hostuseruid
       }
       
-      # loop to check for crashing xpra server or client. restart them if needed.
+      # loop to check for crashing xpra server, restart it if needed. can happen with --mmap=yes
+      Xpracrashcount="0"
       while rocknroll ; do
         checkpid $Xpraserverpid || {
           [ -n "$Xpraserverpid" ] && { 
@@ -5012,16 +5050,15 @@ $(tail $Dockerlogfile)"
           }
         }
         checkpid $Xpraclientpid && kill $Xpraclientpid
-        [ -n "$Xpraclientpid" ] && [ "$Desktopmode" = "yes" ] && [ "$Xpracrashcount" = "0" ] && saygoodbye "xpra" ### FIXME does not terminate x11docker
         verbose "starting Xpra client"
         [ -n "$Xpraclientpid" ] && note "Restarting Xpra client."
         $Mksu "env $Hostxenv XPRA_PADDING_COLORS='0,0.2,1' $Xpraclientcommand" >> $Xpraclientlogfile 2>&1 &
         Xpraclientpid=$!
         
         storepid $Xpraclientpid xpraclient
+        checkpid $Xpraclientpid && mywatch "ps -p $Xpraserverpid -o pid ; ps -p $Xpraclientpid -o pid #xpra"
         sleep 1
-        checkpid $Xpraclientpid && mywatch "ps -p $Xpraclientpid -o pid ; ps -p $Xpraserverpid -o pid #xpra"
-        sleep 1
+        checkpid $Xpraserverpid && ! checkpid $Xpraclientpid && saygoodbye "xpra client"
       done & storepid $! xpraloop
     ;;
   esac
