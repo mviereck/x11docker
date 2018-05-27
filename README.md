@@ -160,7 +160,7 @@ _Advanced usage:_
    - Option `--pulseaudio` needs `pulseaudio` on host _and_ in image. 
  - **Hardware acceleration** with option `--gpu`
    - Works best with open source drivers on host and OpenGL/Mesa in image. In most cases everything will work out of the box with just setting `--gpu`.
-   - To provide good X isolation: Install `Xwayland` and `weston` for desktop mode, and additionally `xpra` and `xdotool` for seamless mode. Without these, you still can use `--gpu` with `--hostdisplay` and `--xorg`.
+   - To provide good X isolation: Install `Xwayland` and `weston` for desktop mode, and additionally `xpra` and `xdotool` for seamless mode. Without these, you can still use `--gpu` with `--hostdisplay` and `--xorg`.
    - Packages for OpenGL/Mesa in image:
      - debian and Ubuntu images: `mesa-utils mesa-utils-extra`.
      - CentOS and fedora images: `glx-utils mesa-dri-drivers`
@@ -172,7 +172,7 @@ _Advanced usage:_
      - You need the very same driver version as on host. It must not be a `deb` or `rpm` package but an `NVIDIA_[...].run` file. Store it at one of the following locations:
        - `~/.local/share/x11docker` (current user only)
        - `/usr/local/share/x11docker` (system wide)
-     - Look at NVIDIA driver download page or try the direct download link provided in x11docker terminal output.
+     - Look at [NVIDIA driver download page](https://http.download.nvidia.com/) or try the direct download link provided in x11docker terminal output.
      - Closed source driver installation fails on image systems that are not based on `glibc`. This affects especially [Alpine](https://alpinelinux.org/) based images. 
        NVIDIA corporation does not provide the source code that would allow you to use your hardware with different systems.
      - Alternativly, you can install a driver version matching your host setup in image yourself. Note that this image will not be portable anymore.
@@ -187,7 +187,7 @@ _Rarer needed dependencies for special options:_
  - `--install`, `--update` and `--remove` need `wget`, `unzip` and `xdg-icon-resource`.
    
 _List of all host packages for all possible x11docker options (debian package names):_
- - `xpra xserver-xephyr xvfb weston xwayland nxagent kwin xserver-xorg-video-dummy xfishtank xclip xdg-utils xauth xdotool xrandr unzip wget`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
+ - `nxagent xserver-xephyr weston xwayland xpra kwin xvfb xserver-xorg-video-dummy xauth xclip xdpyinfo xrandr xfishtank xdg-utils xdotool unzip wget`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
 
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
 
@@ -218,7 +218,7 @@ Core concept is:
      - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. 
      - This restriction can be disabled with x11docker option `--cap-default` or reduced with `--sudouser`.
 
-_Weaknesses / ToDo:_
+_Weaknesses:_
  - If docker daemon runs with `--selinux-enabled`, SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. A more restrictive solution is desirable.
    Compare: [SELinux and docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
  - User namespace remapping is disabled to allow options `--home` and `--homedir` without file ownership issues. (Though, this is less a problem as x11docker already avoids root in container).
@@ -236,7 +236,7 @@ _Most important:_
   
 _Rather special options reducing security, but not needed for regular use:_
   - `--sudouser` allows sudo with password `x11docker`for container user. If an application breaks out of container, it can do anything. Allows some container capabilties that x11docker would drop otherwise.
-  - `--cap-default` disables x11docker's container hardening and falls back to default docker container privileges.
+  - `--cap-default` disables x11docker's container hardening and falls back to default docker container capabilities.
   - `--dbus-system`, `--systemd`, `--sysvinit`, `--openrc` and `--runit` allow some container capabilities that x11docker would drop otherwise. `--systemd` also shares access to `/sys/fs/cgroup`.
   - `--hostipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory. Disables IPC namespacing.)
   - `--hostnet` sets docker run option `--net=host`. (Allows dbus connection to host. Shares host network stack.)
