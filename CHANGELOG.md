@@ -10,9 +10,9 @@ Project website: https://github.com/mviereck/x11docker
 ### Changed
  - `--auto`: prefer `--nxagent` over `--xpra` and `--xephyr`.
 ### Fixed
- - `--xpra` in desktop mode: allow closing client window, don't restart.
- - `--xpra`: warning and workaround for cookie bug in xpra >=v2.3.
- - `--xpra`: warning and workaround for MIT-SHM bug in xpra >=2.2.5
+ - `--xpra`: Deny to start xpra >2.2.5 due to MIT-SHM bug.
+ - `--xpra`: Warning and workaround for cookie bug in xpra >=v2.3.
+ - `--xpra` in desktop mode: Allow closing client window, don't restart.
 
 ## [4.3.0](https://github.com/mviereck/x11docker/releases/tag/v4.3.0) - 2018-05-26
 ### Added
