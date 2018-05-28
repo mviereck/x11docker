@@ -24,6 +24,7 @@ x11docker: Run GUI applications and desktop environments in docker.
    * Wayland support
    * Language locale creation
    * Init system support (systemd, SysVinit, OpenRC, runit, tini)
+   * DBus in container
  Focus on security:
    * Avoids X security leaks using additional X servers.
    * Container user is same as host user to avoid root in container.
@@ -44,14 +45,16 @@ Dependencies on host:
   It will check for them on startup and show messages if some are missing. 
   List of possibly needed packages:
    * most recommended to allow security and convenience:
-       nxagent xpra Xephyr xauth xrandr
+       X servers: nxagent Xephyr
+       X tools:   xauth xrandr
    * advanced GPU support:
-       weston Xwayland xdotool
+       Desktop mode:  weston Xwayland 
+       Seamless mode: weston Xwayland xpra xdotool
    * less important: 
-       xclip pulseaudio kwin_wayland xdpyinfo Xvfb
+       xclip xdpyinfo xdg-utils pulseaudio
    * least important:
-       xserver-xorg-legacy xserver-xorg-video-dummy xfishtank
-       xdg-desktop-icon xdg-icon-resource unzip wget
+       unzip wget xfishtank kwin_wayland Xvfb
+       xserver-xorg-legacy xserver-xorg-video-dummy
        
 Dependencies in image:
   Doesn't have dependencies inside of docker images, except for
@@ -74,7 +77,6 @@ Basic settings: (especially influencing auto choosing X server)
                        To autodetect a host wm, use --wm=auto or short: -wm
                        To set default autodetected window manager:
                            update-alternatives --config x-window-manager
- -W, --wayland         Create a Wayland environment.
 
 Shared folders:
  -m, --home            Share a host folder ~/x11docker/imagename as home folder
@@ -118,25 +120,24 @@ Special options:
                          pkexec beesu none
 
 X server options: 
-     --auto            Auto choose X server for docker applications (default).
+     --auto            Auto choose X server (default).
                        (Regards options --desktop, --gpu, --wayland and --wm).
- -a, --xpra            Use xpra to show application windows on host display.
-                       (Needs 'xpra' on host. Get it from www.xpra.org.
-                       With option --desktop xpra runs in nested desktop mode.)
- -y, --xephyr          Use nested X server Xephyr to show container desktops 
-                       in a window on host display. (Needs 'Xephyr' or 'Xnest').
-                       With option --wm=auto usefull for single apps, too.
- -n, --nxagent         Like --xpra for single applications, but faster startup.
-                       With --desktop like --xephyr, but resizeable.
+ -n, --nxagent         Nested X server running within your primary X server.
+                       Seamless applications or desktop mode with --desktop.
                        (Needs 'nxagent', best since nxagent version 3.5.99).
+ -y, --xephyr          Nested X server for --desktop mode. Without --desktop,
+                       a host window manager will be provided (option --wm).
+                       (Needs 'Xephyr' or 'Xnest').
+ -a, --xpra            Nested X server supporting seamless and --desktop mode.
+                       Needs 'xpra' <= v2.2.5 on host.
  -A, --xpra-xwayland   Like --xpra, but supports option --gpu.
                        (Needs 'xpra', 'Xwayland', 'weston' and 'xdotool').
  -Y, --weston-xwayland Like --xephyr, but supports option --gpu.
-                       Runs as nested server in X or on its own from console. 
+                       Console start as well as nested within X possible.
                        (Needs 'weston' and 'Xwayland'.)
  -h, --hostdisplay     Share host display :0, quite bad container isolation!
                        Least overhead of all X server options.
- -x, --xorg            Run new core Xorg server. Runs ootb from console.
+ -x, --xorg            Core Xorg server. Runs ootb from console.
                        Switch tty with <CTRL><ALT><F1>....<F12>.
                        To run from within X, edit '/etc/X11/Xwrapper.conf' and
                        replace line:        allowed_users=console
@@ -147,18 +148,21 @@ X server options:
 Special X servers:
      --kwin-xwayland   Like --weston-xwayland, but using kwin_wayland
                        (Needs 'kwin_wayland' and 'Xwayland').
- -X, --xwayland        Use Xwayland, needs a running Wayland compositor.
+ -X, --xwayland        Blanc Xwayland, needs a running Wayland compositor.
                        (Needs 'Xwayland' to be installed.)
      --xdummy          Invisible X server. (Needs Xorg's dummy video driver)
      --xvfb            Invisible X server. (Needs 'Xvfb')
-                       --xdummy and --xvfb can be used for custom access,
-                       for example with VNC or SSH. 
+                       --xdummy and --xvfb can be used for custom  VNC access.
                        Output of environment variables on stdout. (--showenv)
                        Along with option --gpu an invisible setup with Weston,
-                       Xwayland and xdotool is used (instead of Xdummy or Xvfb)
+                       Xwayland and xdotool is used (instead of Xdummy or Xvfb).
      --nothing         Do not provide any X or Wayland server.
                        
-Wayland without X: (see also above: --wayland)
+Wayland without X:
+ -W, --wayland         Automatically set up a Wayland environment.
+                       Chooses one of following options and regards --desktop.
+                       Sets some Wayland environment variables and runs
+                       dbus system daemon (--dbus-system).
  -T, --weston          Weston without X for pure Wayland applications.
                        Runs in X or from console. (Needs package weston.)
  -K, --kwin            KWin without X for pure Wayland applications.
@@ -228,7 +232,7 @@ Init system and dbus daemon:
                        Can be used with --openrc.
  -b, --dbus            Run dbus user session daemon for image command.
      --dbus-system     Run dbus system daemon in container (includes --dbus).
-                       Default for --systemd, --sysvinit, --openrc and --runit. 
+                       Default for --wayland and for init options except --tini.
 
 Container capabilities:
      --hostipc         Sets docker option --ipc=host, disables IPC namespacing.
@@ -595,6 +599,7 @@ watchpidlist() {        # watch list of important pids
       }
     done
   done
+  saygoodbye "watchpidlist: carneval is over"
 }
 setonwatchpidlist() {   # add PID $1 to watchpidlist()
   echo $1 >&9
@@ -777,11 +782,12 @@ depends() {             # check dependencies on host for X server option $1
         [ "$Xpraversion" ] || Xpraversion="$(xpra --version)"
         verlte "$Xpraversion" "xpra v2.2.5" || {
           [ "$Sharehostipc" = "no" ] && {
-            $Message "Your xpra version has a MIT-SHM bug that forces
-  x11docker to share host IPC namespace. That reduces security.
+            $Message "Your xpra version has a MIT-SHM bug that would force
+  x11docker to share host IPC namespace. That would reduce container isolation.
   Current installed version: $Xpraversion
   Please downgrade xpra to v2.2.5 or lower, or use another X server option.
-  If you insist on using current xpra, set option --hostipc."
+  If you insist on using current xpra, set insecure option --hostipc.
+  Fallback: will search for another available X server setup."
             Return=1
           }
         }
@@ -839,37 +845,16 @@ depends() {             # check dependencies on host for X server option $1
       [ "$Hostdisplay" ] || {
         $Message "${1:-} needs a running X server. DISPLAY is empty."
         Return=1
-      } ;;
+      } 
+    ;;
     --hostwayland|--xwayland)
       [ "$Hostwaylandsocket" ] || {
         $Message "${1:-} needs a running Wayland compositor. WAYLAND_DISPLAY is empty."
         Return=1
-      } ;;
-    --xorg)
-        [ -z "$Newxvt" ] && {
-          if [ ! -e "/etc/X11/Xwrapper.config" ] || [ -z "$(cat /etc/X11/Xwrapper.config | grep "allowed_users" | grep "anybody")" ] ; then
-            warning "Your configuration does not allow you to start
-  a second core Xorg server from within X. Option --xorg will probably fail.
-  (As a default configuration, only root or console users can do that).
-  
-  Recommended easy solution: install nested X server 'Xephyr'.
-  Solution with --gpu support: install 'Weston' and 'Xwayland'.
-  
-  Or you can switch to console tty1...tty6 with <CTRL><ALT><F1>...<F6>
-  and start x11docker there.
-  
-  Setup to start a second Xorg X server from within already running X:
-  Edit file '/etc/X11/Xwrapper.config' and replace line:
-      allowed_users=console
-  with lines
-      allowed_users=anybody
-      needs_root_rights=yes
-  If the file does not exist already, you can create it.
-  On Ubuntu 16.04 and debian 9 you need package xserver-xorg-legacy."
-          fi
-        }
+      } 
     ;;
   esac
+  
   [ "$Return" = "1" ] && {
     $Message "${1:-} not possible: missing dependencies."
     Autochooseserver="yes"
@@ -1473,11 +1458,13 @@ Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_rec
          --no-internet)Internetaccess="no" ;;              # disallow internet access
          --workdir)    Workdir="$(escapestring "${2:-}")" ; shift ;; # set working directory
          --pw)         Passwordfrontend="${2:-}" ; shift ;;  # frontend for password prompt
-         --runfromhost|--add) Runfromhost="${2:-}" ; shift # add custom host command in xinitrc
+         --runfromhost|--add) Runfromhost="$Runfromhost
+${2:-}"                ; shift # add custom host command in xinitrc
                        [ "${1:-}" = "--add" ] && warning "Option --add changed to --runfromhost and is deprecated.
   Please use --runfromhost instead." ;;  
-         --runasroot) Runasroot="${2:-}" ; shift ;;        # add custom root command in container setup script
-         --stdin)     Forwardstdin="yes" ;;                # forward stdin to image command
+         --runasroot)  Runasroot="$Runasroot
+${2:-}"                ; shift ;;        # add custom root command in container setup script
+         --stdin)      Forwardstdin="yes" ;;                # forward stdin to image command
 
          
      #### Verbose options
@@ -1833,8 +1820,36 @@ Parsed options: $Parsedoptions"
   
   [ "$Autochooseserver" = "yes" ] && note "Using X server option $Xserver"
   
-  [ "$Xserver" = "--xorg" ] && [ "$Autochooseserver" = "yes" ] && [ -z "$Imagename" ] && error "Will not run an empty Xorg in auto-choosing mode.
+  case $Xserver in
+    --xorg)
+      [ "$Autochooseserver" = "yes" ] && [ -z "$Imagename" ] && error "Will not run an empty Xorg in auto-choosing mode.
   If you want this, please use option --xorg explicitly."
+  
+      [ -z "$Newxvt" ] && {
+        if [ ! -e "/etc/X11/Xwrapper.config" ] || [ -z "$(cat /etc/X11/Xwrapper.config | grep "allowed_users" | grep "anybody")" ] ; then
+          warning "Your configuration does not allow to start
+  a second core Xorg server from within X. Option --xorg will probably fail.
+  (As a default configuration, only root or console users can do that).
+  
+  Recommended easy solution: install one of nested X servers
+  'nxagent', 'Xephyr' or 'Xnest'.
+  Solution with --gpu support: install 'Weston' and 'Xwayland'.
+  
+  Or you can switch to console tty1...tty6 with <CTRL><ALT><F1>...<F6>
+  and start x11docker there.
+  
+  Setup to start a second Xorg X server from within already running X:
+  Edit file '/etc/X11/Xwrapper.config' and replace line:
+      allowed_users=console
+  with lines
+      allowed_users=anybody
+      needs_root_rights=yes
+  If the file does not exist already, you can create it.
+  On Ubuntu 16.04 and debian 9 you need package xserver-xorg-legacy."
+        fi
+      }
+    ;;
+  esac
 }
 
 { #### part: check multiple option interferences, change settings if needed
@@ -3511,7 +3526,7 @@ done
       Dbuswatchservicescript="$Sharefolder/dbus.watch" && mkfile $Dbuswatchservicescript
       echo "[D-BUS service]
 Name=org.x11docker.watch
-Exec=/bin/sh $Cshare/dbus.watch
+Exec=$Cshare/dbus.watch
 User=root
 " >> $Dbuswatchservice
       echo "#! /bin/sh
@@ -3523,12 +3538,9 @@ kill \$Pid
 sleep 1
 kill -s KILL \$Pid
 " >> $Dbuswatchservicescript
+      chmod +x $Dbuswatchservicescript
     ;;
   esac
-  
-  # DBus watch service
-  #[ "$Dbusdaemon" = "yes" ] && {
-  #}
   
   case $Initsystem in
     none) ;;
@@ -3697,6 +3709,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
           Dockercommand="$Dockercommand \\
   --stop-signal SIGRTMIN+3 \\
   --cap-add FSETID      --cap-add FOWNER  --cap-add SETPCAP \\
+  --cap-add SYS_BOOT \\
   -v $Systemdtarget:/etc/systemd/system/x11docker.target:ro \\
   -v $Systemdstartcmd:/etc/systemd/system/x11docker-startcmd.service:ro \\
   -v $Systemdwatch:/etc/systemd/system/x11docker-watch.service:ro \\
@@ -3801,13 +3814,18 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
         esac
       done
       
-      # X socket will be softlinked to /tmp/.X11-unix in x11docker.CMD.sh
       case $Xserver in
         --nothing) ;;
-        --weston|--hostwayland|--kwin) ;;
-        *) 
-#          [ "$Newxlock" ] && Dockercommand="$Dockercommand \\
-#  -v $Newxlock:/$(basename $Newxlock):rw"
+        --weston|--hostwayland|--kwin)
+          Dockercommand="$Dockercommand \\
+  -e WAYLAND_DISPLAY=$Newwaylandsocket -e XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR"
+        ;;
+        *)
+          # not really needed here as vars are set in x11docker.CMD.sh
+          # but useful for custom access with docker exec
+          Dockercommand="$Dockercommand \\
+  -e DISPLAY=$Newdisplay -e XAUTHORITY=$Cshare/Xclientcookie"
+          # X socket will be softlinked to /tmp/.X11-unix in x11docker.CMD.sh
           [ "$Newxsocket" ] && Dockercommand="$Dockercommand \\
   -v $Newxsocket:/X$Newdisplaynumber:rw"
         ;;
@@ -4310,22 +4328,29 @@ Fallback: Skipping installation of nvidia driver.EOF' >&3"
   }
   
   # prepare container depending on container init system
-  case $Initsystem in
-    systemd) ;;
-    *)
-      echo "# systemd dbus service causes shutdown after 10s if system runs without systemd. WTF"
-      echo "rm -v /etc/dbus-1/system.d/org.freedesktop.systemd1.conf /usr/share/dbus-1/system-services/org.freedesktop.systemd1.service /usr/share/dbus-1/services/org.freedesktop.systemd1.service"
-    ;;
-  esac
+  #case $Initsystem in
+  #  systemd) ;;
+  #  *)
+  #    echo "# systemd dbus service causes shutdown after 10s if system runs without systemd. WTF"
+  #    echo "rm -v /etc/dbus-1/system.d/org.freedesktop.systemd1.conf /usr/share/dbus-1/system-services/org.freedesktop.systemd1.service /usr/share/dbus-1/services/org.freedesktop.systemd1.service"
+  #  ;;
+  #esac
   case $Initsystem in
     tini|none) ;;
     systemd)
+      echo "# enable x11docker CMD service"
+      echo "systemctl enable x11docker-startcmd.service"
+      
       echo "# to be sure, allow/unmask most important services"
       echo "systemctl unmask systemd-logind dbus"
       echo "# disable cgproxy.service, can cause failing startup."
       echo "systemctl mask cgproxy"
-      echo "# enable x11docker CMD service"
-      echo "systemctl enable x11docker-startcmd.service"
+      echo "# disable useless plymouth"
+      echo "systemctl mask plymouth-start plymouth-read-write plymouth-quit plymouth-quit-wait"
+      echo "# disable useless NetworkManager"
+      echo "systemctl mask NetworkManager"
+      echo "# disable deepin update service"
+      echo "systemctl mask lastore-daemon lastore-update-metadata-info"
     ;;
     runit)
       echo "# create and enable x11docker service containing image command"
@@ -4395,74 +4420,77 @@ start() {
   If the image contains malicious applications started by DBus service files,
   they may abuse their root privileges and may try to break out of container."
   
-      case $Initsystem in
-        systemd) ;;
-        *)
-          [ "$Switchcontaineruser" = "yes" ] && echo "cp $Cshare/org.x11docker.watch.service /usr/share/dbus-1/system-services/"
-
-          echo "echo x11docker: DBus: removing failing services"
-          echo "for Line in \$(find /usr/share/dbus-1/system-services -type f); do"
-          echo "  Name=\"\$(cat \$Line | grep Name= | cut -d= -f2)\""
-          echo "  case \$Name in"
-          echo "    org.freedesktop.UPower|org.freedesktop.login1|org.freedesktop.ConsoleKit|org.freedesktop.systemd1|org.freedesktop.resolve1|org.freedesktop.network1|org.freedesktop.timedate1)"
-          echo "      rm -v \$Line"
-          echo "    ;;"
-          echo "  esac"
-          echo "done"
+      echo "echo x11docker: DBus: removing failing or useless services"
+      echo "for Line in \$(find /usr/share/dbus-1/system-services /usr/share/dbus-1/services -type f); do"
+      echo "  Name=\"\$(cat \$Line | grep Name= | cut -d= -f2)\""
+      echo "  case \$Name in"
+      echo "    org.bluez)"
+      echo "      rm -v \$Line"
+      echo "    ;;"
+      echo "    org.freedesktop.UPower|org.freedesktop.ConsoleKit|org.freedesktop.resolve1|org.freedesktop.network1|org.freedesktop.timedate1)"
+      echo "      rm -v \$Line"
+      echo "    ;;"
+      echo "    org.freedesktop.systemd1|org.freedesktop.login1)"
+      [ "$Initsystem" = "systemd" ] || {
+        echo "      # systemd dbus service causes shutdown after 10s if system runs without systemd. WTF"
+        echo "      rm -v \$Line"
+      }
+      echo "    ;;"
+      echo "    com.deepin.lastore|com.deepin.dde.Welcome|com.deepin.daemon.Bluetooth|com.deepin.daemon.Grub2|com.deepin.daemon.Network|com.deepin.daemon.Timedate|com.deepin.daemon.Power|com.deepin.daemon.Audio|com.deepin.daemon.InputDevices)"
+      echo "      # deepin services"
+      echo "      rm -v \$Line"
+      echo "    ;;"
+      echo "  esac"
+      echo "done"
+      
+      [ "$Switchcontaineruser" = "yes" ] && [ "$Initsystem" != "systemd" ] && echo "cp $Cshare/org.x11docker.watch.service /usr/share/dbus-1/system-services/"
             
-          echo "echo 'x11docker: DBus: starting dbus system daemon'"
-          echo "dbus-daemon --system --fork"
-          echo "for Count in 1 2 3 4 5; do"
-          echo "  [ -e /run/dbus/system_bus_socket ] && break"
-          echo "  sleep 0.1"
-          echo "done"
-          echo "[ -e /run/dbus/system_bus_socket ] || echo 'DBus startup seems to have failed. system bus socket not found.EOF' >&3"
+      echo "echo 'x11docker: DBus: starting dbus system daemon'"
+      echo "dbus-daemon --system --fork"
+      echo "for Count in 1 2 3 4 5; do"
+      echo "  [ -e /run/dbus/system_bus_socket ] && break"
+      echo "  sleep 0.1"
+      echo "done"
+      echo "[ -e /run/dbus/system_bus_socket ] || echo 'DBus startup seems to have failed. system bus socket not found.EOF' >&3"
           
-          [ "$Nonewprivileges" = "yes" ] && {
-            echo "# support for dbus daemon with no-new-privileges"
-            echo "waitforservice() {"
-            echo "  # wait for dbus service \$1 to appear in dbus service list"
-            echo "  for Count in 1 2 3 4 5 6 7 8 9 10 ; do"
-            echo "    dbus-send --system --dest=org.freedesktop.DBus --type=method_call --print-reply /org/freedesktop/DBus org.freedesktop.DBus.ListNames | grep -q \$1 && break"
-            echo "    echo x11docker: DBus: waiting for \$1 to be ready"
-            echo "    sleep 0.1"
-            echo "  done"
-            echo "}"
-            echo "# start polkitd as first service"
-            echo "[ -x /usr/lib/policykit-1/polkitd ] && {"
-            echo "  echo 'x11docker: DBus: starting PolicyKit'"
-            echo "  /usr/lib/policykit-1/polkitd &"
-            #echo "  /usr/lib/dbus-1.0/dbus-daemon-launch-helper org.freedesktop.PolicyKit1.service"
-            echo "  waitforservice org.freedesktop.PolicyKit1"
-            echo "}"
-            echo "[ -x /usr/lib/accountsservice/accounts-daemon ] && {"
-            echo "  echo 'x11docker: DBus: starting Accounts daemon'"
-            echo "  /usr/lib/accountsservice/accounts-daemon &"
-            #echo "  /usr/lib/dbus-1.0/dbus-daemon-launch-helper org.freedesktop.Accounts.service"
-            echo "  waitforservice org.freedesktop.Accounts"
-            echo "}"
-            echo "set -x"
-            echo "# start all other dbus system services (except some failing candidates)"
-            echo "for Line in \$(find /usr/share/dbus-1/system-services -type f); do"
-            echo "  Name=\"\$(cat \$Line | grep Name= | cut -d= -f2)\""
-            echo "  Command=\"\$(cat \$Line | grep Exec= | cut -d= -f2)\""
-            echo "  case \$Name in"
-            echo "    org.freedesktop.PolicyKit1|org.freedesktop.Accounts) ;;"
-            echo "    org.x11docker.watch)"
-            echo "      sh -c \"\$Command\" &"
-            echo "    ;;"
-            echo "    *)"
-            echo "      echo x11docker: DBus: starting service \$Name: \$Command"
-            echo "      sh -c \"\$Command\" &"
-            #echo "      /usr/lib/dbus-1.0/dbus-daemon-launch-helper \$Name"
-            echo "      waitforservice \$Name"
-            echo "    ;;"
-            echo "  esac"
-            echo "done"
-            echo "set +x"
-          } ||:
-        ;;
-      esac
+      [ "$Nonewprivileges" = "yes" ] && {
+        echo "# support for dbus daemon with no-new-privileges"
+        echo "waitforservice() {"
+        echo "  # wait for dbus service \$1 to appear in dbus service list"
+        echo "  for Count in 1 2 3 4 5 6 7 8 9 10 ; do"
+        echo "    dbus-send --system --dest=org.freedesktop.DBus --type=method_call --print-reply /org/freedesktop/DBus org.freedesktop.DBus.ListNames | grep -q \$1 && break"
+        echo "    echo x11docker: DBus: waiting for \$1 to be ready"
+        echo "    sleep 0.1"
+        echo "  done"
+        echo "}"
+        echo "# start polkitd as first service"
+        echo "[ -x /usr/lib/policykit-1/polkitd ] && {"
+        echo "  echo 'x11docker: DBus: starting PolicyKit'"
+        echo "  /usr/lib/policykit-1/polkitd &"
+        echo "  waitforservice org.freedesktop.PolicyKit1"
+        echo "}"
+        echo "[ -x /usr/lib/accountsservice/accounts-daemon ] && {"
+        echo "  echo 'x11docker: DBus: starting Accounts daemon'"
+        echo "  /usr/lib/accountsservice/accounts-daemon &"
+        echo "  waitforservice org.freedesktop.Accounts"
+        echo "}"
+        echo "# start all other dbus system services (except some failing candidates)"
+        echo "for Line in \$(find /usr/share/dbus-1/system-services -type f); do"
+        echo "  Name=\"\$(cat \$Line | grep Name= | cut -d= -f2)\""
+        echo "  Command=\"\$(cat \$Line | grep Exec= | cut -d= -f2)\""
+        echo "  case \$Name in"
+        echo "    org.freedesktop.PolicyKit1|org.freedesktop.Accounts) ;;"
+        echo "    org.x11docker.watch)"
+        echo '      sh -c "$Command" &'
+        echo '    ;;'
+        echo '    *)'
+        echo '      echo x11docker: DBus: starting service $Name: $Command'
+        echo '      sh -c "$Command" &'
+        echo '      [ "$Command" != "/bin/false" ] && waitforservice $Name'
+        echo '    ;;'
+        echo '  esac'
+        echo 'done'
+      }
     ;;
   esac
 
@@ -4849,7 +4877,7 @@ start() {
     echo "# custom host command with added option --runfromhost"
     echo "$Runfromhost"
   }
-  echo "set -x"
+
   echo "touch $Cachefolder/Xready"
   echo "waitfortheend"
 } >> $Xinitrc
@@ -4990,10 +5018,8 @@ Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' '
 
 { #### part: wait for and watch X server, [start xpra] and run xtermrc-> dockerrc-> docker run
   # wait for X server
-  waitforfilecreation $Cachefolder/Xready 24 || error "Startup of X server $Xserver failed. 
-  Last lines of xinit logfile:
-$(tail $Xinitlogfile)"
-  
+  waitforfilecreation $Cachefolder/Xready 24 || error "Timeout during startup of X server $Xserver."
+
   # --xpra / --xpra-xwayland: start xpra server&client
   case $Xserver in      
     --xpra|--xpra-xwayland) 
@@ -5241,12 +5267,21 @@ $(tail $Compositorlogfile)"
       $Mksu                                              "bash  $Xinitrc                       >> $Xinitlogfile  2>&1 " 
     ;;
   esac
+  
+  [ $? != 0 ] && warning "X server $Xserver returned with an error code. 
+  Last lines of xinit logfile:
+$(tail $Xinitlogfile)
+
+  Last lines of compositor logfile:
+$(tail $Compositorlogfile)"
+
   exit 0 # trap to finish()
 }
 
 ######### ToDo notes for development
 todo() {
 # disable dbus service bluez, maybe others, too. check deepin dockerfile
+# --weston and --kwin on pure wayland host: check screen size with Xwayland -rootless
 
 # BUG opensuse/arch: issues with x11docker/fluxbox, background missing, sometimes no context menu. where is the difference?
 # run several code pathes with --debug

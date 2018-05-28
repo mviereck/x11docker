@@ -9,8 +9,15 @@ Project website: https://github.com/mviereck/x11docker
 ## [Unreleased]
 ### Changed
  - `--auto`: prefer `--nxagent` over `--xpra` and `--xephyr`.
+ - `--runfromhost` can be specified multiple times.
+ - `--runasroot` can be specified multiple times.
+ - `--dbus-system` and init systems: remove useless or failing dbus services.
+ - `--systemd`: mask some useless or failing units.
+ - set `DISPLAY`, `XAUTHORITY`, `WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR`
+   in `docker run` command for easier custom use of `docker exec`.
 ### Fixed
  - `--xpra`: Deny to start xpra >2.2.5 due to MIT-SHM bug.
+   Show warning that startup is only possible with `--hostipc`.
  - `--xpra`: Warning and workaround for cookie bug in xpra >=v2.3.
  - `--xpra` in desktop mode: Allow closing client window, don't restart.
 
