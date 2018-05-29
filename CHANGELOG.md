@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [4.3.1](https://github.com/mviereck/x11docker/releases/tag/v4.3.1) - 2018-05-29
 ### Changed
  - `--auto`: prefer `--nxagent` over `--xpra` and `--xephyr`. Reasons:
    Faster startup than `--xpra`. Flexible display size opposed to `--xephyr`.
