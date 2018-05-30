@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Changed
+ - `x11docker-gui` is interactive now. Live preview of generated command. 
+   Starting multiple x11docker instances possible. Copy-to-clipboard button.
+ - `--cleanup`: Running as root not mandatory.
+ 
 ## [4.3.1](https://github.com/mviereck/x11docker/releases/tag/v4.3.1) - 2018-05-29
 ### Changed
  - `--auto`: prefer `--nxagent` over `--xpra` and `--xephyr`. Reasons:

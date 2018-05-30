@@ -10,7 +10,7 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="4.3.1"
+Version="4.3.2-beta"
 
 usage() {               # --help: show usage information
   echo "
@@ -496,7 +496,7 @@ $(ps -p $Pid)"
         esac
         [ "$Pid" ] && ps -p $Pid >/dev/null && {
           sleep 1
-          checkpid $Pid && note "Issue terminating $Line" && kill -s KILL $Pid
+          ps -p $Pid >/dev/null || note "Issue terminating $Line: $(ps -p --no-headers $Pid)" && kill -s KILL $Pid
         }
       }
     done < <(tac $Bgpidfile)
@@ -788,7 +788,7 @@ depends() {             # check dependencies on host for X server option $1
             $Message "Your xpra version has a MIT-SHM bug that would force
   x11docker to share host IPC namespace. That would reduce container isolation.
   Current installed version: $Xpraversion
-  Please update to at least xpra v3.1-19519 or xpra v2.4-r19520,
+  Please update to at least xpra v2.3.1-19519 or xpra v2.4-r19520,
   or downgrade to xpra v2.2.5 or lower, or use another X server option.
   If you insist on using current xpra, set insecure option --hostipc.
   Fallback: will search for another available X server setup."
@@ -867,23 +867,28 @@ depends() {             # check dependencies on host for X server option $1
 }
 cleanup() {             # --cleanup : check for non-removed containers and left cache files
   local Orphanedcontainers= Orphanedfolders= Line=
+  
   note "x11docker will check for orphaned containers from earlier sessions.
   This can happen if docker was not closed successfully. 
   x11docker will look for those containers and will clean up x11docker cache.
   Caution: any currently running x11docker sessions will be terminated, too."
-  Orphanedcontainers=""
-  Orphanedfolders=""
+  
   cd $Cachebasefolder || error "Could not cd to cache folder '$Cachebasefolder'."
-  [ $? ] && grep -q .cache/x11docker <<<$Cachebasefolder && Orphanedfolders=$(find "$Cachebasefolder" -mindepth 1 -maxdepth 1 -type d | sed s%$Cachebasefolder/%%)
+  
+  grep -q .cache/x11docker <<<$Cachebasefolder && Orphanedfolders=$(find "$Cachebasefolder" -mindepth 1 -maxdepth 1 -type d | sed s%$Cachebasefolder/%% | grep -v x11docker-gui)
+  
   Orphanedcontainers="$(docker ps -a --filter name=x11docker_X --format "{{.Names}}")"
   Orphanedcontainers="$(env IFS='' echo $Orphanedcontainers)"
-  if [ -z "$Orphanedcontainers" ] && [ -z "$Orphanedfolders" ] ; then 
+  
+  [ -z "$Orphanedcontainers$Orphanedfolders" ] && { 
     note "No orphaned containers or cache files found. good luck!"
-  else
+    
+  } || {
     note "Found orphaned containers: 
   $Orphanedcontainers"
     note "Found orphaned folders in $Cachebasefolder:
   $Orphanedfolders" 
+  
     for Line in $Orphanedfolders ; do
       [ -d "$Cachebasefolder/$Line/share" ] && [ ! -s "$Cachebasefolder/$Line/share/timetosaygoodbye" ] && {
         note "Found possibly active container $Line.
@@ -892,6 +897,7 @@ cleanup() {             # --cleanup : check for non-removed containers and left 
         sleep 2
       }
     done
+    
     [ -n "$Orphanedcontainers" ] && {
       note "Removing containers with: docker rm -f $Orphanedcontainers
 $(bash -c "docker rm -f $Orphanedcontainers" 2>&1)"
@@ -900,12 +906,21 @@ $(bash -c "docker rm -f $Orphanedcontainers" 2>&1)"
       note "Removing cache files with: rm -R -f $Orphanedfolders
 $(rm -R -f $Orphanedfolders 2>&1)"
     }
-  fi
-  note "Removing remaining files with: rm $Cachebasefolder/*"
-  rm $Cachebasefolder/*
-  note "Removing cache base folder with: rmdir -v $Cachebasefolder"
+  }
+  
+  note "Removing remaining files with: rm -Rf $Cachebasefolder/*"
+  rm -Rf $Cachebasefolder/*
+  
+  note "Removing cache base folder with: rmdir -v $Cachebasefolder" 
   cd
-  rmdir -v $Cachebasefolder
+  rmdir -v $Cachebasefolder  || warning "Did not succeed in removing cache folder
+    $Cachebasefolder
+  Please run 'x11docker --cleanup' as root."
+  
+  docker info >/dev/null 2>/dev/null || warning "Could not check for docker images. 
+  Please run 'x11docker --cleanup' as root
+  to make sure that no orphaned containers are left."
+  
   note "Cleanup ready."
 }
 installer() {           # --install, --update, --update-master, --remove: Installer for x11docker
@@ -1683,7 +1698,6 @@ Parsed options: $Parsedoptions"
    
   # option --cleanup: check for non-removed containers and left cache files
   [ "$Checkorphaned" = "yes" ] && {
-    docker images >/dev/null 2>&1 || error "'x11docker --cleanup' must run as root."   ### FIXME: could be more flexible
     cleanup
     exit
   }
@@ -3565,6 +3579,9 @@ kill -s KILL \$Pid
   It should provide an executeable /usr/bin/docker-init.
   Please write a bug report to your distribution maintainer.
   
+  tini as container init system is quite useful, e.g. to allow x11docker
+  a clean and fast shutdown of containers without the need of privileges.
+  
   To get the advantages of init in container, please download tini:
     https://github.com/krallin/tini/releases/download/v0.18.0/tini-static
     
@@ -4788,6 +4805,15 @@ start() {
       echo "xrandr --addmode \$Output $(echo $Modeline | cut -d " " -f1)"
       echo "xrandr --output  \$Output --mode $(echo $Modeline | cut -d " " -f1)"
       
+      
+      echo "for Ycount in 25 30 40 45 50 55 60 65 70 75 80 85 90 95 100; do"
+      echo "  for Xcount in 25 30 40 45 50 55 60 65 70 75 80 85 90 95 100; do"
+      echo "    Modeline=\$(cvt \$(awk -v a=$Maxxaxis -v b=\$Xcount 'BEGIN {print (a * b / 100)}') \$(awk -v a=$Maxyaxis -v b=\$Ycount 'BEGIN {print (a * b / 100)}') | tail -n1 | cut -d' ' -f2- | tr -d '\"')"
+      echo "    xrandr --newmode \$Modeline"
+      echo "    xrandr --addmode \$Output \$(echo \$Modeline | cut -d' ' -f1)"
+      echo "  done"
+      echo "done 2>&1 | uniq"
+
       verlt "$Xpraversion" "xpra v2.3" || {
         warning "Your xpra version has a cookie authentication issue.
   Installed version is: $Xpraversion
@@ -4795,6 +4821,9 @@ start() {
   Fallback: Setting 'xhost +SI:localuser:$Benutzer'"
         echo "xhost +SI:localuser:$Benutzer"
       }
+    ;;
+    --nxagent)
+      echo "xsetroot -solid darkgrey"
     ;;
     --xorg) # --xorg: --scale, --size, --rotate
       echo "xrandr | grep connected | grep -v disconnected && {"
@@ -5291,6 +5320,7 @@ $(tail $Compositorlogfile)"
 
 ######### ToDo notes for development
 todo() {
+# BUG --nxagent: --size: wrong screen size
 # disable dbus service bluez, maybe others, too. check deepin dockerfile
 # --weston and --kwin on pure wayland host: check screen size with Xwayland -rootless
 

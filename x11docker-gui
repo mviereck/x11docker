@@ -23,13 +23,23 @@ warning() {
   echo "x11docker-gui WARNING: $*" >&2
   echo "">&2
 }
+finish() {
+  # clean up and say goodbye
+  [ -e "$Timetosaygoodbye" ] && echo timetosaygoodbye >> $Timetosaygoodbye
+  for Line in $Kaptain_grammar_file $Kaptain_stdin $Kaptain_stdout ; do
+    [ -e "$Line" ] && rm "$Line"
+  done
+  [ "$Kaptain_pid" ] && ps -p $Kaptain_pid >/dev/null && kill $Kaptain_pid
+}
+
+trap finish EXIT
 
 export PATH="$PATH:/usr/local/bin" # can miss if executed as root
 
 # Try to find x11docker
-X11docker_exe="${0%-gui}"                                            # look at path of current x11docker-gui
-[ ! -f "$X11docker_exe" ] && X11docker_exe="$(command -v x11docker)" # look whether x11docker is in $PATH
-[ ! -f "$X11docker_exe" ] && error "x11docker not found"
+X11docker_exe="${0%-gui}"                                   # look at path of current x11docker-gui
+command -v x11docker >/dev/null && X11docker_exe=x11docker  # look whether x11docker is in $PATH
+[ ! -x "$X11docker_exe" ] && ! command -v x11docker >/dev/null && error "No executeable x11docker found"
 Version="$($X11docker_exe --version)"
 
 # check logged-in user
@@ -44,6 +54,11 @@ Lognameuserhome="$(getent passwd $Lognameuser | cut -d: -f6)"
 
 CONTAINERUSER="$Lognameuser"
 CONTAINERUSERHOME="$Lognameuserhome"
+Cachefolder=$CONTAINERUSERHOME/.cache/x11docker/x11docker-gui
+mkdir -p $Cachefolder || Cachefolder=/tmp/x11docker-gui
+mkdir -p $Cachefolder 
+Mycookie=$(mcookie | cut -c1-6)
+Kaptain_grammar_file=$Cachefolder/x11docker.kaptn.$Mycookie
 
 #####################
 # Preset some options you may want to be set as default
@@ -62,10 +77,10 @@ IMAGELIST='"",
 "x11docker/enlightenment ",
 "x11docker/lxde-wine ",
 "x11docker/xfce-wine-playonlinux ",
-"x11docker/cde \ \" # (needs --hostnet)",
-"x11docker/deepin \ \" # (needs --systemd)",
-"x11docker/cinnamon \ \" # (needs --dbus-system or --systemd)",
-"x11docker/xwayland \ \" # (needs --wayland and --gpu)"
+"x11docker/cde \ \ # (needs --hostnet)",
+"x11docker/deepin \ \ # (needs --systemd)",
+"x11docker/cinnamon \ \ # (needs --dbus-system or --systemd)",
+"x11docker/xwayland \ \ # (needs --wayland and --gpu)"
 '
 
 MYWM="auto"                                          # preferred host window manager
@@ -84,6 +99,7 @@ DESKTOP="!"
 
 # check list of available window managers
 Wm_all="$($X11docker_exe --wmlist)"
+HOSTWM=""
 for Wm in $Wm_all ; do
   command -v "$Wm" >/dev/null && {
     grep -q "$Wm" <<< "$HOSTWM" || HOSTWM="$HOSTWM\"$Wm\","
@@ -94,6 +110,7 @@ HOSTWM="$HOSTWM\"\",\"auto\",\"none\""
 [ -n "$MYWM" ] && ! echo "$HOSTWM" | grep -q "$MYWM" && HOSTWM="\"$MYWM\",$HOSTWM"
 
 # check sound cards for ALSA
+ALSALIST=""
 while read Line; do
   ALSALIST="\"$Line\",$ALSALIST"
 done < <(cat /proc/asound/cards | grep ':' | cut -d[ -f2 | cut -d] -f1)
@@ -104,7 +121,7 @@ sudo -n echo 2>/dev/null && Sudo="sudo -n" || Sudo=""
 while read -r Image ; do
     Image="${Image%:<none>}"
     IMAGELIST="$IMAGELIST,\"$Image \""
-done < <($Sudo docker images --format "{{.Repository}}:{{.Tag}}" | sort)
+done < <($Sudo docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | sort)
 
 Hostlangland=$(echo $LANG | cut -d. -f1)
 Langcombo="\"$Hostlangland\""
@@ -137,7 +154,7 @@ for Line in $Keymaps; do Keymapscombo="$Keymapscombo,\"$Line\"" ; done
 [ -e /usr/local/share/icons/hicolor/64x64/apps/x11docker.png ] && X11docker_icon=/usr/local/share/icons/hicolor/64x64/apps/x11docker.png
 
 Kaptain_grammar='#! /usr/bin/kaptain
-start "Run GUI applications in docker containers - x11docker '$Version'"  -> options buttons;
+start "Run GUI applications in docker containers - x11docker '$Version'"  -> options previewline buttons;
   options:beside              -> frameleft frameright;
     frameleft                 -> choose_image_framed xserver_tabbed blablabuttons;
     frameright                -> options_tabbed;
@@ -151,7 +168,7 @@ start "Run GUI applications in docker containers - x11docker '$Version'"  -> opt
         image:beside     "Run docker image"                                                 -> "-- " ;
         exe              "--exe: Run host application instead of docker"                    -> "--exe -- ";
         xonly            "--xonly: Only create new empty X server"                          -> "--xonly -- "; 
-    dockerimage          "Docker image [and command] to run:"                               -> @combow('$IMAGELIST');
+    dockerimage          "Docker image [and command] to run:"                               -> "--IMG=" @combow('$IMAGELIST');
   
   xserver_tabbed:tabbed -> xserver_choose xserver_appearance;
   
@@ -205,7 +222,7 @@ start "Run GUI applications in docker containers - x11docker '$Version'"  -> opt
       alsaline -> alsa alsacard;
         alsa              "--alsa: Sound with ALSA. (You may need to specify ALSA_CARD)"     -> "--alsa "            | ! "" ;
         alsacard:beside   "--env ALSA_CARD="                                                 -> "--env ALSA_CARD=\"" @combow('$ALSALIST') "\" " | ! "";
-    lang:beside           "--lang: Language locale setting (Created if missing):"            -> "--lang=\""          @combow('$Langcombo')="'$Hostlangland'" "\" " | ! "" ;
+    lang:beside           "--lang: Language locale. (Generated if missing):"                 -> "--lang=\""          @combow('$Langcombo')="'$Hostlangland'" "\" " | ! "" ;
       
     options_hostfolders "Host directories to share" -> home homedir sharedir1 sharedir2;
       home                "--home: Share a host folder in '$CONTAINERUSERHOME'/x11docker \n
@@ -246,7 +263,7 @@ start "Run GUI applications in docker containers - x11docker '$Version'"  -> opt
       showpid1            "--showpid1: Output of host PID of container PID 1."               -> "--showpid1"         | ! "" ;
                    
   develdialogline:beside -> @fill develdialog @fill;
-  develdialog:dialog "Developer options" -> developeroptions @close=" close";
+  develdialog:dialog "Developer options" -> developeroptions @execclose("echo develclose")=" close";
     developeroptions:beside -> develleft develright;
       develleft:framed -> devauth devxconfig devaddcommands ;
       develright:framed ->   devuser devcaps devrun devmisc ;
@@ -286,7 +303,7 @@ start "Run GUI applications in docker containers - x11docker '$Version'"  -> opt
       keymap:beside      "--keymap: XKB keyboard layout: (X and Wayland)"                          -> "--keymap \""      @combow('$Keymapscombo') "\" " | ! "";
       westonini          "--westonini: Custom weston.ini (see man weston.ini)"                     -> "--westonini=\""   @infile="/usr/share/doc/weston/examples/weston.ini"  "\" " | ! "";
     devrun ->  setcapsdialog dockeroptions ;
-      dockeroptions        "Custom options for \"docker run\" "                                    ->  @string="'$DOCKEROPTIONS'" ;
+      dockeroptions        "Custom options for \"docker run\" "                                    ->  "--OPT=\"" @string="'$DOCKEROPTIONS'"  "\"" ;
     devcaps "Container capabilities and namespaces" -> capdefault sysadmin ipc net;
       capdefault         "--cap-default: Allow default container capabilities."                    -> "--cap-default "   | ! "" ;
       sysadmin           "--sys-admin: Add capability SYS_ADMIN."                                  -> "--sys-admin "     | ! "" ;
@@ -321,13 +338,13 @@ start "Run GUI applications in docker containers - x11docker '$Version'"  -> opt
         envCustom3:beside     "Custom"      -> "--env=\""  @string=""                                       "\" " | ! "" ;
         envCustom4:beside     "Custom"      -> "--env=\""  @string=""                                       "\" " | ! "" ;
         
-  setcapsdialog:beside "Add container capabilities:"                                ->  capsdialog ;
-      capsdialog:dialog  "docker capabilities and privileges"  -> capsreference capstable @close="close";
-        capsreference " Add container capabilities degrading container isolation if needed. Use with care.\n\n
-                        x11docker disables all this capabilities per default with \"--cap-drop=ALL --security-opt=no-new-privileges\". \n\n
-                        Left column (SETPCAP till SETFCAP) contains capabilities normally enabled by docker per default.\n
-                        Middle and right column (SYS_MODULE till BLOCK_SUSPEND) contain capabilities disabled by docker per default.\n\n
-                        See \"man capabilities\" and docker run reference: https://docs.docker.com/engine/reference/run/ " -> "" ;
+  setcapsdialog:beside "Add container capabilities:"           -> capsdialog ;
+    capsdialog:dialog  "docker capabilities and privileges"  -> capsreference capstable @close="close";
+      capsreference " Add container capabilities degrading container isolation if needed. Use with care.\n\n
+                      x11docker disables all this capabilities per default with \"--cap-drop=ALL --security-opt=no-new-privileges\". \n\n
+                      Left column (SETPCAP till SETFCAP) contains capabilities normally enabled by docker per default.\n
+                      Middle and right column (SYS_MODULE till BLOCK_SUSPEND) contain capabilities disabled by docker per default.\n\n
+                      See \"man capabilities\" and docker run reference: https://docs.docker.com/engine/reference/run/ " -> "" ;
                        
     capstable:framed:beside -> capsleft capsmiddle capsright;
       capsleft -> drop_1 drop_2 drop_3 drop_4 drop_5 drop_6 drop_7 drop_8 drop_9 drop_10 drop_11 drop_12 drop_13 drop_14 ;
@@ -512,21 +529,21 @@ start "Run GUI applications in docker containers - x11docker '$Version'"  -> opt
   xdependenciesbutton:dialog "Dependencies" -> xdependencies @text(" Other dependencies, some in image, too") xdependencies2 @close=" close";
     xdependencies:beside -> xdep_option xdep_host xdep_xrunning ;
       xdep_option -> xdep_option_title  
+                     xdep_option_nxagent
                      xdep_option_xpra         xdep_option_xephyr 
                      xdep_option_xpraxwayland xdep_option_westonxwayland
                      xdep_option_hostdisplay  xdep_option_xorg
-                     xdep_option_nxagent
                      xdep_option_xwayland     xdep_option_xdummy xdep_option_xvfb
                      xdep_option_wayland      xdep_option_kwin
                      xdep_option_weston ;
         xdep_option_title ->          @text(" X server");
+        xdep_option_nxagent ->        @text(" --nxagent");
         xdep_option_xpra ->           @text(" --xpra");
         xdep_option_xephyr ->         @text(" --xephyr");
         xdep_option_xorg ->           @text(" --xorg");
         xdep_option_hostdisplay ->    @text(" --hostdisplay");
         xdep_option_xpraxwayland ->   @text(" --xpra-xwayland");
         xdep_option_westonxwayland -> @text(" --weston-xwayland");
-        xdep_option_nxagent ->        @text(" --nxagent");
         xdep_option_xwayland ->       @text(" --xwayland");
         xdep_option_xdummy ->         @text(" --xdummy");
         xdep_option_xvfb ->           @text(" --xvfb");
@@ -534,21 +551,21 @@ start "Run GUI applications in docker containers - x11docker '$Version'"  -> opt
         xdep_option_kwin ->           @text(" --kwin, --kwin-xwayland ");
         xdep_option_wayland ->        @text(" --hostwayland");
       xdep_host -> xdep_host_title  
+                   xdep_host_nxagent
                    xdep_host_xpra         xdep_host_xephyr
                    xdep_host_xpraxwayland xdep_host_westonxwayland
                    xdep_host_hostdisplay  xdep_host_xorg
-                   xdep_host_nxagent
                    xdep_host_xwayland     xdep_host_xdummy xdep_host_xvfb
                    xdep_host_wayland      xdep_host_kwin
                    xdep_host_weston ;
         xdep_host_title ->          @text(" Dependencies on host");
+        xdep_host_nxagent ->        @text(" nxagent");
         xdep_host_xpra ->           @text(" xpra");
         xdep_host_xephyr ->         @text(" Xephyr");
         xdep_host_xorg:beside ->    @text(" - \ [ xerver-xorg-legacy ]") xdep_xorg_setupdialog;
         xdep_host_hostdisplay ->    @text(" -");
-        xdep_host_xpraxwayland ->   @text(" Xwayland \ xpra \ [on X also: \ weston \ xdotool ]");
+        xdep_host_xpraxwayland ->   @text(" Xwayland \ weston \ xpra  \ xdotool");
         xdep_host_westonxwayland -> @text(" Xwayland \ weston");
-        xdep_host_nxagent ->        @text(" nxagent");
         xdep_host_xwayland ->       @text(" Xwayland");
         xdep_host_xdummy ->         @text(" (dummy video driver for Xorg)");
         xdep_host_xvfb ->           @text(" Xvfb");
@@ -556,21 +573,21 @@ start "Run GUI applications in docker containers - x11docker '$Version'"  -> opt
         xdep_host_kwin ->           @text(" kwin Xwayland");
         xdep_host_wayland ->        @text(" -");
       xdep_xrunning -> xdep_xrun_title  
+                       xdep_xrun_nxagent
                        xdep_xrun_xpra         xdep_xrun_xephyr
                        xdep_xrun_xpraxwayland xdep_xrun_westonxwayland
                        xdep_xrun_hostdisplay  xdep_xrun_xorg
-                       xdep_xrun_nxagent
                        xdep_xrun_xwayland     xdep_xrun_xdummy xdep_xrun_xvfb
                        xdep_xrun_wayland      xdep_xrun_kwin
                        xdep_xrun_weston ;
         xdep_xrun_title ->          @text(" Needs running X or Wayland on host");
+        xdep_xrun_nxagent ->        @text(" X \ (or Xwayland on Wayland)");
         xdep_xrun_xpra ->           @text(" X \ (or Xwayland on Wayland)");
         xdep_xrun_xephyr ->         @text(" X \ (or Xwayland on Wayland)");
         xdep_xrun_xorg ->           @text(" -");
         xdep_xrun_hostdisplay ->    @text(" X \ (or Xwayland on Wayland)");
         xdep_xrun_xpraxwayland ->   @text(" X \ (or Xwayland on Wayland)");
         xdep_xrun_westonxwayland -> @text(" -");
-        xdep_xrun_nxagent ->        @text(" X \ (or Xwayland on Wayland)");
         xdep_xrun_xwayland ->       @text(" Wayland");
         xdep_xrun_xdummy ->         @text(" -");
         xdep_xrun_xvfb ->           @text(" -");
@@ -581,17 +598,16 @@ start "Run GUI applications in docker containers - x11docker '$Version'"  -> opt
       xdep_options -> xdep_gpu      xdep_xclip      xdep_pulseaudio      xdep_dbus;
       xdep_text    -> xdep_gpu_text xdep_xclip_text xdep_pulseaudio_text xdep_dbus_text;
       xdep_xclip           -> @text("--clipboard") ;
-      xdep_xclip_text      -> @text("Needs package xclip on host (except for options --xpra, --xpra-xwayland and --nxagent).") ; 
+      xdep_xclip_text      -> @text("Needs package xclip on host (except for options --nxagent, --xpra, --xpra-xwayland and --hostdisplay).") ; 
       xdep_pulseaudio      -> @text("--pulseaudio") ;
       xdep_pulseaudio_text -> @text("Needs package pulseaudio on host AND in image.") ;
       xdep_dbus            -> @text("--dbus, --dbus-system") ;
       xdep_dbus_text       -> @text("Needs package dbus in image.") ;
       xdep_systemd         -> @text("--systemd") ;
       xdep_systemd_text    -> @text("Needs systemd in image") ;
-      xdep_gpu             -> @text("--gpu\n\n\n") ;
-      xdep_gpu_text        -> @text("Needs OpenGL dependencies (mesa) to be installed in image. For debian images: mesa-utils mesa-utils-extra,\n
-                                     CentOS and fedora images: glx-utils mesa-dri-drivers, Arch Linux images: mesa-demos\n
-                                     Works best with open source drivers on host. For closed source drivers look at terminal output.");
+      xdep_gpu             -> @text("--gpu\n\n") ;
+      xdep_gpu_text        -> @text("Needs OpenGL dependencies (MESA) to be installed in image. \n
+                                     Works best with open source drivers on host. For closed source driver setups look at terminal messages.");
     xdep_xorg_setupdialog:dialog "Setup" -> @text(" Option --xorg can be used out of the box on console tty1...tty6. \n
                                                    \n
                                                    To run a second Xorg server from within an already running X session, \n
@@ -616,7 +632,7 @@ start "Run GUI applications in docker containers - x11docker '$Version'"  -> opt
     Security:\n
     x11docker is focussed on avoiding X security leaks and improving container isolation. \n
     Depending on chosen options, you can have high or low container isolation. \n
-    Look at button [Security info] to see the differences. \n
+    Look at button [Security info] for further informations. \n
     x11docker shows terminal messages if something is less secure.\n
     \n
     Automatically choosing an X server:\n
@@ -646,23 +662,23 @@ start "Run GUI applications in docker containers - x11docker '$Version'"  -> opt
     ") helpbuttons;
   helpbuttons:beside -> MIT @close=" close" ;
     
-    security_dialog:dialog " Security info " -> sec_info sec_degrading_title sec_degrading sec_developer @close=" close";
-      sec_info               -> @text(" Main intention of x11docker is to allow running GUI applications in docker on X11 or Wayland as secure as possible. \n
+    security_dialog:dialog "Security info" -> sec_info sec_degrading_title sec_degrading @close=" close";
+      sec_info               -> @text(" Intention of x11docker is allowing to run GUI applications in docker on X11 or Wayland as secure as possible. \n
                                         \n
-                                        x11docker shows warning messages in terminal if chosen options degrade container isolation.
+                                        Warnings: \n
+                                        x11docker shows warning messages in terminal if chosen options degrade container isolation.\n
                                         \n
-                                        One important part is to avoid common X security leaks, making keylogging and remote controlling of host applications impossible. \n
-                                        This is given for all provided X servers and Wayland compositors except option --hostdisplay (see below).\n
-                                        Core concept is to run a segregated additional X server with its own authentication cookies.\n
+                                        X security: \n
+                                        To avoid common X security leaks like keylogging and remote control of host applications, \n
+                                        x11docker runs segregated additional X servers. Only option --hostdisplay is insecure here.\n
                                         \n
-                                        Another important part is hardening container security:\n
-                                         - Default user in container is same as host user to avoid root running GUI applications.\n
+                                        Container security:\n
+                                         - Default user in container is same as host user to avoid root in container.\n
                                          - All default docker container capabilities like user switching, chroot and setuid/setgid are disabled.\n
-                                        Docker options in use for container security hardening: \"--cap-drop=ALL --security-opt=no-new-privileges\"\n
                                         \n
                                         Weaknesses:\n
                                         If docker daemon runs with --selinux-enabled, SELinux restrictions are degraded with label container_runtime_t to allow access to X unix socket.\n
-                                        User namespace remapping has limited support and is disabled for options --home and --homedir.\n
+                                        User namespace remapping is disabled to allow options --home and --homedir. (Less an issue as container user is not root.)\n
                                         \n
                                         If you do not care about container isolation at all, get a quite fast insecure setup with \"x11docker --hostdisplay --gpu IMAGENAME\"
                                         ") ;
@@ -670,24 +686,22 @@ start "Run GUI applications in docker containers - x11docker '$Version'"  -> opt
       sec_degrading:beside   -> sec_deg_opt sec_deg_text;
         sec_deg_opt          -> sec_hostdisplay_opt  sec_gpu_opt  sec_pulseaudio_opt  sec_sudouser_opt  sec_capdefault_opt  ;
         sec_deg_text         -> sec_hostdisplay_text sec_gpu_text sec_pulseaudio_text sec_sudouser_text sec_capdefault_text ;
-          sec_gpu_opt          -> @text(" --gpu \n\n\n\n\n");
-          sec_gpu_text         -> @text(" Option --gpu allows hardware acceleration for dockered OpenGL applications. Access to GPU hardware can allow rootkits. \n
+          sec_gpu_opt          -> @text(" --gpu \n\n\n\n");
+          sec_gpu_text         -> @text(" Option --gpu enables hardware acceleration for dockered OpenGL applications. Access to GPU hardware can allow rootkits. \n
                                           Example rootkit: https://github.com/x0r1/jellyfish\n
                                           Although there is little known of real attacks, you should be aware of this. This affects X servers and Wayland compositors as well. \n
-                                          Furthermore, container applications can grab video RAM content formerly drawn by host applications (palinopsia leak).\n\
-                                          Attention: Enables insecure option --ipc and --trusted for --hostdisplay, therefore allowing keylogging and remote host control.");
+                                          Furthermore, container applications can grab video RAM content formerly drawn by host applications (palinopsia leak).");
           sec_hostdisplay_opt  -> @text(" --hostdisplay \n\n\n");
           sec_hostdisplay_text -> @text(" Quite bad container isolation, but least overhead of all X server options. Use with trusted images only.\n
                                           Instead of creating a new segregated X server to avoid X security leaks, your host X server is shared with container. \n
-                                          x11docker avoids keylogging and other attacks using untrusted cookies, but do not rely on this. \n");
+                                          x11docker tries to avoid keylogging and other attacks with untrusted cookies, but do not rely on this. \n");
           sec_pulseaudio_opt   -> @text(" --pulseaudio \n --alsa\n");
           sec_pulseaudio_text  -> @text(" With sound enabled, container applications can catch your audio output and also can hear everything you say \n
                                           if your computer has microphones. With option --alsa, container applications have immediate access to sound hardware.");
           sec_capdefault_opt   -> @text(" --cap-default ");
           sec_capdefault_text  -> @text(" Allows default container capabilities; disables container security hardening by x11docker.");
           sec_sudouser_opt     -> @text(" --sudouser ");
-          sec_sudouser_text    -> @text(" Allows sudo with password \"x11docker\" in container. Allows many capabilities. Outbreaking applications have no limits. ");
-          sec_developer        -> @text(" Some options in the \"Developer\" section degrade container isolation, especially those in part \"container capabilities\". Please install brain.exe");
+          sec_sudouser_text    -> @text(" Allows su and sudo with password \"x11docker\" in container. Allows many capabilities. Outbreaking applications have no limits. ");
                        
   MIT:dialog "MIT license" -> @text(
                " MIT License\n
@@ -712,41 +726,49 @@ start "Run GUI applications in docker containers - x11docker '$Version'"  -> opt
                  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\n
                  SOFTWARE.") @close="close";
 
-x11docker_options -> xserver_choose xserver_appearance tabcollect develcollect imageorexe "\"" setcapsdialog dockeroptions "\" " "\""dockerimage "\"" ;
-x11docker -> "'$X11docker_exe' " x11docker_options;
+                 
+previewline:beside -> previewclipboard previewtext;
+previewtext        -> @text="";
+previewclipboard   -> @echo("--CLIPBOARD")="Copy to clipboard:" ;
 
-buttons :horizontal ->  run runxterm preview desktop_starter orphanedcheck @dump("")="Cancel";
-  old_run -> @fork(x11docker)=" Run";
-  run -> @dump(x11docker)=" Run";
-  preview -> @preview(x11docker,"monospace",900)="Preview command" ;
-  desktop_starter -> @dump("xterm -e '\''","'$X11docker_exe' --starter ",x11docker_options,"'\''")="Create desktop starter";
-  orphanedcheck -> @dump("xterm -hold -e '"'"'pkexec '$X11docker_exe' "," --cleanup '"'"'")="Clean up";
-  runxterm -> @dump("xterm -hold -e '"'"'",x11docker,"'"'"'")="Run in xterm";
+buttons:horizontal ->  run runxterm starter cleanupxterm quit;
+  run              -> @echo("--RUN")=" Run";
+  starter          -> @echo("--STARTER")="Create starter on desktop" ;
+  runxterm         -> @echo("--XTERM")="Run in xterm" ;
+  cleanupxterm     -> @echo("--CLEANUP")="Clean up and exit";
+  quit             -> @dump("--EXIT")="Exit" ;
 '
 
 # remove double whitespaces
 Kaptain_grammar="$(sed -e 's/  */ /g' <<< "$Kaptain_grammar")"
+echo "$Kaptain_grammar" > $Kaptain_grammar_file
 
 # check options
-Verbose="--silent"
-case "$1" in
+Verboseoption="--silent"
+case "${1:-}" in
   --icon)
-    echo "x11docker-gui does no longer create an icon on demand." >&2
+    echo "x11docker-gui does not create an icon on demand anymore." >&2
     exit 1
   ;;
   -v|--verbose) 
     kaptain --version
-    Verbose="--verbose" 
+    Verbose="yes"
+    Verboseoption="--verbose" 
     echo "x11docker-gui: created kaptain grammar:"
     printf "%s" "$Kaptain_grammar" | nl
     echo ""
   ;;
+  "") ;;
+  *) echo "Options:
+  -v  --verbose    Be verbose"
+    exit 1
+  ;;
 esac
 
-# check kaptain version
-
+# check if kaptain is available on host
 command -v kaptain >/dev/null && Hostkaptain="yes" || Hostkaptain="no"
 
+# check kaptain version
 [ "$Hostkaptain" = "yes" ] && kaptain --version 2>&1 | grep -q 'kaptain 0.72' && {
   # regard kde3-kaptain from openSUSE KDE:KDE3 repository
   # up to date from decades ago is 0.73
@@ -762,20 +784,147 @@ $(kaptain --version)
 # Run kaptain either from host or with x11docker/kaptain image
 case $Hostkaptain in
   yes)
-    [ "$Verbose" = "--verbose" ] && {
-         X11docker_command="$(kaptain <<< "$Kaptain_grammar")" ||:
-    } || X11docker_command="$(kaptain 2>/dev/null <<< "$Kaptain_grammar")"
+    Kaptain_stdin=$Cachefolder/stdin.$Mycookie
+    mkfifo $Kaptain_stdin
+    exec 6<>$Kaptain_stdin
+    Kaptain_stdout=$Cachefolder/stdout.$Mycookie
+    :> $Kaptain_stdout
+    case "$Verbose" in
+      yes) kaptain --stdio $Kaptain_grammar_file <&6 >>$Kaptain_stdout & Kaptain_pid=$! ;;
+      *)   kaptain --stdio $Kaptain_grammar_file <&6 >>$Kaptain_stdout 2>/dev/null & Kaptain_pid=$! ;;
+    esac
   ;;
-  no)
+  
+  *)
     warning "Did not find executeable 'kaptain'.
 If your distribution does not provide package kaptain (>=0.73), look at
 kaptain repository:   https://github.com/mviereck/kaptain
 Fallback: Will try to use image x11docker/kaptain."
-#    read -r X11docker_command < <(printf "%s" "$Kaptain_grammar" | bash $X11docker_exe --hostdisplay --size 980x720 --no-init --clipboard $Verbose --stdout --sharedir "$X11docker_icon" --env HOME="$CONTAINERUSERHOME" -- --volume="$CONTAINERUSERHOME":"$CONTAINERUSERHOME":ro x11docker/kaptain)
-    read -r X11docker_command < <(bash $X11docker_exe --hostdisplay --size 980x720 --stdin --no-init --clipboard $Verbose --stdout --sharedir "$X11docker_icon" --env HOME="$CONTAINERUSERHOME" -- --volume="$CONTAINERUSERHOME":"$CONTAINERUSERHOME":ro x11docker/kaptain <<< "$Kaptain_grammar")
+    
+    { IFS= read Xenv ; read Kaptain_pid ; } < <($X11docker_exe $Verboseoption \
+                                                               --stdin --showenv --showpid1 \
+                                                               --size 980x720 --clipboard \
+                                                               --sharedir "$X11docker_icon" \
+                                                               --sharedir "$Kaptain_grammar_file" \
+                                                               --env HOME="$CONTAINERUSERHOME" \
+                                                               -- \
+                                                               --volume="$CONTAINERUSERHOME":"$CONTAINERUSERHOME":ro \
+                                                            x11docker/kaptain --stdio $Kaptain_grammar_file <<< " ")
+                                              
+    Kaptain_stdin="$(export $Xenv; echo $X11DOCKER_CACHE/share/stdin)"
+    exec 6<>$Kaptain_stdin
+    Kaptain_stdout="$(export $Xenv; echo $X11DOCKER_CACHE/share/stdout)"
+    Timetosaygoodbye="$(export $Xenv; echo $X11DOCKER_CACHE/share/timetosaygoodbye.fifo)"
   ;;
 esac
 
-# run x11docker
-echo $X11docker_command
-eval $X11docker_command
+send() {
+  # send messages to kaptain over its stdin
+  echo "$1" >&6
+  [ "$Verbose" = "yes" ] && echo "sent: $1"
+}
+
+# watch kaptain messages
+while read Line; do
+  [ "$Verbose" = "yes" ] && echo "received: $Line"
+  
+  # Option output starts with --
+  # --CAPitalized options are internal x11docker-gui signals
+  [ "$(echo $Line | cut -c1-2)" = "--" ] && {
+    case "$(echo $Line | cut -c1-5)" in
+      
+      --OPT) # custom docker options appear behind -- and without on x11docker option on their own
+        Line="$(echo "$Line" | cut -c7-)"
+        [ "$Line" = '""' ] || Previewline="$Previewline $Line"
+        Line=""
+      ;;
+      
+      --IMG) # docker image and command. Appears after -- without an opion on its own. Last one in refresh request sequence. 
+        Line="$(echo "$Line" | cut -c7-)"
+        [ "$Line" = '""' ] || Previewline="$Previewline $Line"
+        Line=""
+        
+        # refresh request is ready, write preview line into GUI
+        send "previewtext='$Previewline'"
+        
+        # execute x1docker if "Run" button was pressed before
+        [ "$Runit" ] && {
+          case $Runit in
+            run)
+              $Previewline & disown
+            ;;
+            runxterm)
+              xterm -hold -e "$Previewline" & disown
+            ;;
+            runstarter)
+              xterm -e "$X11docker_exe --starter $(echo "$Previewline" | cut -d' ' -f2-)" & disown 
+            ;;
+          esac
+          Previewline="$X11docker_exe"
+          Runit=""
+        }
+      ;;
+      
+      --RUN) # "Run" button was pressed
+        { # animated run button to give some startup feedback
+          for Count in 1 2 3 4 5; do
+            send "run('--RUN')='Starting x11docker *'"
+            sleep 0.5
+            send "run('--RUN')='* Starting x11docker'"
+            sleep 0.5
+          done 
+          send "run('--RUN')=' Run'"
+        } &
+        # x11docker will run after refresh in --IMG)
+        Runit="run"
+        # call for rehfresh of option preview
+        Line="refresh"
+      ;;
+      
+      --XTE) # --XTERM: run in xterm window
+        Runit="runxterm"
+        Line="refresh"
+      ;;
+      
+      --CLE) # --CLEANUP: run --cleanup in xterm window
+        finish
+        exec xterm -hold -e "$X11docker_exe --cleanup"
+      ;;
+      
+      --STA) # --STARTER: create desktop starter icon
+        Runit="runstarter"
+        Line="refresh"
+      ;;
+      
+      --CLI)  # --CLIPBOARD: copy to clipboard
+        command -v xclip >/dev/null && {
+          echo -n "$Previewline" | xclip -selection clipboard
+        } || {
+          echo -n "$Previewline" | xsel -i -b
+        } || send "previewclipboard='Please install xsel or xclip'"
+      ;;
+      
+      --EXI)  # --EXIT: Button "Quit" or tail exits due to closed x1ddocker-gui window
+        break 
+      ;;
+      
+      *) # other messages beginning with -- are chosen options.
+        Previewline="$Previewline $Line"
+        Line=""
+      ;;
+    esac
+  }
+  
+  # on all action messages (without --) refresh preview line. Ask for all set options to be written on stdout.
+  [ "$Line" ] && {
+    Previewline="$X11docker_exe"
+    for Line in xserver_choose xserver_appearance \
+                options_normal options_hostfolders \
+                options_advanced options_init \
+                options_verbosity options_stdstream options_show \
+                devaddcommands devauth devxconfig devmisc devuser devcaps \
+                imageorexe capstable dockeroptions dockerimage; do
+      send "$Line?"
+    done
+  }
+done < <(tail -f $Kaptain_stdout --pid $Kaptain_pid ; echo '--EXIT')
