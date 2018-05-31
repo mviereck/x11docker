@@ -31,6 +31,12 @@ finish() {
   done
   [ "$Kaptain_pid" ] && ps -p $Kaptain_pid >/dev/null && kill $Kaptain_pid
 }
+mkfile() {              # create file $1 owned by $Hostuser
+  :> "${1:-}"
+  chown $Lognameuser    "${1:-}"
+  chgrp $Lognameusergid "${1:-}"
+  [ -n "${2:-}" ] && chmod ${2:-} "${1:-}" ||:
+}
 
 trap finish EXIT
 
@@ -50,15 +56,20 @@ Lognameuser="$(logname 2>/dev/null)"
 [ -z "$Lognameuser" ] && [ -n "$SUDO_USER" ]  && Lognameuser="$SUDO_USER"  && warning "Will assume \$SUDO_USER = $SUDO_USER as host user."
 [ -z "$Lognameuser" ] && [ -n "$PKEXEC_UID" ] && Lognameuser="$PKEXEC_UID" && warning "Will assume user with uid \$PKEXEC_UID = $PKEXEC_UID as host user."
 [ -z "$Lognameuser" ] &&                         Lognameuser="$(id -un)"   && warning "Will assume \$(id -un) = $(id -un) as host user."
+Lognameusergid="$(getent passwd $Lognameuser | cut -d: -f4)"
 Lognameuserhome="$(getent passwd $Lognameuser | cut -d: -f6)"
 
 CONTAINERUSER="$Lognameuser"
 CONTAINERUSERHOME="$Lognameuserhome"
-Cachefolder=$CONTAINERUSERHOME/.cache/x11docker/x11docker-gui
+Cachefolder=$Lognameuserhome/.cache/x11docker/x11docker-gui
+mkdir -p $Lognameuserhome/.cache/x11docker
+chown $Lognameuser $Lognameuserhome/.cache/x11docker
 mkdir -p $Cachefolder || Cachefolder=/tmp/x11docker-gui
 mkdir -p $Cachefolder 
+chown $Lognameuser $Cachefolder 
 Mycookie=$(mcookie | cut -c1-6)
 Kaptain_grammar_file=$Cachefolder/x11docker.kaptn.$Mycookie
+mkfile $Kaptain_grammar_file
 
 #####################
 # Preset some options you may want to be set as default
@@ -98,16 +109,19 @@ DESKTOP="!"
 #CONTAINERUSERHOME="/home/\\\$USER"
 
 # check list of available window managers
+mkfile $Cachefolder/windowmanager.list
 Wm_all="$($X11docker_exe --wmlist)"
 HOSTWM=""
-for Wm in $Wm_all ; do
-  command -v "$Wm" >/dev/null && {
-    grep -q "$Wm" <<< "$HOSTWM" || HOSTWM="$HOSTWM\"$Wm\","
+for Line in $Wm_all ; do
+  command -v "$Line" >/dev/null && {
+    grep -q "$Line" < $Cachefolder/windowmanager.list || echo "$Line" >> $Cachefolder/windowmanager.list
   }
 done
-
+while read Line; do
+  HOSTWM="$HOSTWM\"$Line\","
+done < <(sort < $Cachefolder/windowmanager.list)
 HOSTWM="$HOSTWM\"\",\"auto\",\"none\""
-[ -n "$MYWM" ] && ! echo "$HOSTWM" | grep -q "$MYWM" && HOSTWM="\"$MYWM\",$HOSTWM"
+[ -n "$MYWM" ] && ! grep -q "$MYWM" <<< $HOSTWM && HOSTWM="\"$MYWM\",$HOSTWM"
 
 # check sound cards for ALSA
 ALSALIST=""
@@ -118,10 +132,16 @@ ALSALIST="$ALSALIST\"\""
 
 # if docker can run without password prompt, create list of available named images
 sudo -n echo 2>/dev/null && Sudo="sudo -n" || Sudo=""
-while read -r Image ; do
-    Image="${Image%:<none>}"
-    IMAGELIST="$IMAGELIST,\"$Image \""
-done < <($Sudo docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | sort)
+$Sudo docker info>/dev/null 2>&1 && {
+  mkfile "$Cachefolder/images.list"
+  while read -r Line ; do
+    Line="${Line%:<none>}"
+    [ "$Line" = "<none>" ] || echo $Line >> "$Cachefolder/images.list"
+  done < <($Sudo docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | sort)
+}
+while read -r Line ; do
+  IMAGELIST="$IMAGELIST,\"$Line \""
+done < "$Cachefolder/images.list"
 
 Hostlangland=$(echo $LANG | cut -d. -f1)
 Langcombo="\"$Hostlangland\""
@@ -166,7 +186,7 @@ start "Run GUI applications in docker containers - x11docker '$Version'"  -> opt
     logo_imageorexe:beside                                                                  -> @icon("'$X11docker_icon'") imageorexe ;
       imageorexe                                                                            -> image | exe | xonly;
         image:beside     "Run docker image"                                                 -> "-- " ;
-        exe              "--exe: Run host application instead of docker"                    -> "--exe -- ";
+        exe              "--exe: Run host application instead of docker image"              -> "--exe -- ";
         xonly            "--xonly: Only create new empty X server"                          -> "--xonly -- "; 
     dockerimage          "Docker image [and command] to run:"                               -> "--IMG=" @combow('$IMAGELIST');
   
@@ -741,7 +761,7 @@ buttons:horizontal ->  run runxterm starter cleanupxterm quit;
 
 # remove double whitespaces
 Kaptain_grammar="$(sed -e 's/  */ /g' <<< "$Kaptain_grammar")"
-echo "$Kaptain_grammar" > $Kaptain_grammar_file
+echo "$Kaptain_grammar" >> $Kaptain_grammar_file
 
 # check options
 Verboseoption="--silent"
@@ -851,7 +871,7 @@ while read Line; do
         [ "$Runit" ] && {
           case $Runit in
             run)
-              $Previewline & disown
+              eval $Previewline & disown
             ;;
             runxterm)
               xterm -hold -e "$Previewline" & disown
@@ -884,16 +904,21 @@ while read Line; do
       --XTE) # --XTERM: run in xterm window
         Runit="runxterm"
         Line="refresh"
+        command -v xterm >/dev/null || send "runxterm='Please install xterm'"
       ;;
       
       --CLE) # --CLEANUP: run --cleanup in xterm window
-        finish
-        exec xterm -hold -e "$X11docker_exe --cleanup"
+        command -v xterm >/dev/null && {
+          finish
+          exec xterm -hold -e "$X11docker_exe --cleanup"
+          :
+        } || send "runxterm='Please install xterm'"
       ;;
       
       --STA) # --STARTER: create desktop starter icon
         Runit="runstarter"
         Line="refresh"
+        command -v xterm >/dev/null || send "runxterm='Please install xterm'"
       ;;
       
       --CLI)  # --CLIPBOARD: copy to clipboard
