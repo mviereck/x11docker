@@ -2355,9 +2355,13 @@ Parsed options: $Parsedoptions"
   Xdummyconf="$Cachefolder/$Xdummyconf"                     && mkfile $Xdummyconf
   Xdummywrapper="$Cachefolder/$Xdummywrapper"               && mkfile $Xdummywrapper
   Xkbkeymapfile="$Cachefolder/$Xkbkeymapfile"               && mkfile $Xkbkeymapfile
-
   Logfile="$Sharefolder/x11docker.log"                      && mkfile $Logfile
   
+  # Cache folder for x11docker-gui. Created here to store image list in dockerrc for x11docker-gui
+  mkdir -p $Cachebasefolder/x11docker-gui && chown $Hostuser $Cachebasefolder/x11docker-gui
+  mkfile   $Cachebasefolder/x11docker-gui/images.list
+
+  # standard streams for container
   Cmdstdinfile="$Sharefolder/$Cmdstdinfile"                 && $Mksu "mkfifo $Cmdstdinfile"
   Cmdstdoutlogfile="$Sharefolder/$Cmdstdoutlogfile"         && mkfile $Cmdstdoutlogfile 666
   Cmdstderrlogfile="$Sharefolder/$Cmdstderrlogfile"         && mkfile $Cmdstderrlogfile 666
@@ -3288,7 +3292,7 @@ esac
 }
 
 { #### part: create shareclipboard script (option --clipboard)
-  # use xclip to share text clipboard content between X servers.
+  # use xclip or xsel to share text clipboard content between X servers.
   # xpra and nxagent have their own clipboard management.
   # only xpra supports image clips.
  
@@ -3298,39 +3302,57 @@ esac
   esac
   
   [ "$Shareclipboard" = "yes" ] && case $Xserver in
-    --nothing|--weston|--hostwayland|--kwin) Shareclipboard="no" 
-      note "Option --clipboard is not supported for $Xserver" ;;
-    --nxagent) ;; # look at "create command to start X server", nxagent has its own clipboard management
+  
+    --nothing|--weston|--hostwayland|--kwin) 
+      warning "Option --clipboard is not supported for $Xserver.
+  Fallback: Disabling option --clipboard." 
+      Shareclipboard="no" 
+    ;;
+    --nxagent) ;; # nxagent has its own clipboard management, look at part "create command to start X server", 
+
     --xephyr|--xorg|--xdummy|--xdummy-xwayland|--xvfb|--xwayland|--weston-xwayland)
+    
+      # check for either xclip or xsel
       command -v xclip >/dev/null && {
-        echo "#! /bin/bash
-# share clipboard between X servers $Hostdisplay and $Newdisplay
-while [ ! -s "$Timetosaygoodbye" ] ; do
-    # read content of clipboard of first X server
-    D1CLIP=\"\$(env XAUTHORITY=$Hostxauthority xclip -selection clipboard -o -display $Hostdisplay)\"
-    # check if clipboard of first X server has changed; if yes, send new content to second X server
-    [ \"\$CLIP\" != \"\$D1CLIP\" ] && {
-        CLIP=\"\$D1CLIP\"
-        env XAUTHORITY=$Hostxauthority xclip -selection clipboard -o -display $Hostdisplay | env XAUTHORITY=$Xclientcookie xclip -selection clipboard -i -display $Newdisplay
-    }
-    [ -z \"\$CLIP\" ] && CLIP=' '      # avoid empty string error
-    
-    # read content of clipboard of second X server
-    D2CLIP=\"\$(env XAUTHORITY=$Xclientcookie xclip -selection clipboard -o -display $Newdisplay)\"
-    # check if clipboard of second X server has changed; if yes, send new content to first X server
-    [ \"\$CLIP\" != \"\$D2CLIP\" ] && {
-        CLIP=\"\$D2CLIP\"
-        env XAUTHORITY=$Xclientcookie xclip -selection clipboard -o -display $Newdisplay | env XAUTHORITY=$Hostxauthority xclip -selection clipboard -i -display $Hostdisplay
-    }
-    [ -z \"\$CLIP\" ] && CLIP=' '      # avoid empty string error
-    
-    sleep 0.5                        # sleep a bit to avoid high cpu usage
-done
-" >> $Shareclipboardscript
+        Clipsend="xclip -selection clipboard -in"
+        Clipreceive="xclip -selection clipboard -out"
+      } || command -v xsel >/dev/null && {
+        Clipsend="xsel --clipboard --input"
+        Clipreceive="xsel --clipboard --output"
       } || {
-        warning "Cannot share clipboard. Need package 'xclip'."
+        warning "Need either xclip or xsel for clipboard
+  sharing with X server $Xserver.
+  Fallback: Disabling option --clipboard."
         Shareclipboard="no"
       }
+  
+      echo "#! /bin/bash
+# share clipboard between X servers $Hostdisplay and $Newdisplay
+
+while [ ! -s "$Timetosaygoodbye" ] ; do
+  # read content of clipboard of first X server
+  D1CLIP=\"\$(env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipreceive)\"
+  
+  # check if clipboard of first X server has changed; if yes, send new content to second X server
+  [ \"\$CLIP\" != \"\$D1CLIP\" ] && {
+    CLIP=\"\$D1CLIP\"
+    env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipreceive | env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipsend
+  }
+  [ -z \"\$CLIP\" ] && CLIP=' '      # avoid empty string error
+    
+  # read content of clipboard of second X server
+  D2CLIP=\"\$(env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipreceive)\"
+    
+  # check if clipboard of second X server has changed; if yes, send new content to first X server
+  [ \"\$CLIP\" != \"\$D2CLIP\" ] && {
+    CLIP=\"\$D2CLIP\"
+    env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipreceive | env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipsend
+  }
+  [ -z \"\$CLIP\" ] && CLIP=' '      # avoid empty string error
+    
+  sleep 0.5                        # sleep a bit to avoid high cpu usage
+done
+" >> $Shareclipboardscript
     ;;
   esac
 }
@@ -3346,6 +3368,7 @@ done
     ;;
     exe)
       Hostexe="$Imagename $Imagecommand"
+      Hostexebasename=$(basename $Hostexe | tr -cd '[:alpha:][:digit:][:blank:]-_.')
       Imagename=""
       Imagecommand=""
       [ -z "$Hostexe" ]              && error "No host executable defined"
@@ -3925,7 +3948,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   esac
 }
 
-{ #### part: create dockerrc: This part runs as root (or member of group docker) on host
+{ #### part: create dockerrc: This script runs as root (or member of group docker) on host
   # create x11docker.CMD.sh -> runs as unprivileged user in container
   # check and set up cgroup on host for systemd or elogind
   # run docker
@@ -3944,9 +3967,18 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     echo "set -Eu"
     echo "trap 'traperror \$? \$LINENO \$BASH_LINENO \"\$BASH_COMMAND\" \$(printf \"::%s\" \${FUNCNAME[@]}EOF)'  ERR"
   }
+  echo ""
   
   echo "Imagename=\"$Imagename\""
   echo "Imagecommand=\"$Imagecommand\""
+  
+  echo "# refresh list of available images for x11docker-gui"
+  echo "while read -r Line ; do"
+  echo '  Line="${Line%:<none>}"'
+  echo '  [ "$Line" = "<none>" ] || echo $Line >> '$Cachebasefolder/x11docker-gui/images.list
+  echo 'done < <(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | sort)'
+  echo ""
+  
   
   echo "# check if image is available locally"
   echo "docker inspect --type=image $Imagename > /dev/null 2>&1 || {"
@@ -4222,7 +4254,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   [ "$Switchcontaineruser" = "no" ] && echo "docker exec --tty -u root $Containername /bin/sh $Cshare/containersetup.sh"
 } >> $Dockerrc
 
-{ #### part: create container setup script: This part runs as root in container
+{ #### part: create container setup script: This script runs as root in container
   echo "#! /bin/sh"
   echo "# set up docker container as root before ongoing in unprivileged x11docker.CMD.sh"
   echo "# commands in this script are executed as root in container"
@@ -5026,7 +5058,10 @@ After finish: $Logbackup"
   If you move the new file to $Hostuserhome/.local/share/applications,
   it will appear in your applications menu."
   
-    Name="$(echo $Imagename | tr / -) $(echo $Imagecommand | tr -cd '[:alpha:][:digit:][:blank:]-_.') x11docker"
+    Name="$(echo $Imagename | tr / -) $(echo $Imagecommand | tr -cd '[:alpha:][:digit:][:blank:]-_.')"
+    [ "$Hostexebasename" ] && Name="$(echo $Hostexebasename on $(echo $Xserver | tr -d '-') | tr -cd '[:alpha:][:digit:][:blank:]-_.')"
+    [ "$Hostexebasename" = "xonly" ] && Name="$(echo $Xserver | tr -d '-')"
+    
     read -re -p "Please choose a name for your desktop starter: 
 " -i "$Name" Name
     [ -z "$Name" ] && exit ### FIXME: check for valid file name / invalid chars?
@@ -5321,8 +5356,9 @@ $(tail $Compositorlogfile)"
 ######### ToDo notes for development
 todo() {
 # BUG --nxagent: --size: wrong screen size
-# disable dbus service bluez, maybe others, too. check deepin dockerfile
+# --clipboard: support xsel, too
 # --weston and --kwin on pure wayland host: check screen size with Xwayland -rootless
+# store image list for x11docker-gui
 
 # BUG opensuse/arch: issues with x11docker/fluxbox, background missing, sometimes no context menu. where is the difference?
 # run several code pathes with --debug
