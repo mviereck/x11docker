@@ -10,7 +10,11 @@ Project website: https://github.com/mviereck/x11docker
 ### Changed
  - `x11docker-gui` is interactive now. Live preview of generated command. 
    Starting multiple x11docker instances possible. Copy-to-clipboard button.
+ - `x11docker-gui`: create list of installed images every time x11docker 
+   or x11docker-gui runs and has enough permissions. Image list is used in
+   x11docker-gui in image combo.
  - `--cleanup`: Running as root not mandatory.
+ - `--clipboard`: support `xsel` additional to `xclip`.
  
 ## [4.3.1](https://github.com/mviereck/x11docker/releases/tag/v4.3.1) - 2018-05-29
 ### Changed
@@ -67,9 +71,9 @@ Project website: https://github.com/mviereck/x11docker
  - `--xorg`: disable screen saver [(#46)](https://github.com/mviereck/x11docker/issues/46)
    
 ## [4.2.1](https://github.com/mviereck/x11docker/releases/tag/v4.2.1) - 2018-05-10
-## Added
+### Added
  - Forward `stdin` of x11docker to container command with a named pipe/fifo.
-## Changed
+### Changed
  - `x11docker-gui`: Use stdin for kaptain grammar transmission. Don't use cache.
  - `--dbus-system`: Don't create `--tmpf /tmp --tmpfs /run --tmpfs /var/run --tmpfs /run/lock`.
    [(#43)](https://github.com/mviereck/x11docker/issues/43)
