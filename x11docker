@@ -162,7 +162,7 @@ Wayland without X:
  -W, --wayland         Automatically set up a Wayland environment.
                        Chooses one of following options and regards --desktop.
                        Sets some Wayland environment variables and runs
-                       dbus system daemon (--dbus-system).
+                       dbus system daemon (--dbus-system) in container.
  -T, --weston          Weston without X for pure Wayland applications.
                        Runs in X or from console. (Needs package weston.)
  -K, --kwin            KWin without X for pure Wayland applications.
@@ -602,7 +602,7 @@ watchpidlist() {        # watch list of important pids
   saygoodbye "watchpidlist: carneval is over"
 }
 setonwatchpidlist() {   # add PID $1 to watchpidlist()
-  echo $1 >&9
+  echo ${1:-} >&9
 }
 watchwarningfifo() {    # watch for warning messages out of container or dockerrc
   # message in fifo must end with EOF
@@ -710,10 +710,10 @@ waitforlogentry() {     # wait for entry $3 in logfile $2 of application $1
   
   while ! grep -q "${3:-}" <"${2:-}" ; do
   
-    grep -i -q error <"${2:-}" && {
+    grep -i -q -E 'error|failed' <"${2:-}" && {
       warning "Found error message for ${1:-} in logfile
   ${2:-}
-$(grep -i error  <"${2:-}")"
+$(grep -i -E 'error|failed'  <"${2:-}")"
       return 1
     }
     
@@ -858,6 +858,7 @@ depends() {             # check dependencies on host for X server option $1
       } 
     ;;
   esac
+  verbose -d "dependency check for ${1:-}: $Return"
   
   [ "$Return" = "1" ] && {
     $Message "${1:-} not possible: missing dependencies."
@@ -1289,7 +1290,8 @@ Sharewayland="no"                               # share wayland socket and WAYLA
 Setwaylandenv="no"                              # set environment variables $Waylandtoolkitenv
 Compositorpid=""                                # PID of weston or kwin_wayland
 Compositorpidfile=compositor.pid                # file to store PID of compositor
-Compositorlogfile=compositor.log                # logfile for weston or kwin_wayland 
+Compositorlogfile=compositor.log                # logfile for weston or kwin_wayland
+Xwaylandpid=""                                  # PID of Xwayland during screen size check in Wayland enviroments
 
 # Available terminal emulators
 Passwordterminal=""                             # terminal emulator to use for password prompt (if no terminal emulator is needed, it will be 'bash -c')
@@ -1669,6 +1671,8 @@ $Customenvironment"    ;  shift ;;                         # set custom environm
   
   grep -q beta <<<$Version && note "You are running a beta version of x11docker.
   Beta versions change often and may introduce new bugs.
+  You can help in finding and reporting bugs at:
+    https://github.com/mviereck/x11docker
   If you prefer latest stable release, run 'x11docker --update'.
   If you prefer to follow development, run 'x11docker --update-master'."
   
@@ -1776,11 +1780,10 @@ Parsed options: $Parsedoptions"
       Xserver="--xdummy-xwayland"
     ;;
   esac
-
   
-  [ "$Tty" = "no" ] && [ -z "$Hostdisplay" ] && {
-    warning "Environment variable DISPLAY is empty, but
-  it seems x11docker was started within X, not from console. 
+  [ "$Tty" = "no" ] && [ -z "$Hostdisplay$Hostwaylandsocket" ] && {
+    warning "Environment variables DISPLAY and WAYLAND_DISPLAY are empty,
+  but it seems x11docker was started within X, not from console. 
   Please set DISPLAY and XAUTHORITY.
   If you have started x11docker with su or sudo, su/sudo may be configured to
   unset X environment variables. It may work if you run x11docker with
@@ -2359,7 +2362,6 @@ Parsed options: $Parsedoptions"
   
   # Cache folder for x11docker-gui. Created here to store image list in dockerrc for x11docker-gui
   mkdir -p $Cachebasefolder/x11docker-gui && chown $Hostuser $Cachebasefolder/x11docker-gui
-  mkfile   $Cachebasefolder/x11docker-gui/images.list
 
   # standard streams for container
   Cmdstdinfile="$Sharefolder/$Cmdstdinfile"                 && $Mksu "mkfifo $Cmdstdinfile"
@@ -2410,6 +2412,13 @@ Parsed options: $Parsedoptions"
 }
 
 { #### part: check physical and virtual screen size
+  # Dummy start of Xwayland to detect screen size in pure Wayland environments
+  [ -z "$Hostdisplay" ] && depends --xwayland && {
+    verbose -d "Starting Xwayland to get screen size"
+    Xwayland $Newdisplay -rootless -extension GLX +extension RANDR >>$Xinitlogfile 2>&1 & Xwaylandpid=$! && disown
+    waitforfilecreation $Newxsocket
+    export DISPLAY=$Newdisplay
+  }
 
   # check whole display size, can include multiple monitors
   [ -n "$Hostdisplay" ] && {
@@ -2450,8 +2459,9 @@ Parsed options: $Parsedoptions"
         command -v xrandr > /dev/null 2>/dev/null && xrandr 2>/dev/null | grep -q ' connected' && { # reduce size to primary monitor for windowed desktop
           Xaxis=$(xrandr 2>/dev/null | grep ' connected' | head -n1 | cut -dx -f1 | rev | cut -d' ' -f1 | rev)
           Yaxis=$(xrandr 2>/dev/null | grep ' connected' | head -n1 | cut -dx -f2 | cut -d' ' -f1 | cut -d+ -f1)
-          Xaxis=$((Xaxis-100))
-          Yaxis=$((Yaxis-100))
+          Xaxis=$((Xaxis-96))
+          Yaxis=$((Yaxis-96))
+          Xaxis=$(( $(( $Xaxis / 8 )) * 8 ))  # avoid grey edge in Xwayland, needs full byte x width
         } || { 
           note "Could not determine size of your primary display to
   create a roughly maximized window for $Xserver. 
@@ -2482,10 +2492,6 @@ Parsed options: $Parsedoptions"
     Yaxis=${Screensize#*x}
   }
   case $Xserver in
-    # avoid grey edge, Xwayland needs full byte x width
-    --weston-xwayland|--kwin-xwayland) Xaxis=$(( $(( $Xaxis / 8 )) * 8 )) ;;
-  esac
-  case $Xserver in
     --xorg) ;;  # Xorg autodetects screen size, preset only with option --size
     *) [ "$Tty" = "no" ] && Screensize="${Xaxis}x${Yaxis}" ;;
   esac
@@ -2494,6 +2500,13 @@ Parsed options: $Parsedoptions"
     Maxyaxis=$Yaxis
   }
   Modeline="$(cvt $Xaxis $Yaxis | tail -n1 | cut -d' ' -f2-)"
+  
+  # kill dummy Xwayland process
+  ps -p "$Xwaylandpid" >/dev/null 2>&1 && {
+    verbose -d "Terminating Xwayland"
+    kill $Xwaylandpid
+    export DISPLAY=$Hostdisplay
+  }
 }
 
 { #### part: --gpu: check nvidia driver
@@ -3954,8 +3967,10 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   # run docker
   
   echo "#! /bin/bash"
-  declare -f waitforfilecreation warning verbose rocknroll escapestring
+  declare -f waitforfilecreation warning verbose rocknroll escapestring mkfile
   echo "Timetosaygoodbye=$Timetosaygoodbye"
+  echo "Hostuser=$Hostuser"
+  echo "Hostusergid=$Hostusergid"
   echo "Logfifo=$Logfifo"
   echo "exec 3<>$Warningfifo"
   echo "exec 4<>$Notefifo"
@@ -3973,6 +3988,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "Imagecommand=\"$Imagecommand\""
   
   echo "# refresh list of available images for x11docker-gui"
+  echo "mkfile $Cachebasefolder/x11docker-gui/images.list"
   echo "while read -r Line ; do"
   echo '  Line="${Line%:<none>}"'
   echo '  [ "$Line" = "<none>" ] || echo $Line >> '$Cachebasefolder/x11docker-gui/images.list
@@ -5058,7 +5074,7 @@ After finish: $Logbackup"
   If you move the new file to $Hostuserhome/.local/share/applications,
   it will appear in your applications menu."
   
-    Name="$(echo $Imagename | tr / -) $(echo $Imagecommand | tr -cd '[:alpha:][:digit:][:blank:]-_.')"
+    Name="$Imagenametr $(echo $Imagecommand | tr -cd '[:alpha:][:digit:][:blank:]-_.')"
     [ "$Hostexebasename" ] && Name="$(echo $Hostexebasename on $(echo $Xserver | tr -d '-') | tr -cd '[:alpha:][:digit:][:blank:]-_.')"
     [ "$Hostexebasename" = "xonly" ] && Name="$(echo $Xserver | tr -d '-')"
     
@@ -5072,13 +5088,15 @@ After finish: $Logbackup"
     { 
       echo "#!/usr/bin/xdg-open
 [Desktop Entry]
+# x11docker desktop file
 Type=Application
 Name=$Name
 Exec=x11docker $Parsedoptions
 Icon=x11docker
 Comment=
 Categories=System
-Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' ' )"
+Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' ' )
+"
       case $(command -v x11docker) in 
         "")echo "TryExec=$0 $Parsedoptions" ;;
         *) echo "TryExec=x11docker $Parsedoptions" ;;
@@ -5355,29 +5373,25 @@ $(tail $Compositorlogfile)"
 
 ######### ToDo notes for development
 todo() {
-# BUG --nxagent: --size: wrong screen size
-# --clipboard: support xsel, too
-# --weston and --kwin on pure wayland host: check screen size with Xwayland -rootless
-# store image list for x11docker-gui
+# further checks of pam.d
+# error message  window in wayland fails: xterm: no display. should use konsole
+# error message window in --xorg fails if xinit fails: no display
+# BUG --wayland --exe xfce4-terminal: Sometimes startup error message although startup was successfull
 
+# --weston and --kwin on pure wayland host: check screen size with Xwayland -rootless
+# --update: regard possible location in /opt
 # BUG opensuse/arch: issues with x11docker/fluxbox, background missing, sometimes no context menu. where is the difference?
+
+# --systemd: try to avoid xhost +SI:localuser:$Benutzer
 # run several code pathes with --debug
 # --dbus-system: find way to start dbus services with dbus itself
-
 # --no-init no-new-privileges switchuser: exec fails, but why?
 # check out capsh. replace su with capsh? (missing in alpine) But how to trigger login?
-# --group-add: compare host and container GID? warn if group misses in container, or create it?
+# --group-add: compare host and container GID? warn if group misses in container, or create it? how to trigger login?
 # work on traperror(). 'set -u' possible without a stop?
-# --update: regard possible location in /opt
-# escape more option arguments: custom docker options, --workdir, --user, --homedir, --sharedir, --wm, --lang, --xhost
-# --dbus-system: policykit must not have no-new-privileges. Seems to use setuid? Core issue AccountsService?
-#                starting polkitd and accounts-daemon in setupscript helps:
-#                -> cinnamon starts up with lots of (harmless?) error messages
-#                -> deepin needs --pulseaudio again
 # check fgconsole
 # check echo especially in sh scripts, replace with printf if needed (#25)
 # avoid possible confusions --home --sharedir. --sharedir mounts can overlap --home folder. What about softlinks with existing target in --home? Maybe avoid /home/$USER at all
-# --xpra --desktop restarts client if closing desktop window
 # bug report to docker about --volume waylandsocket in --volume
 
 # --lang: find out locale package names for several distris for documentation
@@ -5387,7 +5401,6 @@ todo() {
 
 # BUG check whether VT is not in use with --xorg/--xpra/--xdummy, bug if accidently using vt that is already in use
 # check all FIXME 
-# --systemd: try to avoid xhost +SI:localuser:$Benutzer
 # --xpra-xwayland, xdummy-xwayland: use kwin-wayland as fallback for missing weston? 
 # --xorg: getty and autologin to avoid Xwrapper.config changes?
 # gnome3 based desktop failing due to gnome bugs: pantheon budgie gnome3

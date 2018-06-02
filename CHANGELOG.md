@@ -15,6 +15,9 @@ Project website: https://github.com/mviereck/x11docker
    x11docker-gui in image combo.
  - `--cleanup`: Running as root not mandatory.
  - `--clipboard`: support `xsel` additional to `xclip`.
+### Fixed
+ - Starting in pure Wayland environments failed (regression in v4.3.0).
+ - `--wayland`, `--weston`, `--kwin` in pure Wayland: detect screen size.
  
 ## [4.3.1](https://github.com/mviereck/x11docker/releases/tag/v4.3.1) - 2018-05-29
 ### Changed
