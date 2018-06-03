@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [4.3.2](https://github.com/mviereck/x11docker/releases/tag/v4.3.2) - 2018-06-03
 ### Changed
  - `x11docker-gui` is interactive now. Live preview of generated command. 
    Starting multiple x11docker instances possible. Copy-to-clipboard button.
