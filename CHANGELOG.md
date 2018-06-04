@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
+### Changed
+ - `--no-init` or missing `tini` resp. `docker-init`: use `sh` as PID 1
+   for desktop environments (`--desktop`) to allow logout.
 ### Fixed
  - fedora 28: Check for docker daemon with name `dockerd-current` (#49)
  - `--auto`: Prefer `--hostdisplay` for seamless apps if nothing else is available.
