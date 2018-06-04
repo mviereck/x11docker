@@ -422,6 +422,16 @@ debugnote() {           # show debug output $*
   }
   return 0
 }
+killpid() {             # kill PID $1 with codename $2 [and process name $3]
+  verbose -d "terminating ${1:-} ${2:-} ${3:-}"
+  checkpid ${1:-} && {
+    [ "${3:-}" ] && {
+      ps -p ${1:-} | grep -q -E "${3:-}" && kill ${1:-}
+    } || {
+      kill ${1:-}
+    }
+  }
+}
 finish() {              # trap EXIT routine to clean up background processes and cache
   local Pid= Name= Zeit= Catlogfilepid= Exitcode= Pid1pid=
   trap - EXIT 
@@ -438,48 +448,31 @@ $(pstree $Pid1pid ||:)"
       Pid=$(echo $Line  | awk '{print $1}')
       Name=$(echo $Line | awk '{print $2}')
       checkpid $Pid && {
-        verbose -d "terminating background pid $Pid of $Name: $(ps -p $Pid --no-headers)"
+        #verbose -d "terminating background pid $Pid of $Name: $(ps -p $Pid --no-headers)"
         
         case $Name in
-          windowmanager) 
-            Windowmanager="$(basename "$Windowmanager" | cut -d' ' -f1)"
-            ps -p $Pid | grep $Windowmanager >/dev/null           && kill $Pid
-          ;;
-          xpraserver|xpraclient)
-            ps -p $Pid | grep 'xpra' >/dev/null                   && kill $Pid
-          ;;
-          compositor)
-            ps -p $Pid | grep -E 'weston|kwin_wayland' >/dev/null && kill $Pid
-          ;;
-          waitfortheend|xpraloop|watchpidlist|watchfifo)
-            ps -p $Pid | grep x11docker >/dev/null                && kill $Pid
-          ;;
+          windowmanager)          killpid $Pid $Name ;;
+          xpraserver|xpraclient)  killpid $Pid $Name xpra ;;
+          compositor)             killpid $Pid $Name 'weston|kwin_wayland' ;;
+          waitfortheend|xpraloop|watchpidlist|watchfifo) 
+                                  killpid $Pid $Name x11docker ;;
           x11docker-run)
             saygoodbye "finish()->subshell"  # catch case where error()/finish() is called within subshell
-            ps -p $Pid | grep x11docker >/dev/null                && kill $Pid
-          ;;
-          tailstdout|tailstderr)
-            Pid=
-          ;;
-          catstdin)
-            ps -p $Pid >/dev/null                                 && kill $Pid
-          ;;
+                                  killpid $Pid $Name x11docker ;;
+          tailstdout|tailstderr) Pid= ;;     # terminate themself after exit of $$
+          catstdin)               killpid $Pid $Name ;;
           catlogfile)
             Catlogfilepid=$Pid
             Pid=
           ;;
-          hostexe|shareclipboard)
-            ps -p $Pid | grep 'bash' >/dev/null                   && kill $Pid
-          ;;
-          xfishtank)
-            ps -p $Pid | grep 'xfishtank' >/dev/null              && kill $Pid
-          ;;
+          hostexe|shareclipboard) killpid $Pid $Name bash ;;
+          xfishtank)              killpid $Pid $Name xfishtank ;;
           container) 
             Containerpid=$Pid
             Pid=
             # Send TERM to PID1 of container
-            checkpid $Pid1pid 2>&1 && {
-              kill $Pid1pid 2>/dev/null || note "Could not kill PID 1 of container: $(ps --no-headers -p $Pid1pid)"
+            checkpid  $Pid1pid 2>&1 && {
+              killpid $Pid1pid 2>/dev/null || note "Could not terminate PID 1 of container: $(ps --no-headers -p $Pid1pid)"
               # Give container a bit time for graceful shutdown
               for Count in 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0; do
                 checkpid $Pid1pid || break
@@ -495,7 +488,7 @@ $(pstree $Pid1pid ||:)"
           *) # should never happen (tm)
             note "Found remaining background process $Line
 $(ps -p $Pid)"
-            kill $Pid
+            killpid $Pid $Name
           ;;
         esac
         [ "$Pid" ] && ps -p $Pid >/dev/null && {
@@ -562,7 +555,7 @@ x11docker --cleanup"
   exit $Exitcode
 }
 saygoodbye() {          # create file signaling watching processes to terminate
-  verbose -d "time to say goodbye ($*)"
+  debugnote "time to say goodbye ($*)"
   [ -e "$Sharefolder" ] && {
     echo timetosaygoodbye >> $Timetosaygoodbye
     echo timetosaygoodbye >&8
@@ -594,12 +587,12 @@ watchpidlist() {        # watch list of important pids
     read -t1 Pid <&9 ||:
     [ "$Pid" ] && {
       Watchpidlist="$Watchpidlist $Pid"
-      verbose -d "watching $(ps --no-headers -p $Pid)"
+      debugnote "watching $(ps --no-headers -p $Pid)"
     }
     for Pid in $Watchpidlist; do
       checkpid $Pid || {
         saygoodbye "watchpidlist $Pid"
-        verbose -d "watchpidlist: PID $Pid has terminated"
+        debugnote "watchpidlist: PID $Pid has terminated"
       }
     done
   done
@@ -1820,6 +1813,9 @@ Parsed options: $Parsedoptions"
   [ "$Xserver" = "--weston-xwayland" ] && { depends --weston-xwayland || Xserver="--kwin-xwayland" ; }
   [ "$Xserver" = "--weston" ]          && { depends --weston          || Xserver="--kwin" ; }
   [ "$Xserver" = "--xdummy-xwayland" ] && { depends --xdummy-xwayland || Xserver="--kwin-xwayland" ; }
+  
+  [ "$Sharewayland" = "yes" ]          && { depends $Xserver || error "Failed to set up a Wayland environment.
+  Please install 'weston' or 'kwin_wayland'." ; }
   
    # Xephyr as fallback for all options. Last fallback: Xorg
   depends $Xserver || Xserver="--xephyr"
@@ -3623,7 +3619,8 @@ kill -s KILL \$Pid
   Please write a bug report to your distribution maintainer.
   
   tini as container init system is quite useful, e.g. to allow x11docker
-  a clean and fast shutdown of containers without the need of privileges.
+  a clean and fast shutdown of containers without the need of privileges,
+  and to allow logout of desktop environments in container.
   
   To get the advantages of init in container, please download tini:
     https://github.com/krallin/tini/releases/download/v0.18.0/tini-static
@@ -3982,6 +3979,8 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "exec 3<>$Warningfifo"
   echo "exec 4<>$Notefifo"
   echo "exec 6<>$Stdoutfifo"
+  echo "exec 7<>$Logfifo"
+
   [ "$Debugmode" = "yes" ] && {
     echo "PS4='$DebugPS4'"
     echo "set -x"

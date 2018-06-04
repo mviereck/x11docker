@@ -8,8 +8,11 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Fixed
- - fedora 28: check for docker daemon with name `dockerd-current` (#49)
- - `--auto`: prefer `--hostdisplay` for seamless apps if nothing else is available.
+ - fedora 28: Check for docker daemon with name `dockerd-current` (#49)
+ - `--auto`: Prefer `--hostdisplay` for seamless apps if nothing else is available.
+ - `--wayland`, `--weston`, `--kwin`, `--hostwayland`: Show error and exit
+   if no wayland environment can be provided.
+ - dockerrc messages forwarded to logfile fifo. (fixes "unknown file descriptor").
 
 ## [4.3.2](https://github.com/mviereck/x11docker/releases/tag/v4.3.2) - 2018-06-03
 ### Changed
