@@ -30,7 +30,7 @@ System changes in running containers are discarded after use.
    - [Language locale](#language-locales) creation.
  - [Network setup](#network-setup) with [SSH](#ssh-x-forwarding), [VNC](#vnc) or [HTML5](#html5-web-applications) possible.
  - Supports [init systems](#init-system) `tini`, `runit`, `openrc`, `SysVinit` and `systemd` in container.
- - Developed on debian 9. Tested on fedora 25, CentOS 7, openSUSE 42.3, Ubuntu 16.04, Manjaro 17, Mageia 6 and Arch Linux.
+ - Developed on debian 9. Tested on fedora 28, CentOS 7, openSUSE 42.3, Ubuntu 18.04, Manjaro 17, Mageia 6 and Arch Linux.
  - Easy to use. [Examples](#examples): 
    - `x11docker jess/cathode`
    - `x11docker --desktop --size 320x240 x11docker/lxde`
@@ -461,9 +461,9 @@ Some image examples can be found on docker hub: https://hub.docker.com/u/x11dock
    - Firefox with shared Download folder: `x11docker --hostipc --sharedir $HOME/Downloads jess/firefox`
    - Chromium browser: `x11docker -- jess/chromium --no-sandbox`
    - [Tor browser](https://www.torproject.org/projects/torbrowser.html): `x11docker jess/tor-browser`
-   - Atom editor with your host home as container home: `x11docker --homedir=$HOME jess/atom`
    - VLC media player with shared Video folder and pulseaudio sound: 
      - `x11docker --pulseaudio --sharedir=$HOME/Videos jess/vlc`
+   - [Kodi](https://kodi.tv/): `x11docker --gpu erichough/kodi` For setup look at [ehough/doker-kodi](https://github.com/ehough/docker-kodi).
    
  - Desktop in container: 
    - Minimal images:
@@ -488,7 +488,6 @@ Some image examples can be found on docker hub: https://hub.docker.com/u/x11dock
      - KDE Plasma: `x11docker --desktop x11docker/plasma`
      - KDE Plasma as nested Wayland compositor: 
        - `x11docker --hostdisplay --gpu x11docker/plasma startplasmacompositor`
-     - [LiriOS](https://liri.io/): `x11docker --desktop lirios/unstable`
      
    - LXDE desktop with wine and a persistent home folder to preserve installed Windows applications, with pulseaudio sound and hardware acceleration: 
      - `x11docker --desktop --home --pulseaudio --gpu x11docker/lxde-wine`

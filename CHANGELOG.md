@@ -6,15 +6,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [4.3.3](https://github.com/mviereck/x11docker/releases/tag/v4.3.3) - 2018-06-05
 ### Changed
  - `--no-init` or missing `tini` resp. `docker-init`: use `sh` as PID 1
    for desktop environments (`--desktop`) to allow logout.
 ### Fixed
  - fedora 28: Check for docker daemon with name `dockerd-current` (#49)
  - `--auto`: Prefer `--hostdisplay` for seamless apps if nothing else is available.
- - `--wayland`, `--weston`, `--kwin`, `--hostwayland`: Show error and exit
-   if no wayland environment can be provided.
+ - `--wayland`, `--weston`, `--kwin`, `--hostwayland`: 
+   Show error and exit if no wayland environment can be provided.
  - dockerrc messages forwarded to logfile fifo. (fixes "unknown file descriptor").
 
 ## [4.3.2](https://github.com/mviereck/x11docker/releases/tag/v4.3.2) - 2018-06-03
