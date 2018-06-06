@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Changed
+ - timezone sync: share `/usr/share/timezone` and symlink `/etc/localtime`
+   in container. [(#50)](https://github.com/mviereck/x11docker/issues/50)
+   
 ## [4.3.3](https://github.com/mviereck/x11docker/releases/tag/v4.3.3) - 2018-06-05
 ### Changed
  - `--no-init` or missing `tini` resp. `docker-init`: use `sh` as PID 1
