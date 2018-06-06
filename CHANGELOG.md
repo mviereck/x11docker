@@ -11,7 +11,8 @@ Project website: https://github.com/mviereck/x11docker
  - `--no-init` or missing `tini` resp. `docker-init`: use `sh` as PID 1
    for desktop environments (`--desktop`) to allow logout.
 ### Fixed
- - fedora 28: Check for docker daemon with name `dockerd-current` (#49)
+ - fedora 28: Check for docker daemon with name `dockerd-current` 
+   [(#49)](https://github.com/mviereck/x11docker/issues/49)
  - `--auto`: Prefer `--hostdisplay` for seamless apps if nothing else is available.
  - `--wayland`, `--weston`, `--kwin`, `--hostwayland`: 
    Show error and exit if no wayland environment can be provided.
