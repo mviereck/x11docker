@@ -463,7 +463,7 @@ Some image examples can be found on docker hub: https://hub.docker.com/u/x11dock
    - [Tor browser](https://www.torproject.org/projects/torbrowser.html): `x11docker jess/tor-browser`
    - VLC media player with shared Video folder and pulseaudio sound: 
      - `x11docker --pulseaudio --sharedir=$HOME/Videos jess/vlc`
-   - [Kodi](https://kodi.tv/): `x11docker --gpu erichough/kodi` For setup look at [ehough/doker-kodi](https://github.com/ehough/docker-kodi).
+   - [Kodi](https://kodi.tv/): `x11docker --gpu erichough/kodi` For setup look at [ehough/docker-kodi](https://github.com/ehough/docker-kodi).
    
  - Desktop in container: 
    - Minimal images:
