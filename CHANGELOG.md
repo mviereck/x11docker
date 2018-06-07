@@ -8,8 +8,14 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Changed
- - timezone sync: share `/usr/share/timezone` and symlink `/etc/localtime`
+ - Timezone sync: share `/usr/share/timezone` and symlink `/etc/localtime`
    in container. [(#50)](https://github.com/mviereck/x11docker/issues/50)
+ - Disentangled final code sequence of xinit and docker run.
+### Fixed
+ - Show error message if X server fails to start. Supress warning if needless.
+ - `--xorg`: Password prompt did not appear on new display.
+ - `--nothing`: Bugfix password prompt on console.
+ - `--nothing`: Avoid startup error message.
    
 ## [4.3.3](https://github.com/mviereck/x11docker/releases/tag/v4.3.3) - 2018-06-05
 ### Changed

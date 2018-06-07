@@ -423,7 +423,7 @@ debugnote() {           # show debug output $*
   return 0
 }
 killpid() {             # kill PID $1 with codename $2 [and process name $3]
-  verbose -d "terminating ${1:-} ${2:-} ${3:-}"
+  verbose -d "terminating ${1:-} ${2:-} ${3:-}: $(ps --no-headers -p ${1:-})"
   ps -p ${1:-} >/dev/null && {
     [ "${3:-}" ] && {
       ps -p ${1:-} | grep -q -E "${3:-}" && kill ${1:-}
@@ -442,6 +442,9 @@ finish() {              # trap EXIT routine to clean up background processes and
   checkpid $Pid1pid && verbose -d "process tree of container:
 $(pstree $Pid1pid ||:)"
     
+  debugnote "List of stored background processes:
+$(cat $Bgpidfile)"
+
   # check for background processes stored in $Bgpidfile
   [ -s "$Bgpidfile" ] && {
     while read -r Line ; do 
@@ -451,15 +454,13 @@ $(pstree $Pid1pid ||:)"
         #verbose -d "terminating background pid $Pid of $Name: $(ps -p $Pid --no-headers)"
         
         case $Name in
+          xinit)                  killpid $Pid $Name ;;
           windowmanager)          killpid $Pid $Name ;;
           xpraserver|xpraclient)  killpid $Pid $Name xpra ;;
           compositor)             killpid $Pid $Name 'weston|kwin_wayland' ;;
           waitfortheend|xpraloop|watchpidlist|watchfifo) 
                                   killpid $Pid $Name x11docker ;;
-          x11docker-run)
-            saygoodbye "finish()->subshell"  # catch case where error()/finish() is called within subshell
-                                  killpid $Pid $Name x11docker ;;
-          tailstdout|tailstderr) Pid= ;;     # terminate themself after exit of $$
+          tailstdout|tailstderr)  Pid= ;;     # tail terminates itself after exit of $$
           catstdin)               killpid $Pid $Name ;;
           catlogfile)
             Catlogfilepid=$Pid
@@ -472,11 +473,13 @@ $(pstree $Pid1pid ||:)"
             Pid=
             # Send TERM to PID1 of container
             checkpid  $Pid1pid 2>&1 && {
+              verbose -d "Sending TERM to PID 1 of container ($(ps --no-headers -p $Pid1pid))"
               killpid $Pid1pid 2>/dev/null || note "Could not terminate PID 1 of container: $(ps --no-headers -p $Pid1pid)"
               # Give container a bit time for graceful shutdown
               for Count in 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0; do
                 checkpid $Pid1pid || break
                 sleep 0.1
+                debugnote "Waiting for container PID 1: $Pid1pid to terminate"
               done
             }
             # Try 'docker stop' if TERM failed
@@ -501,7 +504,7 @@ $(ps -p $Pid)"
   
   saygoodbye "finish"
   
-  # catch case where finish is called by error in a subshell. finish should handle following part in main process.
+  # catch case where finish is called by error in a subshell. finish should handle following part in main process only.
   [ "$$" = "$BASHPID" ] || return 0
 
   # Check if container is still running.
@@ -679,7 +682,7 @@ waitforfilecreation() { # similar to inotify-wait: wait up to 15s for file $1 to
 }
 waitforfilecontent() {  # wait for file $1 to be not empty
   # $1 file to look at
-  local Zeit Warten Dauer Count
+  local Zeit= Warten= Dauer= Count=
   Zeit=$(date +%s)
   Warten=15
   verbose "Waiting for file content in ${1:-}"
@@ -738,7 +741,8 @@ storepid () {           # store pid $1 and name $2 of background process in file
   disown ${1:-} 2>/dev/null || verbose -d "can not disown ${1:-} ${2:-}"
 }
 checkpid() {            # check if PID $1 is active
-  [ -e /proc/${1:-0} ] 
+#  [ -e /proc/${1:-0} ] 
+  ps -p ${1:-} >/dev/null 2>&1 
 }
 no_xhost() {            # remove any access to X server granted by xhost
   local Line=
@@ -3488,6 +3492,7 @@ done
     gnome-terminal|mate-terminal) Pullterminal="dbus-launch $Pullterminal -x" ;;
     terminator)     Pullterminal="dbus-launch $Pullterminal --no-dbus -x" ;;
     konsole)        Pullterminal="dbus-launch $Pullterminal --nofork -e" ;;
+    bash)           Pullterminal="" ;;
     *)              Pullterminal="$Pullterminal -e" ;;
   esac
   [ -z "$Passwordterminal" ] && Passwordterminal="$Pullterminal"
@@ -5024,7 +5029,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
         verbose "Init system in container: $Initsystem"
         [ "$Benutzerhosthome" = "yes" ] && verbose "Sharing directory $Benutzerhosthomefolder 
   with container as its home directory $Benutzerhome"
-        verbose "Created docker command:
+        verbose -d "Created docker command:
   $Dockercommand"
         verbose "Created containersetup.sh:
 $(nl -ba <$Setupscript)"
@@ -5126,14 +5131,139 @@ Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' '
   fi
 }
 
-{ #### part: wait for and watch X server, [start xpra] and run xtermrc-> dockerrc-> docker run
-  # wait for X server
-  waitforfilecreation $Cachefolder/Xready 24 || error "Timeout during startup of X server $Xserver."
+{ #### part: start X server
+  case $Xserver in
+    --xorg|--xpra|--xephyr|--xdummy|--xvfb|--xwayland|--nxagent)
+      $Mksu "exec                                         xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1" 
+    ;;
+    --hostdisplay|--hostwayland)
+      $Mksu "exec                                         bash  $Xinitrc                       >> $Xinitlogfile  2>&1 " 
+    ;;
+    --xpra-xwayland|--xdummy-xwayland)
+      [ -z "$Hostwaylandsocket" ] || { [ "$Scaling" != "0" ] && [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] ;} && {
+        # Weston is needed for Xwayland if no Wayland is running already, and also 
+        # if option scale has a value smaller than 1 to provide a virtual display larger than monitor
+        $Mksu "exec $Compositorcommand                                                         >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
+        waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
+        waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                       || error "Weston startup failed. Can not run $Xserver.
+  Last lines of weston log:
+$(tail $Compositorlogfile)"
+        storepid $(cat $Compositorpidfile) compositor
+        # hide weston window
+        $Mksu "xdotool windowunmap 0x$(printf '%x\n' $(grep 'window id' $Compositorlogfile | rev | cut -d' ' -f1 | rev))"
+      }
+      $Mksu "exec env WAYLAND_DISPLAY=$Newwaylandsocket   xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
+    ;;
+    --weston-xwayland)
+      $Mksu "exec $Compositorcommand                                                           >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
+      waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
+      waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                         || error "Weston startup failed. Can not run $Xserver.
+  Last lines of weston log:
+$(tail $Compositorlogfile)"
+      storepid $(cat $Compositorpidfile) compositor
+      $Mksu "exec env WAYLAND_DISPLAY=$Newwaylandsocket   xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
+    ;;
+    --weston)
+      $Mksu "$Compositorcommand                                                                >> $Compositorlogfile 2>&1  & echo \$! >>$Compositorpidfile"
+      waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
+      waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                         || error "Weston startup failed. Can not run $Xserver.
+  Last lines of weston log:
+$(tail $Compositorlogfile)"
+      storepid $(cat $Compositorpidfile) compositor
+      $Mksu "exec                                         bash  $Xinitrc                       >> $Xinitlogfile  2>&1" 
+    ;;
+    --kwin-xwayland)
+      $Mksu "$Compositorcommand                                                                >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
+      waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
+      waitforlogentry kwin   $Compositorlogfile "X-Server"                                     || error "Kwin startup failed. Can not run $Xserver.
+  Last lines of kwin log:
+$(tail $Compositorlogfile)"
+      storepid $(cat $Compositorpidfile) compositor
+      $Mksu "env WAYLAND_DISPLAY=$Newwaylandsocket           xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
+    ;;
+    --kwin)
+      $Mksu "dbus-launch $Compositorcommand                                                    >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
+      waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
+      waitforlogentry kwin   $Compositorlogfile "X-Server"                                     || error "Kwin startup failed. Can not run $Xserver.
+  Last lines of kwin log:
+$(tail $Compositorlogfile)"
+      storepid $(cat $Compositorpidfile) compositor
+      $Mksu                                              "bash  $Xinitrc                       >> $Xinitlogfile  2>&1 " 
+    ;;
+    --nothing)
+      $Mksu                                              "bash  $Xinitrc                       >> $Xinitlogfile  2>&1 " 
+    ;;
+  esac
+  
+  [ $? != 0 ] && rocknroll && warning "X server $Xserver returned an error code. 
+  Last lines of xinit logfile:
+$(tail $Xinitlogfile)
 
-  # --xpra / --xpra-xwayland: start xpra server&client
+  Last lines of compositor logfile:
+$(tail $Compositorlogfile)"
+
+  saygoodbye
+} & storepid $! xinit
+
+{ #### part: wait for and watch X server
+
+  # wait for X server to be ready (sign is creation of Cachefolder/Xready)
+  Zeit=$(date +%s)
+  Count=0
+  Dauer=0
+  verbose "Waiting for X server $Xserver to be ready."
+  while [ ! -e "$Cachefolder/Xready" ] ; do
+    Count=$(( Count + 1 ))
+    Dauer=$(( $(date +%s) - $Zeit ))
+    sleep $(awk "BEGIN { print $Count * 0.1 }")
+    [ $Dauer -gt 30 ] && error "X server $Xserver not ready after 30s."
+    verbose "waiting since ${Dauer}s for $Xserver to be ready."
+    rocknroll || verbose -d "Stopped waiting for $Xserver due to terminating signal."
+    grep -q -E 'xinit: giving up|unable to connect to X server|Connection refused|server error|Only console users are allowed' <$Xinitlogfile && error "Error during startup of X server.
+  Last lines of xinit log:
+$(tail $Xinitlogfile)
+
+  Last lines of compositor log:
+$(tail $Compositorlogfile)"
+  done
+  
+  # option '--showenv': show display environment variables on stdout
+  [ "$Showdisplayenvironment" = "yes" ] && echo $Newxenv
+  # create easy to find file with latest created X environment for custom access
+  mkfile "$Cachebasefolder/Xenv.latest"
+  for Line in $Newxenv ; do echo $Line >> "$Cachebasefolder/Xenv.latest" ; done
+  
+  # watch X server and/or Wayland compositor
+  Compositorpid=$(cat $Compositorpidfile)
+  case $Xserver in
+    --nothing|--hostwayland|--hostdisplay) ;;
+    --weston|--kwin)
+      {  # catch closing compositor window
+        sleep 1
+        checkpid $Compositorpid && setonwatchpidlist $Compositorpid || error "Startup of compositor failed.
+  Last lines of compositor log:
+$(tail $Compositorlogfile)"
+      } && waitfortheend & storepid $! waitfortheend
+    ;;
+    --weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland)
+      {  # catch closing X server or compositor window
+        sleep 1
+        checkpid $Compositorpid && setonwatchpidlist $Compositorpid || error "Startup of compositor or X failed.
+  Last lines of compositor log:
+$(tail $Compositorlogfile)"
+      } && waitfortheend & storepid $! waitfortheend
+    ;;
+    *)
+      # catch closing X server
+      setonwatchpidlist $(pgrep -a xinit | grep "xinit $Xinitrc" | awk '{print $1}')
+    ;;
+  esac
+}
+
+{ #### part: --xpra / --xpra-xwayland: start and watch xpra server and xpra client
   case $Xserver in      
     --xpra|--xpra-xwayland) 
-      notify-send 'Please be patient, xpra will start soon ...' 2>/dev/null
+      notify-send 'Please be patient, xpra will start soon.' 2>/dev/null
       
       [ "$Desktopmode" = "yes" ] && Xpraservercommand="xpra start-desktop" || Xpraservercommand="xpra start"
       Xpraservercommand="$Xpraservercommand $Newdisplay --use-display $Xpraoptions"
@@ -5203,45 +5333,16 @@ $(tail $Dockerlogfile)"
       done & storepid $! xpraloop
     ;;
   esac
-  
-  # option '--showenv': show display infos on stdout (after X server is ready)
-  [ "$Showdisplayenvironment" = "yes" ] && echo $Newxenv
-  # create easy to find file with latest created X environment for custom access
-  mkfile "$Cachebasefolder/Xenv.latest"
-  for Line in $Newxenv ; do echo $Line >> "$Cachebasefolder/Xenv.latest" ; done
-  
-  #### watch X server and/or Wayland compositor ####
-  Compositorpid=$(cat $Compositorpidfile)
-  case $Xserver in
-    --nothing|--hostwayland|--hostdisplay) ;;
-    --weston|--kwin)
-      {  # catch closing compositor window
-        sleep 1
-        checkpid $Compositorpid && setonwatchpidlist $Compositorpid || error "Startup of compositor failed.
-  Last lines of compositor log:
-$(tail $Compositorlogfile)"
-      } && waitfortheend & storepid $! waitfortheend
-    ;;
-    --weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland)
-      {  # catch closing X server or compositor window
-        sleep 1
-        checkpid $Compositorpid && setonwatchpidlist $Compositorpid || error "Startup of compositor or X failed.
-  Last lines of compositor log:
-$(tail $Compositorlogfile)"
-      } && waitfortheend & storepid $! waitfortheend
-    ;;
-    *)
-      # catch closing X server
-      setonwatchpidlist $(pgrep -a xinit | grep "xinit $Xinitrc" | awk '{print $1}')
-    ;;
-  esac
+}
 
-  #### start docker ####
+{ #### part: start docker
   case $X11dockermode in
     run)
       # prefer asking for password on host X
       [ -n "$Hostdisplay" ]     && export $Hostxenv || export $Newxenv 
       [ "$Fullscreen" = "yes" ] && export $Newxenv ### FIXME could cause trouble with Wayland if terminal is not Wayland capable
+      [ "$Xserver" = "--xorg" ] && export $Newxenv
+      
       # start docker in xtermrc
       case $Passwordfrontend in
         su|sudo)
@@ -5256,6 +5357,7 @@ $(tail $Compositorlogfile)"
       esac
       waitforfilecreation $Cachefolder/xtermready infinity
       
+      # check if container startup was successfull
       sleep 1 # wait for late messages of docker daemon
       [ -s "$Containerpidfile" ] && { 
         Containerpid=$(cat $Containerpidfile)
@@ -5276,17 +5378,18 @@ $(tail $Cmdstderrlogfile)"
           }
         }
       }
-      # wait for docker until it terminates. bash builtin wait does not work in this case
-      checkpid $Containerpid && setonwatchpidlist $Containerpid || error "docker startup was not successfull.
+      rocknroll && {
+        checkpid $Containerpid && setonwatchpidlist $Containerpid || error "docker startup was not successfull.
   Maybe you mistyped your password, or image does not exist.
   Or the chosen password frontend does not match your setup;
   you can try option --pw with e.g. --pw=su or --pw=sudo.
   Last lines of docker logfile:
 $(tail $Dockerlogfile)"
+      }
     ;;
     
-    exe) # --exe
-      # run host application without docker. includes --xonly
+    exe) # --exe: run host application without docker. includes --xonly
+      # create start script
       { echo "#! /bin/bash"
         [ "$Debugmode" = "yes" ] && echo "set -Eux"
         echo "storepid() {"
@@ -5306,100 +5409,30 @@ $(tail $Dockerlogfile)"
         echo "storepid \$! hostexe"
       } >> $Imagecommandscript
       nl -ba <$Imagecommandscript >> $Dockerlogfile
-
+      
+      # run start script
       $Mksubenutzer "bash $Imagecommandscript"
+      
+      # check if startup was successfull
       sleep 1 # wait for possible startup failure
       Hostexepid=$(grep hostexe <$Bgpidfile | cut -d' ' -f1)
-      debugnote "pstree of $Hostexe
-$(pstree -p $Hostexepid)"
-      
       checkpid $Hostexepid || error "Startup of '$Hostexe' failed,
   or the process forked itself and cannot be supervised.
   Last lines of log:
 $(tail $Logfile)"
+
+      debugnote "pstree of $Hostexe
+$(pstree -p $Hostexepid)"
+
       setonwatchpidlist $Hostexepid
     ;;
   esac
-  debugnote "Process tree of x11docker:
-$(pstree -cp $$)"
-  waitfortheend
-  saygoodbye "x11docker-run"
-} & storepid $! x11docker-run
-
-{ #### part: start X server
-  case $Xserver in
-    --xorg|--xpra|--xephyr|--xdummy|--xvfb|--xwayland|--nxagent)
-      $Mksu "exec                                         xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1" 
-    ;;
-    --hostdisplay|--hostwayland)
-      $Mksu "exec                                         bash  $Xinitrc                       >> $Xinitlogfile  2>&1 " 
-    ;;
-    --xpra-xwayland|--xdummy-xwayland)
-      [ -z "$Hostwaylandsocket" ] || { [ "$Scaling" != "0" ] && [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] ;} && {
-        # Weston is needed for Xwayland if no Wayland is running already, and also 
-        # if option scale has a value smaller than 1 to provide a virtual display larger than monitor
-        $Mksu "exec $Compositorcommand                                                         >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
-        waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
-        waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                       || error "Weston startup failed. Can not run $Xserver.
-  Last lines of weston log:
-$(tail $Compositorlogfile)"
-        storepid $(cat $Compositorpidfile) compositor
-        # hide weston window
-        $Mksu "xdotool windowunmap 0x$(printf '%x\n' $(grep 'window id' $Compositorlogfile | rev | cut -d' ' -f1 | rev))"
-      }
-      $Mksu "exec env WAYLAND_DISPLAY=$Newwaylandsocket   xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
-    ;;
-    --weston-xwayland)
-      $Mksu "exec $Compositorcommand                                                           >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
-      waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
-      waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                         || error "Weston startup failed. Can not run $Xserver.
-  Last lines of weston log:
-$(tail $Compositorlogfile)"
-      storepid $(cat $Compositorpidfile) compositor
-      $Mksu "exec env WAYLAND_DISPLAY=$Newwaylandsocket   xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
-    ;;
-    --weston)
-      $Mksu "$Compositorcommand                                                                >> $Compositorlogfile 2>&1  & echo \$! >>$Compositorpidfile"
-      waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
-      waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                         || error "Weston startup failed. Can not run $Xserver.
-  Last lines of weston log:
-$(tail $Compositorlogfile)"
-      storepid $(cat $Compositorpidfile) compositor
-      $Mksu "exec                                         bash  $Xinitrc                       >> $Xinitlogfile  2>&1" 
-    ;;
-    --kwin-xwayland)
-      $Mksu "$Compositorcommand                                                                >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
-      waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
-      waitforlogentry kwin   $Compositorlogfile "X-Server"                                     || error "Kwin startup failed. Can not run $Xserver.
-  Last lines of kwin log:
-$(tail $Compositorlogfile)"
-      storepid $(cat $Compositorpidfile) compositor
-      $Mksu "env WAYLAND_DISPLAY=$Newwaylandsocket           xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
-    ;;
-    --kwin)
-      $Mksu "dbus-launch $Compositorcommand                                                    >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
-      waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
-      waitforlogentry kwin   $Compositorlogfile "X-Server"                                     || error "Kwin startup failed. Can not run $Xserver.
-  Last lines of kwin log:
-$(tail $Compositorlogfile)"
-      storepid $(cat $Compositorpidfile) compositor
-      $Mksu                                              "bash  $Xinitrc                       >> $Xinitlogfile  2>&1 " 
-    ;;
-    --nothing)
-      $Mksu                                              "bash  $Xinitrc                       >> $Xinitlogfile  2>&1 " 
-    ;;
-  esac
-  
-  [ $? != 0 ] && warning "X server $Xserver returned with an error code. 
-  Last lines of xinit logfile:
-$(tail $Xinitlogfile)
-
-  Last lines of compositor logfile:
-$(tail $Compositorlogfile)"
-
-  exit 0 # trap to finish()
 }
 
+debugnote "Process tree of x11docker:
+$(pstree -p $$)"
+waitfortheend
+  
 ######### ToDo notes for development
 todo() {
 # check elogind with --dbus-system
