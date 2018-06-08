@@ -16,6 +16,8 @@ Project website: https://github.com/mviereck/x11docker
  - `--xorg`: Password prompt did not appear on new display.
  - `--nothing`: Bugfix password prompt on console.
  - `--nothing`: Avoid startup error message.
+ - `--nothing`: Don't start X if running within X / dependency check issue.
+ - `--nothing`: Pull request for non-local images was invisible.
    
 ## [4.3.3](https://github.com/mviereck/x11docker/releases/tag/v4.3.3) - 2018-06-05
 ### Changed

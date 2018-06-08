@@ -340,7 +340,7 @@ $Message" | gxmessage -file - -default okay ||:
       xterm -title "$Title" -e "echo '$(echo "$Message" | sed "s/'/\"/g")' ; read -n1" ||:
     }
   } || {
-    [ -n "$Anyterminal" ] && [ -e "$Cachefolder" ] && {
+    [ -n "$Anyterminal" ] && [ -e "$Cachefolder" ] && [ "$Xserver" != "--nothing" ] && {
       mkfile $Cachefolder/message
       echo "#! /bin/bash
 echo '$Title
@@ -349,7 +349,7 @@ $Message
 (Press any key to close window)'
 read -n1
 " >> $Cachefolder/message
-      $Anyterminal /bin/bash $Cachefolder/message ||:
+      $Anyterminal '/bin/bash $Cachefolder/message' ||:
     }
   } || {
     notify-send "$Title: 
@@ -450,9 +450,8 @@ $(cat $Bgpidfile)"
     while read -r Line ; do 
       Pid=$(echo $Line  | awk '{print $1}')
       Name=$(echo $Line | awk '{print $2}')
-      checkpid $Pid && {
-        #verbose -d "terminating background pid $Pid of $Name: $(ps -p $Pid --no-headers)"
-        
+      
+      checkpid $Pid && {        
         case $Name in
           xinit)                  killpid $Pid $Name ;;
           windowmanager)          killpid $Pid $Name ;;
@@ -478,7 +477,7 @@ $(cat $Bgpidfile)"
               # Give container a bit time for graceful shutdown
               for Count in 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0; do
                 checkpid $Pid1pid || break
-                sleep 0.1
+                sleep $( awk "BEGIN { print $Count * 0.1 }")
                 debugnote "Waiting for container PID 1: $Pid1pid to terminate"
               done
             }
@@ -494,9 +493,9 @@ $(ps -p $Pid)"
             killpid $Pid $Name
           ;;
         esac
-        [ "$Pid" ] && ps -p $Pid >/dev/null && {
+        checkpid $Pid && {
           sleep 1
-          ps -p $Pid >/dev/null || note "Issue terminating $Line: $(ps -p --no-headers $Pid)" && kill -s KILL $Pid
+          checkpid $Pid || note "Issue terminating $Line: $(ps -p --no-headers $Pid)" && kill -s KILL $Pid
         }
       }
     done < <(tac $Bgpidfile)
@@ -593,9 +592,9 @@ watchpidlist() {        # watch list of important pids
       debugnote "watching $(ps --no-headers -p $Pid)"
     }
     for Pid in $Watchpidlist; do
-      checkpid $Pid || {
+      [ -e /proc/$Pid ] || {
+        debugnote  "watchpidlist: PID $Pid has terminated"
         saygoodbye "watchpidlist $Pid"
-        debugnote "watchpidlist: PID $Pid has terminated"
       }
     done
   done
@@ -616,28 +615,6 @@ $Line"
       warning "$Message"
       Message=
     }
-  done
-}
-watchnotefifo() {       # watch for note messages out of container or dockerrc
-  # message in fifo must end with EOF
-  local Line= Message=
-  while rocknroll ; do
-    IFS= read -r Line <$Notefifo ||:
-    Message="$Message
-$Line"
-    grep -q EOF <<< $Message && {
-      Message="$(echo "$Message" | sed 's/EOF.*// ; /./,$!d')"
-      note "$Message"
-      Message=
-    }
-  done
-}
-watchstdoutfifo() {     # watch for stdout messages out of container or dockerrc
-  # Only submit one line at a time!
-  local Line=
-  while rocknroll ; do
-    IFS= read -r Line <$Stdoutfifo ||:
-    [ "$Line" ] && echo "$Line"
   done
 }
 rocknroll() {           # check if x11docker is still running
@@ -684,7 +661,11 @@ waitforfilecontent() {  # wait for file $1 to be not empty
   # $1 file to look at
   local Zeit= Warten= Dauer= Count=
   Zeit=$(date +%s)
-  Warten=15
+  case "${2:-}" in
+    infinity) Warten=32000 ;;
+    "")       Warten=15 ;;
+    *)        Warten="${2:-}" ;;
+  esac
   verbose "Waiting for file content in ${1:-}"
   while [ ! -s "${1:-}" ] ; do
     Count=$(( Count + 1 ))
@@ -741,7 +722,6 @@ storepid () {           # store pid $1 and name $2 of background process in file
   disown ${1:-} 2>/dev/null || verbose -d "can not disown ${1:-} ${2:-}"
 }
 checkpid() {            # check if PID $1 is active
-#  [ -e /proc/${1:-0} ] 
   ps -p ${1:-} >/dev/null 2>&1 
 }
 no_xhost() {            # remove any access to X server granted by xhost
@@ -1140,8 +1120,6 @@ Timetosaygoodbyefifo=timetosaygoodbye.fifo
 Watchpidfifo=watchpidfifo
 Watchpidlist=""
 Warningfifo=warning.fifo
-Notefifo=note.fifo
-Stdoutfifo=stdout.fifo
 
 # x11docker log 
 Logfile=""
@@ -1783,7 +1761,7 @@ Parsed options: $Parsedoptions"
     ;;
   esac
   
-  [ "$Tty" = "no" ] && [ -z "$Hostdisplay$Hostwaylandsocket" ] && {
+  [ "$Tty" = "no" ] && [ -z "$Hostdisplay$Hostwaylandsocket" ] && [ "$Xserver" != "--nothing" ] && {
     warning "Environment variables DISPLAY and WAYLAND_DISPLAY are empty,
   but it seems x11docker was started within X, not from console. 
   Please set DISPLAY and XAUTHORITY.
@@ -2201,6 +2179,9 @@ Parsed options: $Parsedoptions"
   --hostdisplay (insecure), or run --nxagent in desktop mode with a
   host window manager (--wm=WINDOWMANAGER or --wm=auto or short -wm)."
       }
+      note "A few applications do not work well with --nxagent
+  or do not appear at all (e.g. atom editor, kodi).
+  In that case, please try another X server option like --xephyr or --xpra."
     ;;
     
     --weston|--kwin|--hostwayland)
@@ -2336,8 +2317,6 @@ Parsed options: $Parsedoptions"
   Timetosaygoodbye="$Sharefolder/$Timetosaygoodbye"         && mkfile $Timetosaygoodbye
   Watchpidfifo="$Cachefolder/$Watchpidfifo"                 && $Mksu "mkfifo $Watchpidfifo" && exec 9<>$Watchpidfifo  
   Warningfifo="$Sharefolder/$Warningfifo"                   && $Mksu "mkfifo $Warningfifo && chmod 666 $Warningfifo"
-  Notefifo="$Sharefolder/$Notefifo"                         && $Mksu "mkfifo $Notefifo    && chmod 666 $Notefifo"
-  Stdoutfifo="$Sharefolder/$Stdoutfifo"                     && $Mksu "mkfifo $Stdoutfifo  && chmod 666 $Stdoutfifo"
   Xinitrc="$Cachefolder/$Xinitrc"                           && mkfile $Xinitrc
   Xinitlogfile="$Cachefolder/$Xinitlogfile"                 && mkfile $Xinitlogfile
   Xtermrc="$Cachefolder/$Xtermrc"                           && mkfile $Xtermrc
@@ -2384,10 +2363,8 @@ Parsed options: $Parsedoptions"
   setonwatchpidlist $$
   watchpidlist & storepid $! watchpidlist
   
-  # start watching for warning out of container
+  # start watching for warnings out of container
   watchwarningfifo & storepid $! watchfifo
-  watchnotefifo    & storepid $! watchfifo
-  watchstdoutfifo  & storepid $! watchfifo
 }
 
 { #### part: create $Hostxenv: Environment variables for host X display
@@ -2419,7 +2396,7 @@ Parsed options: $Parsedoptions"
 
 { #### part: check physical and virtual screen size
   # Dummy start of Xwayland to detect screen size in pure Wayland environments
-  [ -z "$Hostdisplay" ] && depends --xwayland && {
+  [ -z "$Hostdisplay" ] && [ -n "$Hostwaylandsocket" ] && command -v Xwayland >/dev/null && {
     verbose -d "Starting Xwayland to get screen size"
     Xwayland $Newdisplay -rootless -extension GLX +extension RANDR >>$Xinitlogfile 2>&1 & Xwaylandpid=$! && disown
     waitforfilecreation $Newxsocket
@@ -2508,7 +2485,7 @@ Parsed options: $Parsedoptions"
   Modeline="$(cvt $Xaxis $Yaxis | tail -n1 | cut -d' ' -f2-)"
   
   # kill dummy Xwayland process
-  ps -p "$Xwaylandpid" >/dev/null 2>&1 && {
+  checkpid $Xwaylandpid && {
     verbose -d "Terminating Xwayland"
     kill $Xwaylandpid
   }
@@ -3492,7 +3469,7 @@ done
     gnome-terminal|mate-terminal) Pullterminal="dbus-launch $Pullterminal -x" ;;
     terminator)     Pullterminal="dbus-launch $Pullterminal --no-dbus -x" ;;
     konsole)        Pullterminal="dbus-launch $Pullterminal --nofork -e" ;;
-    bash)           Pullterminal="" ;;
+    bash)           Pullterminal="bash -c" ;;
     *)              Pullterminal="$Pullterminal -e" ;;
   esac
   [ -z "$Passwordterminal" ] && Passwordterminal="$Pullterminal"
@@ -3978,28 +3955,25 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   # run docker
   
   echo "#! /bin/bash"
-  declare -f waitforfilecreation warning verbose rocknroll escapestring mkfile
+  declare -f waitforfilecreation warning note verbose rocknroll escapestring mkfile
   echo "Timetosaygoodbye=$Timetosaygoodbye"
   echo "Hostuser=$Hostuser"
   echo "Hostusergid=$Hostusergid"
   echo "Logfifo=$Logfifo"
-  echo "exec 3<>$Warningfifo"
-  echo "exec 4<>$Notefifo"
-  echo "exec 6<>$Stdoutfifo"
   echo "exec 7<>$Logfifo"
 
   [ "$Debugmode" = "yes" ] && {
     echo "PS4='$DebugPS4'"
-    echo "set -x"
+    #echo "set -x"
     declare -f traperror | sed 's/Command/dockerrc: Command/'
     echo "set -Eu"
-    echo "trap 'traperror \$? \$LINENO \$BASH_LINENO \"\$BASH_COMMAND\" \$(printf \"::%s\" \${FUNCNAME[@]}EOF)'  ERR"
+    echo "trap 'traperror \$? \$LINENO \$BASH_LINENO \"\$BASH_COMMAND\" \$(printf \"::%s\" \${FUNCNAME[@]})'  ERR"
   }
   echo ""
   
   echo "Imagename=\"$Imagename\""
   echo "Imagecommand=\"$Imagecommand\""
-  
+  echo ""
   echo "# refresh list of available images for x11docker-gui"
   echo "mkfile $Cachebasefolder/x11docker-gui/images.list"
   echo "while read -r Line ; do"
@@ -4010,15 +3984,14 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   
   echo "# check if image is available locally"
   echo "docker inspect --type=image $Imagename > /dev/null 2>&1 || {"
-  #[ "$Pullterminal" = "$Passwordterminal" ] && Pullterminal=""
+  [ "$Pullterminal" = "$Passwordterminal" ] && Pullterminal=""
   [ -n "$Hostxenv" ]&& echo "  export $Hostxenv"
   [ -n "$Newxenv" ] && [ "$Tty" = "yes" ] && echo "  export $Newxenv"
   [ "$Xserver" = "--xorg" ] && echo "  export $Newxenv"
   echo "  $Pullterminal /bin/bash $Pullrc"
   echo "  waitforfilecreation $Cachefolder/pullready"
   echo "  docker inspect --type=image $Imagename > /dev/null 2>&1 || {"
-  echo "    echo ''"
-  echo "    echo \"ERROR: Image '$Imagename' not found locally and not pulled from docker hub.EOF\" >&3"
+  echo "    warning \"ERROR: Image '$Imagename' not found locally and not pulled from docker hub.\" "
   echo "    exit 1"
   echo "  }"
   echo "}"  
@@ -4044,33 +4017,33 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       case $Initsystem in
         systemd|sysvinit|runit|openrc)
           echo "echo \"\$Entrypoint\" | grep -qE '/init|/systemd' && {"
-          echo "  echo \"There seems to be an init system in ENTRYPOINT of image:
+          echo "  note \"There seems to be an init system in ENTRYPOINT of image:
     \$Entrypoint
   Will disable it as x11docker already runs an init with option --$Initsystem.
-  To allow this ENTRYPOINT, run x11docker with option --no-init.EOF\" >&4"
+  To allow this ENTRYPOINT, run x11docker with option --no-init.\""
           echo "  Entrypoint="
           echo "}"
         ;;
         tini)
           echo "echo \"\$Entrypoint\" | grep -qE '/tini|/init|/systemd' && {"
-          echo "  echo \"There seems to be an init system in ENTRYPOINT of image: 
+          echo "  note \"There seems to be an init system in ENTRYPOINT of image: 
     \$Entrypoint
   x11docker will run this instead of tini from host.
-  You can disable this ENTRYPOINT with option --no-entrypoint.EOF\" >&4"
+  You can disable this ENTRYPOINT with option --no-entrypoint.\""
           echo "  Tini="
           echo "}"
         ;;
         none)
           echo "echo \"\$Entrypoint\" | grep -qE '/tini|/init|/systemd' && {"
-          echo "  echo \"There seems to be an init system in ENTRYPOINT of image: 
-  \$Entrypoint EOF\" >&4"
+          echo "  note \"There seems to be an init system in ENTRYPOINT of image: 
+  \$Entrypoint \""
           echo "} || {"
           [ "$Desktopmode" = "yes" ] && {
             echo "  Exec=  # disable exec to have sh as a fake init for desktop environments. Allows logout."
-            echo "  echo 'Using sh as a fake init system / PID 1 in container
+            echo "  note 'Using sh as a fake init system / PID 1 in container
   due to missing /usr/bin/docker-init on host.
   Without at least a fake init desktop logouts would fail.
-  Please consider to provide tini for x11docker containers.EOF' >&4"
+  Please consider to provide tini for x11docker containers.'"
           } || echo "  :"
           echo "}"
         ;;
@@ -4079,7 +4052,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   esac
   echo ""
 
-  echo "[ -z \"\$Imagecommand\$Entrypoint\" ] && echo 'No image command specified and no CMD or ENTRYPOINT found in image.EOF' >&3"
+  echo "[ -z \"\$Imagecommand\$Entrypoint\" ] && warning 'No image command specified and no CMD or ENTRYPOINT found in image.'"
   echo ""
   
   #### create x11docker.CMD.sh ####
@@ -4149,7 +4122,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     echo "  echo ''"
     echo "  echo 'Dbus=\"\$(dbus-launch --help >/dev/null 2>&1 && echo dbus-launch)\"'"
     echo "  echo '[ -z \"\$Dbus\" ] && Dbus=\"\$(dbus-run-session --help >/dev/null 2>&1 && echo dbus-run-session)\"'"
-    echo "  echo '[ -z \"\$Dbus\" ] && echo \"Did not find dbus-launch or dbus-run-session (option --dbus).EOF\" >&3'"
+    echo "  echo '[ -z \"\$Dbus\" ] && warning \"Did not find dbus-launch or dbus-run-session (option --dbus).\"'"
   } 
   echo   "  echo 'echo x11docker: running dbus user session with: \${Dbus:-(none)} >&2'"
   echo   "  echo ''"
@@ -4225,7 +4198,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       echo "[ '$Wantcgroup' = 'systemd' ] || docker run --rm --entrypoint env $Imagename which elogind >/dev/null && {"
       echo '  [ "$(id -u)" = "0" ] && echo "Creating cgroup mountpoint for '$Wantcgroup'." >&4'
       echo '  [ "$(id -u)" != "0" ] && {'
-      echo "    echo 'Want to create and mount a cgroup for $Wantcgroup.
+      echo "    note 'Want to create and mount a cgroup for $Wantcgroup.
   As x11docker currently does not run as root, this will probably fail.
   Please either run x11docker as root, or run with option --pw=su or --pw=sudo.
   
@@ -4237,9 +4210,9 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     mount -o remount,rw cgroup /sys/fs/cgroup
     
   You can restore write protection after cgroup creation with:
-    mount -o remount,ro cgroup /sys/fs/cgroup EOF' >&4"
-      [ "$Wantcgroup" = "elogind" ] && echo "echo 'If you do not want, need or have elogind in container,
-  just ignore message above. EOF' >&4"
+    mount -o remount,ro cgroup /sys/fs/cgroup'"
+      [ "$Wantcgroup" = "elogind" ] && echo "note 'If you do not want, need or have elogind in container,
+  just ignore message above.'"
       echo "  }"
       findmnt /sys/fs/cgroup -O ro >/dev/null && {
         echo "  mount -o remount,rw cgroup /sys/fs/cgroup"
@@ -4253,42 +4226,43 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     }
   }
   
-  echo "read Containerid < <($Dockercommand)" # <- docker run is here!
+  echo "read Containerid < <($Dockercommand 2>>$Dockerlogfile)" # <- docker run is here!
   
   echo ""
-  echo "echo x11docker: container ID: \$Containerid"
-  echo "[ -z \"\$Containerid\" ] && echo 'ERROR: Startup of docker failed. Did not receive a container ID.EOF' >&3 && exit 1"
+  echo "echo x11docker: container ID: \$Containerid >>$Dockerlogfile"
+  echo "[ -z \"\$Containerid\" ] && warning 'ERROR: Startup of docker failed. Did not receive a container ID.' && exit 1"
   echo "echo \$Containerid >> $Containeridfile"
-  [ "$Showcontainerid" = "yes" ] && echo "echo \"\$(cat $Containeridfile)\" >&6"
+  [ "$Showcontainerid" = "yes" ] && echo "echo \"\$(cat $Containeridfile)\""
   echo "docker logs -f \$Containerid >> $Dockerlogfile 2>&1 &"
   echo ""
   echo "# wait for container to be ready"
   echo "for ((Count=1 ; Count<=10 ; Count++)); do"
+  echo "  docker exec $Containername sh -c : 2>>$Dockerlogfile && { echo 'x11docker: container is up and running.' >>$Dockerlogfile ; break ; } || echo \"x11docker: container not ready on \$Count. attempt, trying again.\" >>$Dockerlogfile "
   echo "  sleep 0.2"
-  echo "  docker exec $Containername sh -c : && { echo 'x11docker: container is up and running.' ; break ; } || echo \"x11docker: container not ready on \$Count. attempt, trying again.\" "
   echo "done"
   echo "Failure=\"\$(cat $Dockerlogfile | grep -v grep | grep -E 'Error response from daemon|OCI runtime exec' ||:)\""
   echo "[ \"\$Failure\" ] && {"
-  echo "  echo \"Got error message from docker daemon:
-\$Failure EOF\" >&3"
-  echo "  echo \"\$Failure\""  # repeat possible error message to make it visible in error() after verbose Count loop
+  echo "  warning \"Got error message from docker daemon:
+\$Failure\""
+  echo "  echo \"\$Failure\" >>$Dockerlogfile"  # repeat possible error message to make it visible in error() after verbose Count loop
   echo "  exit 1"
   echo "}"
   echo ""
 
   echo "docker inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername >> $Containeripfile"
-  echo "echo x11docker: container IP: \$(cat $Containeripfile)"
+  echo "echo x11docker: container IP: \$(cat $Containeripfile) >>$Dockerlogfile"
   echo ""
   echo "docker inspect --format '{{.State.Pid}}' $Containername >> $Containerpid1pidfile"
-  echo "echo x11docker: host PID of container PID 1: \$(cat $Containerpid1pidfile)"
-  [ "$Showcontainerpid1pid" = "yes" ] && echo "echo \"\$(cat $Containerpid1pidfile)\" >&6"
+  echo "echo x11docker: host PID of container PID 1: \$(cat $Containerpid1pidfile) >>$Dockerlogfile"
+  [ "$Showcontainerpid1pid" = "yes" ] && echo "echo \"\$(cat $Containerpid1pidfile)\""
   echo ""
   echo "# get PID of container"
   echo "Containerpid=\$(ps ax | grep \$Containerid | grep -v grep | grep -v ' logs' | awk '{print \$1}')"
-  echo "echo x11docker: container PID: \$Containerpid"
+  echo "echo x11docker: container PID: \$Containerpid >>$Dockerlogfile"
   echo "echo \$Containerpid >> $Containerpidfile"
   echo ""
-  [ "$Switchcontaineruser" = "no" ] && echo "docker exec --tty -u root $Containername /bin/sh $Cshare/containersetup.sh"
+  [ "$Switchcontaineruser" = "no" ] && echo "docker exec --tty -u root $Containername /bin/sh $Cshare/containersetup.sh >>$Dockerlogfile 2>&1"
+  echo "exit 0"
 } >> $Dockerrc
 
 { #### part: create container setup script: This script runs as root in container
@@ -4680,15 +4654,17 @@ start() {
 
 { #### part: create pullrc: interactive script to pull image from docker hub
   echo "#! /bin/bash"
-  [ "$Debugmode" = "yes" ] && echo "set -x"
+  #[ "$Debugmode" = "yes" ] && echo "set -x"
   echo "touchpullready() {"
+  echo "  trap - EXIT"
   echo "  $Mksu 'touch $Cachefolder/pullready'"
+  echo "  exit"
   echo "}"
   echo "trap touchpullready EXIT"
   echo "echo ''"
   echo "read -n1 -e -p \"Image '$Imagename' not found locally. "
   echo "Do you want to pull it from docker hub? [Y|n]\" Choice"
-  echo "[[ \"\$Choice\" == [YyJj]* ]] || [ -z \"\$Choice\" ] && $Sudo docker pull $Imagename 2>&1"
+  echo "[[ \"\$Choice\" == [YyJj]* ]] || [ -z \"\$Choice\" ] && $Sudo docker pull $Imagename 2>> $Dockerlogfile"
   echo "sleep 2"
   echo "exit"
 } >> $Pullrc
@@ -4698,6 +4674,8 @@ start() {
   #[ "$Debugmode" = "yes" ] && echo "set -x"
   echo "touchxtermready() {"
   echo "  $Mksu 'touch $Cachefolder/xtermready'"
+  echo "  trap - EXIT"
+  echo "  exit"
   echo "}"
   echo "trap touchxtermready EXIT"
   echo "export TERM=xterm SHELL=/bin/bash"
@@ -4708,18 +4686,17 @@ start() {
       echo "echo -n 'Password ($Passwordfrontend): '"
     ;;
   esac
-
   case $Passwordfrontend in
-    gksudo|lxsudo)  echo "$Passwordcommand bash $Dockerrc  >>$Dockerlogfile 2>&1" ;;
-    pkexec)         echo "pkexec env DISPLAY=\$DISPLAY XAUTHORITY=\$XAUTHORITY bash $Dockerrc  >>$Dockerlogfile 2>&1" ;;
-    *)              echo "$Passwordcommand \"${Sudo}bash $Dockerrc >>$Dockerlogfile 2>&1\"" ;;
+    gksudo|lxsudo)  echo "$Passwordcommand bash $Dockerrc" ;;
+    pkexec)         echo "pkexec env DISPLAY=\$DISPLAY XAUTHORITY=\$XAUTHORITY bash $Dockerrc" ;;
+    *)              echo "$Passwordcommand \"${Sudo}bash $Dockerrc \"" ;;
   esac
   echo "exit"
 } >> $Xtermrc
 
 { #### part: create xinitrc: set up X environment, create cookies
   echo "#! /bin/sh"
-  [ "$Debugmode" = "yes" ] && echo "set -x"
+  #[ "$Debugmode" = "yes" ] && echo "set -x"
 
   # declaring functions echoes them into xinitrc
   declare -f storepid
@@ -5134,10 +5111,10 @@ Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' '
 { #### part: start X server
   case $Xserver in
     --xorg|--xpra|--xephyr|--xdummy|--xvfb|--xwayland|--nxagent)
-      $Mksu "exec                                         xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1" 
+      $Mksu "exec                                         xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 "
     ;;
     --hostdisplay|--hostwayland)
-      $Mksu "exec                                         bash  $Xinitrc                       >> $Xinitlogfile  2>&1 " 
+      $Mksu "exec                                         bash  $Xinitrc                       >> $Xinitlogfile  2>&1 "
     ;;
     --xpra-xwayland|--xdummy-xwayland)
       [ -z "$Hostwaylandsocket" ] || { [ "$Scaling" != "0" ] && [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] ;} && {
@@ -5179,7 +5156,7 @@ $(tail $Compositorlogfile)"
   Last lines of kwin log:
 $(tail $Compositorlogfile)"
       storepid $(cat $Compositorpidfile) compositor
-      $Mksu "env WAYLAND_DISPLAY=$Newwaylandsocket           xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
+      $Mksu "env WAYLAND_DISPLAY=$Newwaylandsocket        xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
     ;;
     --kwin)
       $Mksu "dbus-launch $Compositorcommand                                                    >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
@@ -5202,7 +5179,7 @@ $(tail $Xinitlogfile)
   Last lines of compositor logfile:
 $(tail $Compositorlogfile)"
 
-  saygoodbye
+  saygoodbye xinit
 } & storepid $! xinit
 
 { #### part: wait for and watch X server
@@ -5218,7 +5195,7 @@ $(tail $Compositorlogfile)"
     sleep $(awk "BEGIN { print $Count * 0.1 }")
     [ $Dauer -gt 30 ] && error "X server $Xserver not ready after 30s."
     verbose "waiting since ${Dauer}s for $Xserver to be ready."
-    rocknroll || verbose -d "Stopped waiting for $Xserver due to terminating signal."
+    rocknroll || { verbose -d "Stopped waiting for $Xserver due to terminating signal." ; break ; }
     grep -q -E 'xinit: giving up|unable to connect to X server|Connection refused|server error|Only console users are allowed' <$Xinitlogfile && error "Error during startup of X server.
   Last lines of xinit log:
 $(tail $Xinitlogfile)
@@ -5328,7 +5305,7 @@ $(tail $Dockerlogfile)"
         Xpraclientpid=$!
         
         storepid $Xpraclientpid xpraclient
-        checkpid $Xpraclientpid && mywatch "ps -p $Xpraserverpid -o pid ; ps -p $Xpraclientpid -o pid #xpra"
+        checkpid $Xpraclientpid && mywatch "ps --no-headers -p $Xpraserverpid -o pid ; ps --no-headers -p $Xpraclientpid -o pid #xpra"
         checkpid $Xpraserverpid && ! checkpid $Xpraclientpid && saygoodbye "xpra client"
       done & storepid $! xpraloop
     ;;
@@ -5342,7 +5319,7 @@ $(tail $Dockerlogfile)"
       [ -n "$Hostdisplay" ]     && export $Hostxenv || export $Newxenv 
       [ "$Fullscreen" = "yes" ] && export $Newxenv ### FIXME could cause trouble with Wayland if terminal is not Wayland capable
       [ "$Xserver" = "--xorg" ] && export $Newxenv
-      
+
       # start docker in xtermrc
       case $Passwordfrontend in
         su|sudo)
@@ -5356,7 +5333,7 @@ $(tail $Dockerlogfile)"
         *) $Passwordterminal "/bin/bash $Xtermrc" ;;
       esac
       waitforfilecreation $Cachefolder/xtermready infinity
-      
+
       # check if container startup was successfull
       sleep 1 # wait for late messages of docker daemon
       [ -s "$Containerpidfile" ] && { 
@@ -5438,7 +5415,7 @@ todo() {
 # check elogind with --dbus-system
 # --switchuser: new option?
 # further checks of pam.d
-# error message  window in wayland fails: xterm: no display. should use konsole
+# error message window in wayland fails: xterm: no display. should use konsole
 # error message window in --xorg fails if xinit fails: no display
 
 # --update: regard possible location in /opt
