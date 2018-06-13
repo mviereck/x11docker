@@ -625,18 +625,17 @@ watchmessagefifo() {    # watch for messages out of container or dockerrc
     IFS= read -r Line <&6 ||:
     Message="$Message
 $Line"
-    grep -q -E ":WARNING|:NOTE|:DEBUGNOTE|:VERBOSE|:ERROR|:STDOUT" <<< "$Message" && {
-      Messagetype="$(echo $Message | rev | cut -d: -f1  | rev)"
-      Message="$(echo "$Message"   | rev | cut -d: -f2- | rev)"
+    grep -q -E ":WARNING|:NOTE|:DEBUGNOTE|:VERBOSE|:ERROR|:STDOUT" <<< "$Line" && {
+      Messagetype=":$(echo $Line | rev | cut -d: -f1  | rev)"
+      Message="${Message%$Messagetype}"
       Message="$(tail -n +2 <<< "$Message")" # remove leading newline
       case "$Messagetype" in
-        WARNING)   warning   "$Message" ;;
-        NOTE)      note      "$Message" ;;
-        DEBUGNOTE) debugnote "$Message" ;;
-        ERROR)     error     "$Message" ;;
-        VERBOSE)   [ "-d " = "$(cut -c1-3 <<<"$Message" | head -n1)" ] && verbose -d "$(tail +4c <<< "$Message")" || verbose "$Message" ;;
-        STDOUT)    echo "$Message" ;;
-        *) debugnote "Undefined message: $Message" ;;
+        :WARNING)   warning   "$Message" ;;
+        :NOTE)      note      "$Message" ;;
+        :DEBUGNOTE) debugnote "$Message" ;;
+        :ERROR)     error     "$Message" ;;
+        :VERBOSE)   [ "-d " = "$(cut -c1-3 <<<"$Message" | head -n1)" ] && verbose -d "$(tail +4c <<< "$Message")" || verbose "$Message" ;;
+        :STDOUT)    echo "$Message" ;;
       esac
       Message=
       Messagetype=
@@ -4040,25 +4039,32 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "Imagecommand=\"$Imagecommand\""
   echo ""
   
-  [ ! -e $Cachebasefolder/x11docker-gui/images.list ] || [ "$(find $Cachebasefolder/x11docker-gui/images.list -mmin +120)" ] && {
-    echo "verbose 'Refreshing list of available images for x11docker-gui'"
-    echo "mkfile $Cachebasefolder/x11docker-gui/images.list"
-    echo "while read -r Line ; do"
-    echo '  grep -q "<none>" <<<$Line || echo $Line >> '$Cachebasefolder/x11docker-gui/images.list
-    echo 'done < <(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | sort)'
-    echo ""
-  }
-  
-  
+  echo "# check whether docker daemon is running and refresh images.list for x11docker-gui"
+  echo "docker images --format '{{.Repository}}:{{.Tag}}' >>$Cachefolder/images.list 2>>$Containerlogfile  || error \"Calling docker daemon failed.
+  Is docker daemon running at all?
+  Try to start docker daemon with:
+      systemctl start docker
+
+  Last lines of log: 
+\$(tail $Containerlogfile)\""
+  echo "mkfile $Cachebasefolder/x11docker-gui/images.list"
+  echo "while read -r Line ; do"
+  echo '  grep -q "<none>" <<<$Line || echo $Line >> '$Cachebasefolder/x11docker-gui/images.list
+  echo "done < <(sort < $Cachefolder/images.list)"
+  echo ""
+    
   echo "# check if image is available locally"
   echo "docker inspect --type=image $Imagename > /dev/null 2>&1 || {"
   [ -n "$Hostxenv" ]                      && echo "  export $Hostxenv"
   [ -n "$Newxenv" ] && [ "$Tty" = "yes" ] && echo "  export $Newxenv"
   [ "$Xserver" = "--xorg" ]               && echo "  export $Newxenv"
-  [ "$Pullterminal" = "$Passwordterminal" ] && Pullterminal=""
+  [ "$Pullterminal" = "$Passwordterminal" ] && [ "$Passwordneeded" = "yes" ] && Pullterminal=""
   echo "  $Pullterminal /bin/bash $Pullrc"
   echo "  waitforfilecreation $Cachefolder/pullready"
-  echo "  docker inspect --type=image $Imagename > /dev/null 2>&1 || error \"Image '$Imagename' not found locally and not pulled from docker hub.\""
+  echo "  docker inspect --type=image $Imagename > /dev/null 2>&1 || error \"Image '$Imagename' not found locally and not pulled from docker hub.
+  
+  Last lines of log: 
+\$(tail $Containerlogfile)\""
   echo "}"  
   echo "# check CMD"
   echo "[ -z \"\$Imagecommand\" ] && {"
@@ -4127,20 +4133,40 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo   "  echo '# created startscript for docker run: container.CMD.sh'"
   echo   "  echo '# runs as unprivileged user in container'"
   echo   "  echo 'echo x11docker: Running unprivileged user commands in container'"
+  
+  echo   "  echo 'exec 3<>$Cshare/message.fifo'"
+  echo   "  echo 'warning() {'"
+  echo   "  echo '  echo \"\$*:WARNING\"   >&3'"
+  echo   "  echo '}'"
+  echo   "  echo 'note() {'"
+  echo   "  echo '  echo \"\$*:NOTE\"   >&3'"
+  echo   "  echo '}'"
+  echo   "  echo 'verbose() {'"
+  echo   "  echo '  echo \"\$*:VERBOSE\"   >&3'"
+  echo   "  echo '}'"
+  echo   "  echo 'debugnote() {'"
+  echo   "  echo '  echo \"\$*:DEBUGNOTE\"   >&3'"
+  echo   "  echo '}'"
+  echo   "  echo 'error() {'"
+  echo   "  echo '  echo \"\$*:ERROR\"   >&3'"
+  echo   "  echo '  exit 1'"
+  echo   "  echo '}'"
+  echo   "  echo 'stdout() {'"
+  echo   "  echo '  echo \"\$*:STDOUT\"   >&3'"
+  echo   "  echo '}'"
 
   echo   '  echo Imagecommand="\"$Imagecommand\""'
   echo   '  echo Entrypoint="\"$Entrypoint\""'
   echo   "  echo ''"
-  echo   "  echo 'echo x11docker: container system:'"
-  echo   "  echo 'cat /etc/os-release'"
+  echo   "  echo 'verbose \"container system:'"
+  echo   "  echo '\$(cat /etc/os-release)\"'"
   echo   "  echo ''"
   
   echo   "  echo '# wait for container setup script do be ready'"
   echo   "  echo 'Zeit=\$(date +%s)'"
-  echo   "  echo 'for Count in $(seq -s' ' 90); do'"
+  echo   "  echo 'for Count in $(seq -s' ' 50); do'"
   echo   "  echo '  [ -e /x11docker.setupready ] && break'"
-  echo   "  echo '  echo \"'"
-  echo   "  echo 'x11docker: waiting since \$((\$(date +%s) - \$Zeit))s for container setup to be ready\"'"
+  echo   "  echo '  verbose \"Waiting since \$((\$(date +%s) - \$Zeit))s for container setup to be ready\"'"
   echo   "  echo '  sleep \$(awk \"BEGIN { print \$Count*0.2 }\")'"
   echo   "  echo 'done'"
   echo   "  echo ''"
@@ -4186,9 +4212,9 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     echo "  echo ''"
     echo "  echo 'Dbus=\"\$(dbus-launch --help >/dev/null 2>&1 && echo dbus-launch)\"'"
     echo "  echo '[ -z \"\$Dbus\" ] && Dbus=\"\$(dbus-run-session --help >/dev/null 2>&1 && echo dbus-run-session)\"'"
-    echo "  echo '[ -z \"\$Dbus\" ] && warning \"Did not find dbus-launch or dbus-run-session (option --dbus).\"'"
+    echo "  echo '[ -z \"\$Dbus\" ] && warning \"Did not find dbus-launch or dbus-run-session. (option --dbus).\"'"
   } 
-  echo   "  echo 'echo x11docker: running dbus user session with: \${Dbus:-(none)} >&2'"
+  echo   "  echo 'verbose -d \"running dbus user session with: \${Dbus:-(none)}\"'"
   echo   "  echo ''"
   echo   '  echo "[ -e \"\$XDG_RUNTIME_DIR\" ] || {"'
   echo   "  echo '  export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR'"
@@ -4236,14 +4262,14 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   IFS=$' \t\n'
   echo   "  echo ''"
   
-  echo   "  echo 'echo x11docker: container environment:'"
   echo   "  echo 'env >> $Cshare/environment'"
   echo   "  echo 'sed -i \"/\(PWD=\|_=\)/d\" $Cshare/environment'"
-  echo   "  echo 'env | sort'"
-  echo   "  echo 'echo x11docker: copy of environment stored in $Cshare/environment'"
+  echo   "  echo 'verbose \"Container environment:'"
+  echo   "  echo '\$(env | sort)\"'"
+  echo   "  echo 'verbose \"Copy of environment stored in $Cshare/environment\"'"
   echo   "  echo ''"
 
-  echo   "  echo \"echo x11docker: running image command: \$Tini \\\$Dbus \$Entrypoint \$Imagecommand\""
+  echo   "  echo verbose -d \"Running image command: \$Tini \\\$Dbus \$Entrypoint \$Imagecommand\""
   echo   "  echo \"\$Exec \$Tini \\\$Dbus \$Entrypoint \$Imagecommand $([ "$Forwardstdin" = "yes" ] && echo "<$Cshare/stdin") >>$Cshare/stdout 2>>$Cshare/stderr\""
 
   echo   "  echo '# Ready for docker run'"
@@ -4358,7 +4384,6 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo 'stdout() {'
   echo '  echo "$*:STDOUT"    >&3'
   echo '}'
-
 
   echo "verbose 'setup as root in container'"
   
@@ -4572,7 +4597,7 @@ start() {
   If the image contains malicious applications started by DBus service files,
   they may abuse their root privileges and may try to break out of container."
 
-      echo "verbose 'DBus: removing failing or useless services. Check for login service.'"
+      echo "verbose 'DBus: removing failing or useless services.'"
       echo "for Line in \$(find /usr/share/dbus-1/system-services /usr/share/dbus-1/services -type f); do"
       echo '  Name="$(cat $Line | grep Name= | cut -d= -f2)"'
       echo '  Command="$(cat $Line | grep Exec= | cut -d= -f2)"'
@@ -4583,12 +4608,25 @@ start() {
       echo "    org.freedesktop.UPower|org.freedesktop.ConsoleKit|org.freedesktop.resolve1|org.freedesktop.network1|org.freedesktop.timedate1)"
       echo "      rm -v \$Line"
       echo "    ;;"
-      echo "    org.freedesktop.systemd1) ;;"
+      echo "    org.freedesktop.systemd1) "
+      #echo '      debugnote "$(cat $Line)"'
+      echo "    ;;"
       echo "    org.freedesktop.login1)"
-      echo '      verbose -d "Found login service $Name:'
-      echo '$(cat $Line)"'
+      echo '      # check for loginservice, store it to run it later'
+      echo '      verbose -d "Found login service $Name: $Command"'
       echo '      Loginservice=$Name'
       echo '      Loginservicecommand=$Command'
+      [ "$Sharecgroup" = "no" ] && {
+        echo '      echo $Command | grep -q elogind && {'
+        echo '        note "Found login service elogind.'
+        echo '  If you want to use it, enable option --sharecgroup."'
+        echo '        Loginservice='
+        echo '        Loginservicecommand='
+        echo '      }'
+      }
+      echo "    ;;"
+      echo "    org.opensuse.CupsPkHelper.Mechanism)"
+      echo "      rm -v \$Line"
       echo "    ;;"
       echo "    com.deepin.lastore|com.deepin.dde.Welcome|com.deepin.daemon.Bluetooth|com.deepin.daemon.Grub2|com.deepin.daemon.Network|com.deepin.daemon.Timedate|com.deepin.daemon.Power|com.deepin.daemon.Audio|com.deepin.daemon.InputDevices)"
       echo "      # deepin services"
@@ -4605,7 +4643,7 @@ start() {
       echo "  [ -e /run/dbus/system_bus_socket ] && break"
       echo "  sleep 0.1"
       echo "done"
-      echo "[ -e /run/dbus/system_bus_socket ] || warning 'DBus startup seems to have failed. system_bus_socket not found.'"
+      echo "[ -e /run/dbus/system_bus_socket ] || warning 'DBus startup seems to have failed. /run/dbus/system_bus_socket not found.'"
           
       [ "$Nonewprivileges" = "yes" ] && {
         echo "# support for dbus daemon with no-new-privileges"
@@ -5428,7 +5466,7 @@ $(tail $Containerlogfile)"
       waitforfilecreation $Cachefolder/xtermready infinity
 
       # check if container startup was successfull
-      sleep 1 # wait for late messages of docker daemon
+      sleep 2 # wait for late messages of docker daemon and pstree to be filled
       Containerpid=$(cat $Containerpidfile)
       checkpid $Containerpid && {
         storepid $Containerpid container
@@ -5495,14 +5533,15 @@ waitfortheend
   
 ######### ToDo notes for development
 todo() {
+# BUG ubuntu 18.04: --xpra fails, --xorg fails, x11docker-gui: cat error message 
+
 # --dbus-system: check systemd-shim
-# check dbus.watch service
+# check dbus.watch service, does not shut down with --sysvinit
 
 # message for elogind and --dbus-system
 # think over /etc/localtime again. regard musl libc. 
 # --lang: check with musl libc
 
-# check elogind with --dbus-system
 # --switchuser: new option?
 # further checks of pam.d
 # error message window in wayland fails: xterm: no display. should use konsole
