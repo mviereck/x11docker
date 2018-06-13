@@ -12,8 +12,13 @@ Project website: https://github.com/mviereck/x11docker
  - Timezone sync: share `/usr/share/timezone` and symlink `/etc/localtime`
    in container. [(#50)](https://github.com/mviereck/x11docker/issues/50)
  - Disentangled final code sequence of xinit and docker run.
+ - Improved message.fifo handling from within dockerrc and container.
 ### Fixed
- - Remove check for running docker daemon [(#49)](https://github.com/mviereck/x11docker/issues/49)
+ - `--xpra`: Do not exit on `failed` in xpra server log. (seen on Ubuntu 18.04).
+ - `--xorg`: Show `Xwrapper.config` warning if `needs_root_rights=yes` is 
+   missing. (Seen on Ubuntu 18.04).
+ - Check for running docker daemon in dockerrc instead of using `pidof`.
+   [(#49)](https://github.com/mviereck/x11docker/issues/49)
  - Show error message if X server fails to start. Supress warning if needless.
  - `--xorg`: Password prompt did not appear on new display.
  - `--nothing`: Bugfix password prompt on console.
