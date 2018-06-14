@@ -398,8 +398,8 @@ error() {               # show error messages on stderr and exit
   finish 1
 }
 warning() {             # show warning messages
-  [ "$Verbose" = "no" ] && echo "$(tput setaf 3)x11docker WARNING:$(tput sgr0) $*" >&3
-  echo "" >&3
+  [ "$Verbose" = "no" ] && echo "$(tput setaf 3)x11docker WARNING:$(tput sgr0) $*
+" >&3
   [ "$Logfifo" ] && echo "x11docker WARNING: $*
 " >&7
   return 0
@@ -430,11 +430,16 @@ killpid() {             # kill PID $1 with codename $2 [and process name $3]
   verbose -d "terminating ${1:-} (${2:-}) ${3:-}: $(ps --no-headers -p ${1:-})"
   ps -p ${1:-} >/dev/null && {
     [ "${3:-}" ] && {
-      ps -p ${1:-} | grep -q -E "${3:-}" && kill ${1:-}
+      ps -p ${1:-} | grep -q -E "${3:-}" && kill ${1:-} 2>/dev/null
     } || {
-      kill ${1:-}
+      kill ${1:-} 2>/dev/null
     }
   }
+}
+finish_sigint() {       # trap SIGINT to activate debug mode on finish()
+  Debugmode="yes"
+  verbose -d "SIGINT"
+  finish
 }
 finish() {              # trap EXIT routine to clean up background processes and cache
   local Pid= Name= Zeit= Catlogfilepid= Exitcode= Pid1pid=
@@ -550,6 +555,7 @@ x11docker --cleanup"
 
   Exitcode=${1:-0}
   [ -e "$Cachefolder/error" ] && Exitcode=1
+  verbose -d "Exitcode $Exitcode"
    
   # close additional file descriptors
   for i in 3 4 6 7 8 9; do
@@ -603,7 +609,7 @@ watchpidlist() {        # watch list of important pids
       }
     done
   done
-  saygoodbye "watchpidlist: carneval is over"
+  saygoodbye "watchpidlist"
 }
 setonwatchpidlist() {   # add PID $1 to watchpidlist()
   echo ${1:-} >&9
@@ -1117,6 +1123,7 @@ writeaccess() {         # check if useruid $1 has write access to folder $2
 
 { #### part: declare variables
 trap finish EXIT
+trap finish_sigint SIGINT
 
 export IFS=$' \n\t'                             # set IFS to default
 # redirects for use in parts with >xy 2>xy
@@ -1220,6 +1227,9 @@ Cmdstderrlogfile=stderr                         # stderr for image command
 
 # host environment
 Hostsystem="$(source /etc/os-release ; echo $ID)"
+ldd --version 2>&1 | grep -q 'musl libc' && Hostlibc='musl'
+ldd --version 2>&1 | grep -q 'GLIBC'     && Hostlibc='glibc'
+Hostlocaltime="$(readlink /etc/localtime)"
 Hostdisplay="$DISPLAY"                          # store environment variable containing name of current display
 Hostdisplaynumber="$(echo $Hostdisplay | cut -d: -f2 | cut -d. -f1)"                         # display number without ":" and ".0"
 Hostxauthority="Xauthority-$Hostdisplaynumber"                                               # file to store copy of $XAUTHORITY
@@ -3944,15 +3954,13 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       Dockercommand="$Dockercommand \\
   --workdir $Workdir"
   
-      ## synchronize time location from host and container
-#      [ -e /etc/localtime ] && Dockercommand="$Dockercommand \\
-#  -v /etc/localtime:/etc/localtime:ro"
-      [ -e "$(readlink /etc/localtime)" ] && Dockercommand="$Dockercommand \\
-  -v /usr/share/zoneinfo:/usr/share/zoneinfo:ro" || {
-        [ -e /etc/localtime ] && Dockercommand="$Dockercommand \\
-  -v /etc/localtime:/etc/localtime:ro"
+      # TZ time zone environment variable (supersedes /etc/localtime in container)
+      [ "$Hostlocaltime" ] && {
+        Dockercommand="$Dockercommand \\
+  --env TZ=$(sed 's%^.*zoneinfo/%%' <<< "$Hostlocaltime")"
+        cp "$Hostlocaltime" "$Sharefolder/timezone"
       }
-      
+  
       # option --env: add custom environment. Only needed here for possible 'docker exec'. Otherwise set in container.CMD.sh
       IFS=$'\n'
       for Line in $Customenvironment ; do
@@ -3960,6 +3968,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   --env $Line"
       done
       IFS=$' \t\n'
+      
   
       # add custom docker arguments, imagename and imagecommand
       [ "$Customdockeroptions" ] && Dockercommand="$Dockercommand \\
@@ -4122,7 +4131,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   #[ "$Debugmode" = "yes" ] && echo "echo 'set -x'"
   echo   "  echo '# created startscript for docker run: container.CMD.sh'"
   echo   "  echo '# runs as unprivileged user in container'"
-  echo   "  echo 'echo x11docker: Running unprivileged user commands in container'"
+  echo   "  echo 'verbose -d \"Running unprivileged user commands in container\"'"
   
   echo   "  echo 'exec 3<>$Cshare/message.fifo'"
   echo   "  echo 'warning() {'"
@@ -4347,7 +4356,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "exit 0"
 } >> $Dockerrc
 
-{ #### part: create container setup script: This script runs as root in container
+{ #### part: create container root setup script: This script runs as root in container
   echo "#! /bin/sh"
   echo "# set up docker container as root before ongoing in unprivileged container.CMD.sh"
   echo "# commands in this script are executed as root in container"
@@ -4377,6 +4386,12 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
 
   echo "verbose 'setup as root in container'"
   
+  # check type of libc
+  echo "ldd --version 2>&1 | grep -q 'musl libc' && Containerlibc='musl'"
+  echo "ldd --version 2>&1 | grep -q 'GLIBC'     && Containerlibc='glibc'"
+  echo 'verbose -d "libc in image: $Containerlibc"'
+  echo ""
+  
   # prepare X environment
   echo "# create some system dirs with needed permissions"
   echo "mkdir -v -p /var/lib/dbus /var/run/dbus"
@@ -4387,8 +4402,17 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "export DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie"
   echo ""
   
-  readlink /etc/localtime >/dev/null 2>/dev/null && echo "ln -f -s $(readlink /etc/localtime) /etc/localtime"
-  echo ""
+  [ "$Hostlocaltime" ] && {
+    echo '[ ! -d /usr/share/zoneinfo ] && [ "$Containerlibc" = "'$Hostlibc'" ] && {'
+    echo "  mkdir -p $(dirname $Hostlocaltime)"
+    echo "  cp '$Cshare/timezone'  '$Hostlocaltime'"
+    echo "}"
+    echo "[ -e '$Hostlocaltime' ] && {"
+    echo "  ln -f -s $Hostlocaltime /etc/localtime"
+    echo "} || note 'Can not synchronize time zone of host and container.
+  If you need that, please install tzdata in image.'"
+    echo ""
+  }
 
   echo "Containersystem=\$(. /etc/os-release; echo \$ID)"
   echo "verbose \"Container system ID: \$Containersystem\""
@@ -4463,7 +4487,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   # --gpu with closed source nvidia driver
   [ "$Nvidiadriver" ] && {
     echo "Installationwillsucceed=maybe"
-    echo "ldd 2>&1 | grep 'musl libc' && {"
+    echo '[ "$Containerlibc" = "musl" ] && {'
     echo "  Installationwillsucceed=no"
     echo "  note 'Found musl libc in image. Closed source NVIDIA driver
 is incompatible. Use free nouveau driver on host and ask NVIDIA corporation
@@ -4982,10 +5006,11 @@ start() {
       echo "  done"
       echo "done 2>&1 | uniq"
 
-      verlt "$Xpraversion" "xpra v2.3" || {
+      ! verlt "$Xpraversion" "xpra v2.3" && verlt "$Xprarelease" "r19606" && {
         warning "Your xpra version has a cookie authentication issue.
   Installed version is: $Xpraversion
-  Recommended: Downgrade to xpra v2.2.5, or use another X server option.
+  Recommended: Downgrade to xpra v2.2.5, upgrade to at least r19606,
+  or use another X server option.
   Fallback: Setting 'xhost +SI:localuser:$Benutzer'"
         echo "xhost +SI:localuser:$Benutzer"
       }
@@ -5523,13 +5548,12 @@ waitfortheend
   
 ######### ToDo notes for development
 todo() {
-# --xpra: check fixed cookie version
+# --xpra: check fixed cookie version, adjust note after next stable update
 
 # --dbus-system: check systemd-shim
 # check dbus.watch service, does not shut down with --sysvinit
 
 # message for elogind and --dbus-system
-# think over /etc/localtime again. regard musl libc. 
 # --lang: check with musl libc
 
 # --switchuser: new option?
