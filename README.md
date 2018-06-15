@@ -344,18 +344,18 @@ x11docker sets up the init system to run desired command. No special setup is ne
    - Tested with [devuan](https://devuan.org/) images from [gitlab/paddy-hack](https://gitlab.com/paddy-hack/devuan/container_registry).
 
 ## elogind
-x11docker automatically supports `elogind` in container with init system options `--sysvinit`, `--runit` and `--openrc`.
- - You must set option `--sharecgroup` to allow `elogind` in container.
+x11docker automatically supports `elogind` in container with init system options `--dbus-system`, `--sysvinit`, `--runit` and `--openrc`. Set option `--sharecgroup` to allow `elogind` in container.
  - If your host does not run with `elogind` (but e.g. with `systemd`), x11docker needs an elogind cgroup mountpoint at `/sys/fs/cgroup/elogind`. Run x11docker with root privileges to automatically create it.
  - Same goes for `elogind` on host and `systemd` in container; a cgroup mountpoint for `systemd` must be created. x11docker does this automatically if it runs as root.
- - Example to manually create elogind cgroup mountpoint on a systemd host:
+ - If you want to manually set up cgroup:
+   - Create elogind cgroup mountpoint on a systemd host:
 ```
 mount -o remount,rw cgroup /sys/fs/cgroup  # remove write protection
 mkdir -p /sys/fs/cgroup/elogind
 mount -t cgroup cgroup /sys/fs/cgroup/elogind -o none,name=elogind
 mount -o remount,ro cgroup /sys/fs/cgroup  # restore write protection
 ```
- - Example to manually create a systemd cgroup mountpoint on an elogind host:
+   - Create a systemd cgroup mountpoint on an elogind host:
 ```
 mkdir -p /sys/fs/cgroup/systemd
 mount -t cgroup cgroup /sys/fs/cgroup/systemd -o none,name=systemd
@@ -363,7 +363,7 @@ mount -t cgroup cgroup /sys/fs/cgroup/systemd -o none,name=systemd
 
 ## dbus
 Some desktop environments and applications need a running dbus daemon and/or dbus user session. 
- - use `--dbus-system` to run dbus system daemon. This includes option `--dbus`. Some desktops like cinnamon or deepin depend more on dbus system daemon than on a full blown init system.
+ - use `--dbus-system` to run dbus system daemon. This includes option `--dbus`.
  - use `--dbus` to run image command with `dbus-launch` (fallback: `dbus-run-session`) for a dbus user session.
 
 # Network setup

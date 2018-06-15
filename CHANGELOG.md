@@ -6,15 +6,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [4.3.4](https://github.com/mviereck/x11docker/releases/tag/v4.3.4) - 2018-06-15
 ### Changed
- - `--dbus-system --sharecgroup`: support of `elogind`.
- - Timezone syncing: Do not share `/etc/localtime`. Instead, set env `TZ`.
-   If tzdata is missing in image AND host and image have same libc,
-   provide current timzeone file only. Create symlink `/etc/localtime` within
-   container. [(#50)](https://github.com/mviereck/x11docker/issues/50)
- - Disentangled final code sequence of xinit and docker run.
+ - `--dbus-system --sharecgroup`: support of `elogind` in container.
+ - Timezone syncing: Do not mount-bind `/etc/localtime`. 
+   If tzdata is missing in image, but host and image have same libc,
+   provide current timezone file only. Create symlink `/etc/localtime` within
+   container. If all that fails, set `TZ` with offset to UTC.
+   [(#50)](https://github.com/mviereck/x11docker/issues/50)
  - Improved `message.fifo` handling from within dockerrc and container.
+ - Disentangled final code sequence of xinit and docker run.
 ### Fixed
  - Check for running docker daemon in dockerrc instead of using `pidof`.
    [(#49)](https://github.com/mviereck/x11docker/issues/49)
@@ -35,7 +36,8 @@ Project website: https://github.com/mviereck/x11docker
 ### Fixed
  - fedora 28: Check for docker daemon with name `dockerd-current` 
    [(#49)](https://github.com/mviereck/x11docker/issues/49)
- - `--auto`: Prefer `--hostdisplay` for seamless apps if nothing else is available.
+ - `--auto`: Prefer `--hostdisplay` for seamless apps if nothing else is 
+   available.
  - `--wayland`, `--weston`, `--kwin`, `--hostwayland`: 
    Show error and exit if no wayland environment can be provided.
  - dockerrc messages forwarded to logfile fifo. (fixes "unknown file descriptor").

@@ -10,7 +10,7 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="4.3.4-beta"
+Version="4.3.4"
 
 usage() {               # --help: show usage information
   echo "
@@ -232,8 +232,8 @@ Init system and dbus daemon:
                        For faster startup mask services that fail in container.
                        Needs 'systemd' installed in image.
                        Old systemd versions in image need --sys-admin, too.
-     --sharecgroup     Share /sys/fs/cgroup. Default for --systemd.
-                       Can be used with --openrc.
+     --sharecgroup     Share /sys/fs/cgroup. Allows elogind in container if
+                       used with --dbus-system or init options.
  -b, --dbus            Run dbus user session daemon for image command.
      --dbus-system     Run dbus system daemon in container (includes --dbus).
                        Default for --wayland and for init options except --tini.
@@ -1227,10 +1227,11 @@ Cmdstderrlogfile=stderr                         # stderr for image command
 
 # host environment
 Hostsystem="$(source /etc/os-release ; echo $ID)"
-ldd --version 2>&1 | grep -q 'musl libc' && Hostlibc='musl'
-ldd --version 2>&1 | grep -q 'GLIBC'     && Hostlibc='glibc'
-ldd --version 2>&1 | grep -q 'GNU libc'  && Hostlibc='glibc'
-Hostlocaltime="$(realpath /etc/localtime || verbose -d 'No valid timezone link /etc/localtime detected.')"
+Hostlibc="unknown"
+ldd --version 2>&1 | grep -q 'musl libc'          && Hostlibc='musl'
+ldd --version 2>&1 | grep -q -E 'GLIBC|GNU libc'  && Hostlibc='glibc'
+Hostlocaltime="$(realpath /etc/localtime)"
+Hostutctime=$(date +%:::z) ; [ "$(cut -c1 <<< "$Hostutctime")" = "+" ] && Hostutctime="UTC-$(cut -c2- <<< "$Hostutctime")" || Hostutctime="UTC-$(cut -c2- <<< "$Hostutctime")"
 Hostdisplay="$DISPLAY"                          # store environment variable containing name of current display
 Hostdisplaynumber="$(echo $Hostdisplay | cut -d: -f2 | cut -d. -f1)"                         # display number without ":" and ".0"
 Hostxauthority="Xauthority-$Hostdisplaynumber"                                               # file to store copy of $XAUTHORITY
@@ -1551,7 +1552,7 @@ $Customenvironment"    ;  shift ;;                         # set custom environm
          --sharedir)   [ -e "${2:-}" ] && {                # share host folder at same location in container with rw access
                          Sharevolumescount=$(($Sharevolumescount + 1))
                          Sharevolumes[$Sharevolumescount]="${2:-}"
-                       } || warning "Option --sharedir: file or folder not found.
+                       } || warning "Option --sharedir: file or folder not found:
   ${2:-}" ;            shift ;;
          
        ## docker options
@@ -3955,12 +3956,12 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       Dockercommand="$Dockercommand \\
   --workdir $Workdir"
   
-      # TZ time zone environment variable (supersedes /etc/localtime in container)
-      [ "$Hostlocaltime" ] && {
-        Dockercommand="$Dockercommand \\
-  --env TZ=$(sed 's%^.*zoneinfo/%%' <<< "$Hostlocaltime")"
-        cp "$Hostlocaltime" "$Sharefolder/timezone"
-      }
+#      # TZ time zone environment variable (supersedes /etc/localtime in container)
+#      [ "$Hostlocaltime" ] && {
+#        Dockercommand="$Dockercommand \\
+#  --env TZ=$(sed 's%^.*zoneinfo/%%' <<< "$Hostlocaltime")"
+#        cp "$Hostlocaltime" "$Sharefolder/timezone"
+#      }
   
       # option --env: add custom environment. Only needed here for possible 'docker exec'. Otherwise set in container.CMD.sh
       IFS=$'\n'
@@ -4220,15 +4221,15 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo   "  echo '  export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR'"
   echo   "  echo '  mkdir -v -m 700 -p \$XDG_RUNTIME_DIR'"
   echo   "  echo '  export XDG_RUNTIME_DIR'"
-  echo   "  echo ''"
   echo   "  echo '}'"
+  echo   "  echo ''"
   
   [ "$Sharewayland" = "yes" ] && {
-    echo "  echo ''"
     echo "  echo '# Wayland environment'"
     echo "  echo 'export WAYLAND_DISPLAY=$Newwaylandsocket'"
     echo "  echo 'ln -s /$Newwaylandsocket \$XDG_RUNTIME_DIR/$Newwaylandsocket'"
     echo "  echo 'ls -la \$XDG_RUNTIME_DIR/$Newwaylandsocket'"
+    echo "  echo ''"
   }
   [ "$Setwaylandenv" = "yes" ] && {
     for Line in $Waylandtoolkitenv ; do echo "  echo 'export $Line'" ; done
@@ -4237,6 +4238,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     --nothing) ;;
     *)                                  echo "  echo 'export XDG_SESSION_TYPE=x11'" ;;
   esac
+  echo   "  echo ''"
   
   [ "$Switchcontaineruser" = "yes" ] && echo "  echo 'export TINI_SUBREAPER=1'"
   echo   "  echo ''"
@@ -4253,6 +4255,9 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo   "  echo ''"
   
   [ "$Pulseaudio" = "yes" ] && echo "  echo 'export $Pulseserver'"
+  echo   "  echo ''"
+  
+  echo   "  echo '[ -e \"$Hostlocaltime\" ] || export TZ='$Hostutctime''"
 
   echo   "  echo '# custom environment (--env)'"
   IFS=$'\n'
@@ -4408,10 +4413,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     echo "  mkdir -p $(dirname $Hostlocaltime)"
     echo "  cp '$Cshare/timezone'  '$Hostlocaltime'"
     echo "}"
-    echo "[ -e '$Hostlocaltime' ] && {"
-    echo "  ln -f -s $Hostlocaltime /etc/localtime"
-    echo "} || note 'Can not synchronize time zone of host and container.
-  If you need that, please install tzdata in image.'"
+    echo "[ -e '$Hostlocaltime' ] && ln -f -s '$Hostlocaltime' /etc/localtime"
     echo ""
   }
 
@@ -5550,8 +5552,6 @@ waitfortheend
   
 ######### ToDo notes for development
 todo() {
-# fedora: ubuntu:bionic date does not work
-
 # check dbus.watch service, does not shut down with --sysvinit
 # further checks of pam.d
 # error message window in wayland fails: xterm: no display. should use konsole
@@ -5562,12 +5562,10 @@ todo() {
 # --dbus-system: check systemd-shim
 
 # --systemd: try to avoid xhost +SI:localuser:$Benutzer
-# run several code pathes with --debug
 # --dbus-system: find way to start dbus services with dbus itself
 # --no-init no-new-privileges switchuser: exec fails, but why?
 # check out capsh. replace su with capsh? (missing in alpine) But how to trigger login?
 # --group-add: compare host and container GID? warn if group misses in container, or create it? how to trigger login?
-# work on traperror(). 'set -u' possible without a stop?
 # check fgconsole
 # check echo especially in sh scripts, replace with printf if needed (#25)
 # avoid possible confusions --home --sharedir. --sharedir mounts can overlap --home folder. What about softlinks with existing target in --home? Maybe avoid /home/$USER at all
