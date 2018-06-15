@@ -348,14 +348,14 @@ x11docker automatically supports `elogind` in container with init system options
  - If your host does not run with `elogind` (but e.g. with `systemd`), x11docker needs an elogind cgroup mountpoint at `/sys/fs/cgroup/elogind`. Run x11docker with root privileges to automatically create it.
  - Same goes for `elogind` on host and `systemd` in container; a cgroup mountpoint for `systemd` must be created. x11docker does this automatically if it runs as root.
  - If you want to manually set up cgroup:
-    - Create elogind cgroup mountpoint on a systemd host:
+   - Create elogind cgroup mountpoint on a systemd host:
 ```
 mount -o remount,rw cgroup /sys/fs/cgroup  # remove write protection
 mkdir -p /sys/fs/cgroup/elogind
 mount -t cgroup cgroup /sys/fs/cgroup/elogind -o none,name=elogind
 mount -o remount,ro cgroup /sys/fs/cgroup  # restore write protection
 ```
-    - Create a systemd cgroup mountpoint on an elogind host:
+   - Create a systemd cgroup mountpoint on an elogind host:
 ```
 mkdir -p /sys/fs/cgroup/systemd
 mount -t cgroup cgroup /sys/fs/cgroup/systemd -o none,name=systemd
