@@ -14,6 +14,8 @@ Project website: https://github.com/mviereck/x11docker
  - `--weston --size` failed on tty, have to specify drm backend for check.
  - timezone syncing: If setting `TZ`, positive offsets have been set wrong.
  - timezone syncing: Regard `TZ` from host, not only `/etc/localtime`.
+ - `--xpra`: catch timeout disconnection that happens if using another tty
+   longer than 60s. Restart xpra client in that case.
 
 ## [4.3.4](https://github.com/mviereck/x11docker/releases/tag/v4.3.4) - 2018-06-15
 ### Changed

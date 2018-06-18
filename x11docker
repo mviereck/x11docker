@@ -139,8 +139,10 @@ X server options:
  -Y, --weston-xwayland Like --xephyr, but supports option --gpu.
                        Console start as well as nested within X possible.
                        (Needs 'weston' and 'Xwayland'.)
- -h, --hostdisplay     Share host display :0, quite bad container isolation!
+ -h, --hostdisplay     Share host display :0. Quite bad container isolation!
                        Least overhead of all X server options.
+                       Some apps may fail due to restricted untrusted cookies.
+                       Remove restrictions with option --clipboard.
  -x, --xorg            Core Xorg server. Runs ootb from console.
                        Switch tty with <CTRL><ALT><F1>....<F12>.
                        To run from within X, edit '/etc/X11/Xwrapper.conf' and
@@ -379,7 +381,7 @@ error() {               # show error messages on stderr and exit
   Please report issues at https://github.com/mviereck/x11docker"
 
   # output to terminal
-  echo -e "
+  [ "$Verbose" = "no" ] && echo -e "
 \033[41mx11docker ERROR:\033[49m $Message
 " >&2
 
@@ -398,13 +400,13 @@ error() {               # show error messages on stderr and exit
   finish 1
 }
 warning() {             # show warning messages
-  echo "$(tput setaf 3)x11docker WARNING:$(tput sgr0) $*
+  [ "$Verbose" = "no" ] && echo "$(tput setaf 3)x11docker WARNING:$(tput sgr0) $*
 " >&3
   logentry "x11docker WARNING: $*
 "
 }
 note() {                # show notice messages
-  echo "$(tput setaf 2)x11docker note:$(tput sgr0) $*
+  [ "$Verbose" = "no" ] && echo "$(tput setaf 2)x11docker note:$(tput sgr0) $*
 " >&3
   logentry "x11docker note: $*
 "
@@ -760,7 +762,6 @@ mkfile() {              # create file $1 owned by $Hostuser
 depends() {             # check dependencies on host for X server option $1
   # Return 1 if something is missing
   local Return= Message=
-  Return="0"
   case $Autochooseserver in
     yes) Message=verbose ;;
     no)  Message=warning ;;
@@ -852,13 +853,13 @@ depends() {             # check dependencies on host for X server option $1
       } 
     ;;
   esac
-  debugnote "dependency check for ${1:-}: $Return"
+  debugnote "dependency check for ${1:-}: ${Return:-0}"
   
   [ "$Return" = "1" ] && {
     $Message "${1:-} not possible: missing dependencies."
     Autochooseserver="yes"
   }
-  return ${Return:-0}
+  return ${Return:-"0"}
 }
 cleanup() {             # --cleanup : check for non-removed containers and left cache files
   local Orphanedcontainers= Orphanedfolders= Line=
@@ -1394,6 +1395,27 @@ Wm_ugly="icewm sapphire aewm aewm++"
 Wm_bad="budgie-wm clfswm tinywm tritium mutter muffin gnome-shell"
 # List of all working window managers, recommended first: (excluding $Wm_bad)
 Wm_all="$Wm_recommended_nodesktop_light $Wm_recommended_nodesktop_heavy  $Wm_recommended_desktop_light $Wm_recommended_desktop_heavy $Wm_good $Wm_ugly $Wm_not_recommended $Wm_nodetect"
+
+Messagefifofuncs='
+warning() {
+  echo "$*:WARNING"   >&3
+}
+note() {
+  echo "$*:NOTE"      >&3
+}
+verbose() {
+  echo "$*:VERBOSE"   >&3
+}
+debugnote() {
+  echo "$*:DEBUGNOTE" >&3
+}
+error() {
+  echo "$*:ERROR"     >&3
+  exit 1
+}
+stdout() {
+  echo "$*:STDOUT"    >&3
+}'
 }
 
 { #### part: parsing cli options
@@ -1677,9 +1699,8 @@ $Customenvironment"    ;  shift ;;                         # set custom environm
 
   verbose "x11docker version $Version 
 docker version: $(docker --version)
-Xorg version:  $(Xorg -version 2>&1 | grep X.Org)
-Host system: $(source /etc/os-release ; echo "$PRETTY_NAME")
-Command: $0 $X11dockerargs
+Host system:    $(source /etc/os-release ; echo "$PRETTY_NAME")
+Command:        $0 $X11dockerargs
 Parsed options: $Parsedoptions"
   Wisdom="$(fortune -s 2>/dev/null || echo "Install fortunes to find wisdom.")"
   verbose "
@@ -1799,7 +1820,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   Can not determine DISPLAY and XAUTHORITY, can not use your X server.
   To allow other X server options, please provide environment variables with
     pkexec env DISPLAY=\$DISPLAY XAUTHORITY=\$XAUTHORITY x11docker [ARGS]."
-    #Tty=yes
+
     Xserver="--xorg"
   }
   
@@ -2415,7 +2436,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   # options --stdout, --stderr
   [ "$Showstdout" = "yes" ] && {
     {
-      waitforfilecontent $Containerpidfile infinity
+      waitforfilecontent $Containerpid1pidfile infinity
       tail --pid=$$ --retry -n +1 -F $Cmdstdoutlogfile     2>/dev/null
     } & storepid $! tailstdout
   }
@@ -4067,27 +4088,8 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "Hostuser=$Hostuser"
   echo "Hostusergid=$Hostusergid"  
   echo "Timetosaygoodbye=$Timetosaygoodbye"
-  echo ""
+  echo "$Messagefifofuncs"
   echo "exec 3<>$Sharefolder/message.fifo"
-  echo 'warning() {'
-  echo '  echo "$*:WARNING"   >&3'
-  echo '}'
-  echo "note() {"
-  echo '  echo "$*:NOTE"      >&3'
-  echo '}'
-  echo 'verbose() {'
-  echo '  echo "$*:VERBOSE"   >&3'
-  echo '}'
-  echo 'debugnote() {'
-  echo '  echo "$*:DEBUGNOTE" >&3'
-  echo '}'
-  echo 'error() {'
-  echo '  echo "$*:ERROR"     >&3'
-  echo '  exit 1'
-  echo '}'
-  echo 'stdout() {'
-  echo '  echo "$*:STDOUT"    >&3'
-  echo '}'
   echo ""
 
   [ "$Debugmode" = "yes" ] && {
@@ -4196,27 +4198,19 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo   "  echo '# created startscript for docker run: container.CMD.sh'"
   echo   "  echo '# runs as unprivileged user in container'"
   
+  echo   "  echo '$Messagefifofuncs'"
   echo   "  echo 'exec 3<>$Cshare/message.fifo'"
-  echo   "  echo 'warning() {'"
-  echo   "  echo '  echo \"\$*:WARNING\"   >&3'"
-  echo   "  echo '}'"
-  echo   "  echo 'note() {'"
-  echo   "  echo '  echo \"\$*:NOTE\"   >&3'"
-  echo   "  echo '}'"
-  echo   "  echo 'verbose() {'"
-  echo   "  echo '  echo \"\$*:VERBOSE\"   >&3'"
-  echo   "  echo '}'"
-  echo   "  echo 'debugnote() {'"
-  echo   "  echo '  echo \"\$*:DEBUGNOTE\"   >&3'"
-  echo   "  echo '}'"
-  echo   "  echo 'error() {'"
-  echo   "  echo '  echo \"\$*:ERROR\"   >&3'"
-  echo   "  echo '  exit 1'"
-  echo   "  echo '}'"
-  echo   "  echo 'stdout() {'"
-  echo   "  echo '  echo \"\$*:STDOUT\"   >&3'"
-  echo   "  echo '}'"
+  echo   "  echo ''"
 
+  echo   "  echo '# wait for container setup script do be ready'"
+  echo   "  echo 'Zeit=\$(date +%s)'"
+  echo   "  echo 'for Count in $(seq -s' ' 50); do'"
+  echo   "  echo '  [ -e /x11docker.setupready ] && break'"
+  echo   "  echo '  verbose \"Waiting since \$((\$(date +%s) - \$Zeit))s for container setup to be ready\"'"
+  echo   "  echo '  sleep \$(awk \"BEGIN { print \$Count*0.2 }\")'"
+  echo   "  echo 'done'"
+  echo   "  echo ''"
+  
   echo   "  echo 'verbose -d \"Running unprivileged user commands in container\"'"
   echo   "  echo ''"
 
@@ -4227,14 +4221,6 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo   "  echo '\$(cat /etc/os-release)\"'"
   echo   "  echo ''"
   
-  echo   "  echo '# wait for container setup script do be ready'"
-  echo   "  echo 'Zeit=\$(date +%s)'"
-  echo   "  echo 'for Count in $(seq -s' ' 50); do'"
-  echo   "  echo '  [ -e /x11docker.setupready ] && break'"
-  echo   "  echo '  verbose \"Waiting since \$((\$(date +%s) - \$Zeit))s for container setup to be ready\"'"
-  echo   "  echo '  sleep \$(awk \"BEGIN { print \$Count*0.2 }\")'"
-  echo   "  echo 'done'"
-  echo   "  echo ''"
   echo   "} >> $Imagecommandscript"
   
   [ "$Switchcontaineruser" = "yes" ] && {
@@ -4437,28 +4423,11 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   #[ "$Debugmode" = "yes" ] && echo "set -x"
   echo ""
   
+  echo "$Messagefifofuncs"
   echo "exec 3<>$Cshare/message.fifo"
-  echo "warning() {"
-  echo '  echo "$*:WARNING"   >&3'
-  echo "}"
-  echo "note() {"
-  echo '  echo "$*:NOTE"      >&3'
-  echo "}"
-  echo "verbose() {"
-  echo '  echo "$*:VERBOSE"   >&3'
-  echo "}"
-  echo "debugnote() {"
-  echo '  echo "$*:DEBUGNOTE" >&3'
-  echo "}"
-  echo 'error() {'
-  echo '  echo "$*:ERROR"     >&3'
-  echo '  exit 1'
-  echo '}'
-  echo 'stdout() {'
-  echo '  echo "$*:STDOUT"    >&3'
-  echo '}'
+  echo ""
 
-  echo "verbose 'setup as root in container'"
+  echo "verbose -d 'setup as root in container'"
   
   # check type of libc
   echo "ldd --version 2>&1 | grep -q 'musl libc' && Containerlibc='musl'"
@@ -4913,17 +4882,20 @@ start() {
   #[ "$Debugmode" = "yes" ] && echo "set -x"
 
   # declaring functions echoes them into xinitrc
-  declare -f storepid
-  declare -f waitfortheend
   echo "Timetosaygoodbye=$Timetosaygoodbye"
   echo "Timetosaygoodbyefifo=$Timetosaygoodbyefifo"
-  declare -f no_xhost 
-  declare -f warning verbose note logentry
   echo "Logfile=$Logfile"
   echo "Bgpidfile=$Bgpidfile"
+  declare -f storepid
+  declare -f waitfortheend
+  declare -f no_xhost 
   
+  echo "$Messagefifofuncs"
+  echo "exec 3<>$Messagefifo"
+  echo ""
+
   [ "$Noxhost" = "yes" ] && [ -n "$Hostdisplay" ] && {  
-    echo "verbose 'option --no-xhost: disabling any access to host display granted by xhost'"
+    echo "verbose -d 'option --no-xhost: disabling any access to host display granted by xhost'"
     echo "export $Hostxenv"
     echo "no_xhost"
   }
@@ -5339,8 +5311,8 @@ $(tail $Compositorlogfile)"
       [ "$Desktopmode" = "yes" ] && Xpraservercommand="xpra start-desktop" || Xpraservercommand="xpra start"
       Xpraservercommand="$Xpraservercommand $Newdisplay --use-display $Xpraoptions"
       #Xpraservercommand="xpra start $Newdisplay --use-display --start-via-proxy=no --daemon=no"
-      Xpraclientcommand="xpra attach $Newdisplay $Xpraoptions"
-      #Xpraclientcommand="xpra attach $Newdisplay --start-via-proxy=no"
+      Xpraclientcommand="xpra attach $Newdisplay $Xpraoptions --window-close=shutdown"
+      #Xpraclientcommand="xpra attach $Newdisplay --start-via-proxy=no --window-close=shutdown"
       verbose "Xpra server command:
   $Xpraservercommand"
       verbose "Xpra client command:
@@ -5379,7 +5351,7 @@ $(tail $Xpraserverlogfile)"
             notify-send "x11docker: xpra server crashed. Restarting xpra now."
             mkfile $Xpraserverlogfile   # clear logfile to remove "xpra is ready" message
           }
-          verbose "starting Xpra server"
+          verbose -d "starting Xpra server"
           $Mksu "env $Newxenv XPRA_OPENGL_DOUBLE_BUFFERED=1 $Xpraservercommand" >> $Xpraserverlogfile 2>&1 &
           Xpraserverpid=$!
           storepid $Xpraserverpid xpraserver
@@ -5393,14 +5365,14 @@ $(tail $Containerlogfile)"
           }
         }
         checkpid $Xpraclientpid && kill $Xpraclientpid
-        verbose "starting Xpra client"
+        verbose -d "starting Xpra client"
         [ -n "$Xpraclientpid" ] && note "Restarting Xpra client."
         $Mksu "env $Hostxenv XPRA_PADDING_COLORS='0,0.2,1' $Xpraclientcommand" >> $Xpraclientlogfile 2>&1 &
         Xpraclientpid=$!
         
         storepid $Xpraclientpid xpraclient
         checkpid $Xpraclientpid && mywatch "ps --no-headers -p $Xpraserverpid -o pid ; ps --no-headers -p $Xpraclientpid -o pid #xpra"
-        checkpid $Xpraserverpid && ! checkpid $Xpraclientpid && saygoodbye "xpra client"
+        grep -q "Shutting down in response to client request" <$Xpraserverlogfile && saygoodbye && break
       done & storepid $! xpraloop
     ;;
   esac
@@ -5452,7 +5424,7 @@ $(tail $Cmdstderrlogfile)"
     exe) # --exe: run host application without docker. includes --xonly
       # create start script
       { echo "#! /bin/bash"
-        [ "$Debugmode" = "yes" ] && echo "set -Eux"
+        #[ "$Debugmode" = "yes" ] && echo "set -Eux"
         echo "storepid() {"
         echo "  echo \${1:-} \${2:-} >> $Bgpidfile"
         echo "}"
@@ -5575,6 +5547,7 @@ $(tail $Compositorlogfile)")"
   
 ######### ToDo notes for development
 todo() {
+# x11docker-gui on tty: --hostdisplay has issues?
 # check restart of xpra server+client after tty switch
 # check wmctrl check again
 # check dbus.watch service, does not shut down with --sysvinit
