@@ -38,7 +38,7 @@ System changes in running containers are discarded after use.
 ![x11docker-gui screenshot](/../screenshots/screenshot-retroterm.png?raw=true "Cathode retro term in docker") ![LXDE in xpra](/../screenshots/screenshot-lxde-small.png?raw=true "LXDE desktop in docker")
 
 # GUI for x11docker
-`x11docker-gui` is an optional graphical frontend for `x11docker`.
+`x11docker-gui` is an optional graphical frontend for `x11docker`. It runs from console, too.
  - `x11docker-gui` needs package `kaptain`. If your distribution misses it, look at [kaptain repository](https://github.com/mviereck/kaptain). 
  - If `kaptain` is not installed on your system, `x11docker-gui` tries to use image [`x11docker/kaptain`](https://hub.docker.com/r/x11docker/kaptain/). 
 
