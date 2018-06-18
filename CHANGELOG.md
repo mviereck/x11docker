@@ -11,6 +11,7 @@ Project website: https://github.com/mviereck/x11docker
 ### Fixed
  - `--xorg` and others on TTY failed due to xinit in subshell.
    (regression in v4.3.4).
+ - `--weston --size` failed on tty, have to specify drm backend for check.
  - timezone syncing: If setting `TZ`, positive offsets have been set wrong.
  - timezone syncing: Regard `TZ` from host, not only `/etc/localtime`.
 

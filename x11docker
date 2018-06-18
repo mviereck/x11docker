@@ -367,7 +367,7 @@ error() {               # show error messages on stderr and exit
   local Message=
   
   # If there was already an error message, just show follow-up error as warning only.
-  [ -e "$Cachefolder/error" ] && warning "$*" && return
+  [ -e "$Cachefolder/error" ] && warning "$*" && waitfortheend
   [ -d "$Cachefolder" ] && $Mksu "touch $Cachefolder/error"   # also regarded by finish() for exit code
 
   sleep 1
@@ -379,7 +379,7 @@ error() {               # show error messages on stderr and exit
   Please report issues at https://github.com/mviereck/x11docker"
 
   # output to terminal
-  [ "$Verbose" = "no" ] && echo -e "
+  echo -e "
 \033[41mx11docker ERROR:\033[49m $Message
 " >&2
 
@@ -398,13 +398,13 @@ error() {               # show error messages on stderr and exit
   finish 1
 }
 warning() {             # show warning messages
-  [ "$Verbose" = "no" ] && echo "$(tput setaf 3)x11docker WARNING:$(tput sgr0) $*
+  echo "$(tput setaf 3)x11docker WARNING:$(tput sgr0) $*
 " >&3
   logentry "x11docker WARNING: $*
 "
 }
 note() {                # show notice messages
-  [ "$Verbose" = "no" ] && echo "$(tput setaf 2)x11docker note:$(tput sgr0) $*
+  echo "$(tput setaf 2)x11docker note:$(tput sgr0) $*
 " >&3
   logentry "x11docker note: $*
 "
@@ -458,11 +458,12 @@ $(cat $Bgpidfile 2>/dev/null)"
     while read -r Line ; do 
       Pid=$(echo $Line  | awk '{print $1}')
       Name=$(echo $Line | awk '{print $2}')
-      debugnote "checking: $Pid $Name: $(ps -p $Pid --no-headers ||:)"
+      debugnote "checking: $Pid ($Name): $(ps -p $Pid --no-headers ||:)"
       checkpid $Pid && {        
         case $Name in
-          xinit|Xserver)          killpid $Pid $Name ;;
-          containershell)         killpid $Pid $Name ;;
+          xinit)                  killpid $Pid $Name xinit ;;
+          Xserver)                killpid $Pid $Name 'Xorg|Xephyr|Xvfb|Xwayland|nxagent' ;;
+          containershell)         killpid $Pid $Name x11docker ;;
           windowmanager)          killpid $Pid $Name ;;
           xpraserver|xpraclient)  killpid $Pid $Name xpra ;;
           compositor)             killpid $Pid $Name 'weston|kwin_wayland' ;;
@@ -701,16 +702,15 @@ waitforlogentry() {     # wait for entry $3 in logfile $2 of application $1
   
   Zeit=$(date +%s)
   Warten=60
-  
+
   while ! grep -q "${3:-}" <"${2:-}" ; do
-  
-    grep -i -q -E 'error|Failed to process Wayland|failed to create display' <"${2:-}" && {
+    grep -i -q -E 'error|Failed to process Wayland|failed to create display|] fatal:' <"${2:-}" && {
       warning "Found error message for ${1:-} in logfile
   ${2:-}
-$(grep -i -E 'error|failed'  <"${2:-}")"
+$(grep -i -E 'error|failed|fatal'  <"${2:-}")"
       return 1
     }
-    
+
     Count=$(( Count + 1 ))
     Dauer=$(( $(date +%s) - $Zeit ))
     verbose -d "waiting since ${Dauer}s for ${1:-} to be ready..."
@@ -1668,11 +1668,12 @@ $Customenvironment"    ;  shift ;;                         # set custom environm
   Logbackup="$Cachebasefolder/x11docker.log"       # afterward copy of $Logfile in $Cachebasefolder  
 
   grep -q beta <<<$Version && note "You are running a beta version of x11docker.
-  Beta versions change often and may introduce new bugs.
-  You can help to find bugs and to report them at:
-    https://github.com/mviereck/x11docker
+  Beta versions change often and may introduce temporary new bugs.
   If you prefer latest stable release, run 'x11docker --update'.
-  If you prefer to follow development, run 'x11docker --update-master'."
+  If you prefer to follow development, run 'x11docker --update-master'.
+  
+  You can help to find bugs and to report them at:
+    https://github.com/mviereck/x11docker"
 
   verbose "x11docker version $Version 
 docker version: $(docker --version)
@@ -1680,6 +1681,9 @@ Xorg version:  $(Xorg -version 2>&1 | grep X.Org)
 Host system: $(source /etc/os-release ; echo "$PRETTY_NAME")
 Command: $0 $X11dockerargs
 Parsed options: $Parsedoptions"
+  Wisdom="$(fortune -s 2>/dev/null || echo "Install fortunes to find wisdom.")"
+  verbose "
+$(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
 
   [ "$Debugmode" = "yes" ] && {
     #PS4="$DebugPS4"    # useful output for set -x
@@ -1749,7 +1753,9 @@ Parsed options: $Parsedoptions"
     [ -n "$Rotation" ]                                           && Xserver="--weston-xwayland"
     [ "$Scaling" != "0" ]       && [ "$Gpu" = "yes" ]            && Xserver="--xpra-xwayland"
     [ "$Scaling" != "0" ]       && [ "$Gpu" = "no" ]             && Xserver="--xpra"
+    [ "$Tty" = "yes" ]                                           && Xserver="--weston-xwayland"
     [ "$Scaling" != "0" ]       && [ "$Tty" = "yes" ]            && Xserver="--xorg"
+    [ "$Screensize" ]           && [ "$Tty" = "yes" ]            && Xserver="--xorg"
     [ -z "$Hostdisplay" ]       && [ -n "$Hostwaylandsocket" ]   && Xserver="--weston-xwayland"
     [ "$Sharewayland" = "yes" ] && { [ -n "$Hostwaylandsocket" ] && [ "$Desktopmode" = "no" ] && Xserver="--hostwayland" || Xserver="--weston" ; }
     { [ "$Xserver" = "--xpra" ] || [ "$Xserver" = "--xephyr" ];} && Xserver="--nxagent"
@@ -1843,6 +1849,7 @@ Parsed options: $Parsedoptions"
       weston Xwayland"
   
   [ "$Autochooseserver" = "yes" ] && note "Using X server option $Xserver"
+  verbose -d  "Using X server option $Xserver"
   
   case $Xserver in
     --xorg)
@@ -2376,6 +2383,53 @@ Parsed options: $Parsedoptions"
   
 }
 
+{ #### part: options --verbose, --stdout, --stderr
+  # create summary logfile
+  tail --pid=$$ --retry -n +1 -F $Containerlogfile \
+                                 $Cmdstdoutlogfile $Cmdstderrlogfile ${Journallogfile:-} \
+                                 $Xpraserverlogfile $Xpraclientlogfile \
+                                 $Xinitlogfile $Compositorlogfile 2>/dev/null >>$Logfile &
+    
+  # option --verbose
+  [ "$Verbose" = "yes" ] && { 
+    [ "$Initsystem" = "systemd" ] && note "x11docker deletes some systemd error messages
+  that are harmless but numerous to get a better readable output.
+  It deletes all lines with: 'Failed to add fd to store', 
+  'Failed to set invocation ID' and 'Failed to reset devices.list'."
+    case $Verbosecolors in
+      no)  tail --pid=$$ --retry -n +1 -F $Logfile 2>/dev/null >&3 & ;;
+      yes) tail --pid=$$ --retry -n +1 -F $Logfile 2>/dev/null | sed "
+                                      /\(Failed to add fd to store\|Failed to set invocation ID\|Failed to reset devices.list\)/d;
+                                      s/\(ERROR\|Error\|error\|FAILURE\|FATAL\|Fatal\|fatal\)/${Esc}[41m\1${Esc}[0m/g;
+                                      s/\(Failed\|failed\|Failure\|failure\)/${Esc}[31m\1${Esc}[0m/g;
+                                      s/\(WARNING\|Warning\|warning\)/${Esc}[33m\1${Esc}[0m/g;
+                                      s/\(DEBUGNOTE\)/${Esc}[35m\1${Esc}[0m/g;
+                                      s/^==>.*/${Esc}[4m\0${Esc}[0m/;
+                                      s/\(Starting\)/${Esc}[32m\0${Esc}[0m/;
+                                      s/\(Started\|Reached target\)/${Esc}[42m\0${Esc}[0m/;
+                                      s/^\(+\|++\|+++\)/${Esc}[42m\0${Esc}[0m/ ;
+                                      s/^x11docker/${Esc}[32m\0${Esc}[0m/ " >&3 & ;;
+    esac
+  }
+    
+  # options --stdout, --stderr
+  [ "$Showstdout" = "yes" ] && {
+    {
+      waitforfilecontent $Containerpidfile infinity
+      tail --pid=$$ --retry -n +1 -F $Cmdstdoutlogfile     2>/dev/null
+    } & storepid $! tailstdout
+  }
+  [ "$Showstderr" = "yes" ] && {
+    {
+      tail --pid=$$ --retry -n +1 -F $Cmdstderrlogfile >&4 2>/dev/null
+    } & storepid $! tailstderr
+  }
+  
+  verbose "Logfile: $Logfile
+In container: $Cshare/x11docker.log
+After finish: $Logbackup"
+}
+
 { #### part: create $Hostxenv: Environment variables for host X display
   # get cookie from host display
   [ -n "$Hostdisplay" ] && {
@@ -2528,6 +2582,9 @@ Parsed options: $Parsedoptions"
     kill $Xwaylandpid
   }
   export DISPLAY=$Hostdisplay
+  
+  verbose "Virtual screen size: $Screensize"
+  verbose "Physical screen size: $(xrandr 2>/dev/null | grep Screen ||:)"
 }
 
 { #### part: --gpu: check nvidia driver
@@ -2550,7 +2607,7 @@ Parsed options: $Parsedoptions"
     Nvidiadriver=$(find /usr/local/share/x11docker/NVIDIA* $Hostuserhome/.local/share/x11docker/NVIDIA* 2>/dev/null | grep $Nvidiaversion )
     
     [ -e "$Nvidiadriver" ] && {
-      verbose "Found proprietary closed source nvidia driver installer
+      verbose -d "Found proprietary closed source nvidia driver installer
   $Nvidiadriver"
       note "Will install closed source nvidia driver $Nvidiaversion in container.
   That slows down container startup. Startup will be much faster if image 
@@ -2687,6 +2744,7 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
   $Wm_good"
   ;;
   esac
+  [ "$Windowmanager" ] && verbose -d "As window manager from host serves: $Windowmanager"
 }
 
 { #### part: check sound (options --pulseaudio and --alsa)
@@ -3042,19 +3100,21 @@ startup-animation=fade
         [ -n "$Hostdisplay" ] && Westonoutput="X"
       }
       [ -z "$Westonoutput" ] && [ -n "$Hostwaylandsocket" ] && Westonoutput="WL"
-      
+
       [ "$Tty" = "yes" ] && { 
         [ -n "$Screensize" ] || [ "$Scaling" != "0" ] || [ -n "$Rotation" ] && {
           # short start&stop of Weston to grep name of monitor
-          $Mksu "weston --no-config >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
+          $Mksu "weston --no-config --backend=drm-backend.so >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
           Compositorpid=$(cat $Compositorpidfile)
           waitforlogentry weston $Compositorlogfile "connector" || error "Weston startup failed. Can not run $Xserver.
   Last lines of weston log:
 $(tail "$Compositorlogfile")"
           Westonoutput="$(grep Output <$Compositorlogfile | grep connector | head -n1 | cut -d ' ' -f3 | rev | cut -c2- | rev)"
+          verbose -d "Screen output for weston: $Westonoutput"
           kill $Compositorpid
           mkfile "$Compositorlogfile"
           mkfile "$Compositorpidfile"
+          Compositorpid=""
         }
       }
     ;;
@@ -3068,7 +3128,6 @@ $(tail "$Compositorlogfile")"
       Xserveroptions="$Xserveroptions \\
   -verbose"                  # make X verbose
       [ "$Tty" = "yes" ] && Xserveroptions="$Xserveroptions -keeptty"
-#      Xcommand="$Xorgwrapper $Newdisplay $Newxvt \\
       Xcommand="$(command -v Xorg) $Newdisplay $Newxvt \\
   $Xserveroptions"
       warning "Although x11docker starts Xorg as unprivileged user,
@@ -3171,6 +3230,7 @@ mode=$Screensize
 " >> $Westonini
         [ "$Scaling" != "0" ] && echo "scale=$Scaling"      >> $Westonini
         [ -n "$Rotation" ]    && echo "transform=$Rotation" >> $Westonini
+        [ "$Count" ] || break
       done
       [ -n "$Customwestonini" ] && Westonini="$Customwestonini"
       Compositorcommand="weston --socket=$Newwaylandsocket --config='$Westonini'"
@@ -3296,6 +3356,13 @@ esac
   esac
   
   [ "$Sharewayland" = "yes" ] && [ -z "$Newwaylandsocket" ] && note "No wayland socket to share" && Sharewayland="no" 
+  
+  
+  [ "$Xcommand" ] && verbose "Created X server command:
+  $Xcommand" 
+  [ "$Xpraversion" ] && verbose "$Xpraversion"
+  [ "$Compositorcommand" ] && verbose "Created compositor command:
+  $Compositorcommand"
 }
 
 { #### part: create $Newxenv: Environment variables
@@ -3329,6 +3396,9 @@ esac
   IFS=$'\n'
   for Line in $Customenvironment; do Newxenv="$Newxenv $Line" ; done
   IFS=$' \t\n'
+  
+  verbose "Environment variables: 
+  $Newxenv"
 }
 
 { #### part: create shareclipboard script (option --clipboard)
@@ -5113,40 +5183,22 @@ start() {
   echo "waitfortheend"
 } >> $Xinitrc
 
-{ #### part: options --verbose, --stdout,--stderr and x11docker.log
-    Wisdom="$(fortune -s 2>/dev/null || echo "Install fortunes to find wisdom.")"
-    verbose "
-$(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
-    [ "$Xserver" != "--nothing" ] && {
-      verbose "X or Wayland server option: $Xserver"
-      verbose "Virtual screen size: $Screensize"
-      verbose "Physical screen size: $(xrandr 2>/dev/null | grep Screen)"
-      verbose "Environment variables: 
-  $Newxenv"
-    }
-    verbose "Image name: $Imagename"
-    verbose "Image command: $Imagecommand"
-    [ "$Hostexe" ] && verbose "Host command: $Hostexe"
+{ #### part: some verbose output
     verbose "Users and terminal:
-  x11docker was started by: $Startuser
+  x11docker was started by:                       $Startuser
   As host user serves (running X, storing cache): $Hostuser
-  Container user will be:   $Benutzer
-  Container user password:  x11docker
-  Getting permission to run docker with: $Passwordcommand $Sudo
-  Running X and other user commands with: $Mksu
-  Terminal for password frontend: $Passwordterminal
-  Terminal to show docker pull progress: $Pullterminal
-  Running on console: $Tty
-  Running over SSH: $Ssh"
-    verbose "Current cache folder: $Cachefolder"
-    [ -n "$Xcommand" ] && verbose "Created X server command:
-  $Xcommand" 
-    [ -n "$Xpraversion" ] && verbose "$Xpraversion"
-    [ -n "$Compositorcommand" ] && verbose "Created compositor command:
-  $Compositorcommand"
-    [ -n "$Windowmanager" ] && verbose "As window manager from host serves: $Windowmanager"
+  Container user will be:                         $Benutzer
+  Container user password:                        x11docker
+  Getting permission to run docker with:          $Passwordcommand $Sudo
+  Running X and other user commands with:         $Mksu
+  Terminal for password frontend:                 $Passwordterminal
+  Terminal to show docker pull progress:          $Pullterminal
+  Running on console:                             $Tty
+  Running over SSH:                               $Ssh"
     case $X11dockermode in
       run)
+        verbose "Image name: $Imagename"
+        verbose "Image command: $Imagecommand"
         verbose "Init system in container: $Initsystem"
         [ "$Benutzerhosthome" = "yes" ] && verbose "Sharing directory $Benutzerhosthomefolder 
   with container as its home directory $Benutzerhome"
@@ -5165,51 +5217,6 @@ $(nl -ba <$Xtermrc)"
 $(nl -ba <$Xinitrc)"
     [ -s "$Westonini" ] && verbose "Created weston.ini:
 $(nl -ba <$Westonini)"
-    verbose "Logfile: $Logfile
-In container: $Cshare/x11docker.log
-After finish: $Logbackup"
-    verbose "Running X server $Xserver on display $Newdisplay now ..."
-
-    # create summary logfile
-    tail --pid=$$ --retry -n +1 -F $Containerlogfile \
-                                   $Cmdstdoutlogfile $Cmdstderrlogfile ${Journallogfile:-} \
-                                   $Xpraserverlogfile $Xpraclientlogfile \
-                                   $Xinitlogfile $Compositorlogfile 2>/dev/null >>$Logfile &
-    
-    # option --verbose
-    [ "$Verbose" = "yes" ] && { 
-      [ "$Initsystem" = "systemd" ] && note "x11docker deletes some systemd error messages
-  that are harmless but numerous to get a better readable output.
-  It deletes all lines with: 'Failed to add fd to store', 
-  'Failed to set invocation ID' and 'Failed to reset devices.list'."
-      case $Verbosecolors in
-        no)  tail --pid=$$ --retry -n +1 -F $Logfile 2>/dev/null >&3 & ;;
-        yes) tail --pid=$$ --retry -n +1 -F $Logfile 2>/dev/null | sed "
-                                      /\(Failed to add fd to store\|Failed to set invocation ID\|Failed to reset devices.list\)/d;
-                                      s/\(ERROR\|Error\|error\|FAILURE\|FATAL\|Fatal\|fatal\)/${Esc}[41m\1${Esc}[0m/g;
-                                      s/\(Failed\|failed\|Failure\|failure\)/${Esc}[31m\1${Esc}[0m/g;
-                                      s/\(WARNING\|Warning\|warning\)/${Esc}[33m\1${Esc}[0m/g;
-                                      s/\(DEBUGNOTE\)/${Esc}[35m\1${Esc}[0m/g;
-                                      s/^==>.*/${Esc}[4m\0${Esc}[0m/;
-                                      s/\(Starting\)/${Esc}[32m\0${Esc}[0m/;
-                                      s/\(Started\|Reached target\)/${Esc}[42m\0${Esc}[0m/;
-                                      s/^\(+\|++\|+++\)/${Esc}[42m\0${Esc}[0m/ ;
-                                      s/^x11docker/${Esc}[32m\0${Esc}[0m/ " >&3 & ;;
-      esac
-    }
-    
-    # options --stdout, --stderr
-    [ "$Showstdout" = "yes" ] && {
-      {
-        waitforfilecontent $Containerpidfile infinity
-        tail --pid=$$ --retry -n +1 -F $Cmdstdoutlogfile     2>/dev/null
-      } & storepid $! tailstdout
-    }
-    [ "$Showstderr" = "yes" ] && {
-      {
-        tail --pid=$$ --retry -n +1 -F $Cmdstderrlogfile >&4 2>/dev/null
-      } & storepid $! tailstderr
-    }
 }
 
 { #### part: option '--starter': create desktop starter
@@ -5256,13 +5263,13 @@ Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' '
   fi
 }
 
-{ #### part: wait for X server and run docker
-  # run following parts as subshell.
-  # They are executed after xinit.
-  # For code flow logic, xinit should run here first and moved to background.
-  # For technical reasons, xinit must not run in subshell.
-  # --xorg on tty only works if xinit runs in foreground to grab the tty.
-  # Otherwise, Xwrapper.config must be edited to 'allowed_users=anybody' even on console.
+{ #### part: wait for X server and run docker ####
+# run following three parts together in a subshell.
+# They are executed after xinit.
+# For code flow logic, xinit should run here first and moved to background.
+# For technical reasons, xinit must not run in a subshell.
+# --xorg on tty only works if xinit runs in foreground to grab the tty.
+# Otherwise, Xwrapper.config must be edited to 'allowed_users=anybody' even on console.
 
 { #### part: wait for and watch X server
 
@@ -5282,8 +5289,8 @@ Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' '
   Last lines of xinit log:
 $(tail $Xinitlogfile)
 
-  Last lines of compositor log:
-$(tail $Compositorlogfile)"
+  $( [ -s "$Compositorlogfile" ] && echo "Last lines of compositor log:
+$(tail $Compositorlogfile)")"
   done
   
   # option '--showenv': show display environment variables on stdout
@@ -5315,12 +5322,10 @@ $(tail $Compositorlogfile)"
     *)
       # catch closing X server
       Xinitpid="$(pgrep -a xinit | grep "xinit $Xinitrc" | awk '{print $1}')"
-      setonwatchpidlist $Xinitpid
-      storepid $Xinitpid xinit
+      [ "$Xinitpid" ] && setonwatchpidlist $Xinitpid && storepid $Xinitpid xinit
       echo $Xcommand | grep -q Xorgwrapper && Line="Xorg $Newdisplay" || Line=$Xcommand
       Xserverpid=$(ps aux | grep "$(echo $Line | cut -d' ' -f1-2)" | grep -v grep | grep -v xinit | awk '{print $2}')
-      setonwatchpidlist $Xserverpid
-      storepid $Xserverpid Xserver
+      [ "$Xserverpid" ] && setonwatchpidlist $Xserverpid && storepid $Xserverpid Xserver
     ;;
   esac
 }
@@ -5490,10 +5495,9 @@ $(pstree -p $Hostexepid)"
   esac
 }
 
-  debugnote "Process tree of x11docker:
+debugnote "Process tree of x11docker:
 $(pstree -p $$)"
-
-} & storepid $! containershell
+} & storepid $! containershell                ####
 
 { #### part: start X server
   case $Xserver in
@@ -5520,7 +5524,7 @@ $(tail $Compositorlogfile)"
     ;;
     --weston-xwayland)
       $Mksu "exec $Compositorcommand                                                           >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
-      waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
+      #waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
       waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                         || error "Weston startup failed. Can not run $Xserver.
   Last lines of weston log:
 $(tail $Compositorlogfile)"
@@ -5563,15 +5567,15 @@ $(tail $Compositorlogfile)"
   Last lines of xinit logfile:
 $(tail $Xinitlogfile)
 
-  Last lines of compositor logfile:
-$(tail $Compositorlogfile)"
+  $( [ -s "$Compositorlogfile" ] && echo "Last lines of compositor log:
+$(tail $Compositorlogfile)")"
 
   saygoodbye xinit
 } 
   
 ######### ToDo notes for development
 todo() {
-# BUG --xorg must have allowed_users=anybody now, even on console, at least on debian 9
+# check restart of xpra server+client after tty switch
 # check wmctrl check again
 # check dbus.watch service, does not shut down with --sysvinit
 # further checks of pam.d
