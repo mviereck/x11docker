@@ -5,6 +5,14 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html) since version 4.0.0.
 
 Project website: https://github.com/mviereck/x11docker
+## [Unreleased]
+### Changed
+ - `x11docker-gui` runs from console, too.
+### Fixed
+ - `--xorg` and others on TTY failed due to xinit in subshell.
+   (regression in v4.3.4).
+ - timezone syncing: If setting `TZ`, positive offsets have been set wrong.
+ - timezone syncing: Regard `TZ` from host, not only `/etc/localtime`.
 
 ## [4.3.4](https://github.com/mviereck/x11docker/releases/tag/v4.3.4) - 2018-06-15
 ### Changed
