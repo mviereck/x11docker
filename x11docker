@@ -361,7 +361,7 @@ $Message" 2>/dev/null
   return 0
 }
 traperror() {           # trap ERR: --debug: Output for 'set -o errtrace'
-  warning "Command at Line ${2:-} returned with error code ${1:-}:
+  debugnote "Command at Line ${2:-} returned with error code ${1:-}:
   ${4:-}
   ${3:-} - ${5:-}" 
 }
@@ -642,7 +642,7 @@ rocknroll() {           # check if x11docker is still running
 waitfortheend() {       # wait for end of x11docker
   # signal is byte in $Timetosaygoodbyefifo
   # decent read to wait for signal to terminate
-  bash -c "read -n1 <$Timetosaygoodbyefifo ||:"
+  bash -c "read -n1 <$Timetosaygoodbyefifo ||:" ||:
 }
 waitforfilecreation() { # similar to inotify-wait: wait up to 15s for file $1 to be created
   # $1 file to wait for
@@ -734,7 +734,7 @@ storepid () {           # store pid $1 and name $2 of background process in file
   # this subroutine has a twin in xinitrc
   echo ${1:-} ${2:-} >> $Bgpidfile
   verbose -d "stored background pid ${1:-} of ${2:-}"
-  disown ${1:-} 2>/dev/null || verbose -d "can not disown ${1:-} ${2:-}"
+  disown ${1:-} 2>/dev/null ||:
 }
 checkpid() {            # check if PID $1 is active
   ps -p ${1:-0} >/dev/null 2>&1
@@ -763,35 +763,15 @@ depends() {             # check dependencies on host for X server option $1
   # Return 1 if something is missing
   local Return= Message=
   case $Autochooseserver in
-    yes) Message=verbose ;;
-    no)  Message=warning ;;
+    yes) Message="verbose -d" ;;
+    no)  Message="warning" ;;
   esac
   case ${1:-} in
     --xpra|--xpra-xwayland)
       command -v "xpra" >/dev/null || { 
         $Message "${1:-}: xpra not found."
         Return=1
-      } 
-      command -v "xpra" >/dev/null && { 
-        # check xpra version
-        [ "$Xpraversion" ] || {
-          Xpraversion="$(xpra --version)"
-          Xprarelease="$(echo $Xpraversion | cut -d- -f2)"
-        }
-        ! verlte "$Xprarelease" "r18663" && verlte $Xprarelease "r19519" && {
-          [ "$Sharehostipc" = "no" ] && {
-            $Message "Your xpra version has a MIT-SHM bug that would force
-  x11docker to share host IPC namespace. That would reduce container isolation.
-  Current installed version: $Xpraversion
-  Please update to at least xpra v2.3.1-19519 or xpra v2.4-r19520,
-  or downgrade to xpra v2.2.5 or lower, or use another X server option.
-  If you insist on using current xpra, set insecure option --hostipc.
-  Fallback: will search for another available X server setup."
-            Return=1
-          }
-        }
-      }
-    ;;
+      } ;;
     --xephyr)
       command -v "Xephyr" >/dev/null || command -v "Xnest" >/dev/null || { 
         $Message "${1:-}: Neither Xephyr nor Xnest found."
@@ -853,8 +833,31 @@ depends() {             # check dependencies on host for X server option $1
       } 
     ;;
   esac
-  debugnote "dependency check for ${1:-}: ${Return:-0}"
+  case $Xserver in
+    --xpra|--xpra-xwayland)
+      [ "$Return" = "1" ] || { 
+        # check xpra version
+        [ "$Xpraversion" ] || {
+          Xpraversion="$(xpra --version)"
+          Xprarelease="$(echo $Xpraversion | cut -d- -f2)"
+        }
+        ! verlte "$Xprarelease" "r18663" && verlte $Xprarelease "r19519" && {
+          [ "$Sharehostipc" = "no" ] && {
+            $Message "Your xpra version has a MIT-SHM bug that would force
+  x11docker to share host IPC namespace. That would reduce container isolation.
+  Current installed version: $Xpraversion
+  Please update to at least xpra v2.3.1-19519 or xpra v2.4-r19520,
+  or downgrade to xpra v2.2.5 or lower, or use another X server option.
+  If you insist on using current xpra, set insecure option --hostipc.
+  Fallback: will search for another available X server setup."
+            Return=1
+          }
+        }
+      }
+    ;;
+  esac
   
+  debugnote "dependency check for ${1:-}: ${Return:-0}"
   [ "$Return" = "1" ] && {
     $Message "${1:-} not possible: missing dependencies."
     Autochooseserver="yes"
@@ -2702,7 +2705,7 @@ After finish: $Logbackup"
       }
       
       # try to find window manager from alternatives system
-      [ "$Windowmanager" ] || [ -e "/etc/alternatives/x-window-manager" ] && {
+      [ -z "$Windowmanager" ] && [ -e "/etc/alternatives/x-window-manager" ] && {
         note "Looking for windowmanager linked with x-window-manager.
   You can set the default one detected in auto mode with
     update-alternatives --config x-window-manager"
@@ -4091,6 +4094,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "$Messagefifofuncs"
   echo "exec 3<>$Sharefolder/message.fifo"
   echo ""
+  echo "verbose -d 'running dockerrc'"
 
   [ "$Debugmode" = "yes" ] && {
     echo "PS4='$DebugPS4'"
@@ -4882,9 +4886,7 @@ start() {
   #[ "$Debugmode" = "yes" ] && echo "set -x"
 
   # declaring functions echoes them into xinitrc
-  echo "Timetosaygoodbye=$Timetosaygoodbye"
   echo "Timetosaygoodbyefifo=$Timetosaygoodbyefifo"
-  echo "Logfile=$Logfile"
   echo "Bgpidfile=$Bgpidfile"
   declare -f storepid
   declare -f waitfortheend
@@ -4893,19 +4895,26 @@ start() {
   echo "$Messagefifofuncs"
   echo "exec 3<>$Messagefifo"
   echo ""
+  
+  echo "verbose -d 'running xinitrc'"
 
   [ "$Noxhost" = "yes" ] && [ -n "$Hostdisplay" ] && {  
-    echo "verbose -d 'option --no-xhost: disabling any access to host display granted by xhost'"
     echo "export $Hostxenv"
+    echo 'verbose -d "option --no-xhost: disabling any access to host display $DISPLAY granted by xhost"'
     echo "no_xhost"
   }
 
   echo "export $Newxenv"
   
   case $Xserver in
-    --weston|--kwin|--hostwayland) ;;
-    --nothing) echo "export WAYLAND_DISPLAY=''" ;;
+    --weston|--kwin|--hostwayland) echo "unset DISPLAY XAUTHORITY" ;;
+    --nothing) echo "unset DISPLAY XAUTHORITY WAYLAND_DISPLAY" ;;
     *) # here something for real X servers
+      echo "# background color"
+      echo "xsetroot -solid '#7F7F7F'"
+      [ "$Xserver" = "--nxagent" ] && echo "sleep 2 && xsetroot -solid '#7F7F7F' &"
+
+      
       [ "$Xauthentication" = "yes" ] && {
         echo "# create new XAUTHORITY cookies"
         [ "$Xserver" = "--nxagent" ] && { 
@@ -5055,9 +5064,6 @@ start() {
   Fallback: Setting 'xhost +SI:localuser:$Benutzer'"
         echo "xhost +SI:localuser:$Benutzer"
       }
-    ;;
-    --nxagent)
-      echo "xsetroot -solid darkgrey"
     ;;
     --xorg) # --xorg: --scale, --size, --rotate
       echo "xrandr | grep connected | grep -v disconnected && {"
@@ -5372,7 +5378,7 @@ $(tail $Containerlogfile)"
         
         storepid $Xpraclientpid xpraclient
         checkpid $Xpraclientpid && mywatch "ps --no-headers -p $Xpraserverpid -o pid ; ps --no-headers -p $Xpraclientpid -o pid #xpra"
-        grep -q "Shutting down in response to client request" <$Xpraserverlogfile && saygoodbye && break
+        grep -q "Shutting down in response to client request" <$Xpraserverlogfile && saygoodbye xpraclient
       done & storepid $! xpraloop
     ;;
   esac
@@ -5547,17 +5553,13 @@ $(tail $Compositorlogfile)")"
   
 ######### ToDo notes for development
 todo() {
-# x11docker-gui on tty: --hostdisplay has issues?
-# check restart of xpra server+client after tty switch
 # check wmctrl check again
 # check dbus.watch service, does not shut down with --sysvinit
 # further checks of pam.d
 # error message window in wayland fails: xterm: no display. should use konsole
 
-# --xpra: check fixed cookie version, adjust note after next stable update
 # --update: regard possible location in /opt
 # BUG arch: issues with x11docker/fluxbox, background missing, sometimes no context menu. where is the difference?
-# --dbus-system: check systemd-shim
 
 # --systemd: try to avoid xhost +SI:localuser:$Benutzer
 # --dbus-system: find way to start dbus services with dbus itself
