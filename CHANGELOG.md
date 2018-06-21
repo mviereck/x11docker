@@ -5,7 +5,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html) since version 4.0.0.
 
 Project website: https://github.com/mviereck/x11docker
-## [Unreleased]
+
+## [4.3.5](https://github.com/mviereck/x11docker/releases/tag/v4.3.5) - 2018-06-21
 ### Changed
  - `x11docker-gui` runs from console, too.
 ### Fixed
