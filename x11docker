@@ -10,7 +10,7 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="4.3.5"
+Version="4.3.6-beta"
 
 usage() {               # --help: show usage information
   echo "
@@ -865,6 +865,8 @@ depends() {             # check dependencies on host for X server option $1
   return ${Return:-"0"}
 }
 cleanup() {             # --cleanup : check for non-removed containers and left cache files
+  # e X11DOCKER_DONTCLEANFOLDER may be set by x11docker-gui to spare its cache folder.
+  
   local Orphanedcontainers= Orphanedfolders= Line=
   
   note "x11docker will check for orphaned containers from earlier sessions.
@@ -875,7 +877,7 @@ cleanup() {             # --cleanup : check for non-removed containers and left 
   cd $Cachebasefolder || error "Could not cd to cache folder '$Cachebasefolder'."
   
   grep -q .cache/x11docker <<<$Cachebasefolder && Orphanedfolders=$(find "$Cachebasefolder" -mindepth 1 -maxdepth 1 -type d | sed s%$Cachebasefolder/%% | grep -v x11docker-gui)
-  
+  [ "${X11DOCKER_DONTCLEANFOLDER:-}" ] && Orphanedfolders="$(echo "$Orphanedfolders" | grep -v $X11DOCKER_DONTCLEANFOLDER)"
   Orphanedcontainers="$(docker ps -a --filter name=x11docker_X --format "{{.Names}}")"
   Orphanedcontainers="$(env IFS='' echo $Orphanedcontainers)"
   
@@ -884,15 +886,16 @@ cleanup() {             # --cleanup : check for non-removed containers and left 
     
   } || {
     note "Found orphaned containers: 
-  $Orphanedcontainers"
+$Orphanedcontainers"
     note "Found orphaned folders in $Cachebasefolder:
-  $Orphanedfolders" 
+$Orphanedfolders" 
   
     for Line in $Orphanedfolders ; do
       [ -d "$Cachebasefolder/$Line/share" ] && [ ! -s "$Cachebasefolder/$Line/share/timetosaygoodbye" ] && {
         note "Found possibly active container $Line.
   Will summon it to terminate itself."
-        echo timetosaygoodbye > "$Cachebasefolder/$Line/share/timetosaygoodbye"  # terminating possibly running x11docker sessions
+        echo timetosaygoodbye >> "$Cachebasefolder/$Line/share/timetosaygoodbye"
+        echo timetosaygoodbye >> "$Cachebasefolder/$Line/share/timetosaygoodbye.fifo"
         sleep 2
       }
     done
@@ -908,14 +911,17 @@ $(rm -R -f $Orphanedfolders 2>&1)"
   }
   
   Logfile=
-  note "Removing remaining files with: rm -Rf -v $Cachebasefolder/*"
-  rm -Rf -v $Cachebasefolder/*
   
-  note "Removing cache base folder with: rmdir -v $Cachebasefolder" 
-  cd
-  [ "$(basename $Cachebasefolder)" = x11docker ] && rmdir -v $Cachebasefolder  || warning "Did not succeed in removing cache folder
+  [ "${X11DOCKER_DONTCLEANFOLDER:-}" ] || {
+    note "Removing remaining files with: rm -Rf -v $Cachebasefolder/*"
+    rm -Rf -v $Cachebasefolder/*
+  
+    note "Removing cache base folder with: rmdir -v $Cachebasefolder" 
+    cd
+    [ "$(basename $Cachebasefolder)" = x11docker ] && rmdir -v $Cachebasefolder  || warning "Did not succeed in removing cache folder
     $Cachebasefolder
   Please run 'x11docker --cleanup' as root."
+  }
   
   docker info >/dev/null 2>/dev/null || warning "Could not check for docker images. 
   Please run 'x11docker --cleanup' as root
@@ -1132,6 +1138,9 @@ exec 4>&2                                       # stderr channel for --stderr
 pstree -ps $$ | grep -q sshd && Ssh="yes" || Ssh="no"  # check if running over SSH
 tty | grep -q tty            && Tty="yes" || Tty="no"  # check if running on X or on tty
 [ "$Tty" = "no" ] && [ -z "$DISPLAY" ] && [ "$Ssh" = "yes" ] && Tty="yes"
+Ttyinuse=
+XDG_VTNR=${XDG_VTNR:-}
+
 export PATH="$PATH:/usr/games:/usr/local/bin"          # may miss for root, but can be needed for --exe and --xfishtank
 export PATH="$PATH:/usr/sbin:/sbin"                    # may miss for unprivileged users, but can be needed for `ip`
 
@@ -1245,6 +1254,7 @@ Newxsocket=""                                   # New X socket
 Newxenv=""                                      # environment variables for new X server DISPLAY XAUTHORITY XSOCKET WAYLAND_DISPLAY
 Newxvt=""                                       # option --vt or automatically: number of virtual console to use for --xorg (>7)
 Newxlock=""                                     # .Xn-lock - exists for running X server with socket n
+Xlegacywrapper=""                               # option --xorg: /etc/X11/Xwrapper.config is configured to run within X yes/no
 Xserveroptions=""                               # created options for new X server
 Xpraservercommand=""                            # created xpra server command
 Xpraclientcommand=""                            # created xpra client command
@@ -1550,7 +1560,7 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
          --showpid1)   Showcontainerpid1pid="yes" ;;       # output of host PID of container PID 1
          --env)        Customenvironment="$(escapestring "${2:-}")
 $Customenvironment"    ;  shift ;;                         # set custom environment variables
-         --vt)         Newxvt="vt${2:-}" ;       shift ;;  # set virtual console to use
+         --vt)         Newxvt="${2:-}" ;         shift ;;  # set virtual console to use
          --display)    Newdisplaynumber=${2:-}             # display number to use
                        [ "$(echo $Newdisplaynumber | cut -c1)" = ":" ] && Newdisplaynumber="$(echo $Newdisplaynumber | cut -c2-)"
                        shift ;;
@@ -1697,7 +1707,7 @@ $Customenvironment"    ;  shift ;;                         # set custom environm
   If you prefer latest stable release, run 'x11docker --update'.
   If you prefer to follow development, run 'x11docker --update-master'.
   
-  You can help to find bugs and to report them at:
+  You can contribute to x11docker if you find bugs and report them at:
     https://github.com/mviereck/x11docker"
 
   verbose "x11docker version $Version 
@@ -1730,13 +1740,6 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   [ "$Checkorphaned" = "yes" ] && {
     cleanup
     exit
-  }
-  
-  # check whether x11docker runs on tty1-tty6, number can be changed with --vt N
-  # console users have to use their own tty for X since debian 9
-  [ "$Tty" = "yes" ] && [ "$Newxvt" = "" ] && {
-    Newxvt="vt$(tty | rev | cut -d/ -f1 | rev | tr -d ty)"
-    [ "$Ssh" = "yes" ] && Newxvt=""
   }
   
   # Weston and Xwayland need XDG_RUNTIME_DIR
@@ -1868,30 +1871,35 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
     To run within an already running X server, install one or all of:
       nxagent Xephyr xpra
     To run with GPU acceleration, install:
-      weston Xwayland xpra xdotool
+      weston and Xwayland, optionally also: xpra and xdotool
     To run from TTY or within Wayland, install:
-      weston Xwayland"
+      weston and Xwayland"
   
-  [ "$Autochooseserver" = "yes" ] && note "Using X server option $Xserver"
-  verbose -d  "Using X server option $Xserver"
-  
+  [ "$Autochooseserver" = "yes" ] && note "Using X server option $Xserver" || verbose -d  "Using X server option $Xserver"
+}
+
+{ #### part: check multiple option interferences, change settings if needed
+
+  # check if --xorg can run
   case $Xserver in
     --xorg)
       [ "$Autochooseserver" = "yes" ] && [ -z "$Imagename" ] && error "Will not run an empty Xorg in auto-choosing mode.
   If you want this, please use option --xorg explicitly."
   
-      { [ -z "$Newxvt" ] || [ "$Hostsystem" = "ubuntu" ] ; } && {
-        if [ ! -e "/etc/X11/Xwrapper.config" ] || ! grep -q "anybody" </etc/X11/Xwrapper.config || ! grep -q "needs_root_rights" </etc/X11/Xwrapper.config ; then
-          warning "Your configuration seems not to allow to start
+      [ -e "/etc/X11/Xwrapper.config" ] && sed 's/ //g' /etc/X11/Xwrapper.config | grep -xq "allowed_users=anybody" && sed 's/ //g' /etc/X11/Xwrapper.config | grep -xq "needs_root_rights=yes" && {
+        Xlegacywrapper="yes"
+      } || {
+        Xlegacywrapper="no"
+        [ "$Startuser" != "root" ] && [ "$Tty" = "no" ] && warning "Your configuration seems not to allow to start
   a second core Xorg server from within X. Option --xorg will probably fail.
   (As a default configuration, only root or console users can do that).
   
-  Recommended easy solution: install one of nested X servers
-  'nxagent', 'Xephyr' or 'Xnest'.
-  Solution with --gpu support: install 'weston' and 'Xwayland'.
-  
-  Or you can switch to console tty1...tty6 with <CTRL><ALT><F1>...<F6>
-  and start x11docker there.
+  Possible solutions:
+  1.) Install one of nested X servers 'nxagent', 'Xephyr' or 'Xnest'.
+      For --gpu support: install 'weston' and 'Xwayland'.
+  2.) Switch to console tty1...tty6 with <CTRL><ALT><F1>...<F6>
+      and start x11docker there.
+  3.) Run x11docker as root.
   
   Setup to start a second Xorg X server from within already running X:
   Edit file '/etc/X11/Xwrapper.config' and replace line:
@@ -1901,14 +1909,10 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
       needs_root_rights=yes
   If the file does not exist already, you can create it.
   On Ubuntu 16.04 and debian 9 you need package xserver-xorg-legacy."
-        fi
       }
     ;;
   esac
-}
-
-{ #### part: check multiple option interferences, change settings if needed
-
+  
   # check if a host window manager is needed
   [ "$Desktopmode" = "no" ] && [ -z "$Windowmanager" ] && case $Xserver in
     --xephyr|--weston-xwayland|--kwin-xwayland|--xorg|--xwayland) 
@@ -1926,7 +1930,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
     ;;
   esac
   
-   # --fullscreen is nonsense on tty at all. Avoids weston error on tty. 
+  # --fullscreen is nonsense on tty at all. Avoids weston error on tty. 
   [ "$Tty" = "yes" ] && Fullscreen="no"
   
   # --gpu
@@ -2185,20 +2189,25 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
     ;;
     
     --xorg)
-      [ "$Hostsystem" = "opensuse" ] && [ "$Tty" = "no" ] && warning "openSUSE does not support starting a second Xorg server
-  from within X. Possible solutions: install nested X server 'Xephyr',
-  or for --gpu support: install 'Weston' and 'Xwayland'.
-  Or switch to console tty1...tty6 with <CTRL><ALT><F1>...<F6>
-  and start x11docker there."
+      [ "$Hostsystem" = "opensuse" ] && [ "$Tty" = "no" ] && [ "$Startuser" != "root" ] && warning "openSUSE does not support starting a second Xorg server
+  from within X. Possible solutions: 
+  1.) Install nested X server 'Xephyr', 'nxagent' or 'Xnest',
+      or for --gpu support: install 'Weston' and 'Xwayland'.
+  2.) Switch to console tty1...tty6 with <CTRL><ALT><F1>...<F6>
+      and start x11docker there.
+  3.) Run x11docker as root."
+
       [ "$Autochooseserver" = "yes" ] && [ -n "$Hostdisplay" ] && note "Could not find Xephyr, Xnest, nxagent,
   xpra, weston+Xwayland or kwin_wayland+Xwayland to run a nested X server.
   Consider to install one of them."
-      note "You can switch between X servers and console terminals
-  with [CTRL][ALT][F1]...[F12]."
-      warning "On debian 9, switching often between multiple X servers can 
-  cause a crash of one X server. This bug may be debian specific and is 
-  probably some sort of race condition. If you know more about this or it 
-  occurs on other systems, too, please report."
+  
+      case $Xlegacywrapper in
+        yes) warning "Although x11docker starts Xorg as unprivileged user,
+  most system setups wrap Xorg to give it root permissions (setuid).
+  Evil containers may try to abuse this.
+  Other x11docker X server options like --xephyr are more secure at this point." ;;
+        no) [ "$Startuser" = "root" ] && warning "x11docker will run Xorg as root." ;;
+      esac
     ;;
     
     --xpra|--xpra-xwayland)
@@ -2331,7 +2340,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   Newdisplay=":$Newdisplaynumber"
   Newxsocket="/tmp/.X11-unix/X$Newdisplaynumber"
   Newxlock="/tmp/.X$Newdisplaynumber-lock"
-  [ -z "$Newxvt" ] && Newxvt="vt$Newdisplaynumber"     # FIXME: assuming instead of knowing whether VT is free
+  #[ -z "$Newxvt" ] && Newxvt="$Newdisplaynumber"     # FIXME: assuming instead of knowing whether VT is free
   [ "$Xserver" != "--hostdisplay" ] && [ -n "$(find $Newxsocket $Newxlock 2>/dev/null)" ] && error "Display $Newdisplay is already in use."
   
   Imagenametr=$(echo $Imagename | tr / - | cut -d: -f1)
@@ -2405,6 +2414,85 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   Cmdstderrlogfile="$Sharefolder/$Cmdstderrlogfile"         && mkfile $Cmdstderrlogfile 666
   mkfile "$Sharefolder/environment"
   
+}
+
+{ #### part: option --xorg: check free vt / tty
+  [ "$Newxvt" ] || case $Xserver in
+    --xorg)
+      # if started from console, use current tty
+      [ "$Tty" = "yes" ] && {
+        Newxvt="$(tty | rev | cut -d/ -f1 | rev)"
+        Newxvt="${Newxvt#tty}"
+      }
+      
+      # check ttys currently in use 
+      [ "$Newxvt" ] || {
+        for Line in $(find /sys/class/vc/vcsa*); do
+          Ttyinuse="$Ttyinuse ${Line#/sys/class/vc/vcsa} "
+        done
+        verbose -d "TTYs currently known to kernel: $Ttyinuse"
+      }
+      
+      [ "$Newxvt" ] && grep -q " $Newxvt " <<<$Ttyinuse && warning "TTY $Newxvt seems to be already in use."
+      
+      # try to find free tty within range of 8..12
+      [ "$Newxvt" ] || {
+        for ((Newxvt=8 ; Newxvt<=12 ; Newxvt++)) ; do
+          grep -q " $Newxvt " <<< "$Ttyinuse" || break
+        done
+      }
+      
+      # try to find free tty within range of 1..7
+      [ "$Newxvt" ] || {
+        for ((Newxvt=1 ; Newxvt<=7 ; Newxvt++)) ; do
+          grep -q " $Newxvt " <<< "$Ttyinuse" || break
+        done
+      }
+      
+      # try to find free tty with fgconsole. Fails in some cases within X.
+      [ "$Newxvt" ] || Newxvt=$(fgconsole --next-available 2>/dev/null ||:)
+      [ "$Newxvt" ] || Newxvt=$(fgconsole --next-available 2>/dev/null </dev/tty$XDG_VTNR ||:)
+      
+      # try to find free tty within range of 13..63
+      [ "$Newxvt" ] || {
+        for ((Newxvt=13 ; Newxvt<=63 ; Newxvt++)) ; do
+          grep -q " $Newxvt " <<< "$Ttyinuse" || break
+        done
+      }
+
+      [ "$Newxvt" ] || error "Could not identify a free tty for --xorg."
+      
+      [ "$XDG_VTNR" ] && [ "$Hostdisplay$Hostwaylandsocket" ] && note "Current X server $Hostdisplay runs on tty $XDG_VTNR.
+  Access it with [CTRL][ALT][F$XDG_VTNR]."
+      
+      [ "${Newxvt:-999}" -gt "12" ] && {
+        fgconsole --next-available 1>/dev/null 2>/dev/null || note "Could not check for a free tty below or equal to 12.
+  Would need to use command fgconsole for a better check.
+  Possibilities: 
+  1.) Run x11docker as root.
+  2.) Add user to group tty (not recommended, may be insecure).
+  3.) Use display manager gdm3.
+  4.) Run x11docker directly from console."
+        note "To access X on tty$Newxvt, use command 'chvt $Newxvt'"
+      } || {
+        note "New Xorg server $Newdisplay will run on tty $Newxvt.
+  Access it with [CTRL][ALT][F$Newxvt]."
+      }
+  
+      warning "On debian 9, switching often between multiple X servers can 
+  cause a crash of one X server. This bug may be debian specific and is probably
+  some sort of race condition. If you know more about this or it occurs on 
+  other systems, too, please report at https://github.com/mviereck/x11docker.
+  
+  You can avoid this issue with switching to a black tty before switching to X."
+    ;;
+    --xpra|--xdummy)
+      ### FIXME vt number 128 out of range 1..63 seems to work even for multiple xpra/Xdummy instances. 
+      ### A check like for --xorg should be cleaner, but may cause issues if a later starting X accesses same tty.
+      ### Running Xdummy with a vt number does not create entry in /sys/class/vc, but must not run on same vt as a real X.
+      [ "$Newxvt" ] || Newxvt=128
+    ;;
+  esac
 }
 
 { #### part: options --verbose, --stdout, --stderr
@@ -2481,37 +2569,6 @@ After finish: $Logbackup"
   [ -n "$Hostdisplay" ] && [ -z "$Hostxauthority" ] && warning "Your host X server seems to run without cookie authorisation."
 }
 
-{ #### part: set up pipes and fifo
-  # file descriptors in use:
-  # &0  stdin                 --stdin with catstdin
-  # &1  stdout
-  # &2  stderr
-  # &3  stderr                for warnings and notes, with --silent redirected to /dev/null
-  # &4  stderr                for --stderr
-  # &5  (not in use)
-  # &6  $Messagefifo          for messages to watchmessagefifo()
-  # &7  (not in use)
-  # &8  $Timetosaygoodbyefifo for saygoodbye() and waitfortheend()
-  # &9  $Watchpidfifo         for watchpidlist()
-
-  # redirect stdin to named pipe. Named pipe is shared with container and used as stdin of image command in container.CMD.sh
-  [ "$Forwardstdin" = "yes" ] && {
-    cat <&0 >$Cmdstdinfile & storepid $! catstdin
-  }
-  
-  # used by waitfortheend()
-  exec 8<>$Timetosaygoodbyefifo
-  
-  # start watching important pids, e.g. xinit, container.
-  exec 9<>$Watchpidfifo
-  setonwatchpidlist $$
-  watchpidlist & storepid $! watchpidlist
-  
-  # start watching for messages out of container or dockerrc
-  exec 6<>$Messagefifo
-  watchmessagefifo & storepid $! watchmessagefifo
-}
-  
 { #### part: check physical and virtual screen size
   # Dummy start of Xwayland to detect screen size in pure Wayland environments
   [ -z "$Hostdisplay" ] && [ -n "$Hostwaylandsocket" ] && command -v Xwayland >/dev/null && {
@@ -3156,12 +3213,8 @@ $(tail "$Compositorlogfile")"
       Xserveroptions="$Xserveroptions \\
   -verbose"                  # make X verbose
       [ "$Tty" = "yes" ] && Xserveroptions="$Xserveroptions -keeptty"
-      Xcommand="$(command -v Xorg) $Newdisplay $Newxvt \\
+      Xcommand="$(command -v Xorg) $Newdisplay vt$Newxvt \\
   $Xserveroptions"
-      warning "Although x11docker starts Xorg as unprivileged user,
-  most system setups wrap Xorg to give it root permissions (setuid).
-  Evil containers may try to abuse this.
-  Other x11docker X server options like --xephyr are more secure at this point."
     ;;
     
     --xpra) # To use xpra, Xdummy will run first. xpra server uses it later. Use Xvfb if available.
@@ -3169,7 +3222,7 @@ $(tail "$Compositorlogfile")"
         Xcommand="$(command -v Xvfb) $Newdisplay -screen 0 ${Maxxaxis}x${Maxyaxis}x24 \\
   $Xserveroptions"
       } || {
-        Xcommand="$Xorgwrapper $Newdisplay $Newxvt \\
+        Xcommand="$Xorgwrapper $Newdisplay vt$Newxvt \\
   -config $Xdummyconf \\
   $Xserveroptions"
         note "Xvfb not found. Will try to use dummy video driver Xdummy.
@@ -3178,7 +3231,7 @@ $(tail "$Compositorlogfile")"
     ;;
     
     --xdummy)
-      Xcommand="$Xorgwrapper $Newdisplay $Newxvt \\
+      Xcommand="$Xorgwrapper $Newdisplay vt$Newxvt \\
   -config $Xdummyconf \\
   $Xserveroptions"
     ;;
@@ -3847,6 +3900,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       
       Containername="x11docker_X${Newdisplaynumber}_${Mycookie}_$Imagenametr"
       Dockercommand="$Dockercommand --name=$Containername"
+      verbose -d "Container name: $Containername"
   
       [ "$Benutzeruid" = "0" ]     && Sudouser="yes"
       [ "$Sudouser" = "yes" ]      && Adminusercaps="yes"
@@ -4253,11 +4307,6 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     done
   }
   echo   "  echo 'export HOME=\"$Benutzerhome\"'"
-  echo   "  echo 'cd \"\$HOME\"'"                                                    # HOME as default working directory
-  echo   "  Workdir=\$(docker inspect --format='{{.Config.WorkingDir}}' $Imagename)" # WORKDIR in image
-  echo   '  [ "$Workdir" ] && echo "[ -d \"$Workdir\" ] && cd \"$Workdir\"   # WORKDIR in image"' 
-  [ "$Workdir" = "/tmp" ] || echo "  echo 'cd $Workdir'"                             # x11docker option --workdir
-  echo   "  echo ''"
   
   [ -n "$Newdisplay" ] && {
     echo "  echo 'export DISPLAY=$Newdisplay'"
@@ -4333,6 +4382,12 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo   "  echo 'verbose \"Copy of environment stored in $Cshare/environment\"'"
   echo   "  echo ''"
 
+  echo   "  echo 'cd \"\$HOME\"'"                                                    # HOME as default working directory
+  echo   "  Workdir=\$(docker inspect --format='{{.Config.WorkingDir}}' $Imagename)" # WORKDIR in image
+  echo   '  [ "$Workdir" ] && echo "[ -d \"$Workdir\" ] && cd \"$Workdir\"   # WORKDIR in image"' 
+  [ "$Workdir" = "/tmp" ] || echo "  echo 'cd $Workdir'"                             # x11docker option --workdir
+  echo   "  echo ''"
+  
   echo   "  echo verbose -d \"Running image command: \$Tini \\\$Dbus \$Entrypoint \$Imagecommand\""
   echo   "  echo \"\$Exec \$Tini \\\$Dbus \$Entrypoint \$Imagecommand $([ "$Forwardstdin" = "yes" ] && echo "<$Cshare/stdin") >>$Cshare/stdout 2>>$Cshare/stderr\""
 
@@ -5245,6 +5300,37 @@ Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' '
   fi
 }
 
+{ #### part: set up pipes and fifo
+  # file descriptors in use:
+  # &0  stdin                 --stdin with catstdin
+  # &1  stdout
+  # &2  stderr
+  # &3  stderr                for warnings and notes, with --silent redirected to /dev/null
+  # &4  stderr                for --stderr
+  # &5  (not in use)
+  # &6  $Messagefifo          for messages to watchmessagefifo()
+  # &7  (not in use)
+  # &8  $Timetosaygoodbyefifo for saygoodbye() and waitfortheend()
+  # &9  $Watchpidfifo         for watchpidlist()
+
+  # redirect stdin to named pipe. Named pipe is shared with container and used as stdin of image command in container.CMD.sh
+  [ "$Forwardstdin" = "yes" ] && {
+    cat <&0 >$Cmdstdinfile & storepid $! catstdin
+  }
+  
+  # used by waitfortheend()
+  exec 8<>$Timetosaygoodbyefifo
+  
+  # start watching important pids, e.g. xinit, container.
+  exec 9<>$Watchpidfifo
+  setonwatchpidlist $$
+  watchpidlist & storepid $! watchpidlist
+  
+  # start watching for messages out of container or dockerrc
+  exec 6<>$Messagefifo
+  watchmessagefifo & storepid $! watchmessagefifo
+}
+  
 { #### part: wait for X server and run docker ####
 # run following three parts together in a subshell.
 # They are executed after xinit.
@@ -5483,8 +5569,14 @@ $(pstree -p $$)"
 
 { #### part: start X server
   case $Xserver in
-    --xorg|--xpra|--xephyr|--xdummy|--xvfb|--xwayland|--nxagent)
+    --xpra|--xephyr|--xdummy|--xvfb|--xwayland|--nxagent)
       $Mksu "exec                                         xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 "
+    ;;
+    --xorg)
+      case $Xlegacywrapper in
+        yes) $Mksu   "exec                                xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " ;;
+        no)  bash -c "exec                                xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " ;;
+      esac
     ;;
     --hostdisplay|--hostwayland)
       $Mksu "exec                                         bash  $Xinitrc                       >> $Xinitlogfile  2>&1 "
@@ -5557,40 +5649,38 @@ $(tail $Compositorlogfile)")"
   
 ######### ToDo notes for development
 todo() {
-# check dbus.watch service, does not shut down with --sysvinit
+# BUG x11docker-gui on console: cleanup&exit may terminate itself before it is ready
+
+# --xorg: check vt check with SSH
+# --weston/x: allow tty switch/option --vt if running as root?
+# check dbus.watch service, does not shut down with --sysvinit, maybe useless at all.
 # further checks of pam.d
 # error message window in wayland fails: xterm: no display. should use konsole
 
 # --update: regard possible location in /opt
 # BUG arch: issues with x11docker/fluxbox, background missing, sometimes no context menu. where is the difference?
+# --group-add: compare host and container GID? warn if group misses in container, or create it?
 
-# --systemd: try to avoid xhost +SI:localuser:$Benutzer
-# --dbus-system: find way to start dbus services with dbus itself
+# --systemd: try to avoid xhost +SI:localuser:$Benutzer, needed by deepin, does not recognice XAUTHORITY
 # --no-init no-new-privileges switchuser: exec fails, but why?
 # check out capsh. replace su with capsh? (missing in alpine) But how to trigger login?
-# --group-add: compare host and container GID? warn if group misses in container, or create it?
-# check fgconsole
 # check echo especially in sh scripts, replace with printf if needed (#25)
 # avoid possible confusions --home --sharedir. --sharedir mounts can overlap --home folder. What about softlinks with existing target in --home? Maybe avoid /home/$USER at all
-# bug report to docker about --volume waylandsocket in --volume
 
 # --lang: find out locale package names for several distris for documentation
 # --keymap does not work on tty with --kwin and --kwin-xwayland. No idea how to set it.
-# xpra restart on tty switch -> bug report
 # further check of xpra server crashes with jess/atom and chromium. --mmap=no avoids the bug: xpra bug report?
 
-# BUG check whether VT is not in use with --xorg/--xpra/--xdummy, bug if accidently using vt that is already in use
 # check all FIXME 
+# bug report to docker about --volume waylandsocket in --volume
 # --xpra-xwayland, xdummy-xwayland: use kwin-wayland as fallback for missing weston? 
 # --xorg: getty and autologin to avoid Xwrapper.config changes?
 # gnome3 based desktop failing due to gnome bugs: pantheon budgie gnome3
-# check Xorg version for +iglx, check security implications, maybe option --iglx?
 # --wayland --user/--hostuser: wayland socket access denied due to XDG_RUNTIME_DIR
 # --nxagent 3.5.0: Mageia 6: seamless mode fails
 # fedora: SElinux issue: '--security-opt label=type:container_runtime_t': need more restrictive setting
 #         https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix
-# multimonitor support for --scale and --size
-# check current multimonitor behaviour for weston on tty
+# check current multimonitor behaviour
 # --xdummy --gpu on tty allows real resolutions only
 # --xorg: check custom systemd start of X #7
 # check X in container #7
