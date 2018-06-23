@@ -10,6 +10,8 @@ Project website: https://github.com/mviereck/x11docker
 ### Changed
  - `--xorg`: Allow running Xorg as root from within X
    if `/etc/X11/Wrapper.config` is not configured to allow it.
+ - `--auto`: Prefer `--xpra` and `--xephyr` over `--nxagent`again.
+   `--nxagent` has too often issues with extension Composite.
 ### Fixed
  - `--xorg`: Secure check for free tty instead of guessing it.
  - `--xorg`: Error messages appear on new display instead of host display.

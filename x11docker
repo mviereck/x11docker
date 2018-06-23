@@ -126,23 +126,24 @@ Special options:
 X server options: 
      --auto            Auto choose X server (default).
                        (Regards options --desktop, --gpu, --wayland and --wm).
- -n, --nxagent         Nested X server running within your primary X server.
-                       Seamless applications or desktop mode with --desktop.
-                       (Needs 'nxagent', best since nxagent version 3.5.99).
+ -a, --xpra            Nested X server supporting seamless and --desktop mode.
+                       Needs 'xpra' on host. For faster startup see --nxagent.
  -y, --xephyr          Nested X server for --desktop mode. Without --desktop,
                        a host window manager will be provided (option --wm).
                        (Needs 'Xephyr' or 'Xnest').
- -a, --xpra            Nested X server supporting seamless and --desktop mode.
-                       Needs 'xpra' <= v2.2.5 on host.
+ -n, --nxagent         Nested X server supporting seamless and --desktop mode.
+                       Faster than --xpra and more flexible than --xephyr, but
+                       some compositing applications have issues.
+                       (Needs 'nxagent', best since nxagent version 3.5.99).
  -A, --xpra-xwayland   Like --xpra, but supports option --gpu.
                        (Needs 'xpra', 'Xwayland', 'weston' and 'xdotool').
- -Y, --weston-xwayland Like --xephyr, but supports option --gpu.
-                       Console start as well as nested within X possible.
+ -Y, --weston-xwayland Desktop mode like --xephyr, but supports option --gpu.
+                       Runs from console, within X and within Wayland.
                        (Needs 'weston' and 'Xwayland'.)
  -h, --hostdisplay     Share host display :0. Quite bad container isolation!
                        Least overhead of all X server options.
                        Some apps may fail due to restricted untrusted cookies.
-                       Remove restrictions with option --clipboard.
+                       Remove restrictions by the way with option --clipboard.
  -x, --xorg            Core Xorg server. Runs ootb from console.
                        Switch tty with <CTRL><ALT><F1>....<F12>.
                        To run from within X, edit '/etc/X11/Xwrapper.conf' and
@@ -642,7 +643,9 @@ rocknroll() {           # check if x11docker is still running
 waitfortheend() {       # wait for end of x11docker
   # signal is byte in $Timetosaygoodbyefifo
   # decent read to wait for signal to terminate
-  bash -c "read -n1 <$Timetosaygoodbyefifo ||:" ||:
+  while rocknroll; do
+    bash -c "read -n1 -t1 <&8"
+  done
 }
 waitforfilecreation() { # similar to inotify-wait: wait up to 15s for file $1 to be created
   # $1 file to wait for
@@ -865,7 +868,7 @@ depends() {             # check dependencies on host for X server option $1
   return ${Return:-"0"}
 }
 cleanup() {             # --cleanup : check for non-removed containers and left cache files
-  # e X11DOCKER_DONTCLEANFOLDER may be set by x11docker-gui to spare its cache folder.
+  # e X11DOCKER_LASTCLEANFOLDER may be set by x11docker-gui to spare its cache folder.
   
   local Orphanedcontainers= Orphanedfolders= Line=
   
@@ -877,7 +880,7 @@ cleanup() {             # --cleanup : check for non-removed containers and left 
   cd $Cachebasefolder || error "Could not cd to cache folder '$Cachebasefolder'."
   
   grep -q .cache/x11docker <<<$Cachebasefolder && Orphanedfolders=$(find "$Cachebasefolder" -mindepth 1 -maxdepth 1 -type d | sed s%$Cachebasefolder/%% | grep -v x11docker-gui)
-  [ "${X11DOCKER_DONTCLEANFOLDER:-}" ] && Orphanedfolders="$(echo "$Orphanedfolders" | grep -v $X11DOCKER_DONTCLEANFOLDER)"
+  [ "${X11DOCKER_LASTCLEANFOLDER:-}" ] && Orphanedfolders="$(echo "$Orphanedfolders" | grep -v $X11DOCKER_LASTCLEANFOLDER)"
   Orphanedcontainers="$(docker ps -a --filter name=x11docker_X --format "{{.Names}}")"
   Orphanedcontainers="$(env IFS='' echo $Orphanedcontainers)"
   
@@ -910,18 +913,22 @@ $(rm -R -f $Orphanedfolders 2>&1)"
     }
   }
   
-  Logfile=
-  
-  [ "${X11DOCKER_DONTCLEANFOLDER:-}" ] || {
-    note "Removing remaining files with: rm -Rf -v $Cachebasefolder/*"
-    rm -Rf -v $Cachebasefolder/*
-  
-    note "Removing cache base folder with: rmdir -v $Cachebasefolder" 
-    cd
-    [ "$(basename $Cachebasefolder)" = x11docker ] && rmdir -v $Cachebasefolder  || warning "Did not succeed in removing cache folder
-    $Cachebasefolder
-  Please run 'x11docker --cleanup' as root."
+  [ "${X11DOCKER_LASTCLEANFOLDER:-}" ] && {
+    echo timetosaygoodbye >>$X11DOCKER_LASTCLEANFOLDER/share/timetosaygoodbye
+    echo timetosaygoodbye >>$X11DOCKER_LASTCLEANFOLDER/share/timetosaygoodbye.fifo
+    sleep 2
   }
+  
+  Logfile=
+
+  note "Removing remaining files with: rm -Rf -v $Cachebasefolder/*"
+  rm -Rf -v $Cachebasefolder/*
+  
+  note "Removing cache base folder with: rmdir -v $Cachebasefolder" 
+  cd
+  [ "$(basename $Cachebasefolder)" = x11docker ] && rmdir -v $Cachebasefolder  || warning "Did not succeed in removing cache folder
+  $Cachebasefolder
+  Please run 'x11docker --cleanup' as root."
   
   docker info >/dev/null 2>/dev/null || warning "Could not check for docker images. 
   Please run 'x11docker --cleanup' as root
@@ -1193,7 +1200,8 @@ X11dockerargs="$*"                              # arguments for x11docker, store
 Imagename=""                                    # name of image to run
 Imagecommand=""                                 # image command [+args]
 Imagenametr=""                                  # image name with : and / replaced by - for use with container name and --home folder
-Hostexe=""                                      # contains host executable
+Hostexe=""                                      # option --exe: contains host executable
+Hostexebasename=""                              # option --exe: host executeable name without path or options
 Customdockeroptions=""                                # custom options for "docker run". Provide after -- and before image name, encapsulated with "" (or without whitespaces)
 
 # docker variables
@@ -1785,7 +1793,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
     [ "$Screensize" ]           && [ "$Tty" = "yes" ]            && Xserver="--xorg"
     [ -z "$Hostdisplay" ]       && [ -n "$Hostwaylandsocket" ]   && Xserver="--weston-xwayland"
     [ "$Sharewayland" = "yes" ] && { [ -n "$Hostwaylandsocket" ] && [ "$Desktopmode" = "no" ] && Xserver="--hostwayland" || Xserver="--weston" ; }
-    { [ "$Xserver" = "--xpra" ] || [ "$Xserver" = "--xephyr" ];} && Xserver="--nxagent"
+#    { [ "$Xserver" = "--xpra" ] || [ "$Xserver" = "--xephyr" ];} && Xserver="--nxagent"
   }
 
   [ "$Gpu" = "yes" ] && case $Xserver in
@@ -1800,9 +1808,18 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
       Xserver="--weston-xwayland"
     ;;
     --nxagent)
-      note "Option --nxagent does not support GPU access.
+      case "$Desktopmode" in
+        yes)
+          note "Option --nxagent does not support GPU access.
+  Fallback: Will try to use option --weston-xwayland."
+          Xserver="--weston-xwayland"
+        ;;
+        no)
+          note "Option --nxagent does not support GPU access.
   Fallback: Will try to use option --xpra-xwayland."
-      Xserver="--xpra-xwayland"
+          Xserver="--xpra-xwayland"
+        ;;
+      esac
     ;;
     --xdummy|--xvfb) 
       note "Using special setup with Weston, Xwayland and xdotool
@@ -1836,7 +1853,6 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   [ "$Xserver" = "--hostwayland" ]     && { depends --hostwayland     || Xserver="--weston"  ; }
   [ "$Xserver" = "--nxagent" ]         && { depends --nxagent         || { [ "$Desktopmode" = "yes" ] && Xserver="--xephyr"        || Xserver="--xpra" ; } ; }
   [ "$Xserver" = "--xpra" ]            && { depends --xpra            || { depends --nxagent          && Xserver="--nxagent"       || Xserver="--xephyr" ; } ; }
-  [ "$Xserver" = "--xpra" ]            && { depends --xpra            || { depends --nxagent          && Xserver="--nxagent"       || Xserver="--xephyr" ; } ; }
   [ "$Xserver" = "--xorg" ]            && { depends --xorg            || Xserver="--weston-xwayland" ; }
   [ "$Xserver" = "--xpra-xwayland" ]   && { depends --xpra            || Xserver="--weston-xwayland" ; }
   [ "$Xserver" = "--xwayland" ]        && { depends --xwayland        || Xserver="--weston-xwayland" ; }
@@ -1855,9 +1871,9 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   [ "$Xserver" = "--xephyr" ]         && {  depends --xephyr || {
                                               depends --kwin-xwayland   && Xserver="--kwin-xwayland" 
                                               depends --hostdisplay     && [ "$Desktopmode" = "no" ] && Xserver="--hostdisplay"
+                                              depends --nxagent         && Xserver="--nxagent"
                                               depends --weston-xwayland && Xserver="--weston-xwayland" 
                                               depends --xpra            && Xserver="--xpra"
-                                              depends --nxagent         && Xserver="--nxagent"
                                             }
     [ "$Gpu" = "yes" ] && case $Desktopmode in
       yes)                                  depends --weston-xwayland && Xserver="--weston-xwayland" ;;
@@ -1869,7 +1885,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   depends $Xserver || error "Did not find a possibility to provide a display.
   Recommendations:
     To run within an already running X server, install one or all of:
-      nxagent Xephyr xpra
+      Xephyr xpra nxagent
     To run with GPU acceleration, install:
       weston and Xwayland, optionally also: xpra and xdotool
     To run from TTY or within Wayland, install:
@@ -1895,7 +1911,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   (As a default configuration, only root or console users can do that).
   
   Possible solutions:
-  1.) Install one of nested X servers 'nxagent', 'Xephyr' or 'Xnest'.
+  1.) Install one of nested X servers 'Xephyr', 'Xnest' or 'nxagent'.
       For --gpu support: install 'weston' and 'Xwayland'.
   2.) Switch to console tty1...tty6 with <CTRL><ALT><F1>...<F6>
       and start x11docker there.
@@ -1921,7 +1937,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
         case $Gpu in
           no)  note "Did not find a nice solution to run a seamless application
   on your desktop. (Only insecure option --hostdisplay would work).
-  It is recommended to install nxagent or xpra." ;;
+  It is recommended to install xpra or nxagent." ;;
           yes) note "Did not find a nice solution to run a seamless application with
   option --gpu on your desktop. (Only insecure option --hostdisplay would work).
   It is recommended to install xpra, weston, Xwayland and xdotool." ;;
@@ -1964,7 +1980,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
       xdpyinfo | grep -q SECURITY || {
         note "Your X server does not support untrusted cookies.
   Have to use trusted cookies and to enable insecure option --hostipc.
-  Consider to use options --nxagent or --xpra instead of --hostdisplay."
+  Consider to use options --xpra or --nxagent instead of --hostdisplay."
         Trusted="yes"
         Sharehostipc="yes"
       } 
@@ -2001,7 +2017,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
       warning "For SSH connection with option --hostdisplay
   x11docker must enable options --hostipc, --hostnet and --trusted.
   It is recommended to user other X server options 
-  like --nxagent, --xpra or --xephyr."
+  like --xpra, --xephyr or --nxagent."
       Sharehostipc="yes"
       Sharehostnet="yes"
       Trusted="yes"
@@ -2164,11 +2180,11 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
     --hostdisplay)
       [ "$Autochooseserver" = "yes" ] && note "To allow protection against X security leaks,
   please install one or more of:
-    nxagent, xpra, Xephyr, weston+Xwayland, kwin_wayland+Xwayland or Xnest.
+    xpra, Xephyr, nxagent, weston+Xwayland, kwin_wayland+Xwayland or Xnest.
   or run a second Xorg server with option --xorg."
       [ "$Trusted" = "no" ] && {
         warning "Option --hostdisplay provides only low container isolation!
-  It is recommended to use another X server option like --nxagent or --xpra.
+  It is recommended to use another X server option like --xpra or --nxagent.
   
   To improve security with --hostdisplay x11docker uses untrusted cookies.
   This can lead to strange behaviour of some applications.
@@ -2216,16 +2232,23 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   recommended to install at least xpra v1.0."
         [ "$Desktopmode" = "yes" ] && {
           note "Your xpra version does not support desktop mode.
-  Please use another X server option like --nxagent or --xephyr."
+  Please use another X server option like --xephyr or --nxagent."
         } ||:
       } || {
         Xpraoptions="$Xpraoptions --webcam=no"
       }
       [ "$Desktopmode" = "yes" ] && verlt "$Xpraversion" "xpra v2.2-r17117" && note "Xpra desktop mode works best since xpra v2.2-r17117.
   You have installed lower version $Xpraversion.
-  It is recommended to use --nxagent or --xephyr instead.
+  It is recommended to use --xephyr or --nxagent instead.
   Rendering issues can be reduced disabling OpenGL in Xpra tray icon. Screen
   size issues can be avoided with non-integer scaling (e.g. --scale=1.01)."
+      [ "$Desktopmode" = "no" ] && note "xpra startup is rather slow. For faster startup
+  with seamless applications,   try --nxagent.
+  If security is not a concern, try --hostdisplay."
+    ;;
+    
+    --xephyr) note "Xephyr is a quite stable nested X server.
+  Less stable, but resizeable is nxagent with option --nxagent."
     ;;
   
     --nxagent)
@@ -3043,6 +3066,9 @@ fi
   case $Xserver in
     --nxagent)
       { [ "$Sharehostipc" = "yes" ] || [ "$X11dockermode" = "exe" ] ; } && Xserveroptions="$Xserveroptions -shmem -shpix" || Xserveroptions="$Xserveroptions -noshmem -noshpix"
+# fixes issues with e.g. enlightenment, causes issues with e.g. xfce4-terminal. Development in nx-libs is in progress.
+#      Xserveroptions="$Xserveroptions \\
+#  +extension Composite"
     ;;
     *)
       # general X server options
@@ -4945,10 +4971,10 @@ start() {
   #[ "$Debugmode" = "yes" ] && echo "set -x"
 
   # declaring functions echoes them into xinitrc
-  echo "Timetosaygoodbyefifo=$Timetosaygoodbyefifo"
+  echo "Timetosaygoodbye=$Timetosaygoodbye"
   echo "Bgpidfile=$Bgpidfile"
   declare -f storepid
-  declare -f waitfortheend
+  declare -f rocknroll waitfortheend
   declare -f no_xhost 
   
   echo "$Messagefifofuncs"
@@ -5439,7 +5465,7 @@ $(tail $Compositorlogfile)"
   After crashing 6 times, x11docker will terminate."
             [ "$Xpracrashcount" -eq 6 ] && error "Xpra server crashed $Xpracrashcount times.
   x11docker stops now. Try out other X server options
-  like --nxagent --xephyr or --hostdisplay."
+  like --nxagent, --xephyr or --hostdisplay."
             warning "xpra server seems to have crashed the $Xpracrashcount. time.
   After 6 crashes, x11docker will terminate on itself.
   Will restart xpra now. Last lines of xpra server log:
