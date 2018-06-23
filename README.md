@@ -149,7 +149,7 @@ x11docker checks dependencies for chosen options on startup and shows terminal m
 
 _Basics:_
  - If no additional X server is installed, only less isolated option `--hostdisplay` will work out of the box within X, and option `--xorg` from console. (To use `--xorg` within X, look at [setup for option --xorg](#setup-for-option---xorg)).
- - As a **well working base** for convenience and security, it is recommended to install [`nxagent`](https://packages.debian.org/experimental/nxagent) (seamless applications and desktop mode) or `Xephyr` (desktop mode).
+ - As a **well working base** for convenience and security, it is recommended to install [`xpra`](http://xpra.org/) (seamless mode) and `Xephyr` (nested desktop mode).
  - Already installed on most systems with an X server: `xrandr`, `xauth` and `xdpyinfo`.
  
 _Advanced usage:_
@@ -178,6 +178,7 @@ _Advanced usage:_
      - Alternativly, you can install a driver version matching your host setup in image yourself. Note that this image will not be portable anymore.
  
 _Rarer needed dependencies for special options:_
+ - `--nxagent` needs `nxagent`. Faster and more flexible than `xpra` and `Xephyr`, but less reliable.
  - `--kwin` and `--kwin-xwayland` need `kwin_wayland`, included in modern `kwin` packages.
  - `--xdummy` needs dummy video driver `xserver-xorg-video-dummy` (debian) or `xorg-x11-drv-dummy` (fedora).
  - `--xvfb` needs `Xvfb`
@@ -187,7 +188,7 @@ _Rarer needed dependencies for special options:_
  - `--install`, `--update` and `--remove` need `wget`, `unzip` and `xdg-icon-resource`.
    
 _List of all host packages for all possible x11docker options (debian package names):_
- - `nxagent xserver-xephyr weston xwayland xpra kwin xvfb xserver-xorg-video-dummy xauth xclip xdpyinfo xrandr xfishtank xdg-utils xdotool unzip wget`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
+ - `xserver-xephyr xpra weston xwayland nxagent kwin xvfb xserver-xorg-video-dummy xauth xclip xdpyinfo xrandr xfishtank xdg-utils xdotool unzip wget`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
 
 ![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
 
