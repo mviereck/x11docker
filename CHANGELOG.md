@@ -15,8 +15,9 @@ Project website: https://github.com/mviereck/x11docker
 ### Fixed
  - `--xorg`: Secure check for free tty instead of guessing it.
  - `--xorg`: Error messages appear on new display instead of host display.
- - `--sysvinit`: fixed shutdown on CTRL-C / SIGINT.
+ - `--sysvinit`, `--runit`, `--openrc`: clean shutdown on CTRL-C / SIGINT.
  - `x11docker-gui` on console: fixed issue with self-terminating on cleanup.
+ - errors within subshells did not reliably terminate x11docker.
 
 ## [4.3.5](https://github.com/mviereck/x11docker/releases/tag/v4.3.5) - 2018-06-21
 ### Changed

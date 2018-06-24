@@ -456,6 +456,8 @@ $(pstree -p $Pid1pid ||:)"
   debugnote "List of stored background processes:
 $(cat $Bgpidfile 2>/dev/null)"
 
+  [ "$$" = "$BASHPID" ] || saygoodbye finish-subshell
+
   # check for background processes stored in $Bgpidfile
   [ -s "$Bgpidfile" ] && {
     while read -r Line ; do 
@@ -512,9 +514,6 @@ $(ps -p $Pid)"
   }
 
   saygoodbye "finish"
-  
-  # catch case where finish is called by error in a subshell. finish should handle following part in main process only.
-  [ "$$" = "$BASHPID" ] || return 0
 
   # Check if container is still running.
   # if kill of PID 1 failed in loop above, most times terminating X server will already have stopped GUI applications.
@@ -3782,29 +3781,7 @@ done
 
   # enable dbus
   case $Initsystem in
-    systemd)
-      Dbusdaemon="yes"
-    ;;
-    sysvinit|openrc|runit) 
-      Dbusdaemon="yes"
-      [ "$Sharecgroup" = "no" ] && note "If you want to use elogind in container,
-  you also need to set option --sharecgroup."
-  
-      # DBus service for shutdown of init systems. Watches $Timetosaygoodbyefifo
-      Dbuswatchservice="$Sharefolder/org.x11docker.watch.service" && mkfile $Dbuswatchservice
-      Dbuswatchservicescript="$Sharefolder/dbus.watch" && mkfile $Dbuswatchservicescript
-      echo "[D-BUS service]
-Name=org.x11docker.watch
-Exec=$Cshare/dbus.watch
-User=root
-" >> $Dbuswatchservice
-      echo "#! /bin/sh
-read Dummy <$Cshare/timetosaygoodbye.fifo
-echo timetosaygoodbye >$Cshare/timetosaygoodbye.fifo
-echo 'x11docker: dbus.watch.service sends: shutdown -h now
-" >> $Dbuswatchservicescript
-      chmod +x $Dbuswatchservicescript
-    ;;
+    systemd|sysvinit|openrc|runit) Dbusdaemon="yes" ;;
   esac
   
   case $Initsystem in
@@ -4689,8 +4666,6 @@ exec 2>&1
 for Service in \$(ls /etc/runit/runsvdir/default/) ; do waitforservice \$Service ;done
 echo \"Current status of runit services:\"
 for Service in \$(ls /etc/runit/runsvdir/default/) ; do sv status      \$Service ;done
-# x11docker service should only run once
-sv once x11docker
 su - --shell=/bin/sh $Benutzer $Cshare/container.CMD.sh
 runit-init 0
 ' > /etc/sv/x11docker/run"
@@ -4724,9 +4699,10 @@ start() {
     sysvinit)
       echo "# add x11docker start command to rc.local"
       echo "sed -i '/exit 0/d' /etc/rc.local"
-      echo "echo 'su - -s /bin/sh $Benutzer $Cshare/container.CMD.sh || echo \"Exit code: \$?\"' >> /etc/rc.local"
-      echo "echo 'echo \"x11docker: rc.local sends shutdown -h now\"' >> /etc/rc.local"
-      echo "echo 'shutdown -h now' >> /etc/rc.local"
+      echo "echo 'su - -s /bin/sh $Benutzer $Cshare/container.CMD.sh || echo \"x11docker: Exit code of x11docker.CMD.sh: \$?\"
+echo \"x11docker: rc.local sends shutdown -h now\"
+shutdown -h now
+exit 0' >> /etc/rc.local"
     ;;  
   esac
   
@@ -4778,8 +4754,6 @@ start() {
       echo "  esac"
       echo "done"
       
-      [ "$Switchcontaineruser" = "yes" ] && [ "$Initsystem" != "systemd" ] && echo "cp $Cshare/org.x11docker.watch.service /usr/share/dbus-1/system-services/"
-      
       echo "echo 'x11docker: DBus: starting dbus system daemon'"
       echo "dbus-daemon --system --fork"
       echo "for Count in 1 2 3 4 5; do"
@@ -4825,10 +4799,6 @@ start() {
         echo "  case \$Name in"
         echo "    org.freedesktop.PolicyKit1|org.freedesktop.Accounts) ;;"
         echo "    org.freedesktop.login1) ;;"
-        echo "    org.x11docker.watch)"
-        echo '      verbose -d "DBus: starting service $Name: $Command"'
-        echo '      sh -c "$Command" &'
-        echo '    ;;'
         echo '    *)'
         echo '      verbose -d "DBus: starting service $Name: $Command"'
         echo '      sh -c "$Command" &'
@@ -4915,6 +4885,12 @@ start() {
         echo "\$Exec /bin/su - -s /bin/sh $Benutzer $Cshare/container.CMD.sh" 
       ;;
       runit|openrc|sysvinit) 
+        echo "{
+  read Dummy <$Cshare/timetosaygoodbye.fifo
+  echo timetosaygoodbye >$Cshare/timetosaygoodbye.fifo
+  echo 'x11docker: timetosaygoodbye.watch sends: shutdown -h now'
+  shutdown -h now
+} &"
         echo "exec /sbin/init"
       ;;
       systemd)
@@ -5685,9 +5661,8 @@ $(tail $Compositorlogfile)")"
   
 ######### ToDo notes for development
 todo() {
-# --weston/x: allow tty switch/option --vt if running as root?
-# check dbus.watch.service, works well in sysvinit, but not obvious in --openrc and --runit.
 # further checks of pam.d
+# --weston/x: allow tty switch/option --vt if running as root?
 # error message window in wayland fails: xterm: no display. should use konsole
 # x11docker-gui: menu entry management? persistant command storage?
 
