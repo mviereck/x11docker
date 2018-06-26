@@ -14,6 +14,8 @@ Project website: https://github.com/mviereck/x11docker
    `--nxagent` has too often issues with extension Composite.
  - `--xpra`, `--xpra-xayland`: set maximal `--quality 100`.
 ### Fixed
+ - `--xpra`: Check for tty timeout had a bug for multiple applications
+   that caused all clients of same server to terminate if one was closed.
  - `--xorg`: Secure check for free tty instead of guessing it.
  - `--xorg`: Error messages appear on new display instead of host display.
  - `--sysvinit`, `--runit`, `--openrc`: clean shutdown on CTRL-C / SIGINT.

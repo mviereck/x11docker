@@ -524,12 +524,12 @@ $(ps -p $Pid)"
   Will wait up to 10 seconds for docker to finish."
       Zeit=$(date +%s)
       while checkpid $Containerpid ; do
-        note "waiting for container to terminate ..."
+        note "Waiting for container to terminate ..."
         sleep 1
         [ 10 -lt $(($(date +%s) - $Zeit)) ] && break
       done
       if checkpid $Containerpid ; then
-        note "docker container didn't terminate as it should. 
+        note "Container did not terminate as it should. 
   Will not clean cache to avoid file permission issues. 
   You can remove the new container with command:
     docker rm -f $Containername
@@ -539,7 +539,7 @@ $(ps -p $Pid)"
     x11docker --cleanup"
         Preservecachefiles="yes"
       else
-        note "docker container terminated successfully"
+        note "Container terminated successfully"
       fi
     }
   }
@@ -651,7 +651,7 @@ waitforfilecreation() { # similar to inotify-wait: wait up to 15s for file $1 to
   # $2 time to wait. default: 15s. possible: infinity
   local Zeit= Warten= Dauer= Count=
   Zeit=$(date +%s)
-  verbose "Waiting for file creation of ${1:-}"
+  verbose -d "Waiting for file creation of ${1:-}"
   case ${2:-} in
     "")           Warten=15 ;;
     infinity|inf) Warten=32000 ;; # nearly infinity in fast-moving today ...
@@ -684,7 +684,7 @@ waitforfilecontent() {  # wait for file $1 to be not empty
     "")       Warten=15 ;;
     *)        Warten="${2:-}" ;;
   esac
-  verbose "Waiting for file content in ${1:-}"
+  verbose -d "Waiting for file content in ${1:-}"
   while [ ! -s "${1:-}" ] ; do
     Count=$(( Count + 1 ))
     Dauer=$(( $(date +%s) - $Zeit ))
@@ -717,7 +717,7 @@ $(grep -i -E 'error|failed|fatal'  <"${2:-}")"
 
     Count=$(( Count + 1 ))
     Dauer=$(( $(date +%s) - $Zeit ))
-    verbose "Waiting since ${Dauer}s for ${1:-} to be ready..."
+    verbose "Waiting since ${Dauer}s for ${1:-} to be ready."
     sleep $(awk "BEGIN { print $Count * 0.1 }")
     [ $Warten -lt $Dauer ] && return 1
     
@@ -842,6 +842,7 @@ depends() {             # check dependencies on host for X server option $1
         [ "$Xpraversion" ] || {
           Xpraversion="$(xpra --version)"
           Xprarelease="$(echo $Xpraversion | cut -d- -f2)"
+          verbose "Xpra version: $Xpraversion"
         }
         ! verlte "$Xprarelease" "r18663" && verlte $Xprarelease "r19519" && {
           [ "$Sharehostipc" = "no" ] && {
@@ -1035,7 +1036,7 @@ installer() {           # --install, --update, --update-master, --remove: Instal
       note "Installed x11docker version $Newversion"
     ;;
     --remove)
-      note "removing x11docker from your system"
+      note "Removing x11docker from your system"
       cleanup
       [ -x /usr/local/bin/x11docker ] && {    # from older installations. /usr/bin is default now as /usr/local/bin can miss in $PATH for root
         rm -v /usr/local/bin/x11docker
@@ -1208,6 +1209,7 @@ X11dockermode="run"                             # can be either "xonly", "run" o
 X11dockerargs="$*"                              # arguments for x11docker, stored for logfile and for --starter
 Imagename=""                                    # name of image to run
 Imagecommand=""                                 # image command [+args]
+Imagecommandbasename=""                         # image command without path or args
 Imagenametr=""                                  # image name with : and / replaced by - for use with container name and --home folder
 Hostexe=""                                      # option --exe: contains host executable
 Hostexebasename=""                              # option --exe: host executeable name without path or options
@@ -1309,7 +1311,7 @@ Modeline=""                                     # screen modeline describing dis
 Maxxaxis=""                                     # maximal screen size of display to support fullscreen beside windowed desktop
 Maxyaxis=""
 Fullscreen="no"                                 # option '-f, --fullscreen': use fullscreen mode (Xephyr only)
-Scaling="0"                                     # option --scale: Scaling factor for xpra and weston
+Scaling=""                                      # option --scale: Scaling factor for xpra and weston
 Rotation=""                                     # option --rotate: Rotation for --weston and --weston-xwayland 0/90/180/270/flipped/flipped-90/..
 Dpi=""                                          # option --dpi: dots per inch to tell the clients.
 Outputcount="1"                                 # option --output-count, quantum of virtual screens for Weston and Xephyr
@@ -1783,6 +1785,43 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   }
 }
 
+{ #### part: check run/--exe/--xonly
+  [ -z "$Imagename" ] && X11dockermode="xonly"
+  case $X11dockermode in
+    run)
+      command -v docker >/dev/null || error "docker is not installed.
+  To run docker images, you need to install docker."
+      verbose "Image name: $Imagename"
+      verbose "Image command: $Imagecommand"
+      Imagecommandbasename=$(basename $(echo $Imagecommand | cut -d' ' -f1) | tr -cd '[:alpha:][:digit:][:blank:]-_.')
+    ;;
+    exe)
+      Hostexe="$Imagename $Imagecommand"
+      Hostexebasename=$(basename $(echo $Hostexe | cut -d' ' -f1) | tr -cd '[:alpha:][:digit:][:blank:]-_.')
+      Imagename=""
+      Imagecommand=""
+      command -v $Hostexe >/dev/null || error "Command '$Hostexe' not found."
+      verbose "Host application to execute: $Hostexe"
+    ;;
+    xonly)
+      Showdisplayenvironment="yes"
+      case $Xserver in
+        --nothing|--hostwayland) 
+          note "You are using $Xserver along with --xonly. 
+  That will achieve nothing"
+        ;;
+        *)
+          Hostexe="sleep infinity"
+          Imagename=""
+          Imagecommand=""
+          Hostexebasename="xonly"
+          X11dockermode="exe"
+        ;;
+      esac
+    ;;
+  esac
+}
+
 { #### part: check X server dependencies, auto-choose X server
 
   ## default option '--auto': Try to automatically choose best matching and available X server
@@ -1795,10 +1834,10 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
     [ "$Gpu" = "yes" ]          && [ "$Xserver" = "--xephyr" ]   && Xserver="--weston-xwayland"
     [ "$Outputcount" != "1" ]                                    && Xserver="--weston-xwayland"
     [ -n "$Rotation" ]                                           && Xserver="--weston-xwayland"
-    [ "$Scaling" != "0" ]       && [ "$Gpu" = "yes" ]            && Xserver="--xpra-xwayland"
-    [ "$Scaling" != "0" ]       && [ "$Gpu" = "no" ]             && Xserver="--xpra"
+    [ "$Scaling" ]              && [ "$Gpu" = "yes" ]            && Xserver="--xpra-xwayland"
+    [ "$Scaling" ]              && [ "$Gpu" = "no" ]             && Xserver="--xpra"
     [ "$Tty" = "yes" ]                                           && Xserver="--weston-xwayland"
-    [ "$Scaling" != "0" ]       && [ "$Tty" = "yes" ]            && Xserver="--xorg"
+    [ "$Scaling" ]              && [ "$Tty" = "yes" ]            && Xserver="--xorg"
     [ "$Screensize" ]           && [ "$Tty" = "yes" ]            && Xserver="--xorg"
     [ -z "$Hostdisplay" ]       && [ -n "$Hostwaylandsocket" ]   && Xserver="--weston-xwayland"
     [ "$Sharewayland" = "yes" ] && { [ -n "$Hostwaylandsocket" ] && [ "$Desktopmode" = "no" ] && Xserver="--hostwayland" || Xserver="--weston" ; }
@@ -1993,7 +2032,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
         Trusted="yes"
         Sharehostipc="yes"
       } 
-    } || note "'xdpyinfo' not found. Need it to check
+    } || note "Command 'xdpyinfo' not found. Need it to check
   whether Xorg supports untrusted cookies for --hostdisplay.
   Please install 'xdpyinfo'."
   }
@@ -2043,21 +2082,21 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   }
 
   # --scale
-  [ "$Scaling" != "0" ] && {
+  [ "$Scaling" ] && {
     case $Xserver in
       --weston|--weston-xwayland)
         [[ $Scaling =~ ^[1-9]$ ]] || {
           note "The scale factor for option $Xserver must be 
   one of   1  2  3  4  5  6  7  8  9
   Fallback: disabling option --scale"
-          Scaling="0"
+          Scaling=""
         }
       ;;
       --xpra|--xpra-xwayland|--xorg)
         isnum $Scaling || {
           note "Option --scale needs a number. '$Scaling' is not allowed.
   Fallback: disabling option --scale"
-          Scaling="0"
+          Scaling=""
         }
       ;;
       *) 
@@ -2065,7 +2104,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   Available for --xpra, --xpra-xwayland and --xorg (float values possible)
   and for --weston and --weston-xwayland (full integer values only).
   Fallback: disabling option --scale"
-        Scaling="0" 
+        Scaling="" 
       ;;
     esac
     case $Xserver in
@@ -2074,7 +2113,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
           note "Your xpra version is quite old and does not support --scale.
   You need at least xpra version 0.16
   Fallback: disabling option --scale"
-          Scaling="0"
+          Scaling=""
         }        
       ;;
     esac
@@ -2088,12 +2127,12 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   --scale in desktop mode works best with option --xorg." 
       ;;
       --xpra-xwayland)
-        [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] && {
+        [ "1" = "$(awk -v a="${Scaling:-1}" 'BEGIN {print (a < 1)}')" ] && {
           command -v weston >/dev/null || { 
             note "Option --xpra-xwayland needs weston 
   for scale factor smaller than 1.
   Fallback: disabling option --scale"
-            Scaling="0"
+            Scaling=""
           }
         }
       ;;
@@ -2127,7 +2166,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   
   # xrandr: --scale --size --rotate
   command -v xrandr >/dev/null || case $Xserver in
-    --xorg) { [ "$Scaling" != "0" ] || [ -n "$Rotation" ] || [ -n "$Screensize" ] ; } && note "Option --xorg needs 'xrandr' to support
+    --xorg) { [ "$Scaling" ] || [ -n "$Rotation" ] || [ -n "$Screensize" ] ; } && note "Option --xorg needs 'xrandr' to support
   options --size, --scale and --rotate.
   Please install 'xrandr'."
     ;;
@@ -2146,7 +2185,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
     case $Xserver in
       --xephyr|--weston|--kwin|--weston-xwayland|--kwin-xwayland) 
         [[ "$Outputcount" =~ ^[1-9]$ ]] || {
-          note "--output-count value must be one of 1 2 3 4 5 6 7 8 9
+          note "Option --output-count: Value must be one of 1 2 3 4 5 6 7 8 9
   Disabling invalid value $Outputcount"
           Outputcount="1"
         }
@@ -2243,15 +2282,13 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
           note "Your xpra version does not support desktop mode.
   Please use another X server option like --xephyr or --nxagent."
         } ||:
-      } || {
-        Xpraoptions="$Xpraoptions --webcam=no"
       }
       [ "$Desktopmode" = "yes" ] && verlt "$Xpraversion" "xpra v2.2-r17117" && note "Xpra desktop mode works best since xpra v2.2-r17117.
   You have installed lower version $Xpraversion.
   It is recommended to use --xephyr or --nxagent instead.
   Rendering issues can be reduced disabling OpenGL in Xpra tray icon. Screen
   size issues can be avoided with non-integer scaling (e.g. --scale=1.01)."
-      [ "$Desktopmode" = "no" ] && note "xpra startup is rather slow. For faster startup
+      [ "$Desktopmode" = "no" ] && note "Xpra startup is rather slow. For faster startup
   with seamless applications,   try --nxagent.
   If security is not a concern, try --hostdisplay."
       [ "$Gpu" = "yes" ] && note "If performance of GPU acceleration with $Xserver
@@ -2606,7 +2643,7 @@ After finish: $Logbackup"
 { #### part: check physical and virtual screen size
   # Dummy start of Xwayland to detect screen size in pure Wayland environments
   [ -z "$Hostdisplay" ] && [ -n "$Hostwaylandsocket" ] && command -v Xwayland >/dev/null && {
-    verbose -d "Starting Xwayland to get screen size"
+    verbose -d "Running Xwayland to get screen size"
     Xwayland $Newdisplay -rootless -extension GLX +extension RANDR >>$Xinitlogfile 2>&1 & Xwaylandpid=$! && disown
     waitforfilecreation $Newxsocket
     export DISPLAY=$Newdisplay
@@ -2648,7 +2685,7 @@ After finish: $Logbackup"
       [ "$Tty" = "yes" ] && {
         : # nothing to do on tty; maybe should check --size=$Screensize
       } || {
-        command -v xrandr > /dev/null 2>/dev/null && xrandr 2>/dev/null | grep -q ' connected' && { # reduce size to primary monitor for windowed desktop
+        command -v xrandr > /dev/null && xrandr 2>/dev/null | grep -q ' connected' && { # reduce size to primary monitor for windowed desktop
           Xaxis=$(xrandr 2>/dev/null | grep ' connected' | head -n1 | cut -dx -f1 | rev | cut -d' ' -f1 | rev)
           Yaxis=$(xrandr 2>/dev/null | grep ' connected' | head -n1 | cut -dx -f2 | cut -d' ' -f1 | cut -d+ -f1)
           Xaxis=$((Xaxis-96))
@@ -2673,7 +2710,7 @@ After finish: $Logbackup"
   }
   
   # regard scaling (option --scale)
-  [ "$Scaling" = "0" ] || {
+  [ "$Scaling" ] && {
     Xaxis=$(awk -v a=$Xaxis -v b=$Scaling 'BEGIN {print (a / b)}')
     Xaxis=${Xaxis%.*}
     Yaxis=$(awk -v a=$Yaxis -v b=$Scaling 'BEGIN {print (a / b)}')
@@ -2691,6 +2728,9 @@ After finish: $Logbackup"
     Maxxaxis=$Xaxis
     Maxyaxis=$Yaxis
   }
+  [ "$Xaxis" -gt "$Maxxaxis" ] && Maxxaxis=$Xaxis
+  [ "$Yaxis" -gt "$Maxyaxis" ] && Maxyaxis=$Yaxis
+  
   Modeline="$(cvt $Xaxis $Yaxis | tail -n1 | cut -d' ' -f2-)"
   
   # kill dummy Xwayland process
@@ -2701,7 +2741,8 @@ After finish: $Logbackup"
   export DISPLAY=$Hostdisplay
   
   verbose "Virtual screen size: $Screensize"
-  verbose "Physical screen size: $(xrandr 2>/dev/null | grep Screen ||:)"
+  verbose "Physical screen size: 
+  $(xrandr 2>/dev/null | grep Screen ||:)"
 }
 
 { #### part: --gpu: check nvidia driver
@@ -3080,7 +3121,7 @@ fi
       # general X server options
       Xserveroptions="$Xserveroptions -retro"
       Xserveroptions="$Xserveroptions \\
-  +extension Composite +extension RANDR +extension RENDER +extension GLX\\
+  +extension Composite +extension RANDR +extension RENDER +extension GLX \\
   +extension XVideo +extension DOUBLE-BUFFER"
       Xserveroptions="$Xserveroptions \\
   -extension X-Resource +extension SECURITY +extension DAMAGE"
@@ -3134,12 +3175,12 @@ fi
   # check DPI
   case $Xserver in
     --xpra|--xpra-xwayland)
-      { [ -n "$Dpi" ] || [ "$Scaling" != "0" ] ; } && verlt "$Xpraversion" "xpra v2.1-r16547" && ! verlt "$Xpraversion" "xpra v2.1" && {
+      { [ -n "$Dpi" ] || [ "$Scaling" ] ; } && verlt "$Xpraversion" "xpra v2.1-r16547" && ! verlt "$Xpraversion" "xpra v2.1" && {
         note "Option --dpi is buggy in $Xpraversion
   due to xpra bug #1605. Need at least xpra v2.1-r16547 or one of 2.0 series.
   This affects option --scale, too, leading to wrong font sizes.
   Fallback: disabling dpi settings."
-        # disabling further down
+        Dpi=
       } ;;
   esac
   case $Xserver in
@@ -3147,14 +3188,14 @@ fi
     *)
       [ -z "$Dpi" ] && {
         xdpyinfo >/dev/null 2>&1 && {
-        Dpi=$(xdpyinfo | grep dots | cut -dx -f2 | cut -d' ' -f1)
+          Dpi=$(xdpyinfo | grep dots | cut -dx -f2 | cut -d' ' -f1)
         } || {
           [ -n "$Hostdisplay" ] && [ -z "$(command -v xdpyinfo)" ] && note "Could not determine dpi settings. If you encounter too big or
   too small fonts with $Xserver, please install xdpyinfo or use option --dpi."
         }
         case $Xserver in
           --xpra|--xpra-xwayland)
-            [ "$Scaling" != "0" ] && {
+            [ "$Scaling" ] && {
               [ "$Desktopmode" = "no" ] || ! verlt "$Xpraversion" "xpra v2.2" && {  # xpra desktop mode has same dpi baviour as non-desktop since v2.2. Before that, dpi in xpra desktop mode must not be adjusted
                 Dpi=$(awk -v a="$Scaling" -v b="$Dpi" 'BEGIN {print (b * a * a)}')
                 Dpi=${Dpi%.*}
@@ -3165,35 +3206,63 @@ fi
       }
     ;;
   esac
-
-  # xpra specials
+  [ -n "$Dpi" ] && Xserveroptions="$Xserveroptions -dpi $Dpi"
+  
+  # xpra server and client command
   case $Xserver in
     --xpra|--xpra-xwayland)
+      # disable proxy for high versions
+      verlt "$Xpraversion" "xpra v2.1" || Xpraoptions="$Xpraoptions \\
+  --start-via-proxy=no"
       # disable --dpi for buggy versions
       [ -n "$Dpi" ] && verlt "$Xpraversion" "xpra v2.1-r16547" && ! verlt "$Xpraversion" "xpra v2.1" &&  Dpi=""
-      # disable proxy for high versions
-      verlt "$Xpraversion" "xpra v2.1" || Xpraoptions="$Xpraoptions --start-via-proxy=no"
-      # disable sound transfer, --pulseaudio and --alsa work different
-      Xpraoptions="$Xpraoptions --no-speaker --no-pulseaudio"
-      # no compression, best quality
-      Xpraoptions="$Xpraoptions -z0 --quality 100"
-      # disable possibly leaking options
-      Xpraoptions="$Xpraoptions --daemon=no --fake-xinerama=no --notifications=no --file-transfer=off --printing=no --html=off --systemd-run=no --mdns=no"
-      [ "$Fullscreen" = "yes" ]  && Xpraoptions="$Xpraoptions --desktop-fullscreen=yes"
-      [ "$Desktopmode" = "yes" ] && Xpraoptions="$Xpraoptions --title='$Imagename on $Newdisplay (shift+F11 toggles fullscreen)'"
-      [ "$Xkblayout" ] && Xpraoptions="$Xpraoptions --keyboard-layout='$Xkblayout' --keyboard-raw=yes"
-      # version check for scaling already done above
-      [ "$Scaling" != "0" ] && Xpraoptions="$Xpraoptions --desktop-scaling=$Scaling"
-      # debug options for xpra
-      #Xpraoptions="$Xpraoptions -d randr,geometry,screen"
+      verlt "$Xpraversion" "xpra v1.0" || Xpraoptions="$Xpraoptions \\
+  --webcam=no"
+      # --keymap
+      [ "$Xkblayout" ] && Xpraoptions="$Xpraoptions \\
+  --keyboard-layout='$Xkblayout' --keyboard-raw=yes"
+      
+      # xpra server command
+      [ "$Desktopmode" = "yes" ] && Xpraservercommand="xpra start-desktop" || Xpraservercommand="xpra start"
+      Xpraservercommand="$Xpraservercommand $Newdisplay --use-display $Xpraoptions \\
+  --no-daemon --fake-xinerama=no --systemd-run=no --mdns=no \\
+  --notifications=no --file-transfer=off --printing=no \\
+  --start-new-commands=no --dbus-proxy=no --no-pulseaudio \\
+  --html=off --session-name=\"$Hostexebasename$Imagename $Imagecommandbasename\""
+#      [ -n "$Dpi" ] && Xpraservercommand="$Xpraservercommand \\
+#  --dpi $Dpi"
+      verbose -d "Xpra server command:
+  $Xpraservercommand"
+  
+      # xpra client command ### --window-close=shutdown 
+      Xpraclientcommand="xpra attach $Newdisplay $Xpraoptions \\
+  -z0 --quality 100 \\
+  --no-speaker --no-pulseaudio"
+      [ "$Desktopmode" = "yes" ] && Xpraclientcommand="$Xpraclientcommand \\
+  --title='$Imagename on $Newdisplay (shift+F11 toggles fullscreen)'" || Xpraclientcommand="$Xpraclientcommand \\
+  --title='@title@ on ${Imagename:-"host"}'"
+      [ "$Fullscreen" = "yes" ]  && Xpraclientcommand="$Xpraclientcommand \\
+  --desktop-fullscreen=yes"
+      [ "$Scaling" ] && Xpraclientcommand="$Xpraclientcommand \\
+  --desktop-scaling=$Scaling"
+      [ -n "$Dpi" ] && Xpraclientcommand="$Xpraclientcommand \\
+  --dpi $Dpi"
+      case $Shareclipboard in
+        yes) Xpraclientcommand="$Xpraclientcommand --clipboard"    ;;
+        no)  Xpraclientcommand="$Xpraclientcommand --no-clipboard" ;; 
+      esac
+      verbose -d "Xpra client command:
+  $Xpraclientcommand"
+  
+      [ -e "/run/user/$Hostuseruid" ] || {
+        # can miss with option --hostuser, xpra needs it for socket
+        verbose -d "Creating /run/user/$Hostuseruid"
+        mkdir -p /run/user/$Hostuseruid
+        chown $Hostuser /run/user/$Hostuseruid
+        chmod 700 /run/user/$Hostuseruid
+      }
     ;;
   esac
-
-  # --dpi
-  [ -n "$Dpi" ] && { :
-    Xserveroptions="$Xserveroptions -dpi $Dpi"
-    Xpraoptions="$Xpraoptions --dpi $Dpi"
-  }
   
   # Prepare weston.ini: config file for Weston
   case $Xserver in
@@ -3221,7 +3290,7 @@ startup-animation=fade
       [ -z "$Westonoutput" ] && [ -n "$Hostwaylandsocket" ] && Westonoutput="WL"
 
       [ "$Tty" = "yes" ] && { 
-        [ -n "$Screensize" ] || [ "$Scaling" != "0" ] || [ -n "$Rotation" ] && {
+        [ -n "$Screensize" ] || [ "$Scaling" ] || [ -n "$Rotation" ] && {
           # short start&stop of Weston to grep name of monitor
           $Mksu "weston --no-config --backend=drm-backend.so >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
           Compositorpid=$(cat $Compositorpidfile)
@@ -3303,30 +3372,43 @@ $(tail "$Compositorlogfile")"
     ;;
     
     --xpra-xwayland|--xdummy-xwayland)
-      Xcommand="$(command -v Xwayland) $Newdisplay -rootless\\
+      Xcommand="$(command -v Xwayland) $Newdisplay \\
   $Xserveroptions"
-      [ -z "$Hostwaylandsocket" ] && Newwaylandsocket="wayland-$Newdisplaynumber" || {
+      [ "$Desktopmode" = "no" ] && [ "$Xserver" = "--xpra-xwayland" ] && Xcommand="$Xcommand \\
+  -rootless"
+      
+      # Weston is needed for Xwayland if no Wayland is running already, and also 
+      # if option scale has a value smaller than 1 to provide a virtual display larger than monitor
+      [ "$Hostwaylandsocket" ] && Needweston="no" || Needweston="yes"
+      [ "1" = "$(awk -v a="${Scaling:-1}" 'BEGIN {print (a < 1)}')" ] && Needweston="yes"
+      [ "$Needweston" = "yes" ] && {
+        Newwaylandsocket="wayland-$Newdisplaynumber"
+        [ "$Hostdisplay" ] && Westonoutput="X"
+        echo "[output]" >> $Westonini
+        case $Westonoutput in
+          X|WL) echo "name=${Westonoutput}1" >> $Westonini ;;
+          *)    echo "name=${Westonoutput}"  >> $Westonini ;;
+        esac
+        echo "mode=$Screensize" >> $Westonini
+        [ -n "$Customwestonini" ] && Westonini="$Customwestonini"
+        Compositorcommand="weston --socket=$Newwaylandsocket"
+        case $Westonoutput in
+          WL) Compositorcommand="$Compositorcommand --backend=wayland-backend.so" ;;
+          X)  Compositorcommand="$Compositorcommand --backend=x11-backend.so" ;;
+          *) 
+            case "$Tty" in
+              yes) Compositorcommand="$Compositorcommand --backend=drm-backend.so" ;;
+              no)  Compositorcommand="$Compositorcommand --backend=x11-backend.so" ;;
+            esac
+          ;;
+        esac
+        [ -n "$Customwestonini" ] && Westonini="$Customwestonini"
+        Compositorcommand="$Compositorcommand \\
+  --config='$Westonini'"
+      } || {
         Newwaylandsocket="$Hostwaylandsocket"
-        [ "$Scaling" != "0" ] && [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] && Newwaylandsocket="wayland-$Newdisplaynumber"
+        Compositorcommand=""
       }
-      echo "[output]" >> $Westonini
-      case $Westonoutput in
-        X|WL) echo "name=${Westonoutput}1" >> $Westonini ;;
-        *)    echo "name=${Westonoutput}"  >> $Westonini ;;
-      esac
-      echo "mode=$Screensize" >> $Westonini
-      [ -n "$Customwestonini" ] && Westonini="$Customwestonini"
-      Compositorcommand="weston --config='$Westonini' --socket=$Newwaylandsocket"
-      case $Westonoutput in
-        WL) Compositorcommand="$Compositorcommand --backend=wayland-backend.so" ;;
-        X)  Compositorcommand="$Compositorcommand --backend=x11-backend.so" ;;
-        *) 
-          case "$Tty" in
-            yes) Compositorcommand="$Compositorcommand --backend=drm-backend.so" ;;
-            no)  Compositorcommand="$Compositorcommand --backend=x11-backend.so" ;;
-          esac
-        ;;
-      esac
     ;;
     
     --weston|--weston-xwayland)
@@ -3334,6 +3416,7 @@ $(tail "$Compositorlogfile")"
   $Xserveroptions"
       [ "$Xserver" = "--weston" ]          && Sharewayland="yes"
       Newwaylandsocket="wayland-$Newdisplaynumber"
+      Compositorcommand="weston --socket=$Newwaylandsocket"
       [ -n "$Westonoutput" ] && for ((Count=1 ; Count<=$Outputcount ; Count++)) ; do
         [ "$Westonoutput" = "WL" ] || [ "$Westonoutput" = "X" ] || { 
           Count=""
@@ -3343,12 +3426,10 @@ $(tail "$Compositorlogfile")"
 name=$Westonoutput$Count
 mode=$Screensize
 " >> $Westonini
-        [ "$Scaling" != "0" ] && echo "scale=$Scaling"      >> $Westonini
+        [ "$Scaling" ]        && echo "scale=$Scaling"      >> $Westonini
         [ -n "$Rotation" ]    && echo "transform=$Rotation" >> $Westonini
         [ "$Count" ] || break
       done
-      [ -n "$Customwestonini" ] && Westonini="$Customwestonini"
-      Compositorcommand="weston --socket=$Newwaylandsocket --config='$Westonini'"
       [ "$Fullscreen" = "yes" ] && Compositorcommand="$Compositorcommand --fullscreen"
       [ "$Outputcount" = "1" ]  || Compositorcommand="$Compositorcommand --output-count=$Outputcount"
       case $Westonoutput in
@@ -3361,6 +3442,9 @@ mode=$Screensize
           esac
         ;;
       esac
+      [ -n "$Customwestonini" ] && Westonini="$Customwestonini"
+      Compositorcommand="$Compositorcommand \\
+  --config='$Westonini'"
     ;;
     
     --kwin-xwayland)
@@ -3473,10 +3557,9 @@ esac
   [ "$Sharewayland" = "yes" ] && [ -z "$Newwaylandsocket" ] && note "No wayland socket to share" && Sharewayland="no" 
   
   
-  [ "$Xcommand" ] && verbose "Created X server command:
+  [ "$Xcommand" ] && verbose -d "X server command:
   $Xcommand" 
-  [ "$Xpraversion" ] && verbose "$Xpraversion"
-  [ "$Compositorcommand" ] && verbose "Created compositor command:
+  [ "$Compositorcommand" ] && verbose -d "Compositor command:
   $Compositorcommand"
 }
 
@@ -3520,12 +3603,6 @@ esac
   # use xclip or xsel to share text clipboard content between X servers.
   # xpra and nxagent have their own clipboard management.
   # only xpra supports image clips.
- 
-  case $Shareclipboard in                        # option '-c, --clipboard'
-    yes) Xpraoptions="$Xpraoptions --clipboard"   ;;
-    no)  Xpraoptions="$Xpraoptions --no-clipboard" ;; 
-  esac
-  
   [ "$Shareclipboard" = "yes" ] && case $Xserver in
   
     --nothing|--weston|--hostwayland|--kwin) 
@@ -3578,40 +3655,6 @@ while [ ! -s "$Timetosaygoodbye" ] ; do
   sleep 0.5                        # sleep a bit to avoid high cpu usage
 done
 " >> $Shareclipboardscript
-    ;;
-  esac
-}
-
-{ #### part: check run/--exe/--xonly
-  [ -z "$Imagename" ] && X11dockermode="xonly" && Showdisplayenvironment="yes"
-  case $X11dockermode in
-    run)
-      command -v docker >/dev/null || error "docker is not installed.
-  To run docker images, you need to install docker."
-    ;;
-    exe)
-      Hostexe="$Imagename $Imagecommand"
-      Hostexebasename=$(basename $(echo $Hostexe | cut -d' ' -f1) | tr -cd '[:alpha:][:digit:][:blank:]-_.')
-      Imagename=""
-      Imagecommand=""
-      [ -z "$Hostexe" ]              && error "No host executable defined"
-      command -v $Hostexe >/dev/null || error "Command '$Hostexe' not found."
-    ;;
-    xonly)
-      case $Xserver in
-        --nothing|--hostwayland) 
-          note "You are using $Xserver along with --xonly. 
-  That will achieve nothing"
-        ;;
-        *)
-          Hostexe="sleep infinity"
-          Imagename=""
-          Imagecommand=""
-          Hostexebasename="xonly"
-          X11dockermode="exe"
-          Showdisplayenvironment="yes"
-        ;;
-      esac
     ;;
   esac
 }
@@ -3773,6 +3816,8 @@ done
       }
       writeaccess $Benutzeruid "$Benutzerhosthomefolder" || warning "User '$Benutzer' does not have write access to
   $Benutzerhosthomefolder."
+      verbose "Sharing directory $Benutzerhosthomefolder 
+  with container as its home directory $Benutzerhome"
     ;;
     no) Benutzerhome="/fakehome/$Benutzer" ;;
   esac
@@ -3908,7 +3953,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       
       Containername="x11docker_X${Newdisplaynumber}_${Mycookie}_$Imagenametr"
       Dockercommand="$Dockercommand --name=$Containername"
-      verbose -d "Container name: $Containername"
+      verbose "Container name: $Containername"
   
       [ "$Benutzeruid" = "0" ]     && Sudouser="yes"
       [ "$Sudouser" = "yes" ]      && Adminusercaps="yes"
@@ -4139,6 +4184,9 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
           esac
         ;;
       esac
+      
+      verbose -d "docker command:
+  $Dockercommand"
     ;;
   esac
 }
@@ -4287,7 +4335,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo   '  echo Imagecommand="\"$Imagecommand\""'
   echo   '  echo Entrypoint="\"$Entrypoint\""'
   echo   "  echo ''"
-  echo   "  echo 'verbose \"container system:'"
+  echo   "  echo 'verbose \"Container system:'"
   echo   "  echo '\$(cat /etc/os-release)\"'"
   echo   "  echo ''"
   
@@ -4503,7 +4551,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   # check type of libc
   echo "ldd --version 2>&1 | grep -q 'musl libc' && Containerlibc='musl'"
   echo "ldd --version 2>&1 | grep -q 'GLIBC'     && Containerlibc='glibc'"
-  echo 'verbose -d "libc in image: $Containerlibc"'
+  echo 'verbose -d "Container libc: $Containerlibc"'
   echo ""
   
   # prepare X environment
@@ -4848,7 +4896,7 @@ exit 0' >> /etc/rc.local"
   Need it for language locale creation (--lang).'"
     echo "  localedef --verbose --force -i \$Langland -f UTF-8 \$Langcontainer || verbose \"localedef exit code: \$?\""
     echo "  locale -a | grep -q \"\$Langcontainer\" || {"
-    echo "    warning \"locale creation of \$Langcontainer failed.\""
+    echo "    warning \"Locale creation of \$Langcontainer failed.\""
     echo "    Langcontainer=''"
     echo "  }"
     echo "} || {"
@@ -4865,7 +4913,7 @@ exit 0' >> /etc/rc.local"
   
   # --pulseaudio check
   [ "$Pulseaudio" = "yes" ] && {
-    echo "command -v pulseaudio >/dev/null || warning \"pulseaudio not found in image (option --pulseaudio),\""
+    echo "command -v pulseaudio >/dev/null || warning \"Command pulseaudio not found in image (option --pulseaudio),\""
     echo ""
   }  
   
@@ -4903,7 +4951,7 @@ exit 0' >> /etc/rc.local"
         echo '[ -e "$Systemd" ] || Systemd=/sbin/systemd'
         echo '[ -e "$Systemd" ] || {'
         echo '  command -v systemctl && {'
-        echo '    warning "executeable for systemd not found. Will try /sbin/init"'
+        echo '    warning "Executeable for systemd not found. Will try /sbin/init"'
         echo '    Systemd=/sbin/init'
         echo '  } || error "systemd not found in image (option --systemd)."'
         echo '}'
@@ -5050,10 +5098,10 @@ exit 0' >> /etc/rc.local"
       case "$Xserver" in
         --hostdisplay|--nxagent) ;;
         *)
-          echo "verbose 'disabling any possible access to new X server possibly granted by xhost'"
+          echo "verbose 'Disabling any possible access to new X server possibly granted by xhost'"
           echo "no_xhost"
           [ -n "$Xhost" ] && {
-            echo "verbose 'custom xhost setting (option --xhost): $Xhost'"
+            echo "verbose 'Custom xhost setting (option --xhost): $Xhost'"
             echo "$Xhost" 
           }
           [ "$Initsystem" = "systemd" ] || [ "$Dbusdaemon" = "yes" ] && {
@@ -5148,9 +5196,9 @@ exit 0' >> /etc/rc.local"
         echo "  getscreensize"
         echo "  Xaxis=\$CurrentXaxis"
         echo "  Yaxis=\$CurrentYaxis"
-        [ "$Scaling" = "0" ] || echo "  Xaxis=\$(awk -v a=\$Xaxis -v b=$Scaling 'BEGIN {print (a / b)}')"
+        [ "$Scaling" ] && echo "  Xaxis=\$(awk -v a=\$Xaxis -v b=$Scaling 'BEGIN {print (a / b)}')"
         echo "  Xaxis=\${Xaxis%.*}"
-        [ "$Scaling" = "0" ] || echo "  Yaxis=\$(awk -v a=\$Yaxis -v b=$Scaling 'BEGIN {print (a / b)}')"
+        [ "$Scaling" ] && echo "  Yaxis=\$(awk -v a=\$Yaxis -v b=$Scaling 'BEGIN {print (a / b)}')"
         echo "  Yaxis=\${Yaxis%.*}"
       } || {
         echo "  Xaxis=$Xaxis"
@@ -5158,19 +5206,21 @@ exit 0' >> /etc/rc.local"
       }
       echo "  Screensize=\${Xaxis}x\${Yaxis}"
       
-      [ -n "$Screensize" ] && [ "$Scaling" = "0" ] && {
+      [ "$Screensize" ] && [ -z "$Scaling" ] && {
         echo "  [ -n \"\$(xrandr | grep \$Screensize)\" ] && { "
         echo "    note \"Will try to set native resolution \$Screensize."
         echo "  If that looks ugly, use --scale=1 to enforce a fake scaled resolution.\""
         echo "    xrandr --output \$Output --mode \$Screensize"
-        echo "  }"
+        echo "  } || note \"Resolution \$Screensize not found in xrandr.\""
       }
        
-      [ -n "$Screensize" ] && [ "$Scaling" = "0" ] && {
-        echo "  note \"Panning \$Screensize. If virtual screen is greater than "
+      [ "$Screensize" ] && [ -z "$Scaling" ] && {
+        echo "  checkscreensize || {"
+        echo "    note \"Panning \$Screensize. If virtual screen is greater than "
         echo "  maximal screen size, you can move virtual screen with mouse at screen edges."
         echo "  You can force the virtual screen to match your monitor with option --scale=1\""
-        echo "  xrandr --output \$Output --panning \$Screensize+0+0/\$Screensize+0+0/100/100/100/100"
+        echo "    xrandr --output \$Output --panning \$Screensize+0+0/\$Screensize+0+0/100/100/100/100 --verbose"
+        echo '  }'
         echo "  checkscreensize || {"
         echo "    note 'Panning failed, trying to scale instead.'"
         echo "    xrandr --output \$Output --scale-from \$Screensize --panning \$Screensize+0+0/\$Screensize+0+0"
@@ -5183,11 +5233,14 @@ exit 0' >> /etc/rc.local"
         echo '  }'
       }
       
-      [ "$Scaling" != "0" ] && {
+      [ "$Scaling" ] && {
+        [ "$Screensize" ] && [ "$Scaling" != "1" ] && echo "  note 'Cannot set panning and scaling at the same time.
+  Desired screen size $Screensize will be scaled to your monitor size
+  for arbitrary values you may provide with option --scale.'"
         echo "  # Scaling $Scaling"
-        echo "  verbose \"Setting scaled resolution \$Screensize\""
+        echo "  note \"Setting scaled resolution \$Screensize\" with scale factor $Scaling."
         # must use --scale-from and --panning because --scale causes mouse barriers/crtc-boundaries
-        echo "  xrandr --output \$Output --scale-from \$Screensize --panning \$Screensize+0+0/\$Screensize+0+0"
+        echo "  xrandr --output \$Output --scale-from \$Screensize --panning \$Screensize+0+0/\$Screensize+0+0 --verbose"
         echo "  checkscreensize || {"
         echo "    getscreensize"
         echo "    note \"Setting desired resolution \$Screensize failed."
@@ -5224,12 +5277,12 @@ exit 0' >> /etc/rc.local"
 
   [ "$Xfishtank" = "yes" ] && echo "xfishtank & storepid \$! xfishtank"
   [ -n "$Windowmanager" ] && {
-    echo "verbose 'starting host window manager $Windowmanager on new display $Newdisplay'"
+    echo "verbose 'Starting host window manager $Windowmanager on new display $Newdisplay'"
     echo "$Windowmanager & storepid \$! windowmanager"
   }
   
   [ "$Runfromhost" ] && {
-    echo "# custom host command with added option --runfromhost"
+    echo "# custom host command added with option --runfromhost"
     echo "$Runfromhost"
   }
 
@@ -5238,7 +5291,7 @@ exit 0' >> /etc/rc.local"
 } >> $Xinitrc
 
 { #### part: some verbose output
-    verbose "Users and terminal:
+    verbose -d "Users and terminal:
   x11docker was started by:                       $Startuser
   As host user serves (running X, storing cache): $Hostuser
   Container user will be:                         $Benutzer
@@ -5251,25 +5304,17 @@ exit 0' >> /etc/rc.local"
   Running over SSH:                               $Ssh"
     case $X11dockermode in
       run)
-        verbose "Image name: $Imagename"
-        verbose "Image command: $Imagecommand"
-        verbose "Init system in container: $Initsystem"
-        [ "$Benutzerhosthome" = "yes" ] && verbose "Sharing directory $Benutzerhosthomefolder 
-  with container as its home directory $Benutzerhome"
-        verbose "Created docker command:
-  $Dockercommand"
-        verbose "Created container.rootsetup.sh:
+        verbose "Generated container.rootsetup.sh:
 $(nl -ba <$Containerrootsetupscript)"
-        verbose "Created dockerrc:
+        verbose "Generated dockerrc:
 $(nl -ba <$Dockerrc)" 
-        verbose "Created xtermrc:
+        verbose "Generated xtermrc:
 $(nl -ba <$Xtermrc)"
       ;;
-      exe) verbose "Running host application: $Hostexe" ;;
     esac
-    verbose "Created xinitrc:
+    verbose "Generated xinitrc:
 $(nl -ba <$Xinitrc)"
-    [ -s "$Westonini" ] && verbose "Created weston.ini:
+    [ -s "$Westonini" ] && verbose "Generated weston.ini:
 $(nl -ba <$Westonini)"
 }
 
@@ -5358,53 +5403,50 @@ Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' '
 
 { #### part: wait for and watch X server
 
-  # wait for X server to be ready (sign is creation of Cachefolder/Xready)
+  # wait for X server to be ready (sign is creation of $Cachefolder/Xready in xinitrc)
   Zeit=$(date +%s)
   Count=0
   Dauer=0
-  verbose -d "Waiting for X server $Xserver to be ready."
+  debugnote "Waiting for X server $Xserver to be ready."
   while [ ! -e "$Cachefolder/Xready" ] ; do
     Count=$(( Count + 1 ))
     Dauer=$(( $(date +%s) - $Zeit ))
     sleep $(awk "BEGIN { print $Count * 0.1 }")
     [ $Dauer -gt 30 ] && error "X server $Xserver not ready after 30s."
-    verbose "waiting since ${Dauer}s for $Xserver to be ready."
+    verbose "Waiting since ${Dauer}s for $Xserver to be ready."
     rocknroll || { verbose -d "Stopped waiting for $Xserver due to terminating signal." ; break ; }
-    grep -q -E 'xinit: giving up|unable to connect to X server|Connection refused|server error|Only console users are allowed' <$Xinitlogfile && error "Error during startup of X server.
+    grep -q -E 'xinit: giving up|unable to connect to X server|Connection refused|server error|Only console users are allowed' <$Xinitlogfile && error "Error during startup of X server $Xserver.
   Last lines of xinit log:
 $(tail $Xinitlogfile)
 
   $( [ -s "$Compositorlogfile" ] && echo "Last lines of compositor log:
 $(tail $Compositorlogfile)")"
   done
+  verbose -d "$Xserver is ready"
+  
+  # check and watch compositor
+  [ "$Compositorcommand" ] && {
+    Compositorpid=$(cat $Compositorpidfile)
+    checkpid $Compositorpid && setonwatchpidlist $Compositorpid || error "Startup of compositor failed.
+  Last lines of compositor log:
+$(tail $Compositorlogfile)"
+    storepid $Compositorpid compositor
+  }
+  
+  # check and watch X server
+  [ "$Xcommand" ] && {
+    Xinitpid="$(pgrep -a xinit | grep "xinit $Xinitrc" | awk '{print $1}')"
+    [ "$Xinitpid" ] && setonwatchpidlist $Xinitpid && storepid $Xinitpid xinit
+    echo $Xcommand | grep -q Xorgwrapper && Line="Xorg $Newdisplay" || Line=$Xcommand
+    Xserverpid=$(ps aux | grep "$(echo $Line | cut -d' ' -f1-2)" | grep -v grep | grep -v xinit | awk '{print $2}')
+    [ "$Xserverpid" ] && setonwatchpidlist $Xserverpid && storepid $Xserverpid Xserver
+  }
   
   # option '--showenv': show display environment variables on stdout
   [ "$Showdisplayenvironment" = "yes" ] && echo $Newxenv
   # create easy to find file with latest created X environment for custom access
   mkfile "$Cachebasefolder/Xenv.latest"
   for Line in $Newxenv ; do echo $Line >> "$Cachebasefolder/Xenv.latest" ; done
-  
-  # check and watch compositor
-  case $Xserver in
-    --weston|--kwin|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland)
-      Compositorpid=$(cat $Compositorpidfile)
-      checkpid $Compositorpid && setonwatchpidlist $Compositorpid || error "Startup of compositor failed.
-  Last lines of compositor log:
-$(tail $Compositorlogfile)"
-      storepid $Compositorpid compositor
-    ;;
-  esac
-  
-  # check and watch X server
-  case $Xserver in
-    --xpra|--xephyr|--nxagent|--xvfb|--xdummy|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland)
-      Xinitpid="$(pgrep -a xinit | grep "xinit $Xinitrc" | awk '{print $1}')"
-      [ "$Xinitpid" ] && setonwatchpidlist $Xinitpid && storepid $Xinitpid xinit
-      echo $Xcommand | grep -q Xorgwrapper && Line="Xorg $Newdisplay" || Line=$Xcommand
-      Xserverpid=$(ps aux | grep "$(echo $Line | cut -d' ' -f1-2)" | grep -v grep | grep -v xinit | awk '{print $2}')
-      [ "$Xserverpid" ] && setonwatchpidlist $Xserverpid && storepid $Xserverpid Xserver
-    ;;
-  esac
 }
 
 { #### part: options --xpra / --xpra-xwayland: start and watch xpra server and xpra client
@@ -5412,69 +5454,46 @@ $(tail $Compositorlogfile)"
     --xpra|--xpra-xwayland) 
       notify-send 'Stay tuned, xpra will start soon.' 2>/dev/null
       note        'Stay tuned, xpra will start soon.'
-      
-      [ "$Desktopmode" = "yes" ] && Xpraservercommand="xpra start-desktop" || Xpraservercommand="xpra start"
-      Xpraservercommand="$Xpraservercommand $Newdisplay --use-display $Xpraoptions"
-      #Xpraservercommand="xpra start $Newdisplay --use-display --start-via-proxy=no --daemon=no"
-      Xpraclientcommand="xpra attach $Newdisplay $Xpraoptions --window-close=shutdown --title '@title@ ($Imagename)'"
-      #Xpraclientcommand="xpra attach $Newdisplay --start-via-proxy=no --window-close=shutdown"
-      verbose "Xpra server command:
-  $Xpraservercommand"
-      verbose "Xpra client command:
-  $Xpraclientcommand"
-  
-      [ -e "/run/user/$Hostuseruid" ] || {
-        # can miss with option --hostuser, xpra needs it for socket
-        verbose "Creating /run/user/$Hostuseruid"
-        mkdir -p /run/user/$Hostuseruid
-        chown $Hostuser /run/user/$Hostuseruid
-        chmod 700 /run/user/$Hostuseruid
-      }
-      
-      # loop to check for crashing xpra server, restart it if needed. can happen with --mmap=yes
+      # loop to keep xpra running.
+      # xpra server can crash with some applications like atom editor, --mmap=no fixes that.
+      # xpra client can be disconnected after a tty switch, will be restarted in that case.
       Xpracrashcount="0"
       while rocknroll ; do
+        # xpra server
         checkpid $Xpraserverpid || {
           [ -n "$Xpraserverpid" ] && { 
             Xpracrashcount=$((Xpracrashcount + 1))
             [ "$Xpracrashcount" -eq 1 ] && {
               warning "xpra server has crashed.
   x11docker will add xpra option --mmap=no to hopefully fix that issue.
-  xpra will need more CPU power, but will run more stable."
+  xpra will need more CPU power now, but will run more stable.
+  Last lines of xpra server log:
+$(tail $Xpraserverlogfile)"
               Xpraservercommand="$Xpraservercommand --mmap=no"
               Xpraclientcommand="$Xpraclientcommand --mmap=no"
             }
-            [ "$Xpracrashcount" -eq 3 ] && alertbox "xpra server has crashed $Xpracrashcount times.
-  After crashing 6 times, x11docker will terminate."
-            [ "$Xpracrashcount" -eq 6 ] && error "Xpra server crashed $Xpracrashcount times.
+            [ "$Xpracrashcount" -gt 1 ] && error "Xpra server has crashed again.
   x11docker stops now. Try out other X server options
   like --nxagent, --xephyr or --hostdisplay."
-            warning "xpra server seems to have crashed the $Xpracrashcount. time.
-  After 6 crashes, x11docker will terminate on itself.
-  Will restart xpra now. Last lines of xpra server log:
-$(tail $Xpraserverlogfile)"
             notify-send "x11docker: xpra server crashed. Restarting xpra now."
             mkfile $Xpraserverlogfile   # clear logfile to remove "xpra is ready" message
           }
           verbose -d "Starting Xpra server"
           $Mksu "env $Newxenv XPRA_OPENGL_DOUBLE_BUFFERED=1 $Xpraservercommand" >> $Xpraserverlogfile 2>&1 &
-          Xpraserverpid=$!
-          storepid $Xpraserverpid xpraserver
-          waitforlogentry "xpra server" $Xpraserverlogfile 'xpra is ready' && verbose "Xpra server is ready" || {
-            [ -e "$Xpraserverlogfile" ] && error "Xpra server startup failed.
+          Xpraserverpid=$! && storepid $Xpraserverpid xpraserver
+          waitforlogentry "xpra server" $Xpraserverlogfile 'xpra is ready' && verbose "Xpra server is ready" || error "Xpra server startup failed.
   Last lines of Xpra server log:
 $(tail $Xpraserverlogfile)"
-          }
         }
+        
+        # xpra client
         checkpid $Xpraclientpid && kill $Xpraclientpid
         verbose -d "Starting Xpra client"
         [ -n "$Xpraclientpid" ] && note "Restarting Xpra client."
-        $Mksu "env $Hostxenv XPRA_PADDING_COLORS='0,0.2,1' $Xpraclientcommand" >> $Xpraclientlogfile 2>&1 &
-        Xpraclientpid=$!
-        
-        storepid $Xpraclientpid xpraclient
+        $Mksu "env $Hostxenv XPRA_PADDING_COLORS='0,0.2,1' $Xpraclientcommand" >> $Xpraclientlogfile 2>&1 & 
+        Xpraclientpid=$! && storepid $Xpraclientpid xpraclient
         checkpid $Xpraclientpid && mywatch "ps --no-headers -p $Xpraserverpid -o pid ; ps --no-headers -p $Xpraclientpid -o pid #xpra"
-        grep -q "Shutting down in response to client request" <$Xpraserverlogfile && saygoodbye xpraclient
+        tail $Xpraserverlogfile | grep -q "client ping timeout" || saygoodbye xpraclient
       done & storepid $! xpraloop
     ;;
   esac
@@ -5573,69 +5592,38 @@ debugnote "Process tree of x11docker:
 $(pstree -p $$)"
 } & storepid $! containershell                ####
 
+{ #### part: start Compositor
+  case $Xserver in
+    --weston|--weston-xwayland|--xpra-xwayland|--xdummy-xwayland) Compositorkeyword="weston-desktop-shell" ;;
+    --kwin|--kwin-xwayland)                                       Compositorkeyword="X-Server" ;;
+  esac
+  
+  [ "$Compositorcommand" ] && {
+    $Mksu "exec dbus-launch    $Compositorcommand  >> $Compositorlogfile  2>&1 & echo \$! >>$Compositorpidfile"
+    waitforlogentry compositor $Compositorlogfile    "$Compositorkeyword" || error "Startup of Wayland compositor failed. 
+  Can not run $Xserver.
+  Last lines of compositor log:
+$(tail $Compositorlogfile)"
+
+    case $Xserver in
+      --xpra-xwayland|--xdummy-xwayland)  # hide weston window
+        $Mksu "xdotool windowunmap 0x$(printf '%x\n' $(grep 'window id' $Compositorlogfile | rev | cut -d' ' -f1 | rev))" ;;
+    esac
+  }
+}
+
 { #### part: start X server
   case $Xserver in
-    --xpra|--xephyr|--xdummy|--xvfb|--xwayland|--nxagent)
-      $Mksu "exec                                         xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 "
-    ;;
+    --xpra|--xephyr|--xdummy|--xvfb|--xwayland|--nxagent|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland)
+      $Mksu "exec env WAYLAND_DISPLAY=$Newwaylandsocket   xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " ;;
     --xorg)
       case $Xlegacywrapper in
         yes) $Mksu   "exec                                xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " ;;
         no)  bash -c "exec                                xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " ;;
       esac
     ;;
-    --hostdisplay|--hostwayland)
-      $Mksu "exec                                         bash  $Xinitrc                       >> $Xinitlogfile  2>&1 "
-    ;;
-    --xpra-xwayland|--xdummy-xwayland)
-      [ -z "$Hostwaylandsocket" ] || { [ "$Scaling" != "0" ] && [ "1" = "$(awk -v a="$Scaling" 'BEGIN {print (a < 1)}')" ] ;} && {
-        # Weston is needed for Xwayland if no Wayland is running already, and also 
-        # if option scale has a value smaller than 1 to provide a virtual display larger than monitor
-        $Mksu "exec $Compositorcommand                                                         >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
-        waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
-        waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                       || error "Weston startup failed. Can not run $Xserver.
-  Last lines of weston log:
-$(tail $Compositorlogfile)"
-        # hide weston window
-        $Mksu "xdotool windowunmap 0x$(printf '%x\n' $(grep 'window id' $Compositorlogfile | rev | cut -d' ' -f1 | rev))"
-      }
-      $Mksu "exec env WAYLAND_DISPLAY=$Newwaylandsocket   xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
-    ;;
-    --weston-xwayland)
-      $Mksu "exec $Compositorcommand                                                           >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
-      #waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
-      waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                         || error "Weston startup failed. Can not run $Xserver.
-  Last lines of weston log:
-$(tail $Compositorlogfile)"
-      $Mksu "exec env WAYLAND_DISPLAY=$Newwaylandsocket   xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
-    ;;
-    --weston)
-      $Mksu "$Compositorcommand                                                                >> $Compositorlogfile 2>&1  & echo \$! >>$Compositorpidfile"
-      waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
-      waitforlogentry weston $Compositorlogfile "weston-desktop-shell"                         || error "Weston startup failed. Can not run $Xserver.
-  Last lines of weston log:
-$(tail $Compositorlogfile)"
-      $Mksu "exec                                         bash  $Xinitrc                       >> $Xinitlogfile  2>&1" 
-    ;;
-    --kwin-xwayland)
-      $Mksu "$Compositorcommand                                                                >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
-      waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
-      waitforlogentry kwin   $Compositorlogfile "X-Server"                                     || error "Kwin startup failed. Can not run $Xserver.
-  Last lines of kwin log:
-$(tail $Compositorlogfile)"
-      $Mksu "exec env WAYLAND_DISPLAY=$Newwaylandsocket   xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " 
-    ;;
-    --kwin)
-      $Mksu "dbus-launch $Compositorcommand                                                    >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
-      waitforfilecreation $XDG_RUNTIME_DIR/$Newwaylandsocket
-      waitforlogentry kwin   $Compositorlogfile "X-Server"                                     || error "Kwin startup failed. Can not run $Xserver.
-  Last lines of kwin log:
-$(tail $Compositorlogfile)"
-      $Mksu "exec                                         bash  $Xinitrc                       >> $Xinitlogfile  2>&1 " 
-    ;;
-    --nothing)
-      $Mksu "exec                                         bash  $Xinitrc                       >> $Xinitlogfile  2>&1 " 
-    ;;
+    --hostdisplay|--hostwayland|--weston|--kwin|--nothing)
+      $Mksu "exec                                          bash $Xinitrc                       >> $Xinitlogfile  2>&1 " ;;
   esac
   
   [ $? != 0 ] && rocknroll && warning "X server $Xserver returned an error code. 
@@ -5650,6 +5638,9 @@ $(tail $Compositorlogfile)")"
   
 ######### ToDo notes for development
 todo() {
+# check --xpra with several options
+# check xpra manpage whether all options are deployed well
+
 # further checks of pam.d
 # --weston/x: allow tty switch/option --vt if running as root?
 # error message window in wayland fails: xterm: no display. should use konsole
