@@ -1793,7 +1793,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   To run docker images, you need to install docker."
       verbose "Image name: $Imagename"
       verbose "Image command: $Imagecommand"
-      Imagecommandbasename=$(basename $(echo $Imagecommand | cut -d' ' -f1) | tr -cd '[:alpha:][:digit:][:blank:]-_.')
+      Imagecommandbasename=$(basename $(echo $Imagecommand | cut -d' ' -f1) 2>/dev/null | tr -cd '[:alpha:][:digit:][:blank:]-_.')
     ;;
     exe)
       Hostexe="$Imagename $Imagecommand"
@@ -3823,17 +3823,27 @@ done
     systemd|sysvinit|openrc|runit) Dbusdaemon="yes" ;;
   esac
   
+  # Check docker-init / tini-static
+      
   case $Initsystem in
     none) ;;
-    tini) 
+    tini)
       Tinibinary="$(command -v docker-init)"
       [ -z "$Tinibinary" ]                                      && Tinibinary="/snap/docker/current/bin/docker-init" 
       [ -e "$Tinibinary" ]                                      || Tinibinary="/snap/docker/current/usr/bin/docker-init" 
       [ -e "/usr/local/share/x11docker/tini-static" ]           && Tinibinary="/usr/local/share/x11docker/tini-static"
       [ -e "$Hostuserhome/.local/share/x11docker/tini-static" ] && Tinibinary="$Hostuserhome/.local/share/x11docker/tini-static"
       Tinibinary="$(realpath "$Tinibinary")"
-      [ -e "$Tinibinary" ] || {
-        Tinibinary=""
+      [ -e "$Tinibinary" ] || Tinibinary=""
+      [ "$Tinibinary" ] && {
+        [ -x "$Tinibinary" ] || {
+          chmod +x "$Tinibinary" || {
+            warning "Your tini binary is not executeable. Please run
+    chmod +x $Tinibinary"
+            Initsystem="none"
+          }
+        }
+      } || {
         Initsystem="none"
         note "Did not find container init system 'tini'.
   This is a bug in your distributions docker package.
@@ -3845,14 +3855,6 @@ done
   Store it in one of:
     $Hostuserhome/.local/share/x11docker/
     /usr/local/share/x11docker/"
-      } || {
-        [ -x "$Tinibinary" ] || {
-          chmod +x "$Tinibinary" || {
-            warning "Your tini binary is not executeable. Please run
-  chmod +x $Tinibinary"
-            Initsystem="none"
-          }
-        }
       }
       verbose "Found tini binary: ${Tinibinary:-(none)}"
     ;;
@@ -4544,7 +4546,8 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   
   # check type of libc
   echo "ldd --version 2>&1 | grep -q 'musl libc' && Containerlibc='musl'"
-  echo "ldd --version 2>&1 | grep -q 'GLIBC'     && Containerlibc='glibc'"
+  echo "ldd --version 2>&1 | grep -q -E 'GLIBC|GNU libc'  && Containerlibc='glibc'"
+
   echo 'verbose -d "Container libc: $Containerlibc"'
   echo ""
   
@@ -4766,6 +4769,7 @@ exit 0' >> /etc/rc.local"
       echo "for Line in \$(find /usr/share/dbus-1/system-services /usr/share/dbus-1/services -type f); do"
       echo '  Name="$(cat $Line | grep Name= | cut -d= -f2)"'
       echo '  Command="$(cat $Line | grep Exec= | cut -d= -f2)"'
+      echo '  verbose -d "Checking $Name: $Command"'
       echo "  case \$Name in"
       echo "    org.bluez)"
       echo "      rm -v \$Line"
@@ -4774,6 +4778,7 @@ exit 0' >> /etc/rc.local"
       echo "      rm -v \$Line"
       echo "    ;;"
       echo "    org.freedesktop.systemd1) "
+      [ "$Initsystem" = "systemd" ] || echo "      rm -v \$Line"
       #echo '      debugnote "$(cat $Line)"'
       echo "    ;;"
       echo "    org.freedesktop.login1)"
@@ -4782,12 +4787,28 @@ exit 0' >> /etc/rc.local"
       echo '      Loginservice=$Name'
       echo '      Loginservicecommand=$Command'
       [ "$Sharecgroup" = "no" ] && {
+        echo "      rm -v \$Line"
         echo '      echo $Command | grep -q elogind && {'
         echo '        note "Found login service elogind.'
         echo '  If you want to use it, enable option --sharecgroup."'
         echo '        Loginservice='
         echo '        Loginservicecommand='
         echo '      }'
+        echo '      echo $Command | grep -q "systemd-logind" && {'
+        echo '        Loginservice='
+        echo '        Loginservicecommand='
+        echo '      }'
+      }
+      [ "$Initsystem" = "systemd" ] || {
+        echo '      echo $Command | grep -q "systemd-logind" && {'
+        echo '        Loginservice='
+        echo '        Loginservicecommand='
+        echo '      }'
+      }
+      echo "    ;;"
+      echo "    org.freedesktop.hostname1|org.freedesktop.locale1)"
+      [ "$Initsystem" = "systemd" ] || {
+        echo "      rm -v \$Line"
       }
       echo "    ;;"
       echo "    org.opensuse.CupsPkHelper.Mechanism)"
@@ -4847,7 +4868,8 @@ exit 0' >> /etc/rc.local"
         echo "    org.freedesktop.login1) ;;"
         echo '    *)'
         echo '      verbose -d "DBus: starting service $Name: $Command"'
-        echo '      sh -c "$Command" &'
+        echo '      $Command &'
+        #echo '      sh -c "$Command" &'
         echo '      [ "$Command" != "/bin/false" ] && waitforservice $Name'
         echo '    ;;'
         echo '  esac'
@@ -5043,7 +5065,7 @@ exit 0' >> /etc/rc.local"
         echo     ":> $Xclientcookie"
         [ "$Xserver" = "--hostdisplay" ] && {
           [ -s "$Hostxauthority" ] && echo "export XAUTHORITY=$Hostxauthority"
-          echo   "xhost | grep -q 'SI:localuser:$Hostuser' && Xhostentry='yes' || xhost +SI:localuser:$Hostuser"
+          echo   "xhost | grep -q 'SI:localuser:$Hostuser'|| { xhost +SI:localuser:$Hostuser ;  && Xhostentry='yes' ; }"
         }
         case "$Ssh" in
           no)
@@ -5083,7 +5105,7 @@ exit 0' >> /etc/rc.local"
         echo     "[ -s '$Xclientcookie' ] || warning 'Cookie creation failed!'" 
         echo     "verbose \"Created cookie: \$(xauth list)\""
         echo     "chmod 644 $Xclientcookie"
-        [ "$Xserver" = "--hostdisplay" ] && echo "[ '\$Xhostentry' = 'yes' ] || env XAUTHORITY=$Hostxauthority xhost -SI:localuser:$Hostuser"
+        [ "$Xserver" = "--hostdisplay" ] && echo "[ '\$Xhostentry' = 'yes' ] && env XAUTHORITY=$Hostxauthority xhost -SI:localuser:$Hostuser"
         [ "$Xserver" = "--nxagent" ]     && echo "rm $Xclientcookie.bak"
       }
       

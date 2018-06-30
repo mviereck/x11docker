@@ -21,6 +21,14 @@ Project website: https://github.com/mviereck/x11docker
  - `--sysvinit`, `--runit`, `--openrc`: clean shutdown on CTRL-C / SIGINT.
  - `x11docker-gui` on console: fixed issue with self-terminating on cleanup.
  - errors within subshells did not reliably terminate x11docker.
+ - `--tini`: Check for `docker-init` in snap installs of docker.
+   [(#51)](https://github.com/mviereck/x11docker/issues/50)
+ - `--dbus-system`: remove services org.freedesktop.hostname1 and 
+   org.freedesktop.locale1 if not running wih `--systemd`.
+ - `--dbus-system`: disable services `org.freedesktop.hostname1` and 
+   `org.freedesktop.locale1` if not running with `--systemd`. Can cause
+   container shutdown after some time.
+ - `--hostdisplay`: fixed possible `xhost -SI:localuser:$USER`. (#53)
 
 ## [4.3.5](https://github.com/mviereck/x11docker/releases/tag/v4.3.5) - 2018-06-21
 ### Changed
