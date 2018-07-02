@@ -40,7 +40,7 @@ System changes in running containers are discarded after use.
 # GUI for x11docker
 `x11docker-gui` is an optional graphical frontend for `x11docker`. It runs from console, too.
  - `x11docker-gui` needs package `kaptain`. If your distribution misses it, look at [kaptain repository](https://github.com/mviereck/kaptain). 
- - If `kaptain` is not installed on your system, `x11docker-gui` tries to use image [`x11docker/kaptain`](https://hub.docker.com/r/x11docker/kaptain/). 
+ - If `kaptain` is not installed on your system, `x11docker-gui` uses image [`x11docker/kaptain`](https://hub.docker.com/r/x11docker/kaptain/). 
 
 ![x11docker-gui screenshot](/../screenshots/x11docker-gui.png?raw=true "GUI for x11docker")
 
