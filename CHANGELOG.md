@@ -13,6 +13,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--auto`: Prefer `--xpra` and `--xephyr` over `--nxagent` again.
    `--nxagent` has too often issues with extension Composite.
  - `--xpra`, `--xpra-xayland`: set maximal `--quality 100`.
+ - `/etc/shadow`: fixed fedora issue with `000` file access. (#53)
 ### Fixed
  - `--xpra`: Check for tty timeout had a bug for multiple applications
    that caused all clients of same server to terminate if one was closed.
