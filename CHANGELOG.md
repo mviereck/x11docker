@@ -9,9 +9,9 @@ Project website: https://github.com/mviereck/x11docker
 ## [4.3.6](https://github.com/mviereck/x11docker/releases/tag/v4.3.6) - 2018-07-03
 ### Changed
  - `--auto`: Prefer `--xpra` and `--xephyr` over `--nxagent` again.
+   `--nxagent` has too often issues with extension Composite.
  - `--xorg`: Allow running Xorg as root from within X 
    if `/etc/X11/Wrapper.config` is not configured to allow it.
-   `--nxagent` has too often issues with extension Composite.
  - `--xpra`, `--xpra-xayland`: set maximal `--quality 100`.
 
 ### Fixed
