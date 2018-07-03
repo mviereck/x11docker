@@ -6,30 +6,35 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Fixed
+ - `--pw gksu`, `--pw gksudo`: Disable keyboard grabbing to avoid issues
+   with Gnome 3 Wayland session.
+
 ## [4.3.6](https://github.com/mviereck/x11docker/releases/tag/v4.3.6) - 2018-07-03
 ### Changed
  - `--auto`: Prefer `--xpra` and `--xephyr` over `--nxagent` again.
-   `--nxagent` has too often issues with extension Composite.
+   `--nxagent` too often has issues with extension Composite.
  - `--xorg`: Allow running Xorg as root from within X 
    if `/etc/X11/Wrapper.config` is not configured to allow it.
- - `--xpra`, `--xpra-xayland`: set maximal `--quality 100`.
+ - `--xpra`, `--xpra-xwayland`: Set maximal `--quality 100`.
 
 ### Fixed
- - `--xpra`: Check for tty timeout had a bug for multiple applications
-   that caused all clients of same server to terminate if one was closed.
+ - `--xpra`: Check for tty timeout had a bug that caused all clients 
+   of same server to terminate if one client was closed.
  - `--xorg`: Secure check for free tty instead of guessing it.
  - `--xorg`: Error messages appear on new display instead of host display.
- - `--sysvinit`, `--runit`, `--openrc`: clean shutdown on CTRL-C / SIGINT.
- - `x11docker-gui`: fixed issue with self-terminating on cleanup.
+ - `--sysvinit`, `--runit`, `--openrc`: Clean shutdown on CTRL-C / SIGINT.
+ - `x11docker-gui`: Fixed issue with self-terminating on cleanup.
  - errors within subshells did not reliably terminate x11docker.
  - `--tini`: Check for `docker-init` in snap installs of docker.
    [(#51)](https://github.com/mviereck/x11docker/issues/51)
- - `--dbus-system`: disable services `org.freedesktop.hostname1` and 
+ - `--dbus-system`: Disable services `org.freedesktop.hostname1` and 
    `org.freedesktop.locale1` if not running with `--systemd`. Can cause
    container shutdown after some time.
- - `--hostdisplay`: fixed possible `xhost -SI:localuser:$USER`. 
+ - `--hostdisplay`: Fixed possible `xhost -SI:localuser:$USER`. 
    [(#53)](https://github.com/mviereck/x11docker/issues/53)
- - `/etc/shadow`: fixed fedora issue with `000` file access.
+ - `/etc/shadow`: Fixed fedora issue with `000` file access.
    [(#53)](https://github.com/mviereck/x11docker/issues/53)
 
 
