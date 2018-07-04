@@ -236,8 +236,8 @@ _Most important:_
   - `--pulseaudio` and `--alsa` allow catching audio output and microphone input from host.
   
 _Rather special options reducing security, but not needed for regular use:_
-  - `--sudouser` allows sudo with password `x11docker`for container user. If an application breaks out of container, it can do anything. Allows some container capabilties that x11docker would drop otherwise.
-  - `--cap-default` disables x11docker's container hardening and falls back to default docker container capabilities.
+  - `--sudouser` allows `su` and `sudo` with password `x11docker`for container user. If an application breaks out of container, it can do anything. Allows many container capabilties that x11docker would drop otherwise.
+  - `--cap-default` disables x11docker's container security hardening and falls back to default docker container capabilities.
   - `--dbus-system`, `--systemd`, `--sysvinit`, `--openrc` and `--runit` allow some container capabilities that x11docker would drop otherwise. `--systemd` also shares access to `/sys/fs/cgroup`.
   - `--hostipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory. Disables IPC namespacing.)
   - `--hostnet` sets docker run option `--net=host`. (Allows dbus connection to host. Shares host network stack.)
@@ -256,7 +256,7 @@ If no X server option is specified, x11docker automatically chooses one dependin
 
 ## Wayland
 Beside the X servers to choose from there are options `--wayland`, `--weston`, `--kwin` and `--hostwayland` to run pure [Wayland](https://wayland.freedesktop.org/) applications without X.
- - Option `--wayland` automatically set up a Wayland environment with some special environment variables and a dbus system daemon in container to support both QT5 and GTK3 applications.
+ - Option `--wayland` automatically sets up a Wayland environment with some special environment variables and a dbus system daemon in container to support both QT5 and GTK3 applications.
  - Options `--kwin` and `--weston` run Wayland compositors `kwin_wayland` or `weston`. 
    - For QT5 applications without option `--wayland` you need to manually add options `--dbus`  and `--env QT_QPA_PLATFORM=wayland`.
  - Option `--hostwayland` can run single applications on host Wayland desktops like Gnome 3, KDE 5 and [Sway](https://github.com/swaywm/sway).
@@ -282,7 +282,9 @@ x11docker --weston --exe neverball
 
 ## Setup for option --xorg
  - Option `--xorg` runs from console without additional setup. 
- - To run a second core Xorg server from within an already running X session, you have to edit or create file `/etc/X11/Xwrapper.config` and replace line:
+ - To run a second core Xorg server from within an already running X session, you have two possibilities:
+   - Run x11docker as root, or
+   - Edit or create file `/etc/X11/Xwrapper.config` and replace line:
 ```
 allowed_users=console
 ```
@@ -427,12 +429,14 @@ This is similar to x11docker option `--hostdisplay`:
  - Share access to host X server with environment variable `DISPLAY` and X unix socket in `/tmp/.X11-unix`. 
  - Allow access with `xhost` for current local user and create a similar container user.
  - Allow shared memory with `--ipc=host` to avoid RAM access failures and rendering glitches due to extension `MIT-SHM`.
+ - Drop all capabilities with `--cap-drop=ALL --security-opt=no-new-privileges` to improve container security.
 ```
 xhost +SI:localuser:$(id -un)
 docker run --rm -e DISPLAY=$DISPLAY \
             -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
             --user $(id -u):$(id -g) \
             --ipc=host \
+            --cap-drop=ALL --security-opt=no-new-privileges \
             IMAGENAME IMAGECOMMAND
 ```
 This nice short solution has the disadvantage of breaking container isolation. X security leaks like keylogging and remote host control can be abused by container applications.
@@ -441,11 +445,13 @@ This is similar to x11docker option `--xephyr`:
  - Run Xephyr with disabled shared memory (extension `MIT-SHM`) and disabled extension `XTEST`.
  - Set `DISPLAY` and share access to new unix socket `/tmp/.X11-unix/X1`.
  - Create unprivileged container user to avoid root in container.
+ - Drop all capabilities with `--cap-drop=ALL --security-opt=no-new-privileges` to improve container security.
 ```
 Xephyr :1 -extension MIT-SHM -extension XTEST &
 docker run --rm -e DISPLAY=:1 \
             -v /tmp/.X11-unix/X1:/tmp/.X11-unix/X1:rw \
             --user $(id -u):$(id -g) \
+            --cap-drop=ALL --security-opt=no-new-privileges \
             IMAGENAME IMAGECOMMAND
 ```
 This solution is more secure than the above one as it does not give access to display :0 with host applications and does not need `--ipc=host`. To use this with single applications you can run a host window manager on Xephyr display, too, for example with `env DISPLAY=:1 x-window-manager`.
@@ -484,9 +490,9 @@ Some image examples can be found on docker hub: https://hub.docker.com/u/x11dock
      - [Trinity](https://www.trinitydesktop.org/) (successor of KDE 3): `x11docker --desktop x11docker/trinity`
      
    - Heavy, option `--gpu` recommended:
-     - Cinnamon: `x11docker --desktop --dbus-system x11docker/cinnamon`
-     - [deepin](https://www.deepin.org/en/dde/): `x11docker --desktop --dbus-system x11docker/deepin`
-     - KDE Plasma: `x11docker --desktop x11docker/plasma`
+     - Cinnamon: `x11docker --desktop --gpu --dbus-system x11docker/cinnamon`
+     - [deepin](https://www.deepin.org/en/dde/): `x11docker --desktop --gpu --systemd x11docker/deepin`
+     - KDE Plasma: `x11docker --desktop --gpu x11docker/plasma`
      - KDE Plasma as nested Wayland compositor: 
        - `x11docker --hostdisplay --gpu x11docker/plasma startplasmacompositor`
      
