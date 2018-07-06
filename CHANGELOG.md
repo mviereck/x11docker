@@ -8,6 +8,8 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Fixed
+ - `--xpra`: Support of outdated xpra version v0.17.6 that is still
+   distributed in debian stretch and buster.
  - `--pw gksu`, `--pw gksudo`: Disable keyboard grabbing to avoid issues
    with Gnome 3 Wayland session.
 
@@ -16,7 +18,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--auto`: Prefer `--xpra` and `--xephyr` over `--nxagent` again.
    `--nxagent` too often has issues with extension Composite.
  - `--xorg`: Allow running Xorg as root from within X 
-   if `/etc/X11/Wrapper.config` is not configured to allow it.
+   if `/etc/X11/Xwrapper.config` is not configured to allow it.
  - `--xpra`, `--xpra-xwayland`: Set maximal `--quality 100`.
 
 ### Fixed
