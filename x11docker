@@ -744,6 +744,10 @@ checkpid() {            # check if PID $1 is active
 }
 no_xhost() {            # remove any access to X server granted by xhost
   local Line=
+  command -v xhost >/dev/null || {
+    verbose -d "Command 'xhost' not found."
+    return 1
+  }
   xhost
   xhost | tail -n +2  /dev/stdin | while read -r Line ; do  # read all but the first line (header)
     xhost -$Line                                         # disable every entry
@@ -2796,6 +2800,16 @@ After finish: $Logbackup"
   For openSUSE images you can try to create a custom installation 
   command with option --runasroot or to install a closed source nvidia driver 
   in image itself that matches your nvidia driver version on host."
+      
+      case $Xserver in
+        --hostdisplay|--xorg) ;;
+        *)
+          warning "Closed source nvidia driver has serious issues with Wayland.
+  Chosen option $Xserver may fail to provide hardware acceleration.
+  Only options --hostdisplay and --xorg will work reliably.
+  Recommendation: Instead of closed nvidia driver use free nouveau driver."
+        ;;
+      esac
   
     } || {
       Nvidiadriver=""
@@ -3135,8 +3149,9 @@ fi
     *)
       # general X server options
       Xserveroptions="$Xserveroptions -retro"
+      # Most X servers have extension "Composite", recent Xwayland has "COMPOSITE".
       Xserveroptions="$Xserveroptions \\
-  +extension Composite +extension RANDR +extension RENDER +extension GLX \\
+  +extension Composite +extension COMPOSITE +extension RANDR +extension RENDER +extension GLX \\
   +extension XVideo +extension DOUBLE-BUFFER"
       Xserveroptions="$Xserveroptions \\
   -extension X-Resource +extension SECURITY +extension DAMAGE"
@@ -3150,10 +3165,6 @@ fi
       }
     ;;
   esac
-  
-  # cookie authentication
-  [ "$Xauthentication" = "yes" ] && Xserveroptions="$Xserveroptions \\
-  -auth $Xservercookie"
   
   # extension XTEST
   [ -z "$Xtest" ] && {
@@ -3227,6 +3238,16 @@ fi
   # xpra server and client command
   case $Xserver in
     --xpra|--xpra-xwayland)
+      # check for version with cookie bug   
+      ! verlt "$Xpraversion" "xpra v2.3" && verlt "$Xprarelease" "r19606" && {
+        command -v xhost >/dev/null || {
+          warning "Your xpra version has a cookie authentication issue.
+  also, 'xhost' is not available on your host.
+  Fallback: Disabling cookie authentication on new X server."
+          Xauthentication="no"
+        }
+      } 
+
       # disable proxy for high versions
       verlt "$Xpraversion" "xpra v2.1" || Xpraoptions="$Xpraoptions \\
   --start-via-proxy=no"
@@ -3322,6 +3343,10 @@ $(tail "$Compositorlogfile")"
       }
     ;;
   esac
+  
+  # cookie authentication
+  [ "$Xauthentication" = "yes" ] && Xserveroptions="$Xserveroptions \\
+  -auth $Xservercookie"
 
   # create command to run X server
   case $Xserver in
@@ -3417,6 +3442,7 @@ $(tail "$Compositorlogfile")"
             esac
           ;;
         esac
+        [ "$Xserver" = "--xpra-xwayland" ] && Compositorcommand="$Compositorcommand --fullscreen"
         [ -n "$Customwestonini" ] && Westonini="$Customwestonini"
         Compositorcommand="$Compositorcommand \\
   --config='$Westonini'"
@@ -5070,7 +5096,8 @@ exit 0' >> /etc/rc.local"
   [ "$Noxhost" = "yes" ] && [ -n "$Hostdisplay" ] && {  
     echo "export $Hostxenv"
     echo 'verbose -d "Option --no-xhost: disabling any access to host display $DISPLAY granted by xhost"'
-    echo "no_xhost"
+    echo 'no_xhost || warning "Option --no-xhost failed. Output of xhost:'
+    echo '$(xhost 2>&1)"'
   }
 
   echo "export $Newxenv"

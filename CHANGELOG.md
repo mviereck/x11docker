@@ -12,6 +12,11 @@ Project website: https://github.com/mviereck/x11docker
    distributed in debian stretch and buster.
  - `--pw gksu`, `--pw gksudo`: Disable keyboard grabbing to avoid issues
    with Gnome 3 Wayland session.
+ - `--xpra`: Check if `xhost` is available if xpra version 2.3.1 has cookie 
+   issue. [(#57)](https://github.com/mviereck/x11docker/issues/53)
+ - `--xpra-xwayland`: Set Weston `--fullscreen` to get Xwayland resolution
+   matching host display. Weston v4.0.0 seems to interpret screen size 
+   settings in `weston.ini` different than before.
 
 ## [4.3.6](https://github.com/mviereck/x11docker/releases/tag/v4.3.6) - 2018-07-03
 ### Changed
