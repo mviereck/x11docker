@@ -7,13 +7,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
+### Changed
+ - Adjustments to support [MSYS2/CYGWIN/MINGW](https://www.msys2.org/). 
+   [(#55)](https://github.com/mviereck/x11docker/issues/55)
 ### Fixed
  - `--xpra`: Support of outdated xpra version v0.17.6 that is still
    distributed in debian stretch and buster.
  - `--pw gksu`, `--pw gksudo`: Disable keyboard grabbing to avoid issues
    with Gnome 3 Wayland session.
  - `--xpra`: Check if `xhost` is available if xpra version 2.3.1 has cookie 
-   issue. [(#57)](https://github.com/mviereck/x11docker/issues/53)
+   issue. [(#57)](https://github.com/mviereck/x11docker/issues/57)
  - `--xpra-xwayland`: Set Weston `--fullscreen` to get Xwayland resolution
    matching host display. Weston v4.0.0 seems to interpret screen size 
    settings in `weston.ini` different than before.
