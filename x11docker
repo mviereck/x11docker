@@ -152,6 +152,7 @@ X server options:
                        with lines           allowed_users=anybody
                                             needs_root_rights=yes
                        Debian 9 and Ubuntu 16.04: Install xserver-xorg-legacy.
+     --vcxsrv          X server for Windows to run x11docker on MSYS2 or WSL.
                        
 Special X servers:
      --kwin-xwayland   Like --weston-xwayland, but using kwin_wayland
@@ -598,9 +599,7 @@ watchpidlist() {        # watch list of important pids
     [ "$Pid" ] && {
       Watchpidlist="$Watchpidlist $Pid"
       debugnote "Watching $(pspid $Pid)"
-    } || {
-      [ "$Cygwin" ] && sleep 1
-    }
+    } || sleep 1
     for Pid in $Watchpidlist; do
       [ -e /proc/$Pid ] || {
         debugnote  "watchpidlist: PID $Pid has terminated"
@@ -618,8 +617,8 @@ watchmessagefifo() {    # watch for messages out of container or dockerrc
   # message in fifo must end with :$Messagetype
   local Line= Message= Messagetype=
   while rocknroll ; do
-    [ "$Line" ] || sleep 1
     IFS= read -r Line <&6 ||:
+    [ "$Line" ] || sleep 1
     [ "$Line" ] && Message="$Message
 $Line"
     grep -q -E ":WARNING|:NOTE|:DEBUGNOTE|:VERBOSE|:ERROR|:STDOUT" <<< "$Line" && {
@@ -807,6 +806,12 @@ depends() {             # check dependencies on host for X server option $1
         $Message "${1:-}: Xorg not found."
         Return=1
       } ;;
+    --vcxsrv)
+      Vcxsrvpath="/c/Program Files/VcXsrv/vcxsrv.exe"
+      command -v "$Vcxsrvpath" >/dev/null || Vcxsrvpath="/mnt$Vcxsrvpath"
+      command -v "$Vcxsrvpath" >/dev/null || Return=1
+      Vcxsrvpath="$(escapestring "$Vcxsrvpath" | rev | cut -d/ -f2- | rev)"
+    ;;
   esac
   case ${1:-} in
     --weston|--xpra-xwayland|--weston-xwayland|--xdummy-xwayland)
@@ -1271,10 +1276,14 @@ ldd --version 2>&1 | grep -q 'musl libc'          && Hostlibc='musl'
 ldd --version 2>&1 | grep -q -E 'GLIBC|GNU libc'  && Hostlibc='glibc'
 Hostlocaltime="$(realpath /etc/localtime)"                                                   # find time zone file in /usr/share/zoneinfo
 Hostutctime=$(date +%:::z) ; [ "$(cut -c1 <<< "$Hostutctime")" = "+" ] && Hostutctime="UTC-$(cut -c2- <<< "$Hostutctime")" || Hostutctime="UTC+$(cut -c2- <<< "$Hostutctime")" # offset of UTC if time zone file cannot be provided
-[ "${MSYSTEM:-}${CYGWIN:-}" ] && Cygwin="yes" || Cygwin="no" # Running on Cygwin/MSYS2 ?
 Ssh=""
 Tty=""
 Ttyinuse=""
+
+[ "${MSYSTEM:-}${CYGWIN:-}" ] && Cygwin="yes" || Cygwin="no" # Running on Cygwin/MSYS2 ?
+grep -q "/mnt/c/Windows/System32" <<< ${PATH:-} && Wsl="yes" || Wsl="no"
+Vcxsrvpath=""
+Winipconfig=""
 
 # X server settings
 Xserver=""                                      # X server option to use
@@ -1465,7 +1474,7 @@ stdout() {
 { #### part: parsing cli options
   Shortoptions="aAbcdeEfgGhHKml:MnNopPrsSutTvw:WxXyY"
   Longoptions="auto,x,X,xpra,xephyr,x11,xorg,hostdisplay,xwayland,weston-xwayland,xpra-xwayland,nxagent,wayland"           # X servers
-  Longoptions="$Longoptions,weston,hostwayland,kwin,kwin-xwayland,xdummy,xvfb,nothing"                                     # more X/Wayland servers
+  Longoptions="$Longoptions,weston,hostwayland,kwin,kwin-xwayland,xdummy,xvfb,nothing,vcxsrv"                              # more X/Wayland servers
   Longoptions="$Longoptions,wm:,desktop,exe,xonly"
   Longoptions="$Longoptions,fullscreen,size:,glamor,scale:,rotate:,dpi:,output-count:,gpu,xfishtank"                       # screen options
   Longoptions="$Longoptions,user:,home,clipboard,pulseaudio,alsa,lang:"                                                    # comfort options
@@ -1512,6 +1521,7 @@ stdout() {
       -K|--kwin)                     Xserver="--kwin" ;            Autochooseserver="no"  ;;
          --kwin-xwayland)            Xserver="--kwin-xwayland" ;   Autochooseserver="no"  ;;
       -n|--nxagent)                  Xserver="--nxagent" ;         Autochooseserver="no"  ;;
+         --vcxsrv)                    Xserver="--vcxsrv" ;         Autochooseserver="no"  ;;
       
      #### Influencing X server 
       -d|--desktop)    Desktopmode="yes" ;;                # image contains a desktop environment.
@@ -1783,7 +1793,9 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
     [ "${SSH_CLIENT:-}" ] && Ssh="yes" || warning "Could not check whether x11docker is running over ssh.
   Please install pstree."
   }
-  tty | grep -q tty            && Tty="yes" || Tty="no"  # check if running on X or on tty
+  tty | grep -q tty     && Tty="yes" || Tty="no"  # check if running on X or on tty
+  [ "$Wsl" = "yes" ]    && Tty="no"
+  [ "$Cygwin" = "yes" ] && Tty="no"
   XDG_VTNR=${XDG_VTNR:-}
   
   [ "$Cachebasefolder" != "$(echo $Cachebasefolder | sed -e 's/ *//g')" ] && error "Cache root folder must not contain whitespaces.
@@ -1959,6 +1971,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   [ "$Xserver" = "--xephyr" ]         && {  depends --xephyr || {
                                               depends --kwin-xwayland   && Xserver="--kwin-xwayland" 
                                               depends --hostdisplay     && [ "$Desktopmode" = "no" ] && Xserver="--hostdisplay"
+                                              depends --vcxsrv          && Xserver="--vcxsrv"
                                               depends --nxagent         && Xserver="--nxagent"
                                               depends --weston-xwayland && Xserver="--weston-xwayland" 
                                               depends --xpra            && Xserver="--xpra"
@@ -2367,7 +2380,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   # --fullscreen
   [ "$Fullscreen" = "yes" ] && {
     case $Xserver in
-      --xephyr|--weston|--weston-xwayland|--nxagent|--xpra|--xpra-xwayland) ;;
+      --xephyr|--weston|--weston-xwayland|--nxagent|--xpra|--xpra-xwayland|--vcxsrv) ;;
       --xdummy|--xdummy-xwayland|--xvfb|--xorg) ;;
       *) note "$Xserver does not support option --fullscreen" ;;
     esac
@@ -2442,6 +2455,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
       --kwin)                            Newdisplaynumber="700" ;;
       --kwin-xwayland)                   Newdisplaynumber="750" ;;
       --nothing)                         Newdisplaynumber="900" ;; # dummy number to look for free cache folder
+      --vcxsrv)                          Newdisplaynumber="1000" ;;
     esac
     
     # search free X socket number and free Wayland socket number, passing already used cache folders
@@ -2481,6 +2495,17 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
       [ -e "$Hostxsocket" ] && Newxsocket=$Hostxsocket || Newxsocket=
       Newxlock="/tmp/.X$Newdisplaynumber-lock"
       [ -e "$Newxlock" ] || Newxlock=""
+    ;;
+    --vcxsrv)
+      Newxsocket=
+      
+      Winipconfig="$(command -v ipconfig)"
+      [ "$Winipconfig" ] || Winipconfig="$(command -v /c/Windows/System32/ipconfig.exe)"
+      [ "$Winipconfig" ] || Winipconfig="$(command -v /mnt/c/Windows/System32/ipconfig.exe)"
+      [ "$Winipconfig" ] || error "Could not find ipconfig."
+
+      Hostip="$($Winipconfig | grep 'IPv4' | head -n1 | grep -o '[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | grep "^10\.0\.*")"
+      Newdisplay="$Hostip:$Newdisplaynumber"
     ;;
   esac
   
@@ -3159,7 +3184,7 @@ fi
 }
 
 { #### part: create command to start X server and/or Wayland compositor
-  Xserveroptions="-nolisten tcp -dpms -s off"
+  Xserveroptions="-dpms -s off"
   case $Xserver in
     --nxagent)
       { [ "$Sharehostipc" = "yes" ] || [ "$X11dockermode" = "exe" ] ; } && Xserveroptions="$Xserveroptions -shmem -shpix" || Xserveroptions="$Xserveroptions -noshmem -noshpix"
@@ -3186,6 +3211,9 @@ fi
       }
     ;;
   esac
+  
+  [ "$Xserver" = "--vcxsrv" ] || Xserveroptions="$Xserveroptions \\
+  -nolisten tcp" 
   
   # extension XTEST
   [ -z "$Xtest" ] && {
@@ -3614,6 +3642,29 @@ esac
     
     --hostwayland) Newwaylandsocket="$Hostwaylandsocket" ;;
     --hostdisplay|--nothing) ;;
+    --vcxsrv)
+      Xcommand="$Vcxsrvpath/vcxsrv.exe :$Newdisplaynumber -ac -retro \\
+  $Xserveroptions \\
+  "
+      Xauthentication="no"
+      case $Fullscreen in
+        yes)
+          Xcommand="$Xcommand -fullscreen"
+        ;;
+        no)
+          Xcommand="$Xcommand -lesspointer"
+          case $Desktopmode in
+            yes) [ "$Screensize" ] && Xcommand="$Xcommand -screen 0 $Screensize"
+            ;;
+            no) Xcommand="$Xcommand -multiwindow" ;;
+          esac
+        ;;
+      esac
+      case $Shareclipboard in
+        yes) Xcommand="$Xcommand -clipboard" ;;
+        no)  Xcommand="$Xcommand -noclipboard" ;;
+      esac
+    ;;
   esac
   
   [ "$Sharewayland" = "yes" ] && [ -z "$Newwaylandsocket" ] && note "No wayland socket to share" && Sharewayland="no" 
@@ -3627,7 +3678,7 @@ esac
 
 { #### part: create $Newxenv: Environment variables
   case $Xserver in
-    --xpra|--xephyr|--xpra-xwayland|--weston-xwayland|--hostdisplay|--xorg|--xdummy|--xvfb|--xdummy-xwayland|--xwayland|--kwin-xwayland|--nxagent)
+    --xpra|--xephyr|--xpra-xwayland|--weston-xwayland|--hostdisplay|--xorg|--xdummy|--xvfb|--xdummy-xwayland|--xwayland|--kwin-xwayland|--nxagent|--vcxsrv)
       Newxenv="DISPLAY=$Newdisplay"
       [ "$Xauthentication" = "yes" ] && Newxenv="$Newxenv XAUTHORITY=$Xclientcookie"
       Newxenv="$Newxenv XSOCKET=$Newxsocket"
@@ -3642,7 +3693,7 @@ esac
     ;;
   esac
   [ "$Sharewayland" = "yes" ] && {
-    [ -n "$Newwaylandsocket" ]                              &&  Newxenv="$Newxenv WAYLAND_DISPLAY=$Newwaylandsocket"
+    [ -n "$Newwaylandsocket" ]                                    &&  Newxenv="$Newxenv WAYLAND_DISPLAY=$Newwaylandsocket"
     [ -z "$Newwaylandsocket" ] && [ -n "$Hostwaylandsocket" ]     &&  Newxenv="$Newxenv WAYLAND_DISPLAY=$Hostwaylandsocket"
     [ -z "$Newwaylandsocket" ] && [ -z "$Hostwaylandsocket" ]     &&  { note "No wayland environment to share,
   neither from host nor from $Xserver (--sharewayland)"
@@ -3672,7 +3723,7 @@ esac
   Fallback: Disabling option --clipboard." 
       Shareclipboard="no" 
     ;;
-    --nxagent) ;; # nxagent has its own clipboard management, look at part "create command to start X server", 
+    --nxagent|--xpra|--xpra-xwayland|--vcxsrv) ;; # have their own clipboard management, look at part "create command to start X server", 
 
     --xephyr|--xorg|--xdummy|--xdummy-xwayland|--xvfb|--xwayland|--weston-xwayland)
     
@@ -5193,12 +5244,21 @@ exit 0' >> /etc/rc.local"
       case "$Xserver" in
         --hostdisplay|--nxagent) ;;
         *)
-          echo "verbose 'Disabling any possible access to new X server possibly granted by xhost'"
-          echo "no_xhost"
-          [ -n "$Xhost" ] && {
-            echo "verbose 'Custom xhost setting (option --xhost): $Xhost'"
-            echo "$Xhost" 
-          }
+          case $Xauthentication in
+            yes)
+              echo "verbose 'Disabling any possible access to new X server possibly granted by xhost'"
+              echo "no_xhost"
+              [ -n "$Xhost" ] && {
+                echo "verbose 'Custom xhost setting (option --xhost): $Xhost'"
+                echo "$Xhost" 
+              }
+            ;;
+            no)
+              echo "verbose 'Allowing access for everyone with xhost +'"
+              echo "xhost +"
+            ;;
+          esac
+          
           [ "$Initsystem" = "systemd" ] || [ "$Dbusdaemon" = "yes" ] && {
             echo "note 'Allowing xhost access for $Benutzer on display $Newdisplay" 
             echo "  to avoid service issues with X access. (option --systemd or --dbus-system):"
@@ -5206,10 +5266,14 @@ exit 0' >> /etc/rc.local"
             echo "xhost +SI:localuser:$Benutzer"
           }
           # Keyboard layout
-          case "$Xkblayout" in
-            "") [ -n "$Hostdisplay" ] && setxkbmap -display $Hostdisplay -print >> $Xkbkeymapfile ;;
-            *)  setxkbmap "$Xkblayout" -print >> $Xkbkeymapfile ;;
-          esac
+          command -v setxkbmap >/dev/null && {
+            case "$Xkblayout" in
+              "") [ -n "$Hostdisplay" ] && setxkbmap -display $Hostdisplay -print >> $Xkbkeymapfile ;;
+              *)  setxkbmap "$Xkblayout" -print >> $Xkbkeymapfile ;;
+            esac
+          } || {
+            note "setxkbmap not found. Need setxkbmap and xkbcomp to set keyboard layout."
+          }
           [ -s "$Xkbkeymapfile" ] && {
             echo "#"
             echo "# set keyboard layout on $Newdisplay to same as on host"
@@ -5235,7 +5299,7 @@ exit 0' >> /etc/rc.local"
   esac
 
   [ "$Setwaylandenv" = "yes" ] && for Line in $Waylandtoolkitenv ; do echo "export $Line" ;  done
-  [ "$Sharewayland"  = "yes" ] &&       [ -n "$Newwaylandsocket" ]    && echo "export WAYLAND_DISPLAY=$Newwaylandsocket"
+  [ "$Sharewayland"  = "yes" ] &&       [ -n "$Newwaylandsocket" ] && echo "export WAYLAND_DISPLAY=$Newwaylandsocket"
   
   case $Xserver in
     --weston|--kwin|--hostwayland|--nothing) ;;
@@ -5730,15 +5794,17 @@ $(tail $Compositorlogfile)"
 { #### part: start X server
   case $Xserver in
     --xpra|--xephyr|--xdummy|--xvfb|--xwayland|--nxagent|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland)
-      $Mksu "exec env WAYLAND_DISPLAY=$Newwaylandsocket   xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " ;;
+      $Mksu "exec env WAYLAND_DISPLAY=$Newwaylandsocket      xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " ;;
     --xorg)
       case $Xlegacywrapper in
-        yes) $Mksu   "exec                                xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " ;;
-        no)  bash -c "exec                                xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " ;;
+        yes) $Mksu   "exec                                   xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " ;;
+        no)  bash -c "exec                                   xinit $Xinitrc -- $Xcommand          >> $Xinitlogfile  2>&1 " ;;
       esac
     ;;
     --hostdisplay|--hostwayland|--weston|--kwin|--nothing)
-      $Mksu "exec                                          bash $Xinitrc                       >> $Xinitlogfile  2>&1 " ;;
+      $Mksu "exec                                             bash $Xinitrc                       >> $Xinitlogfile  2>&1 " ;;
+    --vcxsrv)
+      $Mksu "$Xcommand >> $Xinitlogfile 2>&1  &               bash $Xinitrc                       >> $Xinitlogfile  2>&1 " ;;
   esac
   
   [ $? != 0 ] && rocknroll && warning "X server $Xserver returned an error code. 

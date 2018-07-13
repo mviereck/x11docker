@@ -8,19 +8,19 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
- - Support of [MSYS2/CYGWIN/MINGW](https://www.msys2.org/). 
+ - `--vcxsrv`: New option for VcXsrv X server on Windows.
+ - Support of [MSYS2/CYGWIN/MINGW](https://www.msys2.org/)
+   and WSL (Ubuntu/bash on Windows). 
    [(#55)](https://github.com/mviereck/x11docker/issues/55)
 ### Changed
  - Syntax changed for custom `DOCKER_RUN_OPTIONS`:
-     Previous, still valid:
-   x11docker [OPTIONS] -- "[DOCKER_RUN_OPTIONS]" IMAGE [COMMAND [ARG1 ARG2 ...]]
      New:
-   x11docker [OPTIONS] -- DOCKER_RUN_OPTIONS -- IMAGE [COMMAND [ARG1 ARG2 ...]]
-     BREAKS due to wrongly parsed -- :
-   x11docker [OPTIONS] -- "DOCKER_RUN_OPTIONS" IMAGE COMMAND ARG1 -- ARG2
-     Valid:
-   x11docker [OPTIONS] -- "DOCKER_RUN_OPTIONS" -- IMAGE COMMAND ARG1 -- ARG2
+   x11docker [OPTIONS] --  DOCKER_RUN_OPTIONS -- IMAGE [COMMAND [ARG1 ARG2 ...]]
+     Previous, still valid:
+   x11docker [OPTIONS] -- "DOCKER_RUN_OPTIONS"   IMAGE [COMMAND [ARG1 ARG2 ...]]
    x11docker [OPTIONS] -- IMAGE COMMAND ARG1 -- ARG2
+     BREAKS due to wrongly parsed -- :
+   x11docker [OPTIONS] -- "DOCKER_RUN_OPTIONS"   IMAGE COMMAND ARG1 -- ARG2
    [(#58)](https://github.com/mviereck/x11docker/issues/58)
 ### Fixed
  - `--xpra`: Support of outdated xpra version v0.17.6 that is still
