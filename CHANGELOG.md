@@ -8,12 +8,12 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
- - `--vcxsrv`: New option for VcXsrv X server on Windows.
+ - `--vcxsrv`: New option for VcXsrv X server on MS Windows.
  - Support of [MSYS2/CYGWIN/MINGW](https://www.msys2.org/)
    and WSL (Ubuntu/bash on Windows). 
    [(#55)](https://github.com/mviereck/x11docker/issues/55)
 ### Changed
- - Syntax changed for custom `DOCKER_RUN_OPTIONS`:
+ - *API CHANGE*: Syntax changed for custom `DOCKER_RUN_OPTIONS`:
      New:
    x11docker [OPTIONS] --  DOCKER_RUN_OPTIONS -- IMAGE [COMMAND [ARG1 ARG2 ...]]
      Previous, still valid:

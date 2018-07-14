@@ -466,11 +466,11 @@ $(cat $Bgpidfile 2>/dev/null)"
       Pid=$(echo $Line  | awk '{print $1}')
       Name=$(echo $Line | awk '{print $2}')
       debugnote "Checking: $Pid ($Name): $(pspid $Pid ||:)"
+      [ "$Name" = "vcxsrv.exe" ] && taskkill.exe /PID $Pid /T /F
       checkpid $Pid && {        
         case $Name in
           xinit)                  killpid $Pid $Name xinit ;;
-          Xserver)                killpid $Pid $Name 'Xorg|Xephyr|Xvfb|Xwayland|nxagent|vcxsrv' ;;
-          vcxsrv.exe)             [ "$Cygwin" = "yes" ] && taskkill.exe $Pid ;;
+          Xserver)                killpid $Pid $Name 'Xorg|Xephyr|Xvfb|Xwayland|nxagent' ;;
           containershell)         killpid $Pid $Name x11docker ;;
           windowmanager)          killpid $Pid $Name ;;
           xpraserver|xpraclient)  killpid $Pid $Name xpra ;;
@@ -830,8 +830,21 @@ depends() {             # check dependencies on host for X server option $1
     --vcxsrv)
       Vcxsrvpath="/c/Program Files/VcXsrv/vcxsrv.exe"
       command -v "$Vcxsrvpath" >/dev/null || Vcxsrvpath="/mnt$Vcxsrvpath"
-      command -v "$Vcxsrvpath" >/dev/null || Return=1
-      Vcxsrvpath="$(echo "$Vcxsrvpath" | rev | cut -d/ -f2- | rev)"
+      command -v "$Vcxsrvpath" >/dev/null || {
+        $Message "${1:-}: X server VcXsrv not found." 
+        Return=1
+        [ "$Mswindows" = "yes" ] && note 'To run x11docker within MSYS2, CYGWIN or WSL on MS Windows,
+  please install X server VcXsrv.
+  
+  Searching for vcxsrv.exe at:
+    C:\Program Files\VcXsrv
+    /c/Program Files/VcXsrv
+    /mnt/c/Program Files/VcXsrv'
+      } || {
+        Vcxsrvpath="$(echo "$Vcxsrvpath" | rev | cut -d/ -f2- | rev)"
+        export PATH="$PATH:$Vcxsrvpath)"
+        [ "$Mswindows" = "no" ] && Return=1 && $Message "${1:-}: X server VcXsrv is available on MS Windows only."
+      }
     ;;
   esac
   case ${1:-} in
@@ -1302,8 +1315,9 @@ Tty=""
 Ttyinuse=""
 
 # Windows environment, VcXsrv, WSL, MSYS2/CYGWIN
-[ "${MSYSTEM:-}${CYGWIN:-}" ] && Cygwin="yes" || Cygwin="no" # Running on Cygwin/MSYS2 ?
-grep -q "/mnt/c/Windows/System32" <<< ${PATH:-} && Wsl="yes" || Wsl="no"
+[ "${MSYSTEM:-}${CYGWIN:-}" ]                     && Cygwin="yes"    || Cygwin="no"
+grep -q "/mnt/c/Windows/System32" <<< ${PATH:-}   && Wsl="yes"       || Wsl="no"
+{ [ "$Wsl" = "yes" ] || [ "$Cygwin" = "yes" ] ; } && Mswindows="yes" || Mswindows="no" 
 Vcxsrvpath=""
 Localappdatawin=""
 Localappdatalin=""
@@ -1636,8 +1650,7 @@ $Customenvironment"    ;  shift ;;                         # set custom environm
          --keymap)     Xkblayout="${2:-}" ; shift ;;       # keymap layout for xkbcomp. Compare /usr/share/X11/xkb/symbols 
          
        ## X Authentication
-         --xhost)      Xhost="xhost $2" ; shift ;;         # set 'xhost +' on both X servers
-         --xhost+)     Xhost="xhost +"  ;;                 # set 'xhost +' on both X servers (deprecated, please use --xhost N)
+         --xhost)      Xhost="$2" ; shift ;;               # custom xhost setting on new X server
          --no-auth)    Xauthentication="no" ;;             # disable cookie authentication
       -o|--no-xhost)   Noxhost="yes"  ;;                   # disable any access granted by xhost
          --trusted)    Forcetrusted="yes"  ;;              # force trusted cookies for --hostdisplay
@@ -1912,6 +1925,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
     [ "$Screensize" ]           && [ "$Tty" = "yes" ]            && Xserver="--xorg"
     [ -z "$Hostdisplay" ]       && [ -n "$Hostwaylandsocket" ]   && Xserver="--weston-xwayland"
     [ "$Sharewayland" = "yes" ] && { [ -n "$Hostwaylandsocket" ] && [ "$Desktopmode" = "no" ] && Xserver="--hostwayland" || Xserver="--weston" ; }
+    [ "$Mswindows" = "yes" ]                                     && Xserver="--vcxsrv"
 #    nxagent is disabled as favorized X server due to nxagent issues with X extension Composite.
 #    { [ "$Xserver" = "--xpra" ] || [ "$Xserver" = "--xephyr" ];} && Xserver="--nxagent"
   }
@@ -1988,6 +2002,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   [ "$Xserver" = "--weston-xwayland" ] && { depends --weston-xwayland || Xserver="--kwin-xwayland" ; }
   [ "$Xserver" = "--weston" ]          && { depends --weston          || Xserver="--kwin" ; }
   [ "$Xserver" = "--xdummy-xwayland" ] && { depends --xdummy-xwayland || Xserver="--kwin-xwayland" ; }
+  [ "$Xserver" = "--vcxsrv" ]          && { depends --vcxsrv          || Xserver="--hostdisplay" ; }
   
   [ "$Sharewayland" = "yes" ]          && { depends $Xserver || error "Failed to set up a Wayland environment.
   Please install 'weston' or 'kwin_wayland'." ; }
@@ -2077,7 +2092,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   # --gpu
   [ "$Gpu" = "yes" ] && {
     case $Xserver in
-      --xpra|--xdummy|--nxagent|--xephyr)
+      --xpra|--xdummy|--nxagent|--xephyr|--vcxsrv)
         note "Option $Xserver does not support hardware acceleration.
   Fallback: using software rendering, disabling option --gpu" 
         Gpu="no" 
@@ -2130,7 +2145,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
       ;;
     esac
     case $Xserver in
-      --xpra|--xpra-xwayland|--hostdisplay|--kwin|--weston|--nothing) ;;
+      --xpra|--xpra-xwayland|--hostdisplay|--kwin|--weston|--nothing|--vcxsrv) ;;
       *) note "Sharing picture clips with option --clipboard
   is only possible with options --xpra, --xpra-xwayland and --hostdisplay." ;;
     esac
@@ -2504,7 +2519,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
         
         # find free display number and free cache folder
         while :; do
-          [ -n "$(find $Localappdatalin/x11docker/X$Newdisplaynumber $Cachebasefolder/X$Newdisplaynumber-* 2>/dev/null)" ] || {
+          [ -n "$(find $Localappdatalin/x11docker/X$Newdisplaynumber-* $Cachebasefolder/X$Newdisplaynumber-* 2>/dev/null)" ] || {
             grep -q -E 'Authorisation required|access control' <<< "$(echo "SET DISPLAY=$Hostip:$Newdisplaynumber
 cd c:/Program Files/VcXsrv
 xhost.exe 2>&1
@@ -2602,8 +2617,53 @@ xhost.exe 2>&1
 
   [ "$Xserver" = "--vcxsrv" ] && {
     mkdir -p $Localappdatalin/x11docker
-    Xservercookie="$Localappdatalin/x11docker/X$Newdisplaynumber"   && mkfile $Xservercookie 666
+    Xservercookie="$Localappdatalin/x11docker/X$Newdisplaynumber-Xservercookie" && mkfile $Xservercookie 666
+    Xclientcookie="$Localappdatalin/x11docker/X$Newdisplaynumber-Xclientcookie" && mkfile $Xclientcookie 666
   }
+}
+
+{ #### part: set up pipes and fifo
+  # file descriptors in use:
+  # &0  stdin                 --stdin with catstdin
+  # &1  stdout
+  # &2  stderr
+  # &3  stderr                for warnings and notes, with --silent redirected to /dev/null
+  # &4  stderr                for --stderr
+  # &5  (not in use)
+  # &6  $Messagefifo          for messages to watchmessagefifo()
+  # &7  (not in use)
+  # &8  $Timetosaygoodbyefifo for saygoodbye() and waitfortheend()
+  # &9  $Watchpidfifo         for watchpidlist()
+
+  # redirect stdin to named pipe. Named pipe is shared with container and used as stdin of image command in container.CMD.sh
+  [ "$Forwardstdin" = "yes" ] && {
+    cat <&0 >$Cmdstdinfile & storepid $! catstdin
+  }
+  
+  case $Cygwin in
+    no)
+      Watchpidfifo="$Cachefolder/$Watchpidfifo"                 && $Mksu "mkfifo $Watchpidfifo"
+      Messagefifo="$Sharefolder/$Messagefifo"                   && $Mksu "mkfifo $Messagefifo && chmod 666 $Messagefifo"
+      Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo" && $Mksu "mkfifo $Timetosaygoodbyefifo"
+    ;;
+    yes)
+      Watchpidfifo="$Cachefolder/$Watchpidfifo"                 && mkfile $Watchpidfifo
+      Messagefifo="$Sharefolder/$Messagefifo"                   && mkfile $Messagefifo && chmod 666 $Messagefifo
+      Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo" && mkfile $Timetosaygoodbyefifo && chmod 666 $Timetosaygoodbyefifo
+    ;;
+  esac
+  
+  # used by waitfortheend()
+  exec 8<>$Timetosaygoodbyefifo
+  
+  # start watching important pids, e.g. xinit, container.
+  exec 9<>$Watchpidfifo
+  setonwatchpidlist $$
+  watchpidlist & storepid $! watchpidlist
+  
+  # start watching for messages out of container or dockerrc
+  exec 6<>$Messagefifo
+  watchmessagefifo & storepid $! watchmessagefifo
 }
 
 { #### part: option --xorg: check free vt / tty
@@ -3451,7 +3511,7 @@ $(tail "$Compositorlogfile")"
   # cookie authentication
   [ "$Xauthentication" = "yes" ] && case $Xserver in
     --vcxsrv) 
-      Vcxsrvcookie="$(escapestring "$Localappdatawin")\\\\x11docker\\\\X$Newdisplaynumber"
+      Vcxsrvcookie="$(escapestring "$Localappdatawin")\\\\x11docker\\\\X$Newdisplaynumber-Xservercookie"
       Xserveroptions="$Xserveroptions \\
   -auth $Vcxsrvcookie" ;;
     *) Xserveroptions="$Xserveroptions \\
@@ -3705,8 +3765,7 @@ esac
     --vcxsrv)
       Xcommand="$(escapestring "$Vcxsrvpath")/vcxsrv.exe :$Newdisplaynumber -ac -retro \\
   $Xserveroptions \\
-  "
-      Xauthentication="no"
+ "
       case $Fullscreen in
         yes)
           Xcommand="$Xcommand -fullscreen"
@@ -4301,7 +4360,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
           # not really needed here as vars are set in container.CMD.sh
           # but useful for custom access with docker exec
           Dockercommand="$Dockercommand \\
-  -e DISPLAY=$Newdisplay -e XAUTHORITY=$Cshare/Xclientcookie"
+  -e DISPLAY=$Newdisplay -e XAUTHORITY=$Cshare/Xclientcookie"   ### FIXME XAUTHORITY is wrong for --vcxsrv
           # X socket will be softlinked to /tmp/.X11-unix in container.CMD.sh
           [ "$Newxsocket" ] && Dockercommand="$Dockercommand \\
   -v $Newxsocket:/X$Newdisplaynumber:rw"
@@ -4418,7 +4477,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo '  grep -q "<none>" <<<$Line || echo $Line >> '$Cachebasefolder/x11docker-gui/images.list
   echo "done < <(sort < $Cachefolder/images.list)"
   echo ""
-    
+  
   echo "# check if image is available locally"
   echo "docker inspect --type=image $Imagename >/dev/null 2>&1 || {"
   [ -n "$Hostxenv" ]                      && echo "  export $Hostxenv"
@@ -5129,7 +5188,7 @@ exit 0' >> /etc/rc.local"
     echo "# custom setup root command added with option --runasroot"
     echo "$Runasroot"
   }
-  
+
   # message to container.CMD.sh
   echo "echo 'x11docker: Container root setup is ready'"
   echo ":> /x11docker.setupready"
@@ -5244,8 +5303,12 @@ exit 0' >> /etc/rc.local"
     --nothing) echo "unset DISPLAY XAUTHORITY WAYLAND_DISPLAY" ;;
     --vcxsrv)
       [ "$Xauthentication" = "yes" ] && {
-        :
+        #echo "cd $Localappdatalin/x11docker"
+        #echo "xauth.exe -v -f X$Newdisplaynumber-Xclientcookie generate $Newdisplay . $Trusted timeout 3600 2>&1 | sed 's/$Dosreturn//'"
+        warning "X server VcXsrv runs without cookie authentication."
       }
+      echo "xhost.exe +"
+      warning "X server $Xserver allows access to X for everyone with 'xhost +'."
     ;;
     *) # here something for real X servers
       echo "# background color"
@@ -5294,7 +5357,7 @@ exit 0' >> /etc/rc.local"
         echo     "[ -s '$Xclientcookie' ] || { "
         echo     "  # still no cookie? try to create one without extension security"
         echo     "  verbose 'Failed to retrieve cookie from X server. Will bake one myself.'"
-        echo     "  xauth -f $Xclientcookie add $Newdisplay . $(mcookie)"
+        echo     "  xauth -v -f $Xclientcookie add $Newdisplay . $(mcookie)"
         echo     "}"
         echo     "# create prepared cookie with localhost identification disabled by ffff, needed if X socket is shared. ffff means 'familiy wild'"
         echo     "Cookie=\$(xauth -f $Xclientcookie nlist | sed -e 's/^..../ffff/')"
@@ -5324,6 +5387,11 @@ exit 0' >> /etc/rc.local"
             ;;
           esac
           
+          [ -n "$Xhost" ] && {
+            echo "verbose 'Custom xhost setting on $Newdisplay (option --xhost): $Xhost'"
+            echo "xhost $Xhost" 
+          }
+          
           [ "$Initsystem" = "systemd" ] || [ "$Dbusdaemon" = "yes" ] && {
             echo "note 'Allowing xhost access for $Benutzer on display $Newdisplay" 
             echo "  to avoid service issues with X access. (option --systemd or --dbus-system):"
@@ -5348,17 +5416,12 @@ exit 0' >> /etc/rc.local"
           }
         ;;
       esac
-      
-      [ -n "$Xhost" ] && {
-        echo "verbose 'Custom xhost setting on $Newdisplay (option --xhost): $Xhost'"
-        echo "$Xhost" 
-      }
           
       [ "$Shareclipboard" = "yes" ] && [ -n "$Hostdisplay" ] && {
         case $Xserver in
-          --xpra|--xpra-xwayland|--nxagent) ;;     # have their own clipboard management
-          --hostdisplay) ;;                        # already same clipboard
-          *)                                       # synchronizing between different X servers
+          --xpra|--xpra-xwayland|--nxagent|--vcxsrv) ;;     # have their own clipboard management
+          --hostdisplay) ;;                                 # already same clipboard
+          *)                                                # synchronizing between different X servers
             echo "# option '-c, --clipboard': Run clipboard script "
             echo "# (text copy only) (xpra has its own clipboard managment including images)"
             echo "bash $Shareclipboardscript & storepid \$! shareclipboard" 
@@ -5388,7 +5451,7 @@ exit 0' >> /etc/rc.local"
       echo "  xrandr | grep -q primary || xrandr --output \$(xrandr | grep ' connected' | head -n1 | cut -d' ' -f1) --primary"
       echo "  echo \$(xrandr | grep primary | cut -d' ' -f1)"
       echo "}"
-      echo "Output=\$(getprimary)"
+      [ "$Xserver" != "--vcxsrv" ] && echo "Output=\$(getprimary)"
     ;;
   esac
       
@@ -5501,7 +5564,7 @@ exit 0' >> /etc/rc.local"
       echo "}"
     ;;
   esac
-  [ -n "$Newdisplay" ] && echo "verbose \"Output of xrandr on $Newdisplay
+  [ -n "$Newdisplay" ] && [ "$Xserver" != "--vcxsrv" ] && echo "verbose \"Output of xrandr on $Newdisplay
 \$(xrandr)\""
 
   [ "$Xfishtank" = "yes" ] && echo "xfishtank & storepid \$! xfishtank"
@@ -5531,7 +5594,9 @@ exit 0' >> /etc/rc.local"
   Terminal to show docker pull progress:          $Pullterminal
   Running on console:                             $Tty
   Running over SSH:                               $Ssh
-  Running on CYGWIN or MSYS2:                     $Cygwin"
+  Running on MS Windows:                          $Mswindows
+  Running on CYGWIN or MSYS2:                     $Cygwin
+  Running on WSL:                                 $Wsl"
     case $X11dockermode in
       run)
         verbose "Generated container.rootsetup.sh:
@@ -5595,50 +5660,6 @@ Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' '
   fi
 }
 
-{ #### part: set up pipes and fifo
-  # file descriptors in use:
-  # &0  stdin                 --stdin with catstdin
-  # &1  stdout
-  # &2  stderr
-  # &3  stderr                for warnings and notes, with --silent redirected to /dev/null
-  # &4  stderr                for --stderr
-  # &5  (not in use)
-  # &6  $Messagefifo          for messages to watchmessagefifo()
-  # &7  (not in use)
-  # &8  $Timetosaygoodbyefifo for saygoodbye() and waitfortheend()
-  # &9  $Watchpidfifo         for watchpidlist()
-
-  # redirect stdin to named pipe. Named pipe is shared with container and used as stdin of image command in container.CMD.sh
-  [ "$Forwardstdin" = "yes" ] && {
-    cat <&0 >$Cmdstdinfile & storepid $! catstdin
-  }
-  
-  case $Cygwin in
-    no)
-      Watchpidfifo="$Cachefolder/$Watchpidfifo"                 && $Mksu "mkfifo $Watchpidfifo"
-      Messagefifo="$Sharefolder/$Messagefifo"                   && $Mksu "mkfifo $Messagefifo && chmod 666 $Messagefifo"
-      Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo" && $Mksu "mkfifo $Timetosaygoodbyefifo"
-    ;;
-    yes)
-      Watchpidfifo="$Cachefolder/$Watchpidfifo"                 && mkfile $Watchpidfifo
-      Messagefifo="$Sharefolder/$Messagefifo"                   && mkfile $Messagefifo && chmod 666 $Messagefifo
-      Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo" && mkfile $Timetosaygoodbyefifo && chmod 666 $Timetosaygoodbyefifo
-    ;;
-  esac
-  
-  # used by waitfortheend()
-  exec 8<>$Timetosaygoodbyefifo
-  
-  # start watching important pids, e.g. xinit, container.
-  exec 9<>$Watchpidfifo
-  setonwatchpidlist $$
-  watchpidlist & storepid $! watchpidlist
-  
-  # start watching for messages out of container or dockerrc
-  exec 6<>$Messagefifo
-  watchmessagefifo & storepid $! watchmessagefifo
-}
-  
 { #### part: wait for X server and run docker ####
 # run following three parts together in a subshell.
 # They are executed after xinit.
@@ -5680,13 +5701,17 @@ $(tail $Compositorlogfile)"
   }
   
   # check and watch X server
-  [ "$Xcommand" ] && {
-    Xinitpid="$(pgrep -a xinit | grep "xinit $Xinitrc" | awk '{print $1}')"
-    [ "$Xinitpid" ] && setonwatchpidlist $Xinitpid && storepid $Xinitpid xinit
-    echo $Xcommand | grep -q Xorgwrapper && Line="Xorg $Newdisplay" || Line=$Xcommand
-    Xserverpid=$(ps aux | grep "$(echo $Line | cut -d' ' -f1-2)" | grep -v grep | grep -v xinit | awk '{print $2}')
-    [ "$Xserverpid" ] && setonwatchpidlist $Xserverpid && storepid $Xserverpid Xserver
-  }
+  case $Xserver in
+    --nothing|--weston|--kwin) ;;
+    --vcxsrv) ;;
+    *)
+      Xinitpid="$(pgrep -a xinit | grep "xinit $Xinitrc" | awk '{print $1}')"
+      [ "$Xinitpid" ] && setonwatchpidlist $Xinitpid && storepid $Xinitpid xinit
+      echo $Xcommand | grep -q Xorgwrapper && Line="Xorg $Newdisplay" || Line=$Xcommand
+      Xserverpid=$(ps aux | grep "$(echo $Line | cut -d' ' -f1-2)" | grep -v grep | grep -v xinit | awk '{print $2}')
+      [ "$Xserverpid" ] && setonwatchpidlist $Xserverpid && storepid $Xserverpid Xserver
+    ;;
+  esac
   
   # option '--showenv': show display environment variables on stdout
   [ "$Showdisplayenvironment" = "yes" ] && echo $Newxenv
