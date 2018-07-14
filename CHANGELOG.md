@@ -8,7 +8,8 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
- - `--vcxsrv`: New option for VcXsrv X server on MS Windows.
+ - `--vcxsrv`: New option for [VcXsrv](https://sourceforge.net/projects/vcxsrv/) 
+   X server on MS Windows. Similar to Xming.
  - Support of [MSYS2/CYGWIN/MINGW](https://www.msys2.org/)
    and WSL (Ubuntu/bash on Windows). 
    [(#55)](https://github.com/mviereck/x11docker/issues/55)
@@ -23,10 +24,17 @@ Project website: https://github.com/mviereck/x11docker
    x11docker [OPTIONS] -- "DOCKER_RUN_OPTIONS"   IMAGE [COMMAND [ARG1 ARG2 ...]]
    x11docker [OPTIONS] -- IMAGE COMMAND ARG1 -- ARG2
 ```
-   **BREAKS** due to wrongly parsed `--` :
+   **BREAKS** due to wrongly parsed ` -- ` :
 ```
    x11docker [OPTIONS] -- "DOCKER_RUN_OPTIONS"   IMAGE COMMAND ARG1 -- ARG2
 ```
+### Removed
+ - `--ipc`: Use `--hostipc` instead.
+ - `--net`: Use `--hostnet` instead.
+ - `--sharewayland`: Use `--wayland` instead.
+ - `--setwaylandenv`: Use `--wayland` instead.
+ - `--dbus-daemon`, `--dbusdaemon`: Use `--dbus-system` instead.
+ - `--add`: Use `--runfromhost` instead.
 ### Fixed
  - `--xpra`: Support of outdated xpra version v0.17.6 that is still
    distributed in debian stretch and buster.
