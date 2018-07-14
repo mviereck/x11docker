@@ -469,7 +469,8 @@ $(cat $Bgpidfile 2>/dev/null)"
       checkpid $Pid && {        
         case $Name in
           xinit)                  killpid $Pid $Name xinit ;;
-          Xserver)                killpid $Pid $Name 'Xorg|Xephyr|Xvfb|Xwayland|nxagent' ;;
+          Xserver)                killpid $Pid $Name 'Xorg|Xephyr|Xvfb|Xwayland|nxagent|vcxsrv' ;;
+          vcxsrv.exe)             [ "$Cygwin" = "yes" ] && taskkill.exe $Pid ;;
           containershell)         killpid $Pid $Name x11docker ;;
           windowmanager)          killpid $Pid $Name ;;
           xpraserver|xpraclient)  killpid $Pid $Name xpra ;;
@@ -580,7 +581,7 @@ mywatch() {             # repeat $1 untils its output changes
   Current output:
 $Watchoutput"
 
-while rocknroll; do
+  while rocknroll; do
     [ "$Watchoutput" = "$(sh -c "${1:-}" 2>&1)" ] || break
     sleep 1
   done
@@ -599,13 +600,24 @@ watchpidlist() {        # watch list of important pids
     [ "$Pid" ] && {
       Watchpidlist="$Watchpidlist $Pid"
       debugnote "Watching $(pspid $Pid)"
-    } || sleep 1
-    for Pid in $Watchpidlist; do
-      [ -e /proc/$Pid ] || {
-        debugnote  "watchpidlist: PID $Pid has terminated"
-        saygoodbye "watchpidlist $Pid"
-      }
-    done
+    } || sleep 2 # sleep for cygwin
+    case $Cygwin in
+      no)
+        for Pid in $Watchpidlist; do
+          [ -e /proc/$Pid ] || {
+            debugnote  "watchpidlist: PID $Pid has terminated"
+            saygoodbye "watchpidlist $Pid"
+          }
+        done
+      ;;
+      yes)
+        for Pid in $Watchpidlist; do
+          ps -p $Pid --windows >/dev/null 2>&1 || {
+            debugnote  "watchpidlist: PID $Pid has terminated"
+            saygoodbye "watchpidlist $Pid"
+          }
+        done;;
+    esac
   done
   saygoodbye "watchpidlist"
 }
@@ -618,7 +630,7 @@ watchmessagefifo() {    # watch for messages out of container or dockerrc
   local Line= Message= Messagetype=
   while rocknroll ; do
     IFS= read -r Line <&6 ||:
-    [ "$Line" ] || sleep 1
+    [ "$Line" ] || sleep 2  # sleep for cygwin
     [ "$Line" ] && Message="$Message
 $Line"
     grep -q -E ":WARNING|:NOTE|:DEBUGNOTE|:VERBOSE|:ERROR|:STDOUT" <<< "$Line" && {
@@ -646,9 +658,18 @@ rocknroll() {           # check if x11docker is still running
 waitfortheend() {       # wait for end of x11docker
   # signal is byte in $Timetosaygoodbyefifo
   # decent read to wait for signal to terminate
-  while rocknroll; do
-    bash -c "read -n1 -t1 <&8 ||:"
-  done
+  case $Cygwin in
+    no)
+      while rocknroll; do
+        bash -c "read -n1 -t1 <&8 ||:"
+      done
+    ;;
+    yes)
+      while rocknroll; do
+        sleep 2
+      done
+    ;;
+  esac
 }
 waitforfilecreation() { # similar to inotify-wait: wait up to 15s for file $1 to be created
   # $1 file to wait for
@@ -810,7 +831,7 @@ depends() {             # check dependencies on host for X server option $1
       Vcxsrvpath="/c/Program Files/VcXsrv/vcxsrv.exe"
       command -v "$Vcxsrvpath" >/dev/null || Vcxsrvpath="/mnt$Vcxsrvpath"
       command -v "$Vcxsrvpath" >/dev/null || Return=1
-      Vcxsrvpath="$(escapestring "$Vcxsrvpath" | rev | cut -d/ -f2- | rev)"
+      Vcxsrvpath="$(echo "$Vcxsrvpath" | rev | cut -d/ -f2- | rev)"
     ;;
   esac
   case ${1:-} in
@@ -1280,10 +1301,15 @@ Ssh=""
 Tty=""
 Ttyinuse=""
 
+# Windows environment, VcXsrv, WSL, MSYS2/CYGWIN
 [ "${MSYSTEM:-}${CYGWIN:-}" ] && Cygwin="yes" || Cygwin="no" # Running on Cygwin/MSYS2 ?
 grep -q "/mnt/c/Windows/System32" <<< ${PATH:-} && Wsl="yes" || Wsl="no"
 Vcxsrvpath=""
-Winipconfig=""
+Localappdatawin=""
+Localappdatalin=""
+Dosreturn=$'\r'
+Tasklistold=""
+Tasklistnew=""
 
 # X server settings
 Xserver=""                                      # X server option to use
@@ -2459,9 +2485,41 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
     esac
     
     # search free X socket number and free Wayland socket number, passing already used cache folders
-    while [ -n "$(find /tmp/.X11-unix/X$Newdisplaynumber /tmp/.X$Newdisplaynumber-lock /tmp/.X11-unix/X$Newdisplaynumber $XDG_RUNTIME_DIR/wayland-$Newdisplaynumber $Cachebasefolder/X$Newdisplaynumber-* 2>/dev/null)" ] ; do
-      Newdisplaynumber=$(($Newdisplaynumber + 1))
-    done
+    case $Xserver in
+      --vcxsrv)
+        # Find Windows app cache folder
+        Localappdatawin="$(cmd.exe /C "echo %LocalAppData%" | sed -e "s/$Dosreturn//")"
+        verbose -d "LocalAppData path on Windows: $Localappdatawin"
+        for ((i=1 ; i<=20 ; i++)); do
+          Localappdatalin="$Localappdatalin/$(cut -d'\' -f$i <<< "$Localappdatawin")"
+        done
+        Localappdatalin="$(sed s%//.*%% <<< "$Localappdatalin")"
+        Localappdatalin="$(echo "$Localappdatalin" | cut -d: -f1 | tr [:upper:] [:lower:] )$(cut -d: -f2- <<<"$Localappdatalin")"
+        [ "$(cut -c1-4 <<<"$Vcxsrvpath")" = "/mnt" ] && Localappdatalin="/mnt$Localappdatalin"
+        Localappdatalin="$(escapestring "$Localappdatalin")"      # escape possible spaces
+        verbose -d "LocalAppData path on Linux: $Localappdatalin"
+        
+        # find any ip address from host for X access over TCP
+        Hostip="$(ipconfig.exe | grep 'IPv4' | head -n1 | grep -o '[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | grep "^10\.0\.*")"
+        
+        # find free display number and free cache folder
+        while :; do
+          [ -n "$(find $Localappdatalin/x11docker/X$Newdisplaynumber $Cachebasefolder/X$Newdisplaynumber-* 2>/dev/null)" ] || {
+            grep -q -E 'Authorisation required|access control' <<< "$(echo "SET DISPLAY=$Hostip:$Newdisplaynumber
+cd c:/Program Files/VcXsrv
+xhost.exe 2>&1
+" | cmd.exe )" || break
+          }
+          Newdisplaynumber=$(($Newdisplaynumber + 1))
+        done
+      ;;
+      
+      *)
+        while [ -n "$(find /tmp/.X11-unix/X$Newdisplaynumber /tmp/.X$Newdisplaynumber-lock /tmp/.X11-unix/X$Newdisplaynumber $XDG_RUNTIME_DIR/wayland-$Newdisplaynumber $Cachebasefolder/X$Newdisplaynumber-* 2>/dev/null)" ] ; do
+          Newdisplaynumber=$(($Newdisplaynumber + 1))
+        done
+      ;;
+    esac
   }
   
   Newdisplay=":$Newdisplaynumber"
@@ -2497,14 +2555,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
       [ -e "$Newxlock" ] || Newxlock=""
     ;;
     --vcxsrv)
-      Newxsocket=
-      
-      Winipconfig="$(command -v ipconfig)"
-      [ "$Winipconfig" ] || Winipconfig="$(command -v /c/Windows/System32/ipconfig.exe)"
-      [ "$Winipconfig" ] || Winipconfig="$(command -v /mnt/c/Windows/System32/ipconfig.exe)"
-      [ "$Winipconfig" ] || error "Could not find ipconfig."
-
-      Hostip="$($Winipconfig | grep 'IPv4' | head -n1 | grep -o '[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | grep "^10\.0\.*")"
+      Newxsocket=""
       Newdisplay="$Hostip:$Newdisplaynumber"
     ;;
   esac
@@ -2548,7 +2599,11 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   Cmdstdoutlogfile="$Sharefolder/$Cmdstdoutlogfile"                 && mkfile $Cmdstdoutlogfile 666
   Cmdstderrlogfile="$Sharefolder/$Cmdstderrlogfile"                 && mkfile $Cmdstderrlogfile 666
   mkfile "$Sharefolder/environment"
-  
+
+  [ "$Xserver" = "--vcxsrv" ] && {
+    mkdir -p $Localappdatalin/x11docker
+    Xservercookie="$Localappdatalin/x11docker/X$Newdisplaynumber"   && mkfile $Xservercookie 666
+  }
 }
 
 { #### part: option --xorg: check free vt / tty
@@ -3394,8 +3449,15 @@ $(tail "$Compositorlogfile")"
   esac
   
   # cookie authentication
-  [ "$Xauthentication" = "yes" ] && Xserveroptions="$Xserveroptions \\
-  -auth $Xservercookie"
+  [ "$Xauthentication" = "yes" ] && case $Xserver in
+    --vcxsrv) 
+      Vcxsrvcookie="$(escapestring "$Localappdatawin")\\\\x11docker\\\\X$Newdisplaynumber"
+      Xserveroptions="$Xserveroptions \\
+  -auth $Vcxsrvcookie" ;;
+    *) Xserveroptions="$Xserveroptions \\
+  -auth $Xservercookie" ;;
+  esac
+    
 
   # create command to run X server
   case $Xserver in
@@ -3640,10 +3702,8 @@ esac
 </keystrokes>' >> "$NXAGENT_KEYSTROKEFILE"
     ;;
     
-    --hostwayland) Newwaylandsocket="$Hostwaylandsocket" ;;
-    --hostdisplay|--nothing) ;;
     --vcxsrv)
-      Xcommand="$Vcxsrvpath/vcxsrv.exe :$Newdisplaynumber -ac -retro \\
+      Xcommand="$(escapestring "$Vcxsrvpath")/vcxsrv.exe :$Newdisplaynumber -ac -retro \\
   $Xserveroptions \\
   "
       Xauthentication="no"
@@ -3665,6 +3725,9 @@ esac
         no)  Xcommand="$Xcommand -noclipboard" ;;
       esac
     ;;
+    
+    --hostwayland) Newwaylandsocket="$Hostwaylandsocket" ;;
+    --hostdisplay|--nothing) ;;
   esac
   
   [ "$Sharewayland" = "yes" ] && [ -z "$Newwaylandsocket" ] && note "No wayland socket to share" && Sharewayland="no" 
@@ -5156,6 +5219,7 @@ exit 0' >> /etc/rc.local"
   # declaring functions echoes them into xinitrc
   echo "Timetosaygoodbye=$Timetosaygoodbye"
   echo "Bgpidfile=$Bgpidfile"
+  echo "Cygwin=$Cygwin"
   declare -f storepid
   declare -f rocknroll waitfortheend
   declare -f no_xhost 
@@ -5178,6 +5242,11 @@ exit 0' >> /etc/rc.local"
   case $Xserver in
     --weston|--kwin|--hostwayland) echo "unset DISPLAY XAUTHORITY" ;;
     --nothing) echo "unset DISPLAY XAUTHORITY WAYLAND_DISPLAY" ;;
+    --vcxsrv)
+      [ "$Xauthentication" = "yes" ] && {
+        :
+      }
+    ;;
     *) # here something for real X servers
       echo "# background color"
       echo "xsetroot -solid '#7F7F7F'"
@@ -5248,14 +5317,10 @@ exit 0' >> /etc/rc.local"
             yes)
               echo "verbose 'Disabling any possible access to new X server possibly granted by xhost'"
               echo "no_xhost"
-              [ -n "$Xhost" ] && {
-                echo "verbose 'Custom xhost setting (option --xhost): $Xhost'"
-                echo "$Xhost" 
-              }
             ;;
             no)
-              echo "verbose 'Allowing access for everyone with xhost +'"
-              echo "xhost +"
+              echo "verbose 'Allowing X access with xhost +localhost'"
+              echo "xhost +localhost"
             ;;
           esac
           
@@ -5284,6 +5349,11 @@ exit 0' >> /etc/rc.local"
         ;;
       esac
       
+      [ -n "$Xhost" ] && {
+        echo "verbose 'Custom xhost setting on $Newdisplay (option --xhost): $Xhost'"
+        echo "$Xhost" 
+      }
+          
       [ "$Shareclipboard" = "yes" ] && [ -n "$Hostdisplay" ] && {
         case $Xserver in
           --xpra|--xpra-xwayland|--nxagent) ;;     # have their own clipboard management
@@ -5461,7 +5531,7 @@ exit 0' >> /etc/rc.local"
   Terminal to show docker pull progress:          $Pullterminal
   Running on console:                             $Tty
   Running over SSH:                               $Ssh
-  Running on CYGWIN:                              $Cygwin"
+  Running on CYGWIN or MSYS2:                     $Cygwin"
     case $X11dockermode in
       run)
         verbose "Generated container.rootsetup.sh:
@@ -5804,7 +5874,15 @@ $(tail $Compositorlogfile)"
     --hostdisplay|--hostwayland|--weston|--kwin|--nothing)
       $Mksu "exec                                             bash $Xinitrc                       >> $Xinitlogfile  2>&1 " ;;
     --vcxsrv)
-      $Mksu "$Xcommand >> $Xinitlogfile 2>&1  &               bash $Xinitrc                       >> $Xinitlogfile  2>&1 " ;;
+      Tasklistold="
+$(tasklist.exe | grep vcxsrv.exe | awk '{print $2}')"
+      $Mksu "exec                                                              $Xcommand          >> $Xinitlogfile  2>&1  &"
+      Tasklistnew="$Tasklistold
+$(tasklist.exe | grep vcxsrv.exe | awk '{print $2}')"
+      Xserverpid="$(cat <<<"$Tasklistnew" | sort | uniq -u)"
+      [ "$Cygwin" = "yes" ] && setonwatchpidlist $Xserverpid 
+      storepid $Xserverpid vcxsrv.exe
+      $Mksu "exec                                             bash $Xinitrc                       >> $Xinitlogfile  2>&1 " ;;
   esac
   
   [ $? != 0 ] && rocknroll && warning "X server $Xserver returned an error code. 
@@ -5819,6 +5897,14 @@ $(tail $Compositorlogfile)")"
   
 ######### ToDo notes for development
 todo() {
+# --vcxsrv: create cookie, delete cookie
+#           --pulseaudio
+#           --gpu ?
+#           check further options
+
+# BUG x11docker/cde fails
+# check xhost +localhost
+
 # --hostdisplay: check xdpyinfo for MIT-SHM to avoid --hostipc
 # further checks of pam.d
 # error message window in wayland fails: xterm: no display. should use konsole
