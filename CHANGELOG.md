@@ -13,15 +13,20 @@ Project website: https://github.com/mviereck/x11docker
    and WSL (Ubuntu/bash on Windows). 
    [(#55)](https://github.com/mviereck/x11docker/issues/55)
 ### Changed
- - *API CHANGE*: Syntax changed for custom `DOCKER_RUN_OPTIONS`:
-     New:
+ - **API CHANGE**: Syntax changed for custom `DOCKER_RUN_OPTIONS` 
+   [(#58)](https://github.com/mviereck/x11docker/issues/58). New:
+```
    x11docker [OPTIONS] --  DOCKER_RUN_OPTIONS -- IMAGE [COMMAND [ARG1 ARG2 ...]]
-     Previous, still valid:
+```
+   Previous, still valid:
+```
    x11docker [OPTIONS] -- "DOCKER_RUN_OPTIONS"   IMAGE [COMMAND [ARG1 ARG2 ...]]
    x11docker [OPTIONS] -- IMAGE COMMAND ARG1 -- ARG2
-     BREAKS due to wrongly parsed -- :
+```
+   **BREAKS** due to wrongly parsed `--` :
+```
    x11docker [OPTIONS] -- "DOCKER_RUN_OPTIONS"   IMAGE COMMAND ARG1 -- ARG2
-   [(#58)](https://github.com/mviereck/x11docker/issues/58)
+```
 ### Fixed
  - `--xpra`: Support of outdated xpra version v0.17.6 that is still
    distributed in debian stretch and buster.
