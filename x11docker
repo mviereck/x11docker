@@ -120,10 +120,10 @@ Special options:
      --showpid1        Echo host PID of container PID 1 on stdout.
      --runfromhost CMD Run host command CMD on new X server (you may need & ).
      --runasroot CMD   Run command CMD as root in container on startup.
+     --sharessh        Shares SSH agent authentication socket from host.
      --pw FRONTEND     Choose frontend for password prompt. Possible FRONTEND:
                          su sudo gksu gksudo lxsu lxsudo kdesu kdesudo
                          pkexec beesu none
-     --sharessh        Shares the SSH agent within container
 
 X server options:
      --auto            Auto choose X server (default).
@@ -355,7 +355,8 @@ $Message
 (Press any key to close window)'
 read -n1
 " >> $Cachefolder/message
-      $Anyterminal '/bin/bash $Cachefolder/message' ||:
+      $Anyterminal /bin/bash $Cachefolder/message
+      :
     }
   } || {
     notify-send "$Title:
@@ -467,8 +468,8 @@ $(cat $Bgpidfile 2>/dev/null)"
       Pid=$(echo $Line  | awk '{print $1}')
       Name=$(echo $Line | awk '{print $2}')
       debugnote "Checking: $Pid ($Name): $(pspid $Pid ||:)"
-      [ "$Name" = "vcxsrv.exe" ] && taskkill.exe /PID $Pid /T /F
-      checkpid $Pid && {
+      [ "$Name" = "vcxsrv.exe" ] && cmd.exe /C "taskkill.exe /PID $Pid /T /F 2>&1" | sed "s/$Dosreturn//"
+      checkpid $Pid && {        
         case $Name in
           xinit)                  killpid $Pid $Name xinit ;;
           Xserver)                killpid $Pid $Name 'Xorg|Xephyr|Xvfb|Xwayland|nxagent' ;;
@@ -2611,50 +2612,6 @@ xhost.exe 2>&1
   }
 }
 
-{ #### part: set up pipes and fifo
-  # file descriptors in use:
-  # &0  stdin                 --stdin with catstdin
-  # &1  stdout
-  # &2  stderr
-  # &3  stderr                for warnings and notes, with --silent redirected to /dev/null
-  # &4  stderr                for --stderr
-  # &5  (not in use)
-  # &6  $Messagefifo          for messages to watchmessagefifo()
-  # &7  (not in use)
-  # &8  $Timetosaygoodbyefifo for saygoodbye() and waitfortheend()
-  # &9  $Watchpidfifo         for watchpidlist()
-
-  # redirect stdin to named pipe. Named pipe is shared with container and used as stdin of image command in container.CMD.sh
-  [ "$Forwardstdin" = "yes" ] && {
-    cat <&0 >$Cmdstdinfile & storepid $! catstdin
-  }
-
-  case $Cygwin in
-    no)
-      Watchpidfifo="$Cachefolder/$Watchpidfifo"                 && $Mksu "mkfifo $Watchpidfifo"
-      Messagefifo="$Sharefolder/$Messagefifo"                   && $Mksu "mkfifo $Messagefifo && chmod 666 $Messagefifo"
-      Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo" && $Mksu "mkfifo $Timetosaygoodbyefifo"
-    ;;
-    yes)
-      Watchpidfifo="$Cachefolder/$Watchpidfifo"                 && mkfile $Watchpidfifo
-      Messagefifo="$Sharefolder/$Messagefifo"                   && mkfile $Messagefifo && chmod 666 $Messagefifo
-      Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo" && mkfile $Timetosaygoodbyefifo && chmod 666 $Timetosaygoodbyefifo
-    ;;
-  esac
-
-  # used by waitfortheend()
-  exec 8<>$Timetosaygoodbyefifo
-
-  # start watching important pids, e.g. xinit, container.
-  exec 9<>$Watchpidfifo
-  setonwatchpidlist $$
-  watchpidlist & storepid $! watchpidlist
-
-  # start watching for messages out of container or dockerrc
-  exec 6<>$Messagefifo
-  watchmessagefifo & storepid $! watchmessagefifo
-}
-
 { #### part: option --xorg: check free vt / tty
   [ "$Newxvt" ] || case $Xserver in
     --xorg)
@@ -3939,8 +3896,8 @@ done
   # Not working: pangoterm lilyterm fbterm
   # Makes problems if X and Wayland are independently available at same time: xfce4-terminal
   # Works, but does not appear: 'guake -te'
-  set -x
-  Terminallist="xterm lxterm lxterminal stterm sakura termit pterm terminator terminology Eterm konsole qterminal gnome-terminal mate-terminal mrxvt rxvt xvt kterm mlterm xfce4-terminal NOLUCK"
+
+  Terminallist="xterm lxterm lxterminal stterm sakura termit pterm terminator terminology Eterm konsole qterminal gnome-terminal mate-terminal mrxvt rxvt xvt kterm mlterm xfce4-terminal mintty NOLUCK"
   [ -z "$Hostdisplay$Newdisplay" ] && {
     case $Xserver in
       --weston|--hostwayland)  Terminallist="konsole qterminal gnome-terminal NOLUCK" ;;
@@ -3954,7 +3911,7 @@ done
   [ "$Pullterminal" = "NOLUCK" ] && warning "Can not find a terminal emulator that works for
   option $Xserver. Please install one of:
   ${Terminallist%"NOLUCK"}"
-
+  
   [ -z "$Hostdisplay" ] && [ -n "$Newwaylandsocket" ] && {
     case $Pullterminal in
       qterminal) Pullterminal="env QT_QPA_PLATFORM=wayland $Pullterminal" ;;
@@ -3978,7 +3935,50 @@ done
       *) Passwordterminal="bash -c" ; Pullterminal="" ;;
     esac
   }
-  set +x
+}
+
+{ #### part: set up pipes and fifo
+  # file descriptors in use:
+  # &0  stdin                 --stdin with catstdin
+  # &1  stdout
+  # &2  stderr
+  # &3  stderr                for warnings and notes, with --silent redirected to /dev/null
+  # &4  stderr                for --stderr
+  # &5  (not in use)
+  # &6  $Messagefifo          for messages to watchmessagefifo()
+  # &7  (not in use)
+  # &8  $Timetosaygoodbyefifo for saygoodbye() and waitfortheend()
+  # &9  $Watchpidfifo         for watchpidlist()
+
+  # redirect stdin to named pipe. Named pipe is shared with container and used as stdin of image command in container.CMD.sh
+  [ "$Forwardstdin" = "yes" ] && {
+    cat <&0 >$Cmdstdinfile & storepid $! catstdin
+  }
+  
+  case $Cygwin in
+    no)
+      Watchpidfifo="$Cachefolder/$Watchpidfifo"                 && $Mksu "mkfifo $Watchpidfifo"
+      Messagefifo="$Sharefolder/$Messagefifo"                   && $Mksu "mkfifo $Messagefifo && chmod 666 $Messagefifo"
+      Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo" && $Mksu "mkfifo $Timetosaygoodbyefifo"
+    ;;
+    yes)
+      Watchpidfifo="$Cachefolder/$Watchpidfifo"                 && mkfile $Watchpidfifo
+      Messagefifo="$Sharefolder/$Messagefifo"                   && mkfile $Messagefifo && chmod 666 $Messagefifo
+      Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo" && mkfile $Timetosaygoodbyefifo && chmod 666 $Timetosaygoodbyefifo
+    ;;
+  esac
+  
+  # used by waitfortheend()
+  exec 8<>$Timetosaygoodbyefifo
+  
+  # start watching important pids, e.g. xinit, container.
+  exec 9<>$Watchpidfifo
+  setonwatchpidlist $$
+  watchpidlist & storepid $! watchpidlist
+  
+  # start watching for messages out of container or dockerrc
+  exec 6<>$Messagefifo
+  watchmessagefifo & storepid $! watchmessagefifo
 }
 
 { #### part: check container user and shared home folder
@@ -4227,8 +4227,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       case $Initsystem in
         none) ;;
         tini) Dockercommand="$Dockercommand \\
-  --volume $Tinibinary:$Cshare/tini:ro" ;;
-
+  --volume /$Tinibinary:/$Cshare/tini:ro" ;;
         systemd)
           Switchcontaineruser="yes"
           Sharecgroup="yes"
@@ -4236,11 +4235,11 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   --stop-signal SIGRTMIN+3 \\
   --cap-add FSETID      --cap-add FOWNER  --cap-add SETPCAP \\
   --cap-add SYS_BOOT \\
-  -v $Systemdtarget:/etc/systemd/system/x11docker.target:ro \\
-  -v $Systemdstartcmd:/etc/systemd/system/x11docker-startcmd.service:ro \\
-  -v $Systemdwatch:/etc/systemd/system/x11docker-watch.service:ro \\
-  -v $Systemdjournal:/etc/systemd/system/x11docker-journal.service \\
-  -v $Systemdenvironment:/etc/systemd/system.conf.d/x11docker.conf"
+  -v /$Systemdtarget://etc/systemd/system/x11docker.target:ro \\
+  -v /$Systemdstartcmd://etc/systemd/system/x11docker-startcmd.service:ro \\
+  -v /$Systemdwatch://etc/systemd/system/x11docker-watch.service:ro \\
+  -v /$Systemdjournal://etc/systemd/system/x11docker-journal.service \\
+  -v /$Systemdenvironment://etc/systemd/system.conf.d/x11docker.conf"
         ;;
 
         runit)
@@ -4295,8 +4294,8 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
 
       # option --sharecgroup
       [ "$Sharecgroup" = "yes" ] && Dockercommand="$Dockercommand \\
-  -v /sys/fs/cgroup:/sys/fs/cgroup:ro"
-
+  -v //sys/fs/cgroup://sys/fs/cgroup:ro"
+  
       # Add video group for GPU access, needed by some systems
       # Add audio group for ALSA
       # Does only have real effect if /dev/dri or /dev/snd is shared
@@ -4315,8 +4314,8 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
 
       # Needed especially for --systemd and --dbus-daemon
       Dockercommand="$Dockercommand \\
-  --tmpfs /run --tmpfs /run/lock"
-
+  --tmpfs //run --tmpfs //run/lock"
+  
       # entrypoint is checked in dockerrc
       Dockercommand="$Dockercommand \\
   --entrypoint=env"
@@ -4327,16 +4326,16 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
 
       # shared host folders
       Dockercommand="$Dockercommand \\
-  -v $Sharefolder:$Cshare:rw"
+  -v /$Sharefolder:/$Cshare:rw"
       [ "$Benutzerhosthome" = "yes" ] && [ -n "$Benutzerhosthomefolder" ] && Dockercommand="$Dockercommand \\
-  -v '$Benutzerhosthomefolder':'$Benutzerhome':rw"
+  -v '/$Benutzerhosthomefolder':'/$Benutzerhome':rw"
       for ((Count=1 ; Count<=$Sharevolumescount ; Count++)) ; do
         case "${Sharevolumes[$Count]}" in
           "$Benutzerhome") Dockercommand="$Dockercommand \\
-  -v '${Sharevolumes[$Count]}':'${Sharevolumes[$Count]}/$(basename $Benutzerhome)':rw"
+  -v '/${Sharevolumes[$Count]}':'/${Sharevolumes[$Count]}/$(basename $Benutzerhome)':rw" 
           ;;
           *) Dockercommand="$Dockercommand \\
-  -v '${Sharevolumes[$Count]}':'${Sharevolumes[$Count]}':rw"
+  -v '/${Sharevolumes[$Count]}':'/${Sharevolumes[$Count]}':rw" 
           ;;
         esac
       done
@@ -4345,32 +4344,31 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
         --nothing) ;;
         --weston|--hostwayland|--kwin)
           Dockercommand="$Dockercommand \\
-  -e WAYLAND_DISPLAY=$Newwaylandsocket -e XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR"
+  -e WAYLAND_DISPLAY=$Newwaylandsocket -e XDG_RUNTIME_DIR=//tmp/XDG_RUNTIME_DIR"
         ;;
         *)
           # not really needed here as vars are set in container.CMD.sh
           # but useful for custom access with docker exec
           Dockercommand="$Dockercommand \\
-  -e DISPLAY=$Newdisplay -e XAUTHORITY=$Cshare/Xclientcookie"   ### FIXME XAUTHORITY is wrong for --vcxsrv
+  -e DISPLAY=$Newdisplay -e XAUTHORITY=/$Cshare/Xclientcookie"   ### FIXME XAUTHORITY is wrong for --vcxsrv
           # X socket will be softlinked to /tmp/.X11-unix in container.CMD.sh
           [ "$Newxsocket" ] && Dockercommand="$Dockercommand \\
-  -v $Newxsocket:/X$Newdisplaynumber:rw"
+  -v /$Newxsocket://X$Newdisplaynumber:rw"
         ;;
       esac
       # Wayland socket will be softlinked to XDG_RUNTIME_DIR in container.CMD.sh
       [ "$Sharewayland" = "yes" ] && Dockercommand="$Dockercommand \\
-  -v $XDG_RUNTIME_DIR/$Newwaylandsocket:/$Newwaylandsocket:rw"
-
+  -v /$XDG_RUNTIME_DIR/$Newwaylandsocket://$Newwaylandsocket:rw"
       ## option --gpu : share graphics adapter device files
       [ "$Gpu" = "yes" ] && {
         while read -r Line ; do
           Dockercommand="$Dockercommand \\
-  --device=$Line:$Line:rw \\
-  -v $Line:$Line:rw"
+  --device=/$Line:/$Line:rw \\
+  -v /$Line:/$Line:rw"
         done < <(find /dev/dri /dev/nvidia* /dev/vga_arbiter -maxdepth 0 2>/dev/null ||:)
         [ "$Nvidiadriver" ] && {
           Dockercommand="$Dockercommand \\
-  -v $Nvidiadriver:$Cshare/NVIDIA-$Nvidiaversion.run:ro"
+  -v /$Nvidiadriver:/$Cshare/NVIDIA-$Nvidiaversion.run:ro"
           [ "$Capdropall" = "yes" ] && [ "$Adminusercaps" = "no" ] && Dockercommand="$Dockercommand \\
   --cap-add SETUID      --cap-add SETGID  --cap-add DAC_OVERRIDE\\
   --cap-add CHOWN       --cap-add FOWNER"
@@ -4387,16 +4385,18 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   --net=none"
       ## option --alsa
       [ "$Alsa" = "yes" ]              && Dockercommand="$Dockercommand \\
-  --device=/dev/snd:/dev/snd:rw -v /dev/snd:/dev/snd:rw"
+  --device=//dev/snd://dev/snd:rw -v //dev/snd://dev/snd:rw"
       ## option --pulseaudio
       [ "$Pulseaudio" = "yes" ]        && Dockercommand="$Dockercommand \\
-  -v $Pulseaudiosocketdir:/pulse:rw \\
-  -v $Cachefolder/pulseclient.conf:/etc/pulse/client.conf:rw"
+  -v /$Pulseaudiosocketdir://pulse:rw \\
+  -v /$Cachefolder/pulseclient.conf://etc/pulse/client.conf:rw"
       ## option --workdir or /tmp
       Dockercommand="$Dockercommand \\
-  --workdir $Workdir"
+  --workdir /$Workdir"
+      ## option --sharessh
       [ -n "$Sharessh" ] && Dockercommand="$Dockercommand \\
-  --env SSH_AUTH_SOCK=$Sharessh"
+  --env SSH_AUTH_SOCK=/$Sharessh"
+  
       # option --env: add custom environment. Only needed here for possible 'docker exec'. Otherwise set in container.CMD.sh
       IFS=$'\n'
       for Line in $Customenvironment ; do
@@ -4411,11 +4411,11 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       Dockercommand="$Dockercommand \\
   --"
       case $Switchcontaineruser in
-        no)       Dockercommand="$Dockercommand $Imagename /bin/sh - $Cshare/container.CMD.sh" ;;   # dockerrc runs container.rootsetup.sh with 'docker exec'
-        yes)
+        no)       Dockercommand="$Dockercommand $Imagename //bin/sh - /$Cshare/container.CMD.sh" ;;   # dockerrc runs container.rootsetup.sh with 'docker exec'
+        yes)      
           case $Initsystem in
-            tini) Dockercommand="$Dockercommand $Imagename $Cshare/tini -- /bin/sh - $Cshare/container.rootsetup.sh" ;;  # container.rootsetup.sh runs container.CMD.sh
-            *)    Dockercommand="$Dockercommand $Imagename /bin/sh - $Cshare/container.rootsetup.sh" ;;  # container.rootsetup.sh runs container.CMD.sh
+            tini) Dockercommand="$Dockercommand $Imagename /$Cshare/tini -- //bin/sh - /$Cshare/container.rootsetup.sh" ;;  # container.rootsetup.sh runs container.CMD.sh
+            *)    Dockercommand="$Dockercommand $Imagename //bin/sh - /$Cshare/container.rootsetup.sh" ;;  # container.rootsetup.sh runs container.CMD.sh
           esac
         ;;
       esac
