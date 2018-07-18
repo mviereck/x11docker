@@ -13,6 +13,9 @@ Project website: https://github.com/mviereck/x11docker
  - Support of [MSYS2/CYGWIN/MINGW](https://www.msys2.org/)
    and WSL (Ubuntu/bash on Windows). 
    [(#55)](https://github.com/mviereck/x11docker/issues/55)
+ - `--sharessh`: New option to share SSH agent authentication socket from host.
+ - `--name`: New option to set container name.
+
 ### Changed
  - **API CHANGE**: Syntax changed for custom `DOCKER_RUN_OPTIONS` 
    [(#58)](https://github.com/mviereck/x11docker/issues/58). New:
