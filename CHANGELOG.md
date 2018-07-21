@@ -10,11 +10,15 @@ Project website: https://github.com/mviereck/x11docker
 ### Added
  - `--vcxsrv`: New option for [VcXsrv](https://sourceforge.net/projects/vcxsrv/) 
    X server on MS Windows. Similar to Xming.
+   [(#55)](https://github.com/mviereck/x11docker/issues/55)
  - Support of [MSYS2/CYGWIN/MINGW](https://www.msys2.org/)
    and WSL (Ubuntu/bash on Windows). 
    [(#55)](https://github.com/mviereck/x11docker/issues/55)
  - `--sharessh`: New option to share SSH agent authentication socket from host.
+   [(#59)](https://github.com/mviereck/x11docker/issues/59)
  - `--name`: New option to set container name.
+   [(#61)](https://github.com/mviereck/x11docker/issues/61)
+ - `--cachebasedir`: Set custom cache base directory. Replaces `--cachedir`.
 
 ### Changed
  - **API CHANGE**: Syntax changed for custom `DOCKER_RUN_OPTIONS` 
@@ -31,6 +35,8 @@ Project website: https://github.com/mviereck/x11docker
 ```
    x11docker [OPTIONS] -- "DOCKER_RUN_OPTIONS"   IMAGE COMMAND ARG1 -- ARG2
 ```
+### Deprecated
+ - `--cachedir`: Use `--cachebasedir` instead.
 ### Removed
  - `--ipc`: Use `--hostipc` instead.
  - `--net`: Use `--hostnet` instead.
@@ -41,6 +47,8 @@ Project website: https://github.com/mviereck/x11docker
 ### Fixed
  - `--xpra`: Support of outdated xpra version v0.17.6 that is still
    distributed in debian stretch and buster.
+ - `--xpra`: Set x11docker cache folder as xpra socket folder.
+   [(#69)](https://github.com/mviereck/x11docker/issues/69)
  - `--xpra`: Check if `xhost` is available if xpra version 2.3.1 has cookie 
    issue. [(#57)](https://github.com/mviereck/x11docker/issues/57)
  - `--xpra-xwayland`: Set Weston `--fullscreen` to get Xwayland resolution
