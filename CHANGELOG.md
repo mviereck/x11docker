@@ -11,7 +11,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--vcxsrv`: New option for [VcXsrv](https://sourceforge.net/projects/vcxsrv/) 
    X server on MS Windows. Similar to Xming.
    [(#55)](https://github.com/mviereck/x11docker/issues/55)
- - Support of [MSYS2/CYGWIN/MINGW](https://www.msys2.org/)
+ - Experimental support of [MSYS2](https://www.msys2.org/), CYGWIN 
    and WSL (Ubuntu/bash on Windows). 
    [(#55)](https://github.com/mviereck/x11docker/issues/55)
  - `--sharessh`: New option to share SSH agent authentication socket from host.

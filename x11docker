@@ -399,7 +399,10 @@ ${Colredbg}x11docker ERROR:${Colnorm} $Message
   [ -n "$Hostxenv" ] && export $Hostxenv
   [ -n "$Newxenv" ] && {
     [ "$Tty" = "yes" ] && export $Newxenv
-    [ "$Xserver" = "--xorg" ] && [ -e "$Newxsocket" ] && export $Newxenv
+    case $Xserver in
+      --xorg) [ -e "$Newxsocket" ] && export $Newxenv ;;
+      --vcxsrv) export $Newxenv ;;
+    esac
   }
   [ "$Silent" = "no" ] && alertbox "x11docker ERROR" "$Message"
 
@@ -602,18 +605,20 @@ watchpidlist() {        # watch list of important pids
     read -t1 Pid <&9 ||:
     [ "$Pid" ] && {
       Watchpidlist="$Watchpidlist $Pid"
+      debugnote "WATCHPIDLIST $Pid: $Watchpidlist"
+      pstree -p
       debugnote "Watching $(pspid $Pid)"
-    } || sleep 2 # sleep for cygwin
-    case $Cygwin in
-      no)
+    } || sleep 2 # sleep for MSYS2/CYGWIN workaround
+    case $Winsubsystem in
+      ""|WSL)
         for Pid in $Watchpidlist; do
           [ -e /proc/$Pid ] || {
             debugnote  "watchpidlist: PID $Pid has terminated"
-            saygoodbye "watchpidlist $Pid"
+            #saygoodbye "watchpidlist $Pid"
           }
         done
       ;;
-      yes)
+      MSYS|CYGWIN)
         for Pid in $Watchpidlist; do
           ps -p $Pid --windows >/dev/null 2>&1 || {
             debugnote  "watchpidlist: PID $Pid has terminated"
@@ -626,14 +631,15 @@ watchpidlist() {        # watch list of important pids
 }
 setonwatchpidlist() {   # add PID $1 to watchpidlist()
   #echo ${1:-} >&9
-  echo ${1:-} >>$Watchpidfifo
+  debugnote "Set pid ${1:-} on watchlist: ${2:-}"
+  echo "${1:-}" >>$Watchpidfifo
 }
 watchmessagefifo() {    # watch for messages out of container or dockerrc
   # message in fifo must end with :$Messagetype
   local Line= Message= Messagetype=
   while rocknroll ; do
     IFS= read -r Line <&6 ||:
-    [ "$Line" ] || sleep 2  # sleep for cygwin
+    [ "$Line" ] || sleep 2  # sleep for MSYS2/CYGWIN workaround
     [ "$Line" ] && Message="$Message
 $Line"
     grep -q -E ":WARNING|:NOTE|:DEBUGNOTE|:VERBOSE|:ERROR|:STDOUT" <<< "$Line" && {
@@ -661,13 +667,13 @@ rocknroll() {           # check if x11docker is still running
 waitfortheend() {       # wait for end of x11docker
   # signal is byte in $Timetosaygoodbyefifo
   # decent read to wait for signal to terminate
-  case $Cygwin in
-    no)
+  case $Winsubsystem in
+    ""|WSL)
       while rocknroll; do
         bash -c "read -n1 -t1 <&8 ||:"
       done
     ;;
-    yes)
+    MSYS|CYGWIN)
       while rocknroll; do
         sleep 2
       done
@@ -831,22 +837,19 @@ depends() {             # check dependencies on host for X server option $1
         Return=1
       } ;;
     --vcxsrv)
-      Vcxsrvpath="/c/Program Files/VcXsrv/vcxsrv.exe"
-      command -v "$Vcxsrvpath" >/dev/null || Vcxsrvpath="/mnt$Vcxsrvpath"
+      Vcxsrvpath="$Winsubmount/c/Program Files/VcXsrv/vcxsrv.exe"
       command -v "$Vcxsrvpath" >/dev/null || {
         $Message "${1:-}: X server VcXsrv not found."
         Return=1
-        [ "$Mswindows" = "yes" ] && note 'To run x11docker within MSYS2, CYGWIN or WSL on MS Windows,
+        [ "$Winsubsystem" ] && note "To run x11docker within MSYS2, CYGWIN or WSL on MS Windows,
   please install X server VcXsrv.
-
-  Searching for vcxsrv.exe at:
+  Searching for vcxsrv.exe in: 
     C:\Program Files\VcXsrv
-    /c/Program Files/VcXsrv
-    /mnt/c/Program Files/VcXsrv'
+    $Vcxsrvpath"
       }
       Vcxsrvpath="$(echo "$Vcxsrvpath" | rev | cut -d/ -f2- | rev)"
-      [ "$Vcxsrvpath" ] && export PATH="$PATH:$Vcxsrvpath"
-      [ "$Mswindows" = "no" ] && Return=1 && $Message "${1:-}: X server VcXsrv is available on MS Windows only."
+      [ -z "$Winsubsystem" ] && Return=1 && $Message "${1:-}: X server VcXsrv is available on MS Windows only."
+      [ "$Return" = "1" ] || export PATH="$PATH:$Vcxsrvpath"
     ;;
   esac
   case ${1:-} in
@@ -1168,6 +1171,45 @@ $(sed -n '/'$Key1'/,/'$Key2'/p' /usr/share/doc/x11docker/CHANGELOG.md | head -n-
 
   note "Ready."
 }
+convertpath() {         # convert path $1 into --volume syntax regarding Windows subsystem pathes
+  local Patharg Volumecode
+  Patharg="${1:-}"
+  case $Winsubsystem in
+    "") # regular handling on real linux
+      Volumecode="'$Patharg':'$Patharg'" 
+    ;;
+    
+    *) # special cases for Windows subsystems
+
+      # replace \ with /
+      Patharg="$(tr '\\' '/' <<< "$Patharg")"
+      # Path is already formated like /c/ ?
+      # -> leave as it is
+      [ "$(cut -c1,3 <<< "$Patharg")" = "//" ] && Volumecode="'$Patharg':'$Patharg'" || {
+        [ "$(cut -c2 <<< "$Patharg")" = ":" ] && {
+          # Path begins with e.g. C: or D: ?
+          # -> change e.g. C: to /c/
+          Patharg="$(tr -d : <<< "$Patharg")"
+          Patharg="/${Patharg,}"
+          Volumecode="'$Patharg':'$Patharg'"
+        } || {
+          [ "$Winsubmount" ] && [ "$(cut -c1-${#Winsubmount} <<< "$Patharg" | tr [:upper:] [:lower:])" = "$Winsubmount" ] && {
+            # Path points to Win host over mountpoint in subsystem subfolder
+            # -> remove mountpoint of subsystem to have e.g. /c/ at begin
+            Volumecode="'${Patharg#$Winsubmount}':'${Patharg#$Winsubmount}'"
+          }
+        } || {
+          # Path is part of subsystem ?
+          # -> add Windows path leading to subsystem
+          Volumecode="'$Winsubpath$Patharg':'$Patharg'"
+          [ "$Winsubsystem" = "WSL" ] && error "Can not share pathes within WSL with docker containers.
+  Failing: $Patharg"
+        }
+      }
+    ;;
+  esac
+  echo "$Volumecode"
+}
 verlte() {              # version number check $1 less than or equal $2
   [  "${1:-}" = "$(echo -e "${1:-}\n${2:-}" | sort -V | head -n1)" ] && return 0 || return 1
 }
@@ -1223,7 +1265,6 @@ Logfile=""
 
 # terminal colors
 Esc="$(printf '\033')"
-Colnorm="${Esc}[0m"
 Colblue="${Esc}[35m"
 Colyellow="${Esc}[33m"
 Colgreen="${Esc}[32m"
@@ -1231,6 +1272,7 @@ Colgreenbg="${Esc}[42m"
 Colred="${Esc}[31m"
 Colredbg="${Esc}[41m"
 Coluline="${Esc}[4m"
+Colnorm="${Esc}[0m"
 
 # Users
 Startuser="$(id -un)"                           # user who started x11docker
@@ -1239,13 +1281,14 @@ Hostuser=""                                     # $Lognameuser or --hostuser. Un
 Hostuseruid=""
 Hostusergid=""
 Hostuserhome=""
+Homebasedir=""
 Benutzer=""                                     # option --user: container user. Default: same as $Hostuser.
 Benutzeruid=""
 Benutzergid=""
 Benutzerhome=""
 Benutzergruppe=""
 Benutzerpasswdentry=""
-Benutzerpasswort="sac19FwGGTx/A"                # encrypted password "x11docker", suits /etc/shadow. Created with: perl -e 'print crypt("x11docker", "salt"),"\n"'
+Benutzerpasswort="sac19FwGGTx/A"                # encrypted password "x11docker", suits /etc/shadow. Generated with:  perl -e 'print crypt("x11docker", "salt"),"\n"'
 Mksu=""                                         # prefix to run unprivileged commands (auto or --hostuser)
 Mksubenutzer=""                                 # prefix to run commands as user defined by --user
 Hostgidaudio=""                                 # host GID of group audio. Can differ from container GID
@@ -1328,10 +1371,18 @@ Ssh=""
 Tty=""
 Ttyinuse=""
 
-# Windows environment, VcXsrv, WSL, MSYS2/CYGWIN
-[ "${MSYSTEM:-}${CYGWIN:-}" ]                     && Cygwin="yes"    || Cygwin="no"
-grep -q "/mnt/c/Windows/System32" <<< ${PATH:-}   && Wsl="yes"       || Wsl="no"
-{ [ "$Wsl" = "yes" ] || [ "$Cygwin" = "yes" ] ; } && Mswindows="yes" || Mswindows="no"
+# Check for MS Windows subsystem
+Winsubsystem=""
+Winsubmount=""
+Winsubpath=""
+[ "${MSYSTEM:-}" = "MSYS" ]                       && Winsubsystem="MSYS"
+[ -d "/cygdrive" ]                                && Winsubsystem="CYGWIN"
+grep -q "/mnt/c/Windows/System32" <<< ${PATH:-}   && Winsubsystem="WSL"
+case $Winsubsystem in
+  MSYS)   Winsubpath="/c/msys64"   ; Winsubmount="" ;;
+  CYGWIN) Winsubpath="/c/cygwin64" ; Winsubmount="/cygdrive" ;;
+  WSL)    Winsubpath="FAILURE"     ; Winsubmount="/mnt" ;;
+esac
 Vcxsrvpath=""
 Localappdatawin=""
 Localappdatalin=""
@@ -1679,11 +1730,13 @@ $Customenvironment"    ;  shift ;;                         # set custom environm
          --cachedir)     Cachebasefolder="${2:-}" ; shift 
                          note "Option --cachedir is deprecated.
   Please use instead: --cachebasedir" ;;
-         --sharedir)   [ -e "${2:-}" ] && {                # share host folder at same location in container with rw access
+         --sharedir)   [ -z "$Winsubsystem" ] && [ ! -e "${2:-}" ] && warning "Option --sharedir: file or folder not found:
+  #${2:-}"             || {
+                         # share host folder at same location in container with rw access
                          Sharevolumescount=$(($Sharevolumescount + 1))
                          Sharevolumes[$Sharevolumescount]="${2:-}"
-                       } || warning "Option --sharedir: file or folder not found:
-  ${2:-}" ;            shift ;;
+                       }
+                       shift ;;
 
        ## docker options
          --hostipc)    Sharehostipc="yes" ;;               # docker run option --ipc=host
@@ -1787,7 +1840,7 @@ $Customenvironment"    ;  shift ;;                         # set custom environm
   [ -z "$Hostuserhome" ] && error "No home directory found for user '$Hostuser'.
   You need to specify option --cachedir.
   (Also specify --homedir if you want to use option --home)."
-
+  
   # Need host GIDs to use in container
   Hostgidaudio=$(getent group audio | cut -d: -f3)
   Hostgidvideo=$(getent group video | cut -d: -f3)
@@ -1796,7 +1849,10 @@ $Customenvironment"    ;  shift ;;                         # set custom environm
 { #### part: some init
 
   # base cache folder
-  [ "$Cachebasefolder" ] || Cachebasefolder="$Hostuserhome/.cache/x11docker"
+  [ "$Cachebasefolder" ] || case $Winsubsystem in
+    "") Cachebasefolder="$Hostuserhome/.cache/x11docker" ;;
+    *)  Cachebasefolder="$Winsubmount$(convertpath "$(cmd.exe /C "echo %userprofile%" | sed "s/$Dosreturn//")" | cut -d"'" -f2)/x11docker/cache" ;;
+  esac
   $Mksu "mkdir -p $Cachebasefolder"         || error "Could not create cache folder
   $Cachebasefolder"
   writeaccess $Hostuseruid $Cachebasefolder || error "User $Hostuser does not have write access to
@@ -1840,8 +1896,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   Please install pstree."
   }
   tty | grep -q tty     && Tty="yes" || Tty="no"  # check if running on X or on tty
-  [ "$Wsl" = "yes" ]    && Tty="no"
-  [ "$Cygwin" = "yes" ] && Tty="no"
+  [ "$Winsubsystem"   ] && Tty="no"
   XDG_VTNR=${XDG_VTNR:-}
 
   [ "$Cachebasefolder" != "$(echo $Cachebasefolder | sed -e 's/ *//g')" ] && error "Cache root folder must not contain whitespaces.
@@ -1932,7 +1987,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
     [ "$Screensize" ]           && [ "$Tty" = "yes" ]            && Xserver="--xorg"
     [ -z "$Hostdisplay" ]       && [ -n "$Hostwaylandsocket" ]   && Xserver="--weston-xwayland"
     [ "$Sharewayland" = "yes" ] && { [ -n "$Hostwaylandsocket" ] && [ "$Desktopmode" = "no" ] && Xserver="--hostwayland" || Xserver="--weston" ; }
-    [ "$Mswindows" = "yes" ]                                     && Xserver="--vcxsrv"
+    [ "$Winsubsystem" ]                                          && Xserver="--vcxsrv"
 #    nxagent is disabled as favorized X server due to nxagent issues with X extension Composite.
 #    { [ "$Xserver" = "--xpra" ] || [ "$Xserver" = "--xephyr" ];} && Xserver="--nxagent"
   }
@@ -1969,7 +2024,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
     ;;
   esac
 
-  [ "$Tty" = "no" ] && [ "$Ssh" = "no" ] && [ -z "$Hostdisplay$Hostwaylandsocket" ] && [ "$Xserver" != "--nothing" ] && [ "$Mswindows" = "no" ] && {
+  [ "$Tty" = "no" ] && [ "$Ssh" = "no" ] && [ -z "$Hostdisplay$Hostwaylandsocket" ] && [ "$Xserver" != "--nothing" ] && [ -z "$Winsubsystem" ] && {
     warning "Environment variables DISPLAY and WAYLAND_DISPLAY are empty,
   but it seems x11docker was started within X, not from console.
   Please set DISPLAY and XAUTHORITY.
@@ -3867,6 +3922,7 @@ done
   [ "$Passwordfrontend" = "none" ] && Passwordneeded="no"
   [ -z "$Passwordfrontend" ] && sudo -n env >/dev/null 2>&1 && Passwordfrontend="sudo" && Passwordneeded="no"
   [ -z "$Passwordfrontend" ] && docker info >/dev/null 2>&1 && Passwordfrontend="none" && Passwordneeded="no"
+  [ "$X11dockermode" = "exe" ] && Passwordneeded="no"
 
   # check sudo. Check is not reliable, compare https://unix.stackexchange.com/questions/383918/su-or-sudo-how-to-know-which-one-will-work
   ### FIXME: just guessing that members of group sudo or wheel are allowed to run commands docker and env as root
@@ -3976,16 +4032,16 @@ done
     cat <&0 >$Cmdstdinfile & storepid $! catstdin
   }
   
-  case $Cygwin in
-    no)
-      Watchpidfifo="$Cachefolder/$Watchpidfifo"                 && $Mksu "mkfifo $Watchpidfifo"
-      Messagefifo="$Sharefolder/$Messagefifo"                   && $Mksu "mkfifo $Messagefifo && chmod 666 $Messagefifo"
-      Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo" && $Mksu "mkfifo $Timetosaygoodbyefifo"
-    ;;
-    yes)
+  case $Winsubsystem in
+    MSYS|CYGWIN|WSL)
       Watchpidfifo="$Cachefolder/$Watchpidfifo"                 && mkfile $Watchpidfifo
       Messagefifo="$Sharefolder/$Messagefifo"                   && mkfile $Messagefifo && chmod 666 $Messagefifo
       Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo" && mkfile $Timetosaygoodbyefifo && chmod 666 $Timetosaygoodbyefifo
+    ;;
+    "")
+      Watchpidfifo="$Cachefolder/$Watchpidfifo"                 && $Mksu "mkfifo $Watchpidfifo"
+      Messagefifo="$Sharefolder/$Messagefifo"                   && $Mksu "mkfifo $Messagefifo && chmod 666 $Messagefifo"
+      Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo" && $Mksu "mkfifo $Timetosaygoodbyefifo"
     ;;
   esac
   
@@ -3994,7 +4050,7 @@ done
   
   # start watching important pids, e.g. xinit, container.
   exec 9<>$Watchpidfifo
-  setonwatchpidlist $$
+  setonwatchpidlist $$ x11docker
   watchpidlist & storepid $! watchpidlist
   
   # start watching for messages out of container or dockerrc
@@ -4041,15 +4097,19 @@ done
 
   ## option '--home':    share folder ~/.local/share/x11docker/imagename with created container as its home directory
   ## option '--homedir': share custom host folder as home
+  case $Winsubsystem in
+    "") Homebasedir="$Benutzerhome/.local/share/x11docker" ;;
+    *)  Homebasedir="$Winsubmount$(convertpath "$(cmd.exe /C "echo %userprofile%" | sed "s/$Dosreturn//")" | cut -d"'" -f2)/x11docker/home" ;;
+  esac
   case $Benutzerhosthome in
     yes)
       # if no home folder on host is specified (--homedir), create a standard one in ~/.local/share/x11docker
-      [ -z "$Benutzerhosthomefolder" ] && Benutzerhosthomefolder="$Benutzerhome/.local/share/x11docker/$Imagenametr$Hostexebasename"
+      [ -z "$Benutzerhosthomefolder" ] && Benutzerhosthomefolder="$Homebasedir/$Imagenametr$Hostexebasename"
       [ -d "$Benutzerhosthomefolder" ] || {
         [ "$Startuser" = "root" ] && su $Benutzer -c "mkdir -p '$Benutzerhosthomefolder'"
         [ "$Benutzer" = "$Hostuser" ] && $Mksu "mkdir -p '$Benutzerhosthomefolder'" && {
           # create symbolic link to ~/x11docker
-          echo "$Benutzerhosthomefolder" | grep -q .local/share/x11docker && [ ! -e "$Benutzerhome/x11docker" ] && $Mksu "ln -s '$Benutzerhome/.local/share/x11docker' '$Benutzerhome/x11docker'"
+          echo "$Benutzerhosthomefolder" | grep -q .local/share/x11docker && [ ! -e "$Benutzerhome/x11docker" ] && $Mksu "ln -s '$Homebasedir' '$Benutzerhome/x11docker'"
           :
         } || {
           # errors can occur if specifying a user with --user different from current user
@@ -4248,7 +4308,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       case $Initsystem in
         none) ;;
         tini) Dockercommand="$Dockercommand \\
-  --volume $Tinibinary:$Cshare/tini:ro" ;;
+  --volume $Winsubpath$Tinibinary:$Cshare/tini:ro" ;;
         systemd)
           Switchcontaineruser="yes"
           Sharecgroup="yes"
@@ -4347,17 +4407,19 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
 
       # shared host folders
       Dockercommand="$Dockercommand \\
-  -v $Sharefolder:$Cshare:rw"
+  -v $(convertpath "$Sharefolder" | cut -d: -f1):$Cshare:rw"
+  
+      # --home, --homedir
       [ "$Benutzerhosthome" = "yes" ] && [ -n "$Benutzerhosthomefolder" ] && Dockercommand="$Dockercommand \\
-  -v '$Benutzerhosthomefolder':'$Benutzerhome':rw"
+  -v $(convertpath "$Benutzerhosthomefolder" | cut -d: -f1):'$Benutzerhome':rw"
+  
+      # --sharedir
       for ((Count=1 ; Count<=$Sharevolumescount ; Count++)) ; do
         case "${Sharevolumes[$Count]}" in
-          "$Benutzerhome") Dockercommand="$Dockercommand \\
-  -v '${Sharevolumes[$Count]}':'${Sharevolumes[$Count]}/$(basename $Benutzerhome)':rw" 
-          ;;
+          "$Benutzerhome")  Dockercommand="$Dockercommand \\
+  -v $(convertpath "$Benutzerhome" | cut -d: -f1):'$Benutzerhome/$(basename $Benutzerhome)':rw" ;;
           *) Dockercommand="$Dockercommand \\
-  -v '${Sharevolumes[$Count]}':'${Sharevolumes[$Count]}':rw" 
-          ;;
+  -v $(convertpath "${Sharevolumes[$Count]}"):rw" ;;
         esac
       done
 
@@ -4750,7 +4812,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   }
 
   #### run docker image ####
-  [ "$Cygwin" = "yes" ] && echo "export MSYS2_ARG_CONV_EXCL='*'"
+  [ "$Winsubsystem" = "MSYS" ] && echo "export MSYS2_ARG_CONV_EXCL='*'"
   echo "read Containerid < <($Dockercommand 2>>$Containerlogfile)"
   ##########################
 
@@ -5305,7 +5367,7 @@ exit 0' >> /etc/rc.local"
   # declaring functions echoes them into xinitrc
   echo "Timetosaygoodbye=$Timetosaygoodbye"
   echo "Bgpidfile=$Bgpidfile"
-  echo "Cygwin=$Cygwin"
+  echo "Winsubsystem=$Winsubsystem"
   declare -f storepid
   declare -f rocknroll waitfortheend
   declare -f no_xhost
@@ -5626,9 +5688,7 @@ exit 0' >> /etc/rc.local"
   Terminal to show docker pull progress:          $Pullterminal
   Running on console:                             $Tty
   Running over SSH:                               $Ssh
-  Running on MS Windows:                          $Mswindows
-  Running on CYGWIN or MSYS2:                     $Cygwin
-  Running on WSL:                                 $Wsl"
+  Running on Windows subsystem:                   ${Winsubsystem:-no}"
     case $X11dockermode in
       run)
         verbose "Generated container.rootsetup.sh:
@@ -5726,7 +5786,7 @@ $(tail $Compositorlogfile)")"
   # check and watch compositor
   [ "$Compositorcommand" ] && {
     Compositorpid=$(cat $Compositorpidfile)
-    checkpid $Compositorpid && setonwatchpidlist $Compositorpid || error "Startup of compositor failed.
+    checkpid $Compositorpid && setonwatchpidlist $Compositorpid compositor || error "Startup of compositor failed.
   Last lines of compositor log:
 $(tail $Compositorlogfile)"
     storepid $Compositorpid compositor
@@ -5734,13 +5794,13 @@ $(tail $Compositorlogfile)"
 
   # check and watch X server
   case $Xserver in
-    --nothing|--hostdisplay|--hostwayland|--weston|--kwin|--vcxsrv) ;;
+    --nothing|--hostdisplay|--hostwayland|--weston|--kwin) ;;
     *)
       Xinitpid="$(pgrep -a xinit | grep "xinit $Xinitrc" | awk '{print $1}')"
-      [ "$Xinitpid" ] && setonwatchpidlist $Xinitpid && storepid $Xinitpid xinit
+      checkpid "$Xinitpid"   && setonwatchpidlist $Xinitpid xinit     && storepid $Xinitpid xinit
       echo $Xcommand | grep -q Xorgwrapper && Line="Xorg $Newdisplay" || Line="$(echo "$Xcommand" | head -n1)"
-      Xserverpid=$(ps aux | grep "$(echo "$Line" | cut -d' ' -f1-2)" | grep -v grep | grep -v xinit | awk '{print $2}')
-      [ "$Xserverpid" ] && setonwatchpidlist $Xserverpid && storepid $Xserverpid Xserver
+      Xserverpid=$(ps aux | grep "$(echo "${Line:-nothingtolookfor}" | cut -d' ' -f1-2)" | grep -v grep | grep -v xinit | awk '{print $2}')
+      checkpid "$Xserverpid" && setonwatchpidlist $Xserverpid Xserver && storepid $Xserverpid Xserver
     ;;
   esac
 
@@ -5828,7 +5888,7 @@ $(tail $Xpraserverlogfile)"
       Containerpid=$(cat $Containerpidfile)
       checkpid $Containerpid && {
         storepid $Containerpid container
-        setonwatchpidlist $(cat $Containerpid1pidfile)
+        setonwatchpidlist $(cat $Containerpid1pidfile) containerpid1
         verbose -d "Process tree of container (maybe not complete yet):
 $(pstree -cp $(cat $Containerpid1pidfile) 2>&1)"
       } || {
@@ -5888,7 +5948,7 @@ $(tail $Logfile)"
 $(pstree -p $Hostexepid 2>&1)"
 
       storepid $Hostexepid hostexe
-      setonwatchpidlist $Hostexepid
+      setonwatchpidlist $Hostexepid hostexe
     ;;
   esac
 }
@@ -5933,11 +5993,15 @@ $(tail $Compositorlogfile)"
       Tasklistold="
 $(tasklist.exe | grep vcxsrv.exe | awk '{print $2}')"
       $Mksu "exec                                                              $Xcommand          >> $Xinitlogfile  2>&1  &"
-      Tasklistnew="$Tasklistold
+      case $Winsubsystem in
+        MSYS|CYGWIN)
+          Tasklistnew="$Tasklistold
 $(tasklist.exe | grep vcxsrv.exe | awk '{print $2}')"
-      Xserverpid="$(cat <<<"$Tasklistnew" | sort | uniq -u)"
-      [ "$Cygwin" = "yes" ] && setonwatchpidlist $Xserverpid
-      storepid $Xserverpid vcxsrv.exe
+          Xserverpid="$(cat <<<"$Tasklistnew" | sort | uniq -u)"
+          setonwatchpidlist $Xserverpid Xserver
+          storepid $Xserverpid vcxsrv.exe
+        ;;
+      esac
       $Mksu "exec                                             bash $Xinitrc                       >> $Xinitlogfile  2>&1 " ;;
   esac
 
