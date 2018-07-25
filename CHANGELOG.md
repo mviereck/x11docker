@@ -11,6 +11,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--vcxsrv`: New option for [VcXsrv](https://sourceforge.net/projects/vcxsrv/) 
    X server on MS Windows. Similar to Xming.
    [(#55)](https://github.com/mviereck/x11docker/issues/55)
+ - `--xwin`: New option for Xwin X server of CYGWIN/X on MS Windows.
  - Experimental support of [MSYS2](https://www.msys2.org/), CYGWIN 
    and WSL (Ubuntu/bash on Windows). 
    [(#55)](https://github.com/mviereck/x11docker/issues/55)
