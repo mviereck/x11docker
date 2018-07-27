@@ -47,7 +47,7 @@ Dependencies on host:
   List of possibly needed packages:
    * most recommended to allow security and convenience:
        X servers: Xephyr xpra nxagent
-       X tools:   xauth xrandr
+       X tools:   xauth xrandr xhost
    * advanced GPU support:
        Desktop mode:  weston Xwayland
        Seamless mode: weston Xwayland xpra xdotool
@@ -202,7 +202,7 @@ X authentication:
      --xhost STR       Set \"xhost STR\" on new X server (see 'man xhost').
                        (Use with care. '--xhost +' allows access for everyone).
  -o, --no-xhost        Disable any access to host X server granted by xhost.
-     --no-auth         Disable cookie authentication on new X server.
+     --no-auth         Allow access to X for everyone. Security risk!
      --trusted         Use trusted cookies for --hostdisplay
      --untrusted       Create untrusted cookies. Restricts X access.
                        Default for --hostdisplay to avoid keylogging and
@@ -477,7 +477,7 @@ $(cat $Bgpidfile 2>/dev/null)"
         case $Name in
           xinit)                  killpid $Pid $Name xinit ;;
           Xserver)                killpid $Pid $Name 'Xorg|Xephyr|Xvfb|Xwayland|nxagent' ;;
-          vcxsrv.exe)             env MSYS2_ARG_CONV_EXCL='*' taskkill.exe /PID $Pid /T /F 2>&1 | sed "s/$Dosreturn//" ;;
+          vcxsrv.exe)             env MSYS2_ARG_CONV_EXCL='*' taskkill.exe /PID $Pid /T /F 2>&1 | rmcr ;;
           containershell)         killpid $Pid $Name x11docker ;;
           windowmanager)          killpid $Pid $Name ;;
           xpraserver|xpraclient)  killpid $Pid $Name xpra ;;
@@ -569,7 +569,7 @@ $(ps -p $Pid)"
     { >&$i ;} 2>/dev/null && exec >&$i-
   done
 
-  [ "$Preservecachefiles" = "no" ] && grep -q .cache <<<$Cachefolder && grep -q x11docker <<<$Cachefolder && [ "x11docker" != "$(basename "$Cachefolder")" ] && $Mksu "rm -f -R '$Cachefolder'"
+  [ "$Preservecachefiles" = "no" ] && grep -q cache <<<$Cachefolder && grep -q x11docker <<<$Cachefolder && [ "x11docker" != "$(basename "$Cachefolder")" ] && $Mksu "rm -f -R '$Cachefolder'"
 
   exit $Exitcode
 }
@@ -781,15 +781,18 @@ pspid() {               # ps -p $1 --no-headers
 no_xhost() {            # remove any access to X server granted by xhost
   local Line=
   command -v xhost >/dev/null || {
-    verbose -d "Command 'xhost' not found."
+    warning "Command 'xhost' not found.
+  Can not check for possibly allowed network access to X.
+  Please install 'xhost'."
     return 1
   }
-  xhost
-  xhost | tail -n +2  /dev/stdin | while read -r Line ; do  # read all but the first line (header)
+  #xhost
+  xhost 2>&1 | rmcr | tail -n +2  /dev/stdin | while read -r Line ; do  # read all but the first line (header)
+    verbose -d "xhost: Removing entry $Line"
     xhost -$Line                                         # disable every entry
   done
   xhost -                                                # enable access control
-  [ "$(xhost | wc -l)" -gt "1" ] && {
+  [ "$(xhost 2>&1 | rmcr | wc -l)" -gt "1" ] && {
     warning "Remaining xhost permissions found on display $DISPLAY
 $(xhost)"
     return 1
@@ -1216,6 +1219,9 @@ convertpath() {         # convert path $1 into --volume syntax regarding Windows
   esac
   echo "$Volumecode"
 }
+rmcr() {                # remove carriage return to translate DOS/Windows newlines into UNIX newlines
+  sed "s/$(printf "\r")//"
+}
 verlte() {              # version number check $1 less than or equal $2
   [  "${1:-}" = "$(echo -e "${1:-}\n${2:-}" | sort -V | head -n1)" ] && return 0 || return 1
 }
@@ -1390,9 +1396,6 @@ case $Winsubsystem in
   WSL)    Winsubpath="FAILURE"     ; Winsubmount="/mnt" ;;
 esac
 Vcxsrvpath=""
-Localappdatawin=""
-Localappdatalin=""
-Dosreturn=$'\r'
 Tasklistold=""
 Tasklistnew=""
 
@@ -1856,10 +1859,12 @@ $Customenvironment"    ;  shift ;;                         # set custom environm
 { #### part: some init
 
   # base cache folder
-  [ "$Cachebasefolder" ] || case $Winsubsystem in
-    "") Cachebasefolder="$Hostuserhome/.cache/x11docker" ;;
-    *)  Cachebasefolder="$Winsubmount$(convertpath "$(cmd.exe /C "echo %userprofile%" | sed "s/$Dosreturn//")" | cut -d"'" -f2)/x11docker/cache" ;;
-  esac
+  [ "$Cachebasefolder" ] || {
+    case $Winsubsystem in
+      "") Cachebasefolder="$Hostuserhome/.cache/x11docker" ;;
+      *)  Cachebasefolder="$Winsubmount$(convertpath "$(cmd.exe /C "echo %userprofile%")" | rmcr | cut -d"'" -f2)/x11docker/cache" ;;
+    esac
+  }
   $Mksu "mkdir -p $Cachebasefolder"         || error "Could not create cache folder
   $Cachebasefolder"
   writeaccess $Hostuseruid $Cachebasefolder || error "User $Hostuser does not have write access to
@@ -1899,7 +1904,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   # Check ssh and tty
   pstree -ps $$ 2>/dev/null | grep -q sshd && Ssh="yes" || Ssh="no"  # check if running over SSH            ### FIXME pstree is not available everywhere
   command -v pstree >/dev/null || {
-    [ "${SSH_CLIENT:-}" ] && Ssh="yes" || warning "Could not check whether x11docker is running over ssh.
+    [ "${SSH_CLIENT:-}" ] && Ssh="yes" || note "Could not check whether x11docker is running over ssh.
   Please install pstree."
   }
   tty | grep -q tty     && Tty="yes" || Tty="no"  # check if running on X or on tty
@@ -2163,10 +2168,33 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
       }
     ;;
   esac
+  
+  # --vcxsrv: check xauth availability for VcXsrv
+  case $Xserver in
+    --vcxsrv)
+      case $Winsubsystem in
+        MSYS)
+          warning "Disabling X authentication for X server --vcxsrv in MSYS.
+  An upcoming release of VcXsrv will allow it."
+          Xauthentication="no"
+        ;;
+      esac
+    ;;
+  esac
 
+  # check xauth
+  [ "$Xauthentication" = "yes" ] && {
+    [ "$(command -v xauth)" = "/usr/bin/xauth" ] || {
+      warning "Command '/usr/bin/xauth' not found.
+  Please install 'xauth' to allow X cookie authentication.
+  Fallback: Disabling X authentication."
+      Xauthentication="no"
+    }
+  }
+  
   # --fullscreen is nonsense on tty at all. Avoids weston error on tty.
   [ "$Tty" = "yes" ] && Fullscreen="no"
-
+          
   # --gpu
   [ "$Sharegpu" = "yes" ] && {
     case $Xserver in
@@ -3320,12 +3348,13 @@ fi
       Xserveroptions="$Xserveroptions -retro"
       # Most X servers have extension "Composite", recent Xwayland has "COMPOSITE".
       Xserveroptions="$Xserveroptions \\
-  +extension Composite +extension COMPOSITE +extension RANDR +extension RENDER +extension GLX \\
+  +extension Composite +extension COMPOSITE \\
+  +extension RANDR +extension RENDER +extension GLX \\
   +extension XVideo +extension DOUBLE-BUFFER"
       Xserveroptions="$Xserveroptions \\
   -extension X-Resource +extension SECURITY +extension DAMAGE"
       Xserveroptions="$Xserveroptions \\
-  +extension XINERAMA +xinerama"
+  -extension XINERAMA -xinerama"
       { [ "$Sharehostipc" = "yes" ] || [ "$X11dockermode" = "exe" ] ; } && { # --hostipc needed for shared memory.
         Xserveroptions="$Xserveroptions +extension MIT-SHM"
       } || {
@@ -3521,10 +3550,21 @@ $(tail "$Compositorlogfile")"
   esac
 
   # cookie authentication
-  [ "$Xauthentication" = "yes" ] && case $Xserver in
-    --vcxsrv)  ;; ### FIXME
-    *) Xserveroptions="$Xserveroptions \\
+  case $Xauthentication in
+    yes)
+      case $Xserver in
+        --vcxsrv)  
+          Line="${Xservercookie#$Winsubmount}"
+          Xserveroptions="$Xserveroptions \\
+  -auth '$(cut -c2 <<< "$Line"):$(cut -c3- <<< "$Line")'" 
+        ;;
+        *) Xserveroptions="$Xserveroptions \\
   -auth $Xservercookie" ;;
+      esac
+    ;;
+    no) [ "$Xserver" = "--hostdisplay" ] || warning "Option --no-auth: Allowing access to X server for everyone."
+      Xserveroptions="$Xserveroptions \\
+  -ac" ;;
   esac
 
 
@@ -3773,13 +3813,16 @@ esac
     ;;
 
     --vcxsrv|--xwin)
-      [ "$Xserver" = "--vcxsrv" ] && Xcommand="$(escapestring "$Vcxsrvpath")/vcxsrv.exe :$Newdisplaynumber -ac"
+      [ "$Xserver" = "--vcxsrv" ] && Xcommand="$(escapestring "$Vcxsrvpath")/vcxsrv.exe :$Newdisplaynumber -listen tcp"
       [ "$Xserver" = "--xwin" ]   && Xcommand="$(command -v Xwin) :$Newdisplaynumber"
       
       Xcommand="$Xcommand \\
   $Xserveroptions \\
  "
-      [ "$Sharegpu" = "yes" ] && Xcommand="$Xcommand -wgl +iglx"   ### FIXME needs to be tested
+      case $Sharegpu in
+        yes) Xcommand="$Xcommand -wgl +iglx" ;;  ### FIXME needs to be tested
+        no)  Xcommand="$Xcommand -nowgl -iglx" ;;
+      esac
       case $Fullscreen in
         yes)
           Xcommand="$Xcommand -fullscreen"
@@ -4095,7 +4138,7 @@ done
   # base home folder
   case $Winsubsystem in
     "") Homebasedir="$Benutzerhome/.local/share/x11docker" ;;
-    *)  Homebasedir="$Winsubmount$(convertpath "$(cmd.exe /C "echo %userprofile%" | sed "s/$Dosreturn//")" | cut -d"'" -f2)/x11docker/home" ;;
+    *)  Homebasedir="$Winsubmount$(convertpath "$(cmd.exe /C "echo %userprofile%" | rmcr | cut -d"'" -f2)/x11docker/home")" ;;
   esac
   
   case $Benutzerhosthome in
@@ -4717,8 +4760,6 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     *)                                  echo "  echo 'export XDG_SESSION_TYPE=x11'" ;;
   esac
   echo   "  echo ''"
-  
-  [ "$Xserver" = "--vcxsrv" ] && [ "$Sharegpu" = "yes" ] && echo "  echo 'export LIBGL_ALWAYS_INDIRECT=1'"
 
   [ "$Switchcontaineruser" = "yes" ] && echo "  echo 'export TINI_SUBREAPER=1'"
   echo   "  echo ''"
@@ -5348,15 +5389,6 @@ exit 0' >> /etc/rc.local"
   echo "exit"
 } >> $Xtermrc
 
-#        echo "cd \"C:\\Users\\User\"
-#\"C:/Program Files/Vcxsrv/xauth.exe\" -i -f ./mycookie add :$Newdisplaynumber . $(mcookie)
-#PATH=%PATH%;C:\\Program Files\\VcXsrv
-#echo %PATH%
-#echo %HOME%
-#dir
-#xauth.exe -i -f mycookie add :$Newdisplaynumber . $(mcookie)
-#" | cmd.exe 2>&1 | sed "s/$Dosreturn//"
-
 { #### part: create xinitrc: set up X environment, create cookies
   echo "#! /bin/sh"
   #[ "$Debugmode" = "yes" ] && echo "set -x"
@@ -5367,7 +5399,7 @@ exit 0' >> /etc/rc.local"
   echo "Winsubsystem=$Winsubsystem"
   declare -f storepid
   declare -f rocknroll waitfortheend
-  declare -f no_xhost
+  declare -f no_xhost rmcr
 
   echo "$Messagefifofuncs"
   echo "Messagefile=$Messagefifo"
@@ -5389,18 +5421,6 @@ exit 0' >> /etc/rc.local"
   case $Xserver in
     --weston|--kwin|--hostwayland) echo "unset DISPLAY XAUTHORITY" ;;
     --nothing) echo "unset DISPLAY XAUTHORITY WAYLAND_DISPLAY" ;;
-    --vcxsrv)
-      [ "$Xauthentication" = "yes" ] && {
-#        echo "cd $Localappdatalin/x11docker"
-#        echo "xauth.exe -v -f ./X$Newdisplaynumber-Xclientcookie generate $Newdisplay . $Trusted timeout 3600 2>&1 | sed 's/$Dosreturn//'"
-#        echo "cat $Xclientcookie"
-#        echo "ls -l"
-#        echo "cat ./X$Newdisplaynumber-Xclientcookie"
-        warning "X server VcXsrv runs without cookie authentication."
-      }
-      echo "xhost.exe +"
-      warning "X server $Xserver allows access to X for everyone with 'xhost +'."
-    ;;
     *) # here something for real X servers
       echo "# background color"
       echo "xsetroot -solid '#7F7F7F'"
@@ -5409,6 +5429,7 @@ exit 0' >> /etc/rc.local"
 
       [ "$Xauthentication" = "yes" ] && {
         echo "# create new XAUTHORITY cookies"
+        echo "cd $Sharefolder"
         [ "$Xserver" = "--nxagent" ] && {
           echo "cp $Xclientcookie $Xclientcookie.bak   # nxagent workaround cookie was created before starting xinit"
           echo "export XAUTHORITY=$Xclientcookie.bak"
@@ -5419,10 +5440,15 @@ exit 0' >> /etc/rc.local"
           [ -s "$Hostxauthority" ] && echo "export XAUTHORITY=$Hostxauthority"
           echo   "xhost | grep -q 'SI:localuser:$Hostuser'|| { xhost +SI:localuser:$Hostuser ; Xhostentry='yes' ; }"
         }
+        # TEST
+        #echo "echo 'set DISPLAY=$Newdisplay"
+        #echo "set XAUTHORITY=C:/${Xclientcookie#/cygdrive/c/}"
+        #echo "xhost' | cmd.exe"
+        #echo "xhost"
         case "$Ssh" in
           no)
             echo "verbose 'Requesting $Trusted cookie from X server'"
-            echo "xauth -v -f $Xclientcookie generate $Newdisplay . $Trusted timeout 3600"
+            echo "xauth -v -i -f Xclientcookie generate $Newdisplay . $Trusted timeout 3600"
           ;;
           yes)
             echo "verbose 'Can not use cookies created over SSH. Will bake one myself.'"
@@ -5447,34 +5473,31 @@ exit 0' >> /etc/rc.local"
         echo     "}"
         echo     "[ -s '$Xclientcookie' ] || { "
         echo     "  # still no cookie? try to create one without extension security"
-        echo     "  verbose 'Failed to retrieve cookie from X server. Will bake one myself.'"
-        echo     "  xauth -v -f $Xclientcookie add $Newdisplay . $(mcookie)"
+        echo     "  verbose -d 'Failed to retrieve trusted cookie from X server. Will bake one myself.'"
+        echo     "  xauth -v -i -f Xclientcookie add :$Newdisplaynumber . $(mcookie)"
         echo     "}"
         echo     "# create prepared cookie with localhost identification disabled by ffff, needed if X socket is shared. ffff means 'familiy wild'"
-        echo     "Cookie=\$(xauth -f $Xclientcookie nlist | sed -e 's/^..../ffff/')"
-        echo     "echo \$Cookie | xauth -v -f $Xclientcookie nmerge -"
+        echo     "Cookie=\$(xauth -i -f Xclientcookie nlist | rmcr | sed -e 's/^..../ffff/')"
+        echo     "echo \$Cookie | xauth -v -i -f Xclientcookie nmerge -"
         echo     "cp $Xclientcookie $Xservercookie"
         echo     "[ -s '$Xclientcookie' ] || warning 'Cookie creation failed!'"
-        echo     "verbose \"Created cookie: \$(xauth list)\""
+        echo     "verbose -d \"Created cookie: \$(xauth -f Xclientcookie list 2>&1)\""
         echo     "chmod 644 $Xclientcookie"
         [ "$Xserver" = "--hostdisplay" ] && echo "[ '\$Xhostentry' = 'yes' ] && env XAUTHORITY=$Hostxauthority xhost -SI:localuser:$Hostuser"
         [ "$Xserver" = "--nxagent" ]     && echo "rm $Xclientcookie.bak"
       }
 
       echo "export XAUTHORITY=$Xclientcookie"
-      echo "[ '$Xauthentication' = 'no' ] || [ ! -s '$Xclientcookie' ] && unset XAUTHORITY && warning 'X server $Newdisplay runs without cookie authentication.'"
+      echo "[ '$Xauthentication' = 'no' ] || [ ! -s '$Xclientcookie' ] && unset XAUTHORITY && warning '$Xserver: X server $Newdisplay runs without cookie authentication.'"
 
       case "$Xserver" in
         --hostdisplay|--nxagent) ;;
+        --vcxsrv) ;; # xhost does not work over tcp
         *)
           case $Xauthentication in
             yes)
               echo "verbose 'Disabling any possible access to new X server possibly granted by xhost'"
               echo "no_xhost"
-            ;;
-            no)
-              echo "verbose 'Allowing X access with xhost +localhost'"
-              echo "xhost +localhost"
             ;;
           esac
 
@@ -5793,7 +5816,7 @@ $(tail $Compositorlogfile)"
   case $Xserver in
     --nothing|--hostdisplay|--hostwayland|--weston|--kwin) ;;
     *)
-      Xinitpid="$(pgrep -a xinit | grep "xinit $Xinitrc" | awk '{print $1}')"
+      Xinitpid="$(pgrep -a xinit 2>/dev/null | grep "xinit $Xinitrc" | awk '{print $1}')"
       checkpid "$Xinitpid"   && setonwatchpidlist $Xinitpid xinit     && storepid $Xinitpid xinit
       echo $Xcommand | grep -q Xorgwrapper && Line="Xorg $Newdisplay" || Line="$(echo "$Xcommand" | head -n1)"
       Xserverpid=$(ps aux | grep "$(echo "${Line:-nothingtolookfor}" | cut -d' ' -f1-2)" | grep -v grep | grep -v xinit | awk '{print $2}')
