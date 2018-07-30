@@ -386,6 +386,8 @@ error() {               # show error messages on stderr and exit
   For debugging, run x11docker in terminal and/or enable option '--verbose'
   or look afterwards at logfile $Logbackup
   Please report issues at https://github.com/mviereck/x11docker"
+  
+  Message="$(rmcr <<< "$Message")"
 
   # output to terminal
   [ "$Verbose" = "no" ] && echo -e "
@@ -560,6 +562,7 @@ $(ps -p $Pid)"
 
   [ -e "$Logfile" ] && {
     [ "$Verbose" = "yes" ] && sleep 1
+    rmcr $Logfile
     $Mksu "cp '$Logfile' '$Logbackup'"
     [ "$(dirname $Logfile)" = "$Cachebasefolder" ] && rm $Logfile
   }
@@ -1220,7 +1223,11 @@ convertpath() {         # convert path $1 into --volume syntax regarding Windows
   echo "$Volumecode"
 }
 rmcr() {                # remove carriage return to translate DOS/Windows newlines into UNIX newlines
-  sed "s/$(printf "\r")//"
+  # convert stdin if $1 is empty. Otherwise convert file $1.
+  case "${1:-}" in
+    "") sed    "s/$(printf "\r")//" ;;
+    *)  sed -i "s/$(printf "\r")//"  "${1:-}"
+  esac
 }
 verlte() {              # version number check $1 less than or equal $2
   [  "${1:-}" = "$(echo -e "${1:-}\n${2:-}" | sort -V | head -n1)" ] && return 0 || return 1
@@ -4609,13 +4616,16 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo ""
 
   echo "# check whether docker daemon is running and refresh images.list for x11docker-gui"
-  echo "docker images --format '{{.Repository}}:{{.Tag}}' | rmcr >>$Cachefolder/images.list 2>>$Containerlogfile  || error \"Calling docker daemon failed.
+  echo "docker images --format '{{.Repository}}:{{.Tag}}' | rmcr >>$Cachefolder/images.list 2>>$Containerlogfile  || {
+    rmcr '$Containerlogfile'
+    error \"Calling docker daemon failed.
   Is docker daemon running at all?
   Try to start docker daemon with:
       systemctl start docker
 
   Last lines of log:
-\$(tail $Containerlogfile)\""
+\$(tail $Containerlogfile)\"
+}"
   echo "mkfile $Cachebasefolder/x11docker-gui/images.list"
   echo "while read -r Line ; do"
   echo '  grep -q "<none>" <<<$Line || echo $Line >> '$Cachebasefolder/x11docker-gui/images.list
@@ -4630,7 +4640,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   [ "$Pullterminal" = "$Passwordterminal" ] && [ "$Passwordneeded" = "yes" ] && Pullterminal=""
   echo "  $Pullterminal /bin/bash $Pullrc"
   echo "  waitforfilecreation $Cachefolder/pullready"
-  echo "  docker inspect --type=image $Imagename > /dev/null 2>&1 || error \"Image '$Imagename' not found locally and not pulled from docker hub.
+  echo "  docker inspect --type=image $Imagename 2>&1 | rmcr >>$Containerlogfile || error \"Image '$Imagename' not found locally and not pulled from docker hub.
 
   Last lines of log:
 \$(tail $Containerlogfile)\""
@@ -4732,7 +4742,8 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     echo "IFS=$'\n'"
     echo "while read -r Line; do"
     echo "  echo export \$(escapestring \"\$Line\")      >> $Imagecommandscript"
-    echo "done < <(docker run --rm --entrypoint env $Imagename env | rmcr)"
+    echo "done < <(docker run --rm --entrypoint env $Imagename env 2>>$Containerlogfile| rmcr)"
+    echo "rmcr '$Containerlogfile'"
     echo "IFS=$' \t\n'"
     echo ""
   }
@@ -4763,7 +4774,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     echo "  echo 'Dbus=\"\$(dbus-launch --help >/dev/null 2>&1 && echo dbus-launch)\"'"
     echo "  echo '[ -z \"\$Dbus\" ] && Dbus=\"\$(dbus-run-session --help >/dev/null 2>&1 && echo dbus-run-session)\"'"
     echo "  echo '[ -z \"\$Dbus\" ] && warning \"Did not find dbus-launch or dbus-run-session. (option --dbus).\"'"
-  }
+  } || echo "  echo 'Dbus=\"\"'"
   echo   "  echo 'verbose -d \"Running dbus user session with: \${Dbus:-(none)}\"'"
   echo   "  echo ''"
   echo   '  echo "[ -e \"\$XDG_RUNTIME_DIR\" ] || {"'
@@ -4825,7 +4836,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo   "  echo ''"
 
   echo   "  echo 'cd \"\$HOME\"'"                                                    # HOME as default working directory
-  echo   "  Workdir=\$(docker inspect --format='{{.Config.WorkingDir}}' $Imagename | rmcr)" # WORKDIR in image
+  echo   "  Workdir=\$(docker inspect --format='{{.Config.WorkingDir}}' $Imagename 2>>'$Containerlogfile'| rmcr)" # WORKDIR in image
   echo   '  [ "$Workdir" ] && echo "[ -d \"$Workdir\" ] && cd \"$Workdir\"   # WORKDIR in image"'
   [ "$Workdir" = "/tmp" ] || echo "  echo 'cd $Workdir'"                             # x11docker option --workdir
   echo   "  echo ''"
@@ -4884,10 +4895,13 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
 
   echo ""
   echo "verbose -d \"Container ID: \$Containerid\""
-  echo "[ \"\$Containerid\" ] || error \"Startup of docker failed. Did not receive a container ID.
+  echo "[ \"\$Containerid\" ] || {
+    rmcr '$Containerlogfile'
+    error \"Startup of docker failed. Did not receive a container ID.
 
   Last lines of container log:
-\$(tail $Containerlogfile)\""
+\$(tail $Containerlogfile)\"
+}"
   echo "echo \$Containerid >> $Containeridfile"
   [ "$Showcontainerid" = "yes" ] && echo "stdout \"\$(cat $Containeridfile)\""
   echo "docker logs -f \$Containerid 2>&1 | rmcr >> $Containerlogfile &"
@@ -4897,7 +4911,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "  docker exec $Containername sh -c : 2>&1 | rmcr >>$Containerlogfile && { verbose -d 'Container is up and running.' ; break ; } || verbose -d \"Container not ready on \$Count. attempt, trying again.\""
   echo "  sleep 0.2"
   echo "done"
-  echo "Failure=\"\$(cat $Containerlogfile | grep -v grep | grep -E 'Error response from daemon|OCI runtime exec' ||:)\""
+  echo "Failure=\"\$(cat $Containerlogfile | rmcr | grep -v grep | grep -E 'Error response from daemon|OCI runtime exec' ||:)\""
   echo "[ \"\$Failure\" ] && {"
   echo "  echo \"\$Failure\" >>$Containerlogfile"
   echo "  error \"Got error message from docker daemon:
@@ -4905,10 +4919,10 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "}"
   echo ""
 
-  echo "docker inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername | rmcr >> $Containeripfile"
+  echo "docker inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername 2>>$Containerlogfile | rmcr >> $Containeripfile"
   echo "verbose -d \"Container IP: \$(cat $Containeripfile)\""
   echo ""
-  echo "docker inspect --format '{{.State.Pid}}' $Containername | rmcr >> $Containerpid1pidfile"
+  echo "docker inspect --format '{{.State.Pid}}' $Containername 2>>$Containerlogfile | rmcr >> $Containerpid1pidfile"
   echo "verbose -d \"Host PID of container PID 1: \$(cat $Containerpid1pidfile)\""
   [ "$Showcontainerpid1pid" = "yes" ] && echo "stdout \"\$(cat $Containerpid1pidfile)\""
   echo ""
@@ -4916,6 +4930,8 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "Containerpid=\$(ps ax | grep \$Containerid | grep -v grep | grep -v ' logs' | awk '{print \$1}')"
   echo "verbose -d \"Container PID: \$Containerpid\""
   echo "echo \$Containerpid >> $Containerpidfile"
+  echo ""
+  echo "rmcr '$Containerlogfile'"
   echo ""
   # container.CMD.sh will wait until setup script is ready
   [ "$Switchcontaineruser" = "no" ] && echo "docker exec --tty -u root $Containername /bin/sh $Cshare/container.rootsetup.sh 2>&1 | rmcr >>$Containerlogfile"
@@ -4948,9 +4964,11 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "mkdir -v -p /var/lib/dbus /var/run/dbus"
   echo "mkdir -v -p -m 1777 /tmp/.ICE-unix /tmp/.X11-unix /tmp/.font-unix"
   echo "chmod -c 1777 /tmp/.ICE-unix /tmp/.X11-unix /tmp/.font-unix"
-  echo "ln -s /X$Newdisplaynumber $Newxsocket" # done again in container.CMD.sh. At least x11docker/deepin needs it here already.
-  echo "ls -l $Newxsocket"
   echo "export DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie"
+  [ "$Xserver" != "--vcxsrv" ] && {
+    echo "ln -s /X$Newdisplaynumber $Newxsocket" # done again in container.CMD.sh. At least x11docker/deepin needs it here already.
+    echo "ls -l $Newxsocket"
+  }
   echo ""
 
   [ "$Hostlocaltime" ] && {
@@ -5427,7 +5445,7 @@ exit 0' >> /etc/rc.local"
   echo "Winsubsystem=$Winsubsystem"
   declare -f storepid
   declare -f rocknroll waitfortheend
-  declare -f no_xhost rmcr
+  declare -f rmcr no_xhost
 
   echo "$Messagefifofuncs"
   echo "Messagefile=$Messagefifo"
@@ -5931,17 +5949,19 @@ $(tail $Xpraserverlogfile)"
       esac
       waitforfilecreation $Cachefolder/xtermready infinity
 
-      # check if container startup was successfull
-      sleep 2 # wait for late messages of docker daemon and for pstree to be filled
-      Containerpid=$(cat $Containerpidfile)
-      checkpid $Containerpid && {
-        storepid $Containerpid container
-        setonwatchpidlist $(cat $Containerpid1pidfile) containerpid1
-        verbose -d "Process tree of container (maybe not complete yet):
+      case $Winsubsystem in
+        "")
+          # check if container startup was successfull
+          sleep 2 # wait for late messages of docker daemon and for pstree to be filled
+          Containerpid=$(cat $Containerpidfile)
+          checkpid $Containerpid && {
+            storepid $Containerpid container
+            setonwatchpidlist $(cat $Containerpid1pidfile) containerpid1
+            verbose -d "Process tree of container (maybe not complete yet):
 $(pstree -cp $(cat $Containerpid1pidfile) 2>&1 ||:)"
-      } || {
-        [ "$Xserver" = "--nothing" ] && saygoodbye "--nothing" || {
-          error "Container startup seems to have failed!
+          } || {
+            [ "$Xserver" = "--nothing" ] && saygoodbye "--nothing" || {
+              error "Container startup seems to have failed!
 
   Last lines of container.log:
 $(tail $Containerlogfile)
@@ -5951,8 +5971,10 @@ $(tail $Cmdstderrlogfile)
 
   Last lines of command stdout:
 $(tail $Cmdstdoutlogfile)"
-        }
-      }
+            }
+          }
+        ;;
+      esac
     ;;
 
     exe) # --exe: run host application without docker. includes --xonly
@@ -6040,7 +6062,7 @@ $(tail $Compositorlogfile)"
     --vcxsrv)
       Tasklistold="
 $(tasklist.exe | rmcr | grep vcxsrv.exe | awk '{print $2}')"
-      $Mksu "exec                                                              $Xcommand          >> $Xinitlogfile  2>&1  &"
+      $Mksu "exec                                                              $Xcommand          2>&1 | rmcr >> $Xinitlogfile &"
       case $Winsubsystem in
         MSYS|CYGWIN)
           Tasklistnew="$Tasklistold
