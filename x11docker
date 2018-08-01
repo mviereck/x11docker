@@ -441,13 +441,7 @@ logentry() {            # write into logfile
 }
 killpid() {             # kill PID $1 with codename $2 [and process name $3]
   verbose -d "Terminating ${1:-} (${2:-}) ${3:-}: $(pspid ${1:-})"
-  ps -p ${1:-} >/dev/null && {
-    [ "${3:-}" ] && {
-      ps -p ${1:-} | grep -q -E "${3:-}" && kill ${1:-} 2>/dev/null
-    } || {
-      kill ${1:-} 2>/dev/null
-    }
-  }
+  ps -p ${1:-} >/dev/null && kill ${1:-} 2>/dev/null
 }
 finish_sigint() {       # trap SIGINT to activate debug mode on finish()
   Debugmode="yes"
@@ -475,11 +469,10 @@ $(cat $Bgpidfile 2>/dev/null)"
       Pid=$(echo $Line  | awk '{print $1}')
       Name=$(echo $Line | awk '{print $2}')
       debugnote "Checking: $Pid ($Name): $(pspid $Pid ||:)"
-      { checkpid $Pid || [ "$Name" = "vcxsrv.exe" ] ; } && {        
+      checkpid $Pid && {        
         case $Name in
           xinit)                  killpid $Pid $Name xinit ;;
           Xserver)                killpid $Pid $Name 'Xorg|Xephyr|Xvfb|Xwayland|nxagent' ;;
-          vcxsrv.exe)             verbose -d "$(env MSYS2_ARG_CONV_EXCL='*' taskkill.exe /PID $Pid /T /F 2>&1 | rmcr)" ;;
           containershell)         killpid $Pid $Name x11docker ;;
           windowmanager)          killpid $Pid $Name ;;
           xpraserver|xpraclient)  killpid $Pid $Name xpra ;;
@@ -603,37 +596,27 @@ $(sh -c "${1:-}" 2>&1)"
 watchpidlist() {        # watch list of important pids
   # terminate x11docker if a PID in $Watchpidlist terminates
   # serves mainly watching X server, Wayland compositor, container and hostexe
-  # echo PIDs to watch into >&9
+  # echo PIDs to watch into >&9 (setonwatchpidlist())
   local Pid= Containername=
   while rocknroll ; do
     read -t1 Pid <&9 ||:
     [ "$Pid" ] && {
       [ "${Pid:0:9}" = "CONTAINER" ] && {
         Containername=${Pid#CONTAINER}
-        debugnote "Watching Container: $Containername"
+        verbose -d "Watching Container: $Containername"
       } || {
         Watchpidlist="$Watchpidlist $Pid"
         debugnote "Watching pids: $Watchpidlist"
       }
-    } || sleep 2 # sleep for MSYS2/CYGWIN workaround
-    case $Winsubsystem in
-      ""|WSL)
-        for Pid in $Watchpidlist; do
-          [ -e /proc/$Pid ] || {
-            debugnote  "watchpidlist: PID $Pid has terminated"
-            saygoodbye "watchpidlist $Pid"
-          }
-        done
-      ;;
-      MSYS2|CYGWIN)
-        for Pid in $Watchpidlist; do
-          ps -p $Pid --windows >/dev/null 2>&1 || {
-            debugnote  "watchpidlist: PID $Pid has terminated"
-            saygoodbye "watchpidlist $Pid"
-          }
-        done;;
-    esac
+    }
+    for Pid in $Watchpidlist; do
+      [ -e /proc/$Pid ] || {
+        debugnote  "watchpidlist: PID $Pid has terminated"
+        saygoodbye "watchpidlist $Pid"
+      }
+    done
     [ "$Containername" ] && {
+      # Container PID not watchable in MSYS2/Cygwin/WSL.
       docker inspect $Containername >/dev/null 2>&1 || {
         debugnote "watchpidlist: Container $Containername has terminated"
         saygoodbye "watchpidlist $Containername"
@@ -826,6 +809,14 @@ depends() {             # check dependencies on host for X server option $1
     yes) Message="verbose -d" ;;
     no)  Message="warning" ;;
   esac
+  case $Xserver in
+    --xephyr|--xpra|--nxagent|--xorg|--xvfb|--xdummy|--xwayland|--weston-xwayland|--kwin-xwayland|--xwin)
+      command -v xinit >/dev/null || {
+        $Message "${1:-}: xinit not found."
+        Return=1
+      }
+    ;;
+  esac
   case ${1:-} in
     --xpra|--xpra-xwayland)
       command -v "xpra" >/dev/null || {
@@ -854,7 +845,8 @@ depends() {             # check dependencies on host for X server option $1
       } ;;
     --xwin)
       command -v "xwin" >/dev/null || {
-        $Message "${1:-}: Xwin not found."
+        $Message "${1:-}: Xwin not found. 
+  Need 'xinit' package from Cygwin (X11 section)."
         Return=1
       } ;;
     --vcxsrv)
@@ -2463,6 +2455,9 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   Fallback: Disabling option --sharecgroup."
       Sharecgroup="no"
     }
+    [ "$Winsubsystem" = "WSL" ] && [ "$Xserver" = "--vcxsrv" ] && note "x11docker will not be able to terminate X server
+  on exit due to a bug in WSL Windows process handling.
+  Compare:  https://github.com/Microsoft/WSL/issues/1614"
   }
 }
 
@@ -4134,7 +4129,6 @@ done
   
   # start watching important pids, e.g. xinit, container.
   exec 9<>$Watchpidfifo
-  setonwatchpidlist $$ x11docker
   watchpidlist & storepid $! watchpidlist
   
   # start watching for messages out of container or dockerrc
@@ -5874,7 +5868,7 @@ $(tail $Compositorlogfile)"
 
   # check and watch X server
   case $Xserver in
-    --nothing|--hostdisplay|--hostwayland|--weston|--kwin) ;;
+    --nothing|--hostdisplay|--hostwayland|--weston|--kwin|--vcxsrv) ;;
     *)
       Xinitpid="$(pgrep -a xinit 2>/dev/null | grep "xinit $Xinitrc" | awk '{print $1}')"
       checkpid "$Xinitpid"   && setonwatchpidlist $Xinitpid xinit     && storepid $Xinitpid xinit
@@ -6077,22 +6071,13 @@ $(tail $Compositorlogfile)"
     --hostdisplay|--hostwayland|--weston|--kwin|--nothing)
       $Mksu "exec                                             bash $Xinitrc                       >> $Xinitlogfile  2>&1 " ;;
     --vcxsrv)
-      Tasklistold="
-$(tasklist.exe | rmcr | grep vcxsrv.exe | awk '{print $2}')"
-      $Mksu "exec env MSYS2_ARG_CONV_EXCL='*'                                  $Xcommand          2>&1 | rmcr >> $Xinitlogfile &"
-      case $Winsubsystem in
-        MSYS2|CYGWIN)
-          Tasklistnew="$Tasklistold
-$(tasklist.exe | rmcr | grep vcxsrv.exe | awk '{print $2}')"
-          Xserverpid="$(cat <<<"$Tasklistnew" | rmcr | sort | uniq -u)"
-          [ "$Xserverpid" ] && {
-            setonwatchpidlist $Xserverpid Xserver
-            storepid $Xserverpid vcxsrv.exe
-          } || warning "Failed to get PID of vcxsrv.exe.
-  Can not watch whether it terminates, 
-  and cannot terminate it if container terminates."
-        ;;
-      esac
+      $Mksu "exec env MSYS2_ARG_CONV_EXCL='*'                                  $Xcommand          >> $Xinitlogfile  2>&1 & echo \$! >$Cachefolder/Xserverpid"
+      Xserverpid=$(cat "$Cachefolder/Xserverpid")
+      [ "$Xserverpid" ] && {
+        storepid $Xserverpid Xserver
+        setonwatchpidlist $Xserverpid Xserver
+      } || error "Failed to receive PID of X server."
+      sleep 1
       $Mksu "exec                                             bash $Xinitrc                       >> $Xinitlogfile  2>&1 " ;;
   esac
 
