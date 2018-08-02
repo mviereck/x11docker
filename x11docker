@@ -550,7 +550,7 @@ $(ps -p $Pid)"
   }
   [ "$Winsubsystem" ] && [ "$Pid1pid" ] && {
     verbose -d "Stopping container $Containername"
-    $Sudo docker stop $Containername >>$Containerlogfile 2>&1 || {
+    $Sudo docker stop $Containername >/dev/null 2>&1 || {
       docker inspect $Containername >/dev/null 2>&1 && {
         warning "Failed to stop container $Containername.
   Will not clean cache to avoid file permission issues."
@@ -1411,9 +1411,9 @@ Winsubpath=""
 [ -d "/cygdrive" ]                                && Winsubsystem="CYGWIN"
 grep -q "/mnt/c/Windows/System32" <<< ${PATH:-}   && Winsubsystem="WSL"
 case $Winsubsystem in
-  MSYS2)  Winsubpath="/c/msys64"   ; Winsubmount="" ;;
-  CYGWIN) Winsubpath="/c/cygwin64" ; Winsubmount="/cygdrive" ;;
-  WSL)    Winsubpath="FAILURE"     ; Winsubmount="/mnt" ;;
+  MSYS2)   Winsubpath="/c/msys64"                 ;  Winsubmount="" ;;
+  CYGWIN)  Winsubpath="/c/cygwin64"               ;  Winsubmount="/cygdrive" ;;
+  WSL)     Winsubpath="CANNOT_SHARE_WSL_PATH"     ;  Winsubmount="/mnt" ;;
 esac
 Vcxsrvpath=""
 
@@ -1531,7 +1531,6 @@ Capsysadmin="no"                                # option --sys-admin: add capabi
 Runfromhost=""                                  # option --runfromhost: add host command to xinitrc
 Runasroot=""                                    # option --runasroot: add command running as root to container setup script
 Workdir="/tmp"                                  # option --workdir: set working directory
-Sharessh=""                                     # option --sharessh: share ssh agent
 
 # init and dbus
 Initsystem="tini"                               # options --systemd --openrc --runit --sysvinit --tini --no-init:Init system in container
@@ -1708,10 +1707,11 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
          --debug)      Debugmode="yes" ;;                      # debugging mode
 
      #### Developer options
-         --sharessh)   [ -e "$SSH_AUTH_SOCK" ] && {                # share host folder at same location in container with rw access
+         --sharessh)   [ -e "${SSH_AUTH_SOCK:-}" ] && {                # share host folder at same location in container with rw access
                          Sharevolumescount=$(($Sharevolumescount + 1))
                          Sharevolumes[$Sharevolumescount]=$(dirname $SSH_AUTH_SOCK)
-                         Sharessh=$SSH_AUTH_SOCK
+                         Customenvironment="$(escapestring "${SSH_AUTH_SOCK:-}")
+$Customenvironment"
                        } || warning "Option --sharessh: environment variable \$SSH_AUTH_SOCK not set:" ; ;;
        ## User settings
          --user)       Benutzer="${2:-}"  ; shift ;;       # set container user instead of host user
@@ -3414,8 +3414,12 @@ fi
     ;;
   esac
 
-  [ "$Xserver" = "--vcxsrv" ] || Xserveroptions="$Xserveroptions \\
-  -nolisten tcp"
+   case $Xserver in
+     --vcxsrv|--xwin) Xserveroptions="$Xserveroptions \\
+  -listen tcp" ;;
+     *) Xserveroptions="$Xserveroptions \\
+  -nolisten tcp" ;;
+    esac
 
   # extension XTEST
   [ -z "$Xtest" ] && {
@@ -3863,7 +3867,7 @@ esac
     ;;
 
     --vcxsrv|--xwin)
-      [ "$Xserver" = "--vcxsrv" ] && Xcommand="$(escapestring "$Vcxsrvpath")/vcxsrv.exe :$Newdisplaynumber -listen tcp"
+      [ "$Xserver" = "--vcxsrv" ] && Xcommand="$(escapestring "$Vcxsrvpath")/vcxsrv.exe :$Newdisplaynumber"
       [ "$Xserver" = "--xwin" ]   && Xcommand="$(command -v Xwin) :$Newdisplaynumber"
       
       Xcommand="$Xcommand \\
@@ -4565,9 +4569,6 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       ## option --workdir or /tmp
       Dockercommand="$Dockercommand \\
   --workdir $Workdir"
-      ## option --sharessh
-      [ -n "$Sharessh" ] && Dockercommand="$Dockercommand \\
-  --env SSH_AUTH_SOCK=$Sharessh"
   
       # option --env: add custom environment. Only needed here for possible 'docker exec'. Otherwise set in container.CMD.sh
       IFS=$'\n'
@@ -4981,8 +4982,10 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "export DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie"
   [ "$Xserver" != "--vcxsrv" ] && {
     echo "ln -s /X$Newdisplaynumber $Newxsocket" # done again in container.CMD.sh. At least x11docker/deepin needs it here already.
+    echo "ls -l /X$Newdisplaynumber"
     echo "ls -l $Newxsocket"
   }
+  [ "$Xserver" = "--xwin" ] && echo "note \"shared X unix socket: \$(ls -l /X$Newdisplaynumber)\""
   echo ""
 
   [ "$Hostlocaltime" ] && {
@@ -6113,6 +6116,7 @@ todo() {
 #                   --alsa
 #                   --systemd, elogind
 # WSL: sharing from within WSL not possible so far. Needs check and error message.
+# --homebasedir?
 
 # BUG x11docker/cde fails
 # check xhost +localhost
