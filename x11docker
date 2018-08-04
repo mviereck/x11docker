@@ -462,6 +462,7 @@ $(pstree -p $Pid1pid 2>&1 ||:)"
 $(cat $Bgpidfile 2>/dev/null)"
 
   [ "$$" = "$BASHPID" ] || saygoodbye finish-subshell
+  [ "$Sudo" ] && Sudo="sudo -n" # no password prompt here, rather fail
 
   # check for background processes stored in $Bgpidfile
   [ -s "$Bgpidfile" ] && {
@@ -499,9 +500,8 @@ $(cat $Bgpidfile 2>/dev/null)"
               done
             }
             # Try 'docker stop' if TERM failed
-            [ -n "$Sudo" ] && Sudo="sudo -n" # no password prompt here, rather fail
             checkpid $Containerpid && {
-              $Sudo docker stop $Containername >>$Containerlogfile 2>&1 || verbose -d "docker stop failed"
+              $Sudo $Docker stop $Containername >>$Containerlogfile 2>&1 || verbose -d "docker stop failed"
             }
           ;;
           *) # should never happen (tm)
@@ -523,7 +523,7 @@ $(ps -p $Pid)"
   # Check if container is still running.
   # if kill of PID 1 failed in loop above, most times terminating X server will already have stopped GUI applications.
   checkpid $Containerpid && {
-    $Sudo docker stop $Containername >>$Containerlogfile 2>&1 || {
+    $Sudo $Docker stop $Containername >>$Containerlogfile 2>&1 || {
       note "Found remaining container process. Most probably the X session was
   interrupted. Can not stop container because x11docker does not run as root.
   Will wait up to 10 seconds for docker to finish."
@@ -550,8 +550,8 @@ $(ps -p $Pid)"
   }
   [ "$Winsubsystem" ] && [ "$Pid1pid" ] && {
     verbose -d "Stopping container $Containername"
-    $Sudo docker stop $Containername >/dev/null 2>&1 || {
-      docker inspect $Containername >/dev/null 2>&1 && {
+    $Sudo $Docker stop $Containername >/dev/null 2>&1 || {
+      $Docker inspect $Containername >/dev/null 2>&1 && {
         warning "Failed to stop container $Containername.
   Will not clean cache to avoid file permission issues."
         Preservecachefiles="yes"
@@ -627,7 +627,7 @@ watchpidlist() {        # watch list of important pids
     done
     [ "$Containername" ] && {
       # Container PID not watchable in MSYS2/Cygwin/WSL.
-      docker inspect $Containername >/dev/null 2>&1 || {
+      $Docker inspect $Containername >/dev/null 2>&1 || {
         debugnote "watchpidlist: Container $Containername has terminated"
         saygoodbye "watchpidlist $Containername"
       }
@@ -878,7 +878,7 @@ depends() {             # check dependencies on host for X server option $1
   esac
   case $Xserver in
     --vcxsrv|--xwin)
-      Hostip="$(ipconfig.exe | grep 'IPv4' | head -n1 | grep -o '[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | grep "^10\.0\.*")"
+      Hostip="$(ipconfig.exe | grep 'IPv4' | grep -o '[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | grep "^10\.0\.*" )"
       [ "$Hostip" ] || {
         warning "Failed to get host IP for $Xserver."
         Return=1
@@ -970,16 +970,16 @@ cleanup() {             # --cleanup : check for non-removed containers and left 
 
   grep -q .cache/x11docker <<<$Cachebasefolder && Orphanedfolders=$(find "$Cachebasefolder" -mindepth 1 -maxdepth 1 -type d | sed s%$Cachebasefolder/%% | grep -v x11docker-gui)
   [ "${X11DOCKER_LASTCLEANFOLDER:-}" ] && Orphanedfolders="$(echo "$Orphanedfolders" | grep -v $X11DOCKER_LASTCLEANFOLDER)"
-  Orphanedcontainers="$(docker ps -a --filter name=x11docker_X --format "{{.Names}}")"
+  Orphanedcontainers="$($Docker ps -a --filter name=x11docker_X --format "{{.Names}}")"
   Orphanedcontainers="$Orphanedcontainers $(find "$Cachebasefolder" -mindepth 2 -maxdepth 2 -type f -name 'container.id' -exec cat {} \;)"
   Orphanedcontainers="$(env IFS='' echo $Orphanedcontainers)"
   
   # check for double entrys name/id, check for already non-existing containers
   for Line in $Orphanedcontainers; do
-    docker inspect $Line -f '{{.Id}}' >/dev/null 2>/dev/null && {
+    $Docker inspect $Line -f '{{.Id}}' >/dev/null 2>/dev/null && {
       echo $Line | grep -q x11docker_X && {
-        docker inspect $Line -f '{{.Id}}'
-        Line=$(docker inspect $Line -f '{{.Id}}')
+        $Docker inspect $Line -f '{{.Id}}'
+        Line=$($Docker inspect $Line -f '{{.Id}}')
         Orphanedcontainers=$(sed s/$Line// <<< $Orphanedcontainers)
       } ||:
     } || Orphanedcontainers=$(sed s/$Line// <<< $Orphanedcontainers)
@@ -1003,8 +1003,8 @@ $Orphanedfolders"
     done
 
     [ -n "$Orphanedcontainers" ] && {
-      note "Removing containers with: docker rm -f $Orphanedcontainers"
-      bash -c "docker rm -f $Orphanedcontainers" 2>&1
+      note "Removing containers with: $Docker rm -f $Orphanedcontainers"
+      bash -c "$Docker rm -f $Orphanedcontainers" 2>&1
     }
     [ -n "$Orphanedfolders" ] && {
       note "Removing cache files with: rm -R -f $Orphanedfolders"
@@ -1029,7 +1029,7 @@ $Orphanedfolders"
   $Cachebasefolder
   Please run 'x11docker --cleanup' as root."
 
-  docker info >/dev/null 2>/dev/null || warning "Could not check for docker images.
+  $Docker info >/dev/null 2>/dev/null || warning "Could not check for docker images.
   Please run 'x11docker --cleanup' as root
   to make sure that no orphaned containers are left."
 
@@ -1423,6 +1423,12 @@ case $Winsubsystem in
   WSL)     Winsubpath="CANNOT_SHARE_WSL_PATH"     ;  Winsubmount="/mnt" ;;
 esac
 Vcxsrvpath=""
+Docker="docker"
+[ "$Winsubsystem" ] && {
+  export PATH="$PATH:$Winsubmount/c/Program Files/docker"
+  Docker="docker.exe"
+}
+
 
 # X server settings
 Xserver=""                                      # X server option to use
@@ -1633,7 +1639,7 @@ stdout() {
 
   [ "$*" = "-h --" ] &&    usage         && exit 0         # catch single -h for usage info, otherwise it means --hostdisplay
 
-  while [ $# -gt 0 ] ; do
+  while { [ $# -gt 0 ] && [ -z "$Imagename" ] ;}; do
     case "${1:-}" in
       --help)              usage         && exit 0  ;;     # show help/usage and exit
       --license|--licence) license       && exit 0  ;;     # show MIT license and exit
@@ -1793,7 +1799,7 @@ $Customenvironment"    ;  shift ;;                         # set custom environm
       --) shift
         [ "$(cut -c1 <<< "${1:-}")"  = "-" ] && grep -q " -- "  <<< "$*" && {
           Customdockeroptions="$(sed 's/ -- .*//' <<< "$*" )"
-          Imagecommand="$(sed -E 's/.* -- (.*( --.*))/\1/' <<< "$*" )"
+          Imagecommand="$(sh -c 'echo "${0#* -- }"' "$*" )"
           Imagename="$(cut -d ' ' -f1 <<< "$Imagecommand")"
           Imagecommand="$(cut -d ' ' -f2- -s <<< "$Imagecommand")"
           break
@@ -1911,7 +1917,7 @@ $Customenvironment"    ;  shift ;;                         # set custom environm
     https://github.com/mviereck/x11docker"
 
   verbose -d "x11docker version $Version
-docker version: $(docker --version 2>&1)
+docker version: $($Docker --version 2>&1)
 Host system:    $(source /etc/os-release 2>/dev/null; echo "$PRETTY_NAME")
 Command:        $0 $X11dockerargs
 Parsed options: $Parsedoptions"
@@ -1980,7 +1986,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   [ -z "$Imagename" ] && X11dockermode="xonly"
   case $X11dockermode in
     run)
-      command -v docker >/dev/null || error "docker is not installed.
+      command -v $Docker >/dev/null || error "docker is not installed.
   To run docker images, you need to install docker."
       verbose "Image name: $Imagename"
       verbose "Image command: $Imagecommand"
@@ -2474,7 +2480,9 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
     }
     [ "$Winsubsystem" = "WSL" ] && [ "$Xserver" = "--vcxsrv" ] && note "x11docker will not be able to terminate X server
   on exit due to a bug in WSL Windows process handling.
-  Compare:  https://github.com/Microsoft/WSL/issues/1614"
+  Compare:  https://github.com/Microsoft/WSL/issues/1614
+  You can kill all running instances of vcxsrv.exe with
+      taskkill.exe /F /IM vcxsrv.exe"
   }
 }
 
@@ -2672,8 +2680,9 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
           --vcxsrv) grep -q -E 'Authorisation required|access control' <<< "$(echo "SET DISPLAY=$Hostip:$Newdisplaynumber
 cd c:/Program Files/VcXsrv
 xhost.exe 2>&1
-" | cmd.exe )" || break ;;
-          *)        break ;;
+" | cmd.exe )" || break 
+          ;;
+          *)      break ;;
         esac
       }
       Newdisplaynumber=$(($Newdisplaynumber + 1))
@@ -3625,7 +3634,8 @@ $(tail "$Compositorlogfile")"
   -auth $Xservercookie" ;;
       esac
     ;;
-    no) [ "$Xserver" = "--hostdisplay" ] || warning "Option --no-auth: Allowing access to X server for everyone."
+    no) [ "$Xserver" = "--hostdisplay" ] || warning "Option --no-auth: SECURITY RISK!
+  Allowing access to X server for everyone."
       Xserveroptions="$Xserveroptions \\
   -ac" ;;
   esac
@@ -4023,12 +4033,12 @@ done
   # check if x11docker can run docker without prompting for password
   [ "$Passwordfrontend" = "none" ] && Passwordneeded="no"
   [ -z "$Passwordfrontend" ] && sudo -n env >/dev/null 2>&1 && Passwordfrontend="sudo" && Passwordneeded="no"
-  [ -z "$Passwordfrontend" ] && docker info >/dev/null 2>&1 && Passwordfrontend="none" && Passwordneeded="no"
+  [ -z "$Passwordfrontend" ] && $Docker info >/dev/null 2>&1 && Passwordfrontend="none" && Passwordneeded="no"
   [ "$X11dockermode" = "exe" ] && Passwordneeded="no"
 
   # check sudo. Check is not reliable, compare https://unix.stackexchange.com/questions/383918/su-or-sudo-how-to-know-which-one-will-work
   ### FIXME: just guessing that members of group sudo or wheel are allowed to run commands docker and env as root
-  [ -z "$Passwordfrontend" ] && { sudo -ln docker >/dev/null 2>&1  ||  id | grep -q '(sudo)'  ||  id | grep -q '(wheel)' ; } && command -v sudo >/dev/null && {
+  [ -z "$Passwordfrontend" ] && { sudo -ln $Docker >/dev/null 2>&1  ||  id | grep -q '(sudo)'  ||  id | grep -q '(wheel)' ; } && command -v sudo >/dev/null && {
     [ -z "$Hostdisplay$Newdisplay" ] && Passwordfrontend="sudo"
     sudo -ln env >/dev/null 2>&1  ||  id | grep -q '(sudo)'  ||  id | grep -q '(wheel)'  && {
       [ -z "$Passwordfrontend" ] && command -v gksudo  >/dev/null && Passwordfrontend="gksudo"
@@ -4367,7 +4377,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
 { #### part: create command to run docker
   case $X11dockermode in
     exe) Dockercommand="# dontrundocker"  ;;
-    run) Dockercommand="docker run -d --tty"
+    run) Dockercommand="$Docker run -d --tty"
       [ "$Preservecachefiles" = "no" ] && Dockercommand="$Dockercommand --rm"
 
       [ -z "$Containername" ] && Containername="x11docker_X${Newdisplaynumber}_${Mycookie}_$Imagenametr"
@@ -4640,9 +4650,12 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "Imagename=\"$Imagename\""
   echo "Imagecommand=\"$Imagecommand\""
   echo ""
+  
+  [ "$Winsubsystem" ] && echo 'export PATH="'$Winsubmount'/c/Program Files/docker:$PATH"'
 
   echo "# check whether docker daemon is running and refresh images.list for x11docker-gui"
-  echo "docker images --format '{{.Repository}}:{{.Tag}}' | rmcr >>$Cachefolder/images.list 2>>$Containerlogfile  || {
+  echo "mkfile $Cachebasefolder/x11docker-gui/images.list"
+  echo "$Docker images --format '{{.Repository}}:{{.Tag}}' >>$Cachefolder/images.list 2>>$Containerlogfile  || {
     rmcr '$Containerlogfile'
     error \"Calling docker daemon failed.
   Is docker daemon running at all?
@@ -4652,21 +4665,21 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   Last lines of log:
 \$(tail $Containerlogfile)\"
 }"
-  echo "mkfile $Cachebasefolder/x11docker-gui/images.list"
+  echo "rmcr $Cachefolder/images.list"
   echo "while read -r Line ; do"
   echo '  grep -q "<none>" <<<$Line || echo $Line >> '$Cachebasefolder/x11docker-gui/images.list
   echo "done < <(sort < $Cachefolder/images.list)"
   echo ""
 
   echo "# check if image is available locally"
-  echo "docker inspect --type=image $Imagename >/dev/null 2>&1 || {"
+  echo "$Docker inspect --type=image $Imagename >/dev/null 2>&1 || {"
   [ -n "$Hostxenv" ]                      && echo "  export $Hostxenv"
   [ -n "$Newxenv" ] && [ "$Tty" = "yes" ] && echo "  export $Newxenv"
   [ "$Xserver" = "--xorg" ]               && echo "  export $Newxenv"
   [ "$Pullterminal" = "$Passwordterminal" ] && [ "$Passwordneeded" = "yes" ] && Pullterminal=""
   echo "  $Pullterminal /bin/bash $Pullrc"
   echo "  waitforfilecreation $Cachefolder/pullready infinity"
-  echo "  docker inspect --type=image $Imagename 2>&1 | rmcr >>$Containerlogfile || error \"Image '$Imagename' not found locally and not pulled from docker hub.
+  echo "  $Docker inspect --type=image $Imagename 2>&1 | rmcr >>$Containerlogfile || error \"Image '$Imagename' not found locally and not pulled from docker hub.
 
   Last lines of log:
 \$(tail $Containerlogfile)\""
@@ -4674,7 +4687,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "# check CMD"
   echo "[ -z \"\$Imagecommand\" ] && {"
   echo "  # extract image command from image if not given on cli"
-  echo "  Imagecommand=\"\$(docker inspect --format='{{.Config.Cmd}}' $Imagename | rmcr)\""
+  echo "  Imagecommand=\"\$($Docker inspect --format='{{.Config.Cmd}}' $Imagename | rmcr)\""
   echo "  Imagecommand=\"\${Imagecommand#[}\""
   echo "  Imagecommand=\"\${Imagecommand%]}\""
   echo "  Imagecommand=\"\${Imagecommand#/bin/sh -c }\""
@@ -4686,7 +4699,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     yes) echo "Entrypoint=" ;;
     no)
       echo "# check ENTRYPOINT"
-      echo "Entrypoint=\$(docker inspect --format='{{.Config.Entrypoint}}' $Imagename | rmcr)"
+      echo "Entrypoint=\$($Docker inspect --format='{{.Config.Entrypoint}}' $Imagename | rmcr)"
       echo "Entrypoint=\${Entrypoint#[}"
       echo "Entrypoint=\${Entrypoint#/bin/sh -c }"
       echo "Entrypoint=\${Entrypoint%]}"
@@ -4768,7 +4781,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     echo "IFS=$'\n'"
     echo "while read -r Line; do"
     echo "  echo export \$(escapestring \"\$Line\")      >> $Imagecommandscript"
-    echo "done < <(docker run --rm --entrypoint env $Imagename env 2>>$Containerlogfile| rmcr)"
+    echo "done < <($Docker run --rm --entrypoint env $Imagename env 2>>$Containerlogfile| rmcr)"
     echo "rmcr '$Containerlogfile'"
     echo "IFS=$' \t\n'"
     echo ""
@@ -4862,7 +4875,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo   "  echo ''"
 
   echo   "  echo 'cd \"\$HOME\"'"                                                    # HOME as default working directory
-  echo   "  Workdir=\$(docker inspect --format='{{.Config.WorkingDir}}' $Imagename 2>>'$Containerlogfile'| rmcr)" # WORKDIR in image
+  echo   "  Workdir=\$($Docker inspect --format='{{.Config.WorkingDir}}' $Imagename 2>>'$Containerlogfile'| rmcr)" # WORKDIR in image
   echo   '  [ "$Workdir" ] && echo "[ -d \"$Workdir\" ] && cd \"$Workdir\"   # WORKDIR in image"'
   [ "$Workdir" = "/tmp" ] || echo "  echo 'cd $Workdir'"                             # x11docker option --workdir
   echo   "  echo ''"
@@ -4883,7 +4896,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   [ "$Sharecgroup" = "yes" ] && [ "$Dbusdaemon" = "yes" ] && {
     [ "$Initsystem" = "systemd" ] && Wantcgroup=systemd || Wantcgroup=elogind
     findmnt /sys/fs/cgroup/$Wantcgroup >/dev/null || {
-      echo "[ '$Wantcgroup' = 'systemd' ] || docker run --rm --entrypoint env $Imagename which elogind >/dev/null && {"
+      echo "[ '$Wantcgroup' = 'systemd' ] || $Docker run --rm --entrypoint env $Imagename which elogind >/dev/null && {"
       echo '  [ "$(id -u)"  = "0" ] && note "Creating cgroup mountpoint for '$Wantcgroup'."'
       echo '  [ "$(id -u)" != "0" ] && {'
       echo "    note 'Want to create and mount a cgroup for $Wantcgroup.
@@ -4930,11 +4943,11 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
 }"
   echo "echo \$Containerid >> $Containeridfile"
   [ "$Showcontainerid" = "yes" ] && echo "stdout \"\$(cat $Containeridfile)\""
-  echo "docker logs -f \$Containerid 2>&1 | rmcr >> $Containerlogfile &"
+  echo "$Docker logs -f \$Containerid 2>&1 | rmcr >> $Containerlogfile &"
   echo ""
   echo "# wait for container to be ready"
   echo "for ((Count=1 ; Count<=20 ; Count++)); do"
-  echo "  docker exec $Containername sh -c : 2>&1 | rmcr >>$Containerlogfile && { verbose -d 'Container is up and running.' ; break ; } || verbose -d \"Container not ready on \$Count. attempt, trying again.\""
+  echo "  $Docker exec $Containername sh -c : 2>&1 | rmcr >>$Containerlogfile && { verbose -d 'Container is up and running.' ; break ; } || verbose -d \"Container not ready on \$Count. attempt, trying again.\""
   echo "  sleep 0.2"
   echo "done"
   echo "Failure=\"\$(cat $Containerlogfile | rmcr | grep -v grep | grep -E 'Error response from daemon|OCI runtime exec' ||:)\""
@@ -4945,10 +4958,10 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "}"
   echo ""
 
-  echo "docker inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername 2>>$Containerlogfile | rmcr >> $Containeripfile"
+  echo "$Docker inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername 2>>$Containerlogfile | rmcr >> $Containeripfile"
   echo "verbose -d \"Container IP: \$(cat $Containeripfile)\""
   echo ""
-  echo "docker inspect --format '{{.State.Pid}}' $Containername 2>>$Containerlogfile | rmcr >> $Containerpid1pidfile"
+  echo "$Docker inspect --format '{{.State.Pid}}' $Containername 2>>$Containerlogfile | rmcr >> $Containerpid1pidfile"
   echo "verbose -d \"Host PID of container PID 1: \$(cat $Containerpid1pidfile)\""
   [ "$Showcontainerpid1pid" = "yes" ] && echo "stdout \"\$(cat $Containerpid1pidfile)\""
   echo ""
@@ -4960,7 +4973,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "rmcr '$Containerlogfile'"
   echo ""
   # container.CMD.sh will wait until setup script is ready
-  [ "$Switchcontaineruser" = "no" ] && echo "docker exec --tty -u root $Containername /bin/sh $Cshare/container.rootsetup.sh 2>&1 | rmcr >>$Containerlogfile"
+  [ "$Switchcontaineruser" = "no" ] && echo "$Docker exec --tty -u root $Containername /bin/sh $Cshare/container.rootsetup.sh 2>&1 | rmcr >>$Containerlogfile"
   echo "exit 0"
 } >> $Dockerrc
 
@@ -5430,9 +5443,10 @@ exit 0' >> /etc/rc.local"
   echo "}"
   echo "trap touchpullready EXIT"
   echo "echo ''"
+  [ "$Winsubsystem" ] && echo "export PATH=\"\$PATH:$Winsubmount/c/Program Files/docker\""
   echo "read -n1 -e -p \"Image '$Imagename' not found locally. "
   echo "Do you want to pull it from docker hub? [Y|n]\" Choice"
-  echo "[[ \"\$Choice\" == [YyJj]* ]] || [ -z \"\$Choice\" ] && $Sudo docker pull $Imagename 2>> $Containerlogfile"
+  echo "[[ \"\$Choice\" == [YyJj]* ]] || [ -z \"\$Choice\" ] && $Sudo $Docker pull $Imagename 2>> $Containerlogfile"
   echo "rmcr $Containerlogfile"
   echo "sleep 2"
   echo "exit"
