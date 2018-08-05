@@ -316,35 +316,35 @@ alertbox() {            # X alert box with title $1 and message $2
   Message="$(echo "$Message" | LANG=C sed "s/[\x80-\xFF]//g" | fold -w120 )" # remove UTF-8 special chars; line folding at 120 chars
 
   # try some tools to show alert message. If all tools fail, return 1
-  command -v   xmessage     >/dev/null && [ -n "$DISPLAY" ] && {
+  command -v   xmessage     >/dev/null && [ -n "${DISPLAY:-}" ] && {
     echo "$Title
 
 $Message" | xmessage  -file - -default okay ||:
   } || {
-    command -v gxmessage    >/dev/null && [ -n "$DISPLAY" ] && {
+    command -v gxmessage    >/dev/null && [ -n "${DISPLAY:-}" ] && {
       echo "$Title
 
 $Message" | gxmessage -file - -default okay ||:
     }
   } || {
-    command -v zenity       >/dev/null && [ -n "$DISPLAY" ] && {
+    command -v zenity       >/dev/null && [ -n "${DISPLAY:-}" ] && {
       zenity --error --no-markup --ellipsize --title="$Title" --text="$Message" 2>/dev/null ||:
     }
   } || {
-    command -v yad          >/dev/null && [ -n "$DISPLAY" ] && {
+    command -v yad          >/dev/null && [ -n "${DISPLAY:-}" ] && {
       yad  --image "dialog-error" --title "$Title" --button=gtk-ok:0 --text "$(echo "$Message" | sed 's/\\/\\\\/g')" --fixed 2>/dev/null ||:
     }
   } || {
-    command -v kaptain      >/dev/null && [ -n "$DISPLAY" ] && {
+    command -v kaptain      >/dev/null && [ -n "${DISPLAY:-}" ] && {
       echo 'start "'$Title'" -> message @close=" cancel" ;
             message "'$(echo "$Message" | sed 's/\\/\\\\\\/g' | sed 's/"/\\"/g' | sed -E ':a;N;$!ba;s/\r{0,1}\n/\\n/g' )'" -> @fill ;'  | kaptain ||:
     }
   } || {
-    command -v kdialog      >/dev/null && [ -n "$DISPLAY" ] && {
+    command -v kdialog      >/dev/null && [ -n "${DISPLAY:-}" ] && {
       kdialog --title "$Title" --error "$(echo "$Message" | sed 's/\\/\\\\/g' )" 2>/dev/null ||:
     }
   } || {
-    command -v xterm        >/dev/null && [ -n "$DISPLAY" ] && {
+    command -v xterm        >/dev/null && [ -n "${DISPLAY:-}" ] && {
       xterm -title "$Title" -e "echo '$(echo "$Message" | sed "s/'/\"/g")' ; read -n1" ||:
     }
   } || {
@@ -401,7 +401,7 @@ ${Colredbg}x11docker ERROR:${Colnorm} $Message
 "
 
   # output to X dialogbox
-  [ -n "$Hostdisplay" ] && export $Hostxenv || export $Newxenv
+  [ -n "$Hostdisplay" ] && export $Hostxenv || { [ -n "$Newdisplay" ] && export $Newxenv ; }
   [ -n "$Newdisplay" ] && {
     [ "$Tty" = "yes" ] && export $Newxenv
     case $Xserver in
@@ -518,6 +518,9 @@ $(ps -p $Pid)"
       }
     done < <(tac $Bgpidfile)
   }
+  
+  # Possibly stored Windows pid to terminate. Currently only VcXsrv in WSL.
+  [ "$Winpidlist" ] && for Line in $Winpidlist ; do verbose -d "Terminating Windows PID $Line: $(taskkill.exe /F /PID $Line 2>&1 | rmcr)" ; done
 
   saygoodbye "finish"
 
@@ -1423,13 +1426,15 @@ case $Winsubsystem in
   CYGWIN)  Winsubpath="/c/cygwin64"               ;  Winsubmount="/cygdrive" ;;
   WSL)     Winsubpath="CANNOT_SHARE_WSL_PATH"     ;  Winsubmount="/mnt" ;;
 esac
-Vcxsrvpath=""
 Docker="docker"
 [ "$Winsubsystem" ] && {
   export PATH="$PATH:$Winsubmount/c/Program Files/docker"
   Docker="docker.exe"
 }
-
+Vcxsrvpath=""
+Tasklistold=""
+Tasklistnew=""
+Winpidlist=""
 
 # X server settings
 Xserver=""                                      # X server option to use
@@ -5993,36 +5998,17 @@ $(tail $Xpraserverlogfile)"
       esac
       waitforfilecreation $Cachefolder/xtermready infinity
 
-      case $Winsubsystem in
-        "")
-          # check if container startup was successfull
-          sleep 2 # wait for late messages of docker daemon and for pstree to be filled
-          Containerpid=$(cat $Containerpidfile)
-          checkpid $Containerpid && {
-            storepid $Containerpid container
-            setonwatchpidlist $(cat $Containerpid1pidfile) containerpid1
-            verbose -d "Process tree of container (maybe not complete yet):
+      # watch container
+      Containerpid=$(cat $Containerpidfile)
+      Containerid=$(cat $Containeridfile)
+      [ "$Containerpid" ] && checkpid $Containerpid && {
+        storepid $Containerpid container
+        setonwatchpidlist $(cat $Containerpid1pidfile) containerpid1
+        sleep 2
+        verbose -d "Process tree of container (maybe not complete yet):
 $(pstree -cp $(cat $Containerpid1pidfile) 2>&1 ||:)"
-          } || {
-            [ "$Xserver" = "--nothing" ] && saygoodbye "--nothing" || {
-              error "Container startup seems to have failed!
-  
-  Last lines of container.log:
-$(tail $Containerlogfile)
-  
-  Last lines of command stderr:
-$(tail $Cmdstderrlogfile)
-  
-  Last lines of command stdout:
-$(tail $Cmdstdoutlogfile)"
-            }
-          }
-        ;;
-        *)
-          sleep 2
-          [ -s "$Containeridfile" ] && setonwatchpidlist "CONTAINER$(cat $Containeridfile)"
-        ;;
-      esac
+      }
+      [ "$Winsubsystem" ] && [ "$Containerid" ] && setonwatchpidlist "CONTAINER$Containerid"
     ;;
 
     exe) # --exe: run host application without docker. includes --xonly
@@ -6109,6 +6095,7 @@ $(tail $Compositorlogfile)"
     --hostdisplay|--hostwayland|--weston|--kwin|--nothing)
       $Mksu "exec                                             bash $Xinitrc                       >> $Xinitlogfile  2>&1 " ;;
     --vcxsrv)
+      [ "$Winsubsystem" = "WSL" ] && Tasklistold="$(tasklist.exe | rmcr | grep vcxsrv.exe | awk '{print $2}')"
       $Mksu "exec env MSYS2_ARG_CONV_EXCL='*'                                  $Xcommand          >> $Xinitlogfile  2>&1 & echo \$! >$Cachefolder/Xserverpid"
       Xserverpid=$(cat "$Cachefolder/Xserverpid")
       [ "$Xserverpid" ] && {
@@ -6116,6 +6103,13 @@ $(tail $Compositorlogfile)"
         setonwatchpidlist $Xserverpid Xserver
       } || error "Failed to receive PID of X server."
       sleep 1
+      [ "$Winsubsystem" = "WSL" ] && {
+        # bug in WSL: WSL does not terminate Windows process on TERM for processes started in bash. Workaround to get Windows pid.
+        Tasklistnew="$(tasklist.exe | rmcr | grep vcxsrv.exe | awk '{print $2}')"
+        Winpidlist="$Winpidlist $(echo "$Tasklistold
+$Tasklistnew" | sort | uniq -u)"
+        verbose -d "Stored Windows pids: $Winpidlist"
+      }
       $Mksu "exec                                             bash $Xinitrc                       >> $Xinitlogfile  2>&1 " ;;
   esac
 
