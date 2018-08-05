@@ -356,8 +356,10 @@ echo '$Title
 $Message
 (Press any key to close window)'
 read -n1
+      mkfile $Cachefolder/messageready
 " >> $Cachefolder/message
       $Anyterminal /bin/bash $Cachefolder/message
+      waitforfilecreation $Cachefolder/messageready 60
       :
     }
   } || {
@@ -399,12 +401,11 @@ ${Colredbg}x11docker ERROR:${Colnorm} $Message
 "
 
   # output to X dialogbox
-  [ -n "$Hostxenv" ] && export $Hostxenv
-  [ -n "$Newxenv" ] && {
+  [ -n "$Hostdisplay" ] && export $Hostxenv || export $Newxenv
+  [ -n "$Newdisplay" ] && {
     [ "$Tty" = "yes" ] && export $Newxenv
     case $Xserver in
       --xorg) [ -e "$Newxsocket" ] && export $Newxenv ;;
-      --vcxsrv) export $Newxenv ;;
     esac
   }
   [ "$Silent" = "no" ] && alertbox "x11docker ERROR" "$Message"
@@ -437,7 +438,7 @@ debugnote() {           # show debug output $*
   } ||:
 }
 logentry() {            # write into logfile
-  [ "$Logfile" ] && echo "$*" >>$Logfile ||:
+  [ "$Logfile" ] && echo "$*" >>$Logfile || echo "Could not write to logfile: $*" >&2
 }
 killpid() {             # kill PID $1 with codename $2 [and process name $3]
   verbose -d "Terminating ${1:-} (${2:-}) ${3:-}: $(pspid ${1:-})"
@@ -1245,8 +1246,8 @@ convertpath() {         # convert path $1 into --volume syntax regarding Windows
 rmcr() {                # remove carriage return to translate DOS/Windows newlines into UNIX newlines
   # convert stdin if $1 is empty. Otherwise convert file $1.
   case "${1:-}" in
-    "") sed    "s/$(printf "\r")//" ;;
-    *)  sed -i "s/$(printf "\r")//"  "${1:-}"
+    "") sed    "s/$(printf "\r")//g" ;;
+    *)  sed -i "s/$(printf "\r")//g"  "${1:-}"
   esac
 }
 verlte() {              # version number check $1 less than or equal $2
@@ -4070,11 +4071,14 @@ done
     kdesudo)   Passwordcommand="kdesudo --comment 'x11docker $Imagename'"                ; Passwordterminal="bash -c" ;;
     beesu)     Passwordcommand="beesu -c"                                                ; Passwordterminal="bash -c" ;;
     none)      Passwordcommand="bash -c"                                                 ; Passwordterminal="bash -c" ;;
-    *) error "Unknown password prompt '$Passwordfrontend' (option --pw).
-  Possible: su sudo gksu gksudo lxsu lxsudo kdesu kdesudo beesu pkexec none" ;;
+    *) warning "Unknown password prompt '$Passwordfrontend' (option --pw).
+  Possible: su sudo gksu gksudo lxsu lxsudo kdesu kdesudo beesu pkexec none"
+               Passwordcommand="$Passwordfrontend"                                       ; Passwordterminal="bash -c" ;;
   esac
   [ "$Passwordneeded" = "yes" ] && {
-    command -v $(echo $Passwordcommand|cut -d' ' -f1) >/dev/null || error "Password prompt frontend $(echo $Passwordcommand|cut -d' ' -f1) not found"
+    command -v $(echo $Passwordcommand|cut -d' ' -f1) >/dev/null || warning "Password prompt frontend $(echo $Passwordcommand|cut -d' ' -f1) not found.
+  Fallback: using no password prompt (--pw=none)." 
+               Passwordcommand="bash -c" ; Passwordfrontend="none" ; Passwordneeded="no" ; Passwordterminal="bash -c"
   }
 }
 
@@ -4659,9 +4663,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
     rmcr '$Containerlogfile'
     error \"Calling docker daemon failed.
   Is docker daemon running at all?
-  Try to start docker daemon with:
-      systemctl start docker
-
+  Try to start docker daemon with:   systemctl start docker
   Last lines of log:
 \$(tail $Containerlogfile)\"
 }"
@@ -4902,14 +4904,14 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       echo "    note 'Want to create and mount a cgroup for $Wantcgroup.
   As x11docker currently does not run as root, this will probably fail.
   Please either run x11docker as root, or run with option --pw=su or --pw=sudo.
-  
+    
   Alternatively, create cgroup mountpoint yourself with:
     mkdir -p /sys/fs/cgroup/$Wantcgroup
     mount -t cgroup cgroup /sys/fs/cgroup/$Wantcgroup -o none,name=$Wantcgroup
-  
+    
   If you get a read-only error message, remove write protection with:
     mount -o remount,rw cgroup /sys/fs/cgroup
-  
+    
   You can restore write protection after cgroup creation with:
     mount -o remount,ro cgroup /sys/fs/cgroup'"
       [ "$Wantcgroup" = "elogind" ] && echo "note 'If you do not want or need elogind in container,
@@ -4937,7 +4939,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "[ \"\$Containerid\" ] || {
     rmcr '$Containerlogfile'
     error \"Startup of docker failed. Did not receive a container ID.
-
+    
   Last lines of container log:
 \$(tail $Containerlogfile)\"
 }"
@@ -5323,7 +5325,6 @@ exit 0' >> /etc/rc.local"
         echo '    *)'
         echo '      verbose -d "DBus: starting service $Name: $Command"'
         echo '      $Command &'
-        #echo '      sh -c "$Command" &'
         echo '      [ "$Command" != "/bin/false" ] && waitforservice $Name'
         echo '    ;;'
         echo '  esac'
@@ -6005,20 +6006,21 @@ $(pstree -cp $(cat $Containerpid1pidfile) 2>&1 ||:)"
           } || {
             [ "$Xserver" = "--nothing" ] && saygoodbye "--nothing" || {
               error "Container startup seems to have failed!
-
+  
   Last lines of container.log:
 $(tail $Containerlogfile)
-
+  
   Last lines of command stderr:
 $(tail $Cmdstderrlogfile)
-
+  
   Last lines of command stdout:
 $(tail $Cmdstdoutlogfile)"
             }
           }
         ;;
         *)
-          setonwatchpidlist CONTAINER$Containername
+          sleep 2
+          [ -s "$Containeridfile" ] && setonwatchpidlist "CONTAINER$(cat $Containeridfile)"
         ;;
       esac
     ;;
