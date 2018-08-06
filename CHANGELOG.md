@@ -8,17 +8,18 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
+ - Support of MSYS2, Cygwin and WSL (Ubuntu/bash on Windows). 
+   [(#55)](https://github.com/mviereck/x11docker/issues/55)
  - `--vcxsrv`: New option for [VcXsrv](https://sourceforge.net/projects/vcxsrv/) 
    X server on MS Windows. Similar to Xming.
    [(#55)](https://github.com/mviereck/x11docker/issues/55)
  - `--xwin`: New option for Xwin X server of Cygwin/X on MS Windows.
- - Experimental support of MSYS2, Cygwin and WSL (Ubuntu/bash on Windows). 
-   [(#55)](https://github.com/mviereck/x11docker/issues/55)
  - `--sharessh`: New option to share SSH agent authentication socket from host.
    [(#59)](https://github.com/mviereck/x11docker/issues/59)
  - `--name`: New option to set container name.
    [(#61)](https://github.com/mviereck/x11docker/issues/61)
  - `--cachebasedir`: Set custom cache base directory. Replaces `--cachedir`.
+ - `--homebasedir`: Set base directory where to store folders for `--home`.
 
 ### Changed
  - **API CHANGE**: Syntax changed for custom `DOCKER_RUN_OPTIONS` 
