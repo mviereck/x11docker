@@ -1425,15 +1425,17 @@ case $Winsubsystem in
   CYGWIN)  Winsubpath="/c/cygwin64"               ;  Winsubmount="/cygdrive" ;;
   WSL)     Winsubpath="CANNOT_SHARE_WSL_PATH"     ;  Winsubmount="/mnt" ;;
 esac
+# Needed for Windows subsystems only
 Docker="docker"
 [ "$Winsubsystem" ] && {
   export PATH="$PATH:$Winsubmount/c/Program Files/docker"
   Docker="docker.exe"
 }
-Vcxsrvpath=""
-Tasklistold=""
+Vcxsrvpath=""                                   # path to vcxsrv.exe and xauth.exe
+Tasklistold=""                                  # Output of tasklist.exe to get Windows pid of vcxsrv.exe
 Tasklistnew=""
-Winpidlist=""
+Winpidlist=""                                   # List of stored Windows pids (currently vcxsrv.exe on WSL only)
+Xauth="xauth"                                   # either 'xauth' or 'xauth.exe'
 
 # X server settings
 Xserver=""                                      # X server option to use
@@ -2210,13 +2212,15 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
 
   # check xauth
   [ "$Xauthentication" = "yes" ] && {
-    command -v xauth >/dev/null || {
+    command -v xauth.exe >/dev/null && Xauth="xauth.exe"
+    command -v xauth     >/dev/null && Xauth="xauth"
+    command -v $Xauth    >/dev/null || {
       warning "Command 'xauth' not found.
   Please install 'xauth' to allow X cookie authentication.
   Fallback: Disabling X authentication protocol. (option --no-auth)"
       Xauthentication="no"
     }
-    command -v xauth | grep -q VcXsrv && {
+    command -v $Xauth | grep -q VcXsrv && {
       Vcxsrvversion="$(vcxsrv.exe -version 2>&1 | rmcr | grep Release | cut -d' ' -f2)"
       verlt "$Vcxsrvversion" "1.20.0.1" && {
         warning "Please upgrade X server VcXsrv to at least version 1.20.0.1.
@@ -2892,7 +2896,7 @@ After finish: $Logbackup"
 { #### part: create $Hostxenv: Environment variables for host X display
   # get cookie from host display
   [ -n "$Hostdisplay" ] && {
-    xauth nlist $Hostdisplay 2>/dev/null | rmcr | $Mksu "xauth -f $Hostxauthority nmerge - 2>/dev/null"
+    $Xauth nlist $Hostdisplay 2>/dev/null | rmcr | $Mksu "$Xauth -f $Hostxauthority nmerge - 2>/dev/null"
     chown $Hostuser $Hostxauthority
     chmod 600 $Hostxauthority
   } || {
@@ -3840,8 +3844,8 @@ mode=$Screensize
       # workaround as nxagent ignores XAUTHORITY and fails to start if option -auth is given. Option -ac above complies "xhost +" and is disabled in xinitrc
       [ "$Xauthentication" = "yes" ] && {
         $Mksu "cp '$Hostxauthority' '$Xservercookie'"
-        $Mksu "xauth -f '$Xclientcookie' add   $Newdisplay . $(mcookie)"
-        $Mksu "xauth -f '$Xclientcookie' nlist $Newdisplay | xauth -f '$Xservercookie' nmerge -"
+        $Mksu "$Xauth -f '$Xclientcookie' add   $Newdisplay . $(mcookie)"
+        $Mksu "$Xauth -f '$Xclientcookie' nlist $Newdisplay | $Xauth -f '$Xservercookie' nmerge -"
       }
       # fake NXclient
       export NX_CLIENT="$Cachefolder/nx_client"
@@ -5535,7 +5539,7 @@ exit 0' >> /etc/rc.local"
         case "$Ssh" in
           no)
             echo "verbose 'Requesting $Trusted cookie from X server'"
-            echo "xauth -v -i -f Xclientcookie generate $Newdisplay . $Trusted timeout 3600 | rmcr"
+            echo "$Xauth -v -i -f Xclientcookie generate $Newdisplay . $Trusted timeout 3600 | rmcr"
           ;;
           yes)
             echo "verbose 'Can not use cookies created over SSH. Will bake one myself.'"
@@ -5561,14 +5565,14 @@ exit 0' >> /etc/rc.local"
         echo     "[ -s '$Xclientcookie' ] || { "
         echo     "  # still no cookie? try to create one without extension security"
         echo     "  verbose -d 'Failed to retrieve trusted cookie from X server. Will bake one myself.'"
-        echo     "  xauth -v -i -f Xclientcookie add :$Newdisplaynumber . $(mcookie) | rmcr"
+        echo     "  $Xauth -v -i -f Xclientcookie add :$Newdisplaynumber . $(mcookie) | rmcr"
         echo     "}"
         echo     "# create prepared cookie with localhost identification disabled by ffff, needed if X socket is shared. ffff means 'familiy wild'"
-        echo     "Cookie=\$(xauth -i -f Xclientcookie nlist | rmcr | sed -e 's/^..../ffff/')"
-        echo     "echo \"\$Cookie\" | xauth -v -i -f Xclientcookie nmerge - | rmcr"
+        echo     "Cookie=\$($Xauth -i -f Xclientcookie nlist | rmcr | sed -e 's/^..../ffff/')"
+        echo     "echo \"\$Cookie\" | $Xauth -v -i -f Xclientcookie nmerge - | rmcr"
         echo     "cp $Xclientcookie $Xservercookie"
         echo     "[ -s '$Xclientcookie' ] || warning 'Cookie creation failed!'"
-        echo     "verbose -d \"Created cookie: \$(xauth -f Xclientcookie list 2>&1 | rmcr)\""
+        echo     "verbose -d \"Created cookie: \$($Xauth -f Xclientcookie list 2>&1 | rmcr)\""
         echo     "chmod 644 $Xclientcookie"
         [ "$Xserver" = "--hostdisplay" ] && echo "[ '\$Xhostentry' = 'yes' ] && env XAUTHORITY=$Hostxauthority xhost -SI:localuser:$Hostuser | rmcr"
         [ "$Xserver" = "--nxagent" ]     && echo "rm $Xclientcookie.bak"
@@ -6117,11 +6121,8 @@ $(tail $Compositorlogfile)")"
 
 ######### ToDo notes for development
 todo() {
-# --vcxsrv: create cookie https://sourceforge.net/p/vcxsrv/bugs/79/
-#           --gpu implemented, needs test
+# --vcxsrv, --xwin: --gpu implemented, needs test
 # MSYS2/Cygwin/WSL: check further options
-#                   --stdin:      will fail, needs fix
-#                   --pw:         set to none as default? does check already work?
 #                   --pulseaudio: not implemented. At least on Cygwin probably not too hard.
 #                   --wayland:    create nested setup for WSL in X?
 #                   impossible:
@@ -6131,6 +6132,7 @@ todo() {
 # --homebasedir?
 
 # BUG x11docker/cde fails
+# jess/cathode fails with xcb error, needs bug report
 # check xhost +localhost
 # BUG --pulseaudio fails with --user due to wrong socket ownership (#54). Fallback to tcp?
 
