@@ -11,9 +11,8 @@ Project website: https://github.com/mviereck/x11docker
  - `--vcxsrv`: New option for [VcXsrv](https://sourceforge.net/projects/vcxsrv/) 
    X server on MS Windows. Similar to Xming.
    [(#55)](https://github.com/mviereck/x11docker/issues/55)
- - `--xwin`: New option for Xwin X server of CYGWIN/X on MS Windows.
- - Experimental support of [MSYS2](https://www.msys2.org/), CYGWIN 
-   and WSL (Ubuntu/bash on Windows). 
+ - `--xwin`: New option for Xwin X server of Cygwin/X on MS Windows.
+ - Experimental support of MSYS2, Cygwin and WSL (Ubuntu/bash on Windows). 
    [(#55)](https://github.com/mviereck/x11docker/issues/55)
  - `--sharessh`: New option to share SSH agent authentication socket from host.
    [(#59)](https://github.com/mviereck/x11docker/issues/59)
@@ -35,6 +34,10 @@ Project website: https://github.com/mviereck/x11docker
    **BREAKS** due to wrongly parsed ` -- ` :
 ```
    x11docker [OPTIONS] -- "DOCKER_RUN_OPTIONS"   IMAGE COMMAND ARG1 -- ARG2
+```
+   Valid:
+```
+   x11docker [OPTIONS] --  DOCKER_RUN_OPTIONS -- IMAGE COMMAND ARG1 -- ARG2
 ```
 ### Deprecated
  - `--cachedir`: Use `--cachebasedir` instead.
