@@ -881,7 +881,6 @@ depends() {             # check dependencies on host for X server option $1
   esac
   case $Xserver in
     --vcxsrv|--xwin)
-      Hostip="$(ipconfig.exe | grep 'IPv4' | grep -o '[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | grep "^10\.0\.*" )"
       [ "$Hostip" ] || {
         warning "Failed to get host IP for $Xserver."
         Return=1
@@ -1403,6 +1402,7 @@ Hostdisplaynumber="$(echo $Hostdisplay | cut -d: -f2 | cut -d. -f1)"            
 Hostxauthority="Xauthority-$Hostdisplaynumber"                                               # file to store copy of $XAUTHORITY
 [ -n "$Hostdisplay" ] && Hostxsocket="/tmp/.X11-unix/X$Hostdisplaynumber" || Hostxsocket=""  # X socket from host, needed for --hostdisplay
 [ -e "$Hostxsocket" ] || Hostxsocket=""                                                      # can miss in SSH session
+Hostip=""
 Hostxenv=""                                                                                  # collection of host X environment variables
 Hostlibc="unknown"                                                                           # check libc:glibc, musl or others. Needed to eventually provide time zone file.
 ldd --version 2>&1 | grep -q 'musl libc'          && Hostlibc='musl'
@@ -1417,7 +1417,8 @@ Ttyinuse=""
 Winsubsystem=""
 Winsubmount=""
 Winsubpath=""
-grep -q "/mnt/c/Windows/System32" <<< ${PATH:-} && Winsubsystem="WSL"
+#grep -q "/mnt/c/Windows/System32" <<< ${PATH:-} && Winsubsystem="WSL"
+uname -r | grep -q Microsoft                    && Winsubsystem="WSL"
 command -v cygcheck.exe >/dev/null && {
   cygcheck.exe -V | rmcr | grep -q "(cygwin)"   && Winsubsystem="CYGWIN"
   cygcheck.exe -V | rmcr | grep -q "(msys)"     && Winsubsystem="MSYS2"
@@ -1521,15 +1522,21 @@ Sharevolumes=""                                 # option --volume: host folders 
 Sharevolumescount="0"                           # counts shared folders in array
 Shareclipboard="no"                             # option '-c, --clipboard' enable clipboard sharing
 Shareclipboardscript=clipboard.bash             #    "              "      created script for text clipboard sharing
+Alsa="no"                                       # option --alsa: enable ALSA sound, share /dev/snd
+Noentrypoint="no"                               # option --no-entrypoint: disable entrypoint in image
+Internetaccess="yes"                            # option --no-internet: disable internet access
+Langwunsch=""                                   # option --lang: search or create UTF-8 locale and set LANG
+
+# --pulseaudio
 Pulseaudio="no"                                 # option -p, --pulseaudio: use pulseaudio yes/no
 Pulseserver=""                                  #
 Pulseaudioconf=pulseclient.conf
 Pulseaudiosocketdir=""
 Pulseaudiosocketname=""
-Alsa="no"                                       # option --alsa: enable ALSA sound, share /dev/snd
-Noentrypoint="no"                               # option --no-entrypoint: disable entrypoint in image
-Internetaccess="yes"                            # option --no-internet: disable internet access
-Langwunsch=""                                   # option --lang: search or create UTF-8 locale and set LANG
+Lowerport=""
+Upperport=""
+Pulseaudioport=""
+Pulseaudiomode=""
 
 # verbosity options
 Verbose="no"                                    # option '-v, --verbose': if "yes", be verbose
@@ -1635,7 +1642,7 @@ stdout() {
   Longoptions="$Longoptions,wm:,desktop,exe,xonly"
   Longoptions="$Longoptions,fullscreen,size:,scale:,rotate:,dpi:,output-count:,gpu,xfishtank"                              # X appearance options
   Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,xtest,no-xtest,env:,showenv,showid,showpid1"                       # X and environment options
-  Longoptions="$Longoptions,home,clipboard,pulseaudio,alsa,lang:"                                                          # comfort options
+  Longoptions="$Longoptions,home,clipboard,pulseaudio::,alsa,lang:"                                                        # comfort options
   Longoptions="$Longoptions,no-xhost,trusted,untrusted,dbus,dbus-system,pw:,no-internet,workdir:,sharessh"                 # advanced options
   Longoptions="$Longoptions,homedir:,sharedir:,cachebasedir:,homebasedir:"                                                 # host folders
   Longoptions="$Longoptions,tini,no-init,systemd,runit,openrc,sysvinit,sys-admin,sharecgroup"                              # init system options
@@ -1649,7 +1656,7 @@ stdout() {
   [ -e /tmp/x11docker_parsererror ] && Parsererror=$(cat /tmp/x11docker_parsererror) && rm /tmp/x11docker_parsererror
   [ "$Parsererror" ] && error "$Parsererror"
   eval set -- "$Parsedoptions"
-
+  
   [ "$*" = "-h --" ] &&    usage         && exit 0         # catch single -h for usage info, otherwise it means --hostdisplay
 
   while { [ $# -gt 0 ] && [ -z "$Imagename" ] ;}; do
@@ -1709,7 +1716,10 @@ stdout() {
       -m|--home)       Benutzerhosthome="yes" ;;                # share folder ~/x11docker/Imagename with container
       -c|--clipboard)  Shareclipboard="yes"  ;;            # share host clipboard with dockered applications (xpra only)
          --alsa)       Alsa="yes" ;;                       # enable ALSA sound (shares /dev/snd)
-      -p|--pulseaudio) Pulseaudio="yes"  ;;                # enable pulseaudio sound with shared pulse socket
+      -p|--pulseaudio) Pulseaudio="yes"                    # enable pulseaudio sound
+                       [ "-" = "$(cut -c1 <<<"${2:-}")" ] || {
+                         Pulseaudiomode="${2:-}" ; shift
+                       } ;;
          --lang)       Langwunsch=${2:-} ; shift ;;        # locale/language setting
 
      #### Advanced options
@@ -1994,6 +2004,13 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   $XDG_RUNTIME_DIR/$Hostwaylandsocket"
     Hostwaylandsocket=""
   }
+  
+  # host IP needed for --pulseaudio over tcp, --vcxsrv and --xwin
+  case $Winsubsystem in
+    "") Hostip="$(ip -4 -o a | awk '{print $4}' | cut -d/ -f1 | grep -v 127.0.0.1 | head -n1)" ;;
+    *)  Hostip="$(ipconfig.exe | grep 'IPv4' | grep -o '[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | grep "^10\.0\.*" )" ;;
+  esac
+  verbose -d "Host IP: $Hostip"
   
   # provide dos->unix conversion to $Mksu commands
   export -f rmcr
@@ -3213,26 +3230,37 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
   [ "$Pulseaudio" = "yes" ] && {
     warning "Option --pulseaudio allows container applications
   to catch your audio output and microphone input."
-    Pulseaudiosocketdir="$XDG_RUNTIME_DIR/pulse"
-    [ -d "$Pulseaudiosocketdir" ] || Pulseaudiosocketdir="$(pax11publish -d | grep Server | cut -d'}' -f2 | cut -d' ' -f1 | cut -d: -f2)"
-    [ -d "$Pulseaudiosocketdir" ] || {
-      warning "Did not find directory 'pulse' in XDG_RUNTIME_DIR.
+  
+    case "$Pulseaudiomode" in
+      "") Pulseaudiomode="socket" ;;
+      tcp|socket) ;;
+      *) warning "Unknown pulseaudio mode: $Pulseaudiomode
+  Allowed are --pulseaudio=socket or --pulseaudio=tcp
+  Fallback: setting --pulseaudiomode=tcp"
+        Pulseaudiomode="tcp";;
+    esac
+  
+    [ "$Pulseaudiomode" = "socket" ] && {
+      Pulseaudiosocketdir="$XDG_RUNTIME_DIR/pulse"
+      [ -d "$Pulseaudiosocketdir" ] || Pulseaudiosocketdir="$(pax11publish -d | grep Server | cut -d'}' -f2 | cut -d' ' -f1 | cut -d: -f2)"
+      [ -d "$Pulseaudiosocketdir" ] || {
+        warning "Did not find directory 'pulse' in XDG_RUNTIME_DIR.
   Is pulseaudio up and running on your host?
   Fallback: Will try to use ALSA (option --alsa) instead."
-      Pulseaudio="no"
-      Alsa="yes"
-    }
-    [ -s "$Pulseaudiosocketdir/native" ] && Pulseaudiosocketname="native"
-    [ -z "$Pulseaudiosocketname" ] && Pulseaudiosocketname="$(find "$Pulseaudiosocketdir" -type s | rev | cut -d/ -f1 | rev | head -n1)"
-    [ -z "$Pulseaudiosocketname" ] && {
-      warning "Did not find pulseaudio socket
+        Pulseaudio="no"
+        Alsa="yes"
+      }
+      [ -s "$Pulseaudiosocketdir/native" ] && Pulseaudiosocketname="native"
+      [ -z "$Pulseaudiosocketname" ] && Pulseaudiosocketname="$(find "$Pulseaudiosocketdir" -type s | rev | cut -d/ -f1 | rev | head -n1)"
+      [ -z "$Pulseaudiosocketname" ] && {
+        warning "Did not find pulseaudio socket
   in $Pulseaudiosocketdir
   Fallback: Will try to use ALSA (option --alsa) instead."
-      Pulseaudio="no"
-      Alsa="yes"
-    }
-    [ "$Pulseaudio" = "yes" ] && Pulseserver="PULSE_SERVER=unix:/pulse/$Pulseaudiosocketname"
-    echo "# Connect to the host's server using the mounted UNIX socket
+        Pulseaudio="no"
+        Alsa="yes"
+      }
+      [ "$Pulseaudio" = "yes" ] && Pulseserver="PULSE_SERVER=unix:/pulse/$Pulseaudiosocketname"
+      echo "# Connect to the host's server using the mounted UNIX socket
 default-server = unix:/pulse/$Pulseaudiosocketname
 # Prevent a server running in the container
 autospawn = no
@@ -3240,6 +3268,30 @@ daemon-binary = /bin/true
 # Prevent the use of shared memory
 enable-shm = false
 " >> $Pulseaudioconf
+    }
+    
+    [ "$Pulseaudiomode" = "tcp" ] && {
+      case $Winsubsystem in
+        "")
+          read Lowerport Upperport < /proc/sys/net/ipv4/ip_local_port_range 2>/dev/null
+          [ "$Lowerport" ] || Lowerport=33000
+          [ "$Upperport" ] || Upperport=60000
+          while : ; do
+            Pulseaudioport="`shuf -i $Lowerport-$Upperport -n 1`"
+            ss -lpn | grep -q ":$Pulseaudioport " || break
+          done
+        ;;
+        *)
+          Line="$(netstat.exe -p tcp -n | rmcr | grep TCP | awk '{print $2}' | cut -d: -f2)"
+          for ((Pulseaudioport=33333 ; Pulseaudioport<=60000 ; Pulseaudioport++)) ; do
+            grep -q $Pulseaudioport <<<$Line || break
+          done
+        ;;
+      esac
+      Pulseaudioserver="PULSE_SERVER=tcp:$Hostip:$Pulseaudioport"
+      Customenvironment="$Pulseaudioserver
+$Customenvironment"
+    }
   }
 
   # option --alsa
@@ -4625,9 +4677,9 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       [ "$Alsa" = "yes" ]              && Dockercommand="$Dockercommand \\
   --device=/dev/snd:/dev/snd:rw -v /dev/snd:/dev/snd:rw"
       ## option --pulseaudio
-      [ "$Pulseaudio" = "yes" ]        && Dockercommand="$Dockercommand \\
+      [ "$Pulseaudio" = "yes" ] && [ "$Pulseaudiomode" = "socket" ] && Dockercommand="$Dockercommand \\
   -v $Pulseaudiosocketdir:/pulse:rw \\
-  -v $Cachefolder/pulseclient.conf:/etc/pulse/client.conf:rw"
+  -v $Cachefolder/pulseclient.conf:/etc/pulse/client.conf:ro"
       ## option --workdir or /tmp
       Dockercommand="$Dockercommand \\
   --workdir $Workdir"
@@ -6036,6 +6088,9 @@ $(tail $Xpraserverlogfile)"
 $(pstree -cp $(cat $Containerpid1pidfile) 2>&1 ||:)"
       }
       [ "$Winsubsystem" ] && [ "$Containerid" ] && setonwatchpidlist "CONTAINER$Containerid"
+      
+      # --pulseaudio
+      [ "$Pulseaudiomode" = "tcp" ] && Pulseaudiomoduleid="$(pactl load-module module-native-protocol-tcp port=$Pulseaudioport auth-ip-acl=$(cat $Containeripfile))"
     ;;
 
     exe) # --exe: run host application without docker. includes --xonly
