@@ -40,6 +40,8 @@ Project website: https://github.com/mviereck/x11docker
 ```
    x11docker [OPTIONS] --  DOCKER_RUN_OPTIONS -- IMAGE COMMAND ARG1 -- ARG2
 ```
+ - `--pulseaudio` allows optional argument `=tcp` or `=socket`.
+   Defaults to connection over shared socket. TCP connection now possible.
 ### Deprecated
  - `--cachedir`: Use `--cachebasedir` instead.
 ### Removed
