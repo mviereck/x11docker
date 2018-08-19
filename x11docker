@@ -3,9 +3,10 @@
 # x11docker
 # Run GUI applications and desktop environments in docker
 #
-# - Circumvents common X security leaks with additional X servers.
-# - Improves container security restricting container capabilities.
+# - Runs additional X servers to circumvents common X security leaks.
+# - Restricts container capabilities to improve container security.
 # - Container user is same as host user to avoid root in container.
+# - Features e.g. sound, hardware acceleration and data storage.
 #
 # Type 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
@@ -272,7 +273,8 @@ Miscellaneous:
      --cleanup         Clean up orphaned containers and cache files.
 
 Verbosity options:
- -v, --verbose         Be verbose. Output of logfile on stderr.
+ -v, --verbose [=c]    Be verbose. Output of logfile on stderr.
+                       Optional argument '=c' generates colored output. 
      --silent          Do not show terminal messages.
      --debug           Debug mode: Show some debug output,
      --stdout          Show stdout of container applications.
@@ -380,7 +382,7 @@ error() {               # show error messages on stderr and exit
 
   # If there was already an error message, just show follow-up error as warning only.
   [ -e "$Cachefolder/error" ] && warning "$*" && waitfortheend
-  [ -d "$Cachefolder" ] && $Mksu "touch $Cachefolder/error"   # also regarded by finish() for exit code
+  [ -d "$Cachefolder" ] && mkfile $Cachefolder/error   # also regarded by finish() for exit code
 
   sleep 1
   Message="$*
@@ -429,17 +431,21 @@ verbose() {             # show verbose messages
   # only logfile notes here, terminal output is done with tail in part:verbose
   # if $1 = -d then show debug note, too
   [ "$1" = "-d" ] && shift && debugnote "$*"
-  logentry "x11docker: $*
+  logentry "x11docker[$(date +%s.%2N | cut -c8-)]: $*
 "
 }
 debugnote() {           # show debug output $*
   [ "$Debugmode" = "yes" ] && {
-    logentry "DEBUGNOTE: $*"
-    [ "$Verbose" = "no" ] && echo "${Colblue}DEBUGNOTE:($(date +%T))${Colnorm} $*" >&3
+    logentry "DEBUGNOTE[$(date +%s.%2N | cut -c8-)]: $*"
+    [ "$Verbose" = "no" ] && echo "${Colblue}DEBUGNOTE[$(date +%s.%2N | cut -c8-)]:${Colnorm} $*" >&3
   } ||:
 }
 logentry() {            # write into logfile
-  [ "$Logfile" ] && echo "$*" >>$Logfile ||:
+  [ "$Logfile" ] && {
+    [ "$Logmessages" ] && echo "$Logmessages" >>$Messagelogfile && Logmessages=""
+    echo "$*" >>$Messagelogfile ||:
+  } || Logmessages="$Logmessages
+$*" 
 }
 killpid() {             # kill PID $1 with codename $2 [and process name $3]
   verbose -d "Terminating ${1:-} (${2:-}) ${3:-}: $(pspid ${1:-})"
@@ -612,7 +618,7 @@ watchpidlist() {        # watch list of important pids
   # terminate x11docker if a PID in $Watchpidlist terminates
   # serves mainly watching X server, Wayland compositor, container and hostexe
   # echo PIDs to watch into >&9 (setonwatchpidlist())
-  local Pid= Containername=
+  local Pid= Containername= Line=
   while rocknroll ; do
     read -t1 Pid <&9 ||:
     [ "$Pid" ] && {
@@ -621,7 +627,8 @@ watchpidlist() {        # watch list of important pids
         verbose -d "Watching Container: $Containername"
       } || {
         Watchpidlist="$Watchpidlist $Pid"
-        debugnote "Watching pids: $Watchpidlist"
+        verbose -d "Watching pids: 
+$(for Line in $Watchpidlist; do pspid $Line ; done)"
       }
     }
     for Pid in $Watchpidlist; do
@@ -682,7 +689,7 @@ waitfortheend() {       # wait for end of x11docker
   case $Winsubsystem in
     "")
       while rocknroll; do
-        bash -c "read -n1 -t1 <&8 ||:"
+        bash -c "read -n1 -t1 <&8" && saygoodbye timetosaygoodbyefifo
       done
     ;;
     *)
@@ -866,14 +873,14 @@ depends() {             # check dependencies on host for X server option $1
         Return=1
       } ;;
     --vcxsrv)
-      Vcxsrvpath="$Winsubmount/c/Program Files/VcXsrv/vcxsrv.exe"
+      Vcxsrvpath="$(convertpath --subsystem "C:/Program Files/VcXsrv/vcxsrv.exe")"
       command -v "$Vcxsrvpath" >/dev/null || {
         $Message "${1:-}: X server VcXsrv not found."
         Return=1
         [ "$Winsubsystem" ] && note "To run x11docker within MSYS2, Cygwin or WSL on MS Windows,
   please install X server VcXsrv (or Xwin on Cygwin).
   Searching for vcxsrv.exe in: 
-    C:\Program Files\VcXsrv"
+    C:/Program Files/VcXsrv"
       }
       Vcxsrvpath="$(echo "$Vcxsrvpath" | rev | cut -d/ -f2- | rev)"
       [ -z "$Winsubsystem" ] && Return=1 && $Message "${1:-}: X server VcXsrv is available on MS Windows only."
@@ -1205,44 +1212,114 @@ $(sed -n '/'$Key1'/,/'$Key2'/p' /usr/share/doc/x11docker/CHANGELOG.md | head -n-
 
   note "Ready."
 }
-convertpath() {         # convert path $1 into --volume syntax regarding Windows subsystem pathes
-  local Patharg Volumecode
-  Patharg="${1:-}"
-  case $Winsubsystem in
-    "") # regular handling on real linux
-      Volumecode="'$Patharg':'$Patharg'" 
-    ;;
-    
-    *) # special cases for Windows subsystems
+convertpath() {         # convert unix and windows pathes
+  # $1: Mode:
+  #   --windows   echo windows path               - result: C:/path
+  #   --unix      echo unix path                  - result: /c/path
+  #   --subsystem echo path within subsystem      - result: /cygdrive/c/path  or  /path
+  #   --volume    echo --volume compatible syntax - result: 'unixpath':'containerpath'
+  # $2: Path to convert. Arbitrary syntax, can be C:/path, /c/path, /cygdrive/c/path, /path
+  # $3: Optional for --volume: containerpath
+  
+  local Mode= Path= Drive=
+  
+  Mode="${1:-}"
+  Path="${2:-}"
+  
+  # not on Windows
+  [ -z "$Winsubsystem" ] && {
+    case $Mode in
+      --volume) echo "'$Path':'${3:-$Path}'" ;;
+      --unix|--subsystem) echo "$Path" ;;
+      --windows) warning "Nonsense path conversion $Mode: $Path" ; return 1 ;;
+    esac
+    return 0
+  }
+  
+  # replace \ with /
+  Path="$(tr '\\' '/' <<< "$Path")"
+  
+  # remove possible already given mountpoint
+  Path="${Path#$Winsubmount}"
+  
+  # Given format is /c/
+  [ "$(cut -c1,3 <<< "$Path")" = "//" ] && {
+    Drive="$(cut -c2 <<< "$Path")"
+    Path="$(cut -c3- <<< "$Path")"
+  }
+  
+  # Given format is C:/
+  [ "$(cut -c2 <<< "$Path")" = ":" ] && {
+    Drive="$(cut -c1 <<< "$Path")"
+    Path="$(cut -c3- <<< "$Path")"
+  }
+  
+  # change C to c
+  Drive="${Drive,}"
 
-      # replace \ with /
-      Patharg="$(tr '\\' '/' <<< "$Patharg")"
-      # Path is already formated like /c/ ?
-      # -> leave as it is
-      [ "$(cut -c1,3 <<< "$Patharg")" = "//" ] && Volumecode="'$Patharg':'$Patharg'" || {
-        [ "$(cut -c2 <<< "$Patharg")" = ":" ] && {
-          # Path begins with e.g. C: or D: ?
-          # -> change e.g. C: to /c/
-          Patharg="$(tr -d : <<< "$Patharg")"
-          Patharg="/${Patharg,}"
-          Volumecode="'$Patharg':'$Patharg'"
-        } || {
-          [ "$Winsubmount" ] && [ "$(cut -c1-${#Winsubmount} <<< "$Patharg" | tr [:upper:] [:lower:])" = "$Winsubmount" ] && {
-            # Path points to Win host over mountpoint in subsystem subfolder
-            # -> remove mountpoint of subsystem to have e.g. /c/ at begin
-            Volumecode="'${Patharg#$Winsubmount}':'${Patharg#$Winsubmount}'"
-          }
-        } || {
-          # Path is part of subsystem ?
-          # -> add Windows path leading to subsystem
-          Volumecode="'$Winsubpath$Patharg':'$Patharg'"
-          [ "$Winsubsystem" = "WSL" ] && error "Can not share pathes within WSL with docker containers.
-  Failing: $Patharg"
-        }
-      }
+  [ "$Winsubsystem" = "WSL" ] && [ -z "$Drive" ] && case $Mode in
+    --windows|--unix|--volume)
+      warning "Request of Windows path to path within WSL:
+  $Path
+  Write access from Windows host to WSL files can damage WSL.
+  Read-only access is ok."
     ;;
   esac
-  echo "$Volumecode"
+
+  case $Drive in
+    "") # Path points into subsystem
+      Path="${Path#"$Winsubpath"}"
+      Drive="$(cut -c2 <<<"$Winsubpath")"
+      case $Mode in
+        --windows)   echo "${Drive^}:$(cut -c3- <<<$Winsubpath)$Path" ;;
+        --unix)      echo "$Winsubpath$Path" ;;
+        --subsystem) echo "$Path" ;;
+        --volume)    echo "'$Winsubpath$Path':'${3:-$Path}'" ;;
+      esac
+    ;;
+    *) # Path outside of subsystem
+      case $Mode in
+        --windows)   echo "${Drive^}:$Path" ;;
+        --unix)      echo "/$Drive$Path" ;;
+        --subsystem) echo "$Winsubmount/$Drive$Path" ;;
+        --volume)    echo "'/$Drive$Path':'${3:-/$Drive$Path}'" ;;
+      esac
+    ;;
+  esac
+  return 0
+}
+getwslpath() {          # get path to currently running WSL system
+  # Fork from https://github.com/Microsoft/WSL/issues/2578#issuecomment-354010141
+  
+  local RUN_ID= BASE_PATH=
+  
+  RUN_ID="/tmp/$(mcookie)"
+
+  # Mark our filesystem with a temporary file having an unique name.
+  touch "${RUN_ID}"
+
+  powershell.exe -Command '(Get-ChildItem HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss | ForEach-Object {Get-ItemProperty $_.PSPath}).BasePath.replace(":", "").replace("\", "/")' | while IFS= read -r BASEPATH; do
+    # Remove trailing whitespaces.
+    BASEPATH="${BASEPATH%"${BASEPATH##*[![:space:]]}"}"
+    # Build the path on WSL.
+    BASEPATH="/mnt/${BASEPATH,}/rootfs"
+
+    # Current WSL instance doesn't have an access to its mount from within
+    # itself despite all others are available. That's the hacky way we're
+    # using to determine current instance.
+    #
+    # The second of part of the condition is a fallback for a case if our
+    # trick will stop working. For that we've created a temporary file with
+    # an unique name and now seeking it among all WLSs.
+    if ! ls "${BASEPATH}" > /dev/null 2>&1 || [ -f "${BASEPATH}${RUN_ID}" ]; then
+      echo "${BASEPATH}"
+      # You can create and simultaneously run multiple WSL instances, comment
+      # out the "break", run this script within each one and it'll return only
+      # single value.
+      break
+    fi
+  done
+  rm "${RUN_ID}"
 }
 rmcr() {                # remove carriage return to translate DOS/Windows newlines into UNIX newlines
   # convert stdin if $1 is empty. Otherwise convert file $1.
@@ -1300,9 +1377,12 @@ Timetosaygoodbyefifo=timetosaygoodbye.fifo
 Watchpidfifo=watchpid.fifo
 Watchpidlist=""
 Messagefifo=message.fifo
-
-# x11docker log
+Messagelogfile=message.log
+Logmessages=""
 Logfile=""
+
+Mycookie=$(mcookie | cut -b1-6)
+[ -z "$Mycookie" ] && Mycookie=$RANDOM
 
 # terminal colors
 Esc="$(printf '\033')"
@@ -1353,7 +1433,6 @@ X11dockermode="run"                             # can be either "xonly", "run" o
 X11dockerargs="$*"                              # arguments for x11docker, stored for logfile and for --starter
 Imagename=""                                    # name of image to run
 Imagecommand=""                                 # image command [+args]
-Imagecommandbasename=""                         # image command without path or args
 Imagenametr=""                                  # image name with : and / replaced by - for use with container name and --home folder
 Hostexe=""                                      # option --exe: contains host executable
 Hostexebasename=""                              # option --exe: host executeable name without path or options
@@ -1417,7 +1496,6 @@ Ttyinuse=""
 Winsubsystem=""
 Winsubmount=""
 Winsubpath=""
-#grep -q "/mnt/c/Windows/System32" <<< ${PATH:-} && Winsubsystem="WSL"
 uname -r | grep -q Microsoft                    && Winsubsystem="WSL"
 command -v cygcheck.exe >/dev/null && {
   cygcheck.exe -V | rmcr | grep -q "(cygwin)"   && Winsubsystem="CYGWIN"
@@ -1425,16 +1503,16 @@ command -v cygcheck.exe >/dev/null && {
 }
 case $Winsubsystem in
   MSYS2|CYGWIN) 
-    Winsubpath="$(convertpath "$(cygpath.exe -w "/" | rmcr)" | cut -d "'" -f2)" 
-    Winsubmount="$(cygpath.exe -u "c:/" | sed s%/c/%%)" ;;
+    Winsubmount="$(cygpath.exe -u "c:/" | rmcr | sed s%/c/%%)"
+    Winsubpath="$(convertpath --unix "$(cygpath.exe -w "/" | rmcr)" )" ;;
   WSL)          
-    Winsubpath="CANNOT_SHARE_WSL_PATH"
-    Winsubmount="/mnt" ;;
+    Winsubmount="/mnt"
+    Winsubpath="$(convertpath --unix "$(getwslpath)")" ;;
 esac
 # Needed for Windows subsystems only
 Dockerexe="docker"
 [ "$Winsubsystem" ] && {
-  export PATH="$PATH:$Winsubmount/c/Program Files/docker:$Winsubmount/c/Program Files/Docker/Docker/resources/bin"
+  export PATH="$PATH:$(convertpath --subsystem "C:/Program Files/docker"):$(convertpath --subsystem "C:/Program Files/Docker/Docker/resources/bin")"
   Dockerexe="docker.exe"
 }
 Vcxsrvpath=""                                   # path to vcxsrv.exe and xauth.exe
@@ -1471,6 +1549,7 @@ Xtest=""                                        # enable extension Xtest yes/no.
 Xkblayout=""                                    # option '--keymap': Layout for keymap, compare /usr/share/X11/xkb/symbols
 Xinitpid=""
 Xserverpid=""
+Xcomposite="yes"                                # +extension COMPOSITE yes/no
 
 # Main X server options
 Autochooseserver="yes"                          # option '--auto': automatically choose X server (default)
@@ -1529,7 +1608,6 @@ Langwunsch=""                                   # option --lang: search or creat
 
 # --pulseaudio
 Pulseaudiomode=""                               # option --pulseaudio: 'tcp' or 'socket'
-Pulseaudiologfile=pulseaudio.log
 Pulseaudioconf=pulseclient.conf
 Lowerport=""
 Upperport=""
@@ -1543,12 +1621,12 @@ Silent="no"                                     # option --silent: do not show m
 Showdisplayenvironment="no"                     # option -E, --env: output of environment variables of new display on stdout
 Showcontainerid="no"                            # option --showid: output of container id on stdout
 Showcontainerpid1pid="no"                       # option --showpid1: output of host PID of container PID 1
-Verbosecolors="yes"                             # colored output for --verbose and delete some systemd error messages.
+Verbosecolors="no"                              # colored output for --verbose and delete some systemd error messages.
 Debugmode="no"                                  # option --debug: Throw it all out
 DebugPS4='+ \033[32m${LINENO}:${FUNCNAME[0]:+${FUNCNAME[0]}(): }\033[0m'
 
 # advanced options
-Customenvironment=""                            # option '--env': set custom environment variables
+Containerenvironment=""                         # option '--env': set custom environment variables
 Capdropall="yes"                                # option --cap-default: (don't) drop all container capabilities
 Adminusercaps="no"                              # options --sudouser, --systemd: add capabilities for general sys administration
 Switchcontaineruser="no"                        # options for init systems: user switching to toggle login daemons
@@ -1633,7 +1711,7 @@ stdout() {
 }
 
 { #### part: parsing cli options
-  Shortoptions="aAbcdefgGhHKml:MnNopPrsutTvw:WxXyY"
+  Shortoptions="aAbcdefgGhHKml:MnNopPrsutTv::w:WxXyY"
   Longoptions="auto,x,X,xpra,xephyr,x11,xorg,hostdisplay,xwayland,weston-xwayland,xpra-xwayland,nxagent,wayland"           # X servers
   Longoptions="$Longoptions,weston,hostwayland,kwin,kwin-xwayland,xdummy,xvfb,nothing,vcxsrv,xwin"                         # more X/Wayland servers
   Longoptions="$Longoptions,wm:,desktop,exe,xonly"
@@ -1644,7 +1722,7 @@ stdout() {
   Longoptions="$Longoptions,homedir:,sharedir:,cachebasedir:,homebasedir:"                                                 # host folders
   Longoptions="$Longoptions,tini,no-init,systemd,runit,openrc,sysvinit,sys-admin,sharecgroup"                              # init system options
   Longoptions="$Longoptions,starter,cleanup,license,licence,help,version,install,update,update-master,remove,wmlist"       # special options without starting X or container
-  Longoptions="$Longoptions,verbose,silent,debug,stdout,stderr,stdin"                                                      # verbose options
+  Longoptions="$Longoptions,verbose::,silent,debug,stdout,stderr,stdin"                                                      # verbose options
   Longoptions="$Longoptions,hostipc,hostnet,ps,cache,cap-default,sudouser,hostuser:,user:,group-add:,name:"                # capabilities, users
   Longoptions="$Longoptions,keymap:,name:,no-entrypoint,runfromhost:,runasroot:,westonini:"                                # developer options
   Longoptions="$Longoptions,cachedir:"                                                                                     # deprecated
@@ -1732,7 +1810,8 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
 
 
      #### Verbose options
-      -v|--verbose)    Verbose="yes"  ;;                   # be verbose
+      -v|--verbose)    Verbose="yes"                       # be verbose  
+                       [ "${2:-}" = "c" ] && Verbosecolors="yes" && shift ;;
          --stdout)     Showstdout="yes" ;;                 # show stdout of image command
          --stderr)     Showstderr="yes" ;;                 # show stderr of image command
          --silent)     Silent="yes" ; exec 3>/dev/null ;;  # do not show warnings or errors
@@ -1742,8 +1821,8 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
          --sharessh)   [ -e "${SSH_AUTH_SOCK:-}" ] && {                # share host folder at same location in container with rw access
                          Sharevolumescount=$(($Sharevolumescount + 1))
                          Sharevolumes[$Sharevolumescount]=$(dirname $SSH_AUTH_SOCK)
-                         Customenvironment="SSH_AUTH_SOCK=$(escapestring "${SSH_AUTH_SOCK:-}")
-$Customenvironment"
+                         Containerenvironment="SSH_AUTH_SOCK=$(escapestring "${SSH_AUTH_SOCK:-}")
+$Containerenvironment"
                        } || warning "Option --sharessh: environment variable \$SSH_AUTH_SOCK not set:" ; ;;
        ## User settings
          --user)       Benutzer="${2:-}"  ; shift ;;       # set container user instead of host user
@@ -1766,8 +1845,8 @@ $Customenvironment"
          --showid)     Showcontainerid="yes" ;;            # output of container id on stdout
          --showenv)    Showdisplayenvironment="yes" ;;     # output of display number and cookie file on stdout. Catch with  ~$ read xdenv < <(x11docker --showenv)
          --showpid1)   Showcontainerpid1pid="yes" ;;       # output of host PID of container PID 1
-         --env)        Customenvironment="$(escapestring "${2:-}")
-$Customenvironment"    ;  shift ;;                         # set custom environment variables
+         --env)        Containerenvironment="$(escapestring "${2:-}")
+$Containerenvironment"    ;  shift ;;                         # set custom environment variables
          --vt)         Newxvt="${2:-}" ;         shift ;;  # set virtual console to use
          --display)    Newdisplaynumber=${2:-}             # display number to use
                        [ "$(echo $Newdisplaynumber | cut -c1)" = ":" ] && Newdisplaynumber="$(echo $Newdisplaynumber | cut -c2-)"
@@ -1817,9 +1896,9 @@ $Customenvironment"    ;  shift ;;                         # set custom environm
 
      ##### custom docker options / image name + image command
       --) shift
-        [ "$(cut -c1 <<< "${1:-}")"  = "-" ] && grep -q " -- "  <<< "$*" && {
-          Customdockeroptions="$(sed 's/ -- .*//' <<< "$*" )"
-          Imagecommand="$(sh -c 'echo "${0#* -- }"' "$*" )"
+        [ "$(cut -c1 <<< "${1:-}")"  = "-" ] && grep -q " -- "  <<< " $*" && {
+          Customdockeroptions="$(sed 's/ -- .*//' <<< " $*" )"
+          Imagecommand="$(sh -c 'echo "${0#* -- }"' " $*" )"
           Imagename="$(cut -d ' ' -f1 <<< "$Imagecommand")"
           Imagecommand="$(cut -d ' ' -f2- -s <<< "$Imagecommand")"
           break
@@ -1913,21 +1992,16 @@ $Customenvironment"    ;  shift ;;                         # set custom environm
   [ "$Cachebasefolder" ] || {
     case $Winsubsystem in
       "") Cachebasefolder="$Hostuserhome/.cache/x11docker" ;;
-      *)  Cachebasefolder="$Winsubmount$(convertpath "$(cmd.exe /C "echo %userprofile%")" | rmcr | cut -d"'" -f2)/x11docker/cache" ;;
+      *)  Cachebasefolder="$(convertpath --subsystem "$(cmd.exe /C "echo %userprofile%")" | rmcr)/x11docker/cache" ;;
     esac
   }
+  Cachebasefolder="$(convertpath --subsystem "$Cachebasefolder")"
   $Mksu "mkdir -p $Cachebasefolder"         || error "Could not create cache folder
   $Cachebasefolder"
   writeaccess $Hostuseruid $Cachebasefolder || error "User $Hostuser does not have write access to
   cache folder $Cachebasefolder"  # can happen with --cachedir
-
-  # Logfiles. $Logfile will be moved to $Sharefolder later
-  Mycookie=$(mcookie | cut -b1-6)
-  [ -z "$Mycookie" ] && Mycookie=$RANDOM
-  Logfile="$Cachebasefolder/x11docker.log.$Mycookie"
-  mkfile "$Logfile"
   Logbackup="$Cachebasefolder/x11docker.log"       # afterward copy of $Logfile in $Cachebasefolder
-
+  
   grep -q beta <<<$Version && note "You are running a beta version of x11docker.
   Beta versions change often and may introduce temporary new bugs.
   If you prefer latest stable release, run 'x11docker --update'.
@@ -2003,8 +2077,11 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   
   # host IP needed for --pulseaudio over tcp, --vcxsrv and --xwin
   case $Winsubsystem in
-    "") Hostip="$(ip -4 -o a | awk '{print $4}' | cut -d/ -f1 | grep -v 127.0.0.1 | head -n1)" ;;
-    *)  Hostip="$(ipconfig.exe | grep 'IPv4' | grep -o '[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | grep "^10\.0\.*" )" ;;
+    "") Hostip="$(ip -4 -o a | grep 'docker0' | awk '{print $4}' | cut -d/ -f1)"
+      [ "$Hostip" ] || Hostip="$(ip -4 -o a | awk '{print $4}' | cut -d/ -f1 | grep -v 127.0.0.1 | head -n1)" ;;
+    *) Hostip="$(ipconfig.exe | grep -A6 'DockerNAT' | grep 'IPv4' | rev | cut -d' ' -f1 | rev)"
+      [ "$Hostip" ] || Hostip="$(ipconfig.exe | grep 'IPv4' | grep -o '[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | grep "^10\.0\.*" )"
+      [ "$Hostip" ] || Hostip="$(ipconfig.exe | grep 'IPv4' | head -n1 | | rev | cut -d' ' -f1 | rev)" ;;
   esac
   verbose -d "Host IP: $Hostip"
   
@@ -2019,8 +2096,6 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
       command -v $Dockerexe >/dev/null || error "docker is not installed.
   To run docker images, you need to install docker."
       verbose "Image name: $Imagename"
-      verbose "Image command: $Imagecommand"
-      Imagecommandbasename=$(basename $(echo $Imagecommand | cut -d' ' -f1) 2>/dev/null | tr -cd '[:alpha:][:digit:][:blank:]-_.')
     ;;
     exe)
       Hostexe="$Imagename $Imagecommand"
@@ -2059,11 +2134,9 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
     [ "$Scaling" ]              && [ "$Tty" = "yes" ]            && Xserver="--xorg"
     [ "$Screensize" ]           && [ "$Tty" = "yes" ]            && Xserver="--xorg"
     [ -z "$Hostdisplay" ]       && [ -n "$Hostwaylandsocket" ]   && Xserver="--weston-xwayland"
-    [ "$Sharewayland" = "yes" ] && { [ -n "$Hostwaylandsocket" ] && [ "$Desktopmode" = "no" ] && Xserver="--hostwayland" || Xserver="--weston" ; }
     [ "$Winsubsystem" ]                                          && Xserver="--vcxsrv"
     [ "$Winsubsystem" = "CYGWIN" ]                               && Xserver="--xwin"
-#    nxagent is disabled as favorized X server due to nxagent issues with X extension Composite.
-#    { [ "$Xserver" = "--xpra" ] || [ "$Xserver" = "--xephyr" ];} && Xserver="--nxagent"
+    [ "$Sharewayland" = "yes" ] && { [ -n "$Hostwaylandsocket" ] && [ "$Desktopmode" = "no" ] && Xserver="--hostwayland" || Xserver="--weston" ; }
   }
 
   [ "$Sharegpu" = "yes" ] && case $Xserver in
@@ -2744,6 +2817,8 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
     ;;
   esac
 
+  Logfile="$Sharefolder/x11docker.log"                              && mkfile $Logfile
+  Messagelogfile="$Cachefolder/$Messagelogfile"                     && mkfile $Messagelogfile
   Timetosaygoodbye="$Sharefolder/$Timetosaygoodbye"                 && mkfile $Timetosaygoodbye
   Xinitrc="$Cachefolder/$Xinitrc"                                   && mkfile $Xinitrc
   Xinitlogfile="$Cachefolder/$Xinitlogfile"                         && mkfile $Xinitlogfile
@@ -2764,7 +2839,6 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   Compositorlogfile="$Cachefolder/$Compositorlogfile"               && mkfile $Compositorlogfile
   Compositorpidfile="$Cachefolder/$Compositorpidfile"               && mkfile $Compositorpidfile
   Pulseaudioconf="$Cachefolder/$Pulseaudioconf"                     && mkfile $Pulseaudioconf
-  Pulseaudiologfile="$Cachefolder/$Pulseaudiologfile"               && mkfile $Pulseaudiologfile
   Bgpidfile="$Cachefolder/$Bgpidfile"                               && mkfile $Bgpidfile
   Imagecommandscript="$Sharefolder/$Imagecommandscript"             && mkfile $Imagecommandscript
   Shareclipboardscript="$Cachefolder/$Shareclipboardscript"         && mkfile $Shareclipboardscript
@@ -2773,15 +2847,13 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   Xorgwrapper="$Cachefolder/$Xorgwrapper"                           && mkfile $Xorgwrapper
   Xkbkeymapfile="$Cachefolder/$Xkbkeymapfile"                       && mkfile $Xkbkeymapfile
 
-  mv $Logfile $Sharefolder/x11docker.log
-  Logfile="$Sharefolder/x11docker.log"
-
   # Cache folder for x11docker-gui. Created here to store image list in dockerrc for x11docker-gui
   mkdir -p $Cachebasefolder/x11docker-gui && chown $Hostuser $Cachebasefolder/x11docker-gui
 
   # standard streams for container
   Cmdstdoutlogfile="$Sharefolder/$Cmdstdoutlogfile"                 && mkfile $Cmdstdoutlogfile 666
   Cmdstderrlogfile="$Sharefolder/$Cmdstderrlogfile"                 && mkfile $Cmdstderrlogfile 666
+  
   mkfile "$Sharefolder/environment"
 }
 
@@ -2866,7 +2938,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
 
 { #### part: options --verbose, --stdout, --stderr
   # create summary logfile
-  tail --pid=$$ --retry -n +1 -F $Containerlogfile $Pulseaudiologfile \
+  tail --pid=$$ --retry -n +1 -F $Messagelogfile $Containerlogfile \
                                  $Cmdstdoutlogfile $Cmdstderrlogfile ${Journallogfile:-} \
                                  $Xpraserverlogfile $Xpraclientlogfile \
                                  $Xinitlogfile $Compositorlogfile 2>/dev/null >>$Logfile &
@@ -2877,6 +2949,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   that are harmless but numerous to get a better readable output.
   It deletes all lines with: 'Failed to add fd to store',
   'Failed to set invocation ID' and 'Failed to reset devices.list'."
+  
     case $Verbosecolors in
       no)  tail --pid=$$ --retry -n +1 -F $Logfile 2>/dev/null >&3 & ;;
       yes) tail --pid=$$ --retry -n +1 -F $Logfile 2>/dev/null | sed "
@@ -2913,8 +2986,8 @@ After finish: $Logbackup"
 
 { #### part: create $Hostxenv: Environment variables for host X display
   # get cookie from host display
-  [ -n "$Hostdisplay" ] && {
-    $Xauth nlist $Hostdisplay 2>/dev/null | rmcr | $Mksu "$Xauth -f $Hostxauthority nmerge - 2>/dev/null"
+  [ "${XAUTHORITY:-}" ] && {
+    $Mksu "$Xauth -i -f ${XAUTHORITY:-} nlist $Hostdisplay 2>/dev/null | rmcr | $Xauth -f $Hostxauthority nmerge - 2>/dev/null"
     chown $Hostuser $Hostxauthority
     chmod 600 $Hostxauthority
   } || {
@@ -2922,6 +2995,7 @@ After finish: $Logbackup"
     Hostxauthority=""
     Hostxsocket=""
   }
+  [ -s "${XAUTHORITY:-}" ] && [ ! -s "$Hostxauthority" ] && cp "${XAUTHORITY:-}" "$Hostxauthority"
 
   Hostxenv="DISPLAY=$Hostdisplay"
   [ -s "$Hostxauthority" ] && {
@@ -3226,22 +3300,25 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
   [ "$Pulseaudiomode" ] && warning "Option --pulseaudio allows container applications
   to catch your audio output and microphone input."
   
+  # shared socket works for same user only. Fallback to tcp if --user is specified.
+  [ "$Pulseaudiomode" ] && [ "$Benutzer" ] && Pulseaudiomode="tcp"
+  
   case $Pulseaudiomode in
     socket)
-      Customenvironment="PULSE_SERVER=unix:$Cshare/pulseaudio.socket
+      Containerenvironment="PULSE_SERVER=unix:$Cshare/pulseaudio.socket
 PULSE_COOKIE=$Cshare/pulseaudio.cookie
-$Customenvironment"
+$Containerenvironment"
 
-      echo "# Connect to the host's server using the mounted UNIX socket
+      echo "# Connect to host pulseaudio server using mounted UNIX socket
 default-server = unix:$Cshare/pulseaudio.socket
-# Prevent a server running in the container
+# Prevent a server running in container
 autospawn = no
 daemon-binary = /bin/true
-# Prevent the use of shared memory
+# Prevent use of shared memory
 enable-shm = false
 " >> $Pulseaudioconf
-      echo "Generated pulseaudio client.conf:
-$(nl -ba <<<$Pulseaudioconf)" >>$Pulseaudiologfile
+      verbose "Generated pulseaudio client.conf:
+$(nl -ba <$Pulseaudioconf)"
     ;;
     tcp)
       case $Winsubsystem in
@@ -3258,7 +3335,7 @@ $(nl -ba <<<$Pulseaudioconf)" >>$Pulseaudiologfile
           note "Option --pulseaudio: Pulseaudio daemon will continue
   to run after x11docker terminates. You can kill pulseaudio manually with:
       taskkill.exe /PID pulseaudio.exe /F"
-          [ -e "$Winsubmount/c/cygwin64/bin/pulseaudio.exe" ] || { 
+          [ -e "$(convertpath --subsystem "C:/cygwin64/bin/pulseaudio.exe")" ] || { 
             warning "--pulseaudio: Did not find C:/cygwin64/bin/pulseaudio.exe.
   Please install Cygwin with pulseaudio.
   Fallback: Disabling option --pulseaudio"
@@ -3269,11 +3346,11 @@ $(nl -ba <<<$Pulseaudioconf)" >>$Pulseaudiologfile
             Pulseaudioport="$(shuf -i 34000-54000 -n1)"
             grep -q $Pulseaudioport <<<"$Line" || break
           done
-          env XDG_RUNTIME_DIR="" HOME="" cmd.exe /C "C:/cygwin64/bin/pulseaudio.exe -D 2>&1" 2>&1 >>$Pulseaudiologfile
+          env XDG_RUNTIME_DIR="" HOME="" cmd.exe /C "C:/cygwin64/bin/pulseaudio.exe -D 2>&1" 2>&1 >>$Messagelogfile
         ;;
       esac
-      [ "$Pulseaudiomode" ] && Customenvironment="PULSE_SERVER=tcp:$Hostip:$Pulseaudioport
-$Customenvironment"
+      [ "$Pulseaudiomode" ] && Containerenvironment="PULSE_SERVER=tcp:$Hostip:$Pulseaudioport
+$Containerenvironment"
     ;;
     "") ;;
     *) 
@@ -3469,16 +3546,11 @@ fi
   case $Xserver in
     --nxagent)
       { [ "$Sharehostipc" = "yes" ] || [ "$X11dockermode" = "exe" ] ; } && Xserveroptions="$Xserveroptions -shmem -shpix" || Xserveroptions="$Xserveroptions -noshmem -noshpix"
-#      # fixes issues with e.g. enlightenment, causes issues with e.g. xfce4-terminal. Development in nx-libs is in progress.
-#      Xserveroptions="$Xserveroptions \\
-#  +extension Composite"
     ;;
     *)
       # general X server options
       Xserveroptions="$Xserveroptions -retro"
-      # Most X servers have extension "Composite", recent Xwayland has "COMPOSITE".
       Xserveroptions="$Xserveroptions \\
-  +extension Composite +extension COMPOSITE \\
   +extension RANDR +extension RENDER +extension GLX \\
   +extension XVideo +extension DOUBLE-BUFFER"
       Xserveroptions="$Xserveroptions \\
@@ -3492,6 +3564,20 @@ fi
         Xprashm="XPRA_XSHM=0"
       }
     ;;
+  esac
+  
+  # X extension COMPOSITE
+  case $Xserver in
+    --nxagent|--vcxsrv|--xwin) Xcomposite="no" ;;
+  esac
+  case $Xcomposite in
+    yes)
+      # Most X servers have extension "Composite", recent Xwayland and VcXsrv calls it "COMPOSITE".
+      Xserveroptions="$Xserveroptions \\
+  +extension Composite +extension COMPOSITE" ;;
+    no)
+      Xserveroptions="$Xserveroptions \\
+  -extension Composite -extension COMPOSITE" ;;
   esac
 
   # allow/disallow X over TCP
@@ -3605,7 +3691,7 @@ fi
   --no-daemon --fake-xinerama=no --mdns=no \\
   --notifications=no --file-transfer=off --printing=no \\
   --start-new-commands=no --dbus-proxy=no --no-pulseaudio \\
-  --html=off --session-name=\"$Hostexebasename$Imagename $Imagecommandbasename\""
+  --html=off --session-name=\"$Hostexebasename$Imagename \""
       verlt  "$Xprarelease" "r13378" || Xpraservercommand="$Xpraservercommand --systemd-run=no"
       verbose -d "Xpra server command:
   $Xpraservercommand"
@@ -3689,9 +3775,8 @@ $(tail "$Compositorlogfile")"
     yes)
       case $Xserver in
         --vcxsrv)  
-          Line="${Xservercookie#$Winsubmount}"
           Xserveroptions="$Xserveroptions \\
-  -auth '$(cut -c2 <<< "$Line"):$(cut -c3- <<< "$Line")'" 
+  -auth '$(convertpath --windows "$Xservercookie")'" 
         ;;
         *) Xserveroptions="$Xserveroptions \\
   -auth $Xservercookie" ;;
@@ -3849,7 +3934,8 @@ mode=$Screensize
       Xcommand="$(command -v Xwayland) $Newdisplay \\
   $Xserveroptions"
       Newwaylandsocket="wayland-$Newdisplaynumber"
-      Compositorcommand="kwin_wayland --xwayland --socket=$Newwaylandsocket --width=$Xaxis --height=$Yaxis --output-count=$Outputcount"
+      Compositorcommand="kwin_wayland --xwayland --socket=$Newwaylandsocket --width=$Xaxis --height=$Yaxis"
+      [ "$Outputcount" = "1" ] || Compositorcommand="$Compositorcommand --output-count=$Outputcount"
       [ "$Xkblayout" ] && Compositorcommand="KWIN_XKB_DEFAULT_KEYMAP=$Xkblayout $Compositorcommand"
       Compositorcommand="env QT_XKB_CONFIG_ROOT=/usr/share/X11/xkb $Compositorcommand"
       case $Tty in
@@ -3861,7 +3947,8 @@ mode=$Screensize
     --kwin)
       Newwaylandsocket="wayland-$Newdisplaynumber"
       Sharewayland="yes"
-      Compositorcommand="kwin_wayland --xwayland --socket=$Newwaylandsocket --width=$Xaxis --height=$Yaxis --output-count='$Outputcount'"
+      Compositorcommand="kwin_wayland --xwayland --socket=$Newwaylandsocket --width=$Xaxis --height=$Yaxis"
+      [ "$Outputcount" = "1" ] || Compositorcommand="$Compositorcommand --output-count=$Outputcount"
       #[ "$Xkblayout" ] && Compositorcommand="KWIN_XKB_DEFAULT_KEYMAP=$Xkblayout $Compositorcommand"
       Compositorcommand="env QT_XKB_CONFIG_ROOT=/usr/share/X11/xkb $Compositorcommand"
       case $Tty in
@@ -3951,16 +4038,16 @@ esac
     --vcxsrv|--xwin)
       [ "$Xserver" = "--vcxsrv" ] && Xcommand="$(escapestring "$Vcxsrvpath")/vcxsrv.exe :$Newdisplaynumber"
       [ "$Xserver" = "--xwin" ]   && Xcommand="$(command -v Xwin) :$Newdisplaynumber"
-      [ "$Xserver" = "--xwin" ]   && Customenvironment="DISPLAY=$Hostip:$Newdisplaynumber
-$Customenvironment"
+      [ "$Xserver" = "--xwin" ]   && Containerenvironment="DISPLAY=$Hostip:$Newdisplaynumber
+$Containerenvironment"
       
       Xcommand="$Xcommand \\
   $Xserveroptions \\
  "
       case $Sharegpu in
         yes) Xcommand="$Xcommand -wgl +iglx" 
-             Customenvironment="LIBGL_ALWAYS_INDIRECT=1
-$Customenvironment" ;;
+             Containerenvironment="LIBGL_ALWAYS_INDIRECT=1
+$Containerenvironment" ;;
         no)  Xcommand="$Xcommand -nowgl -iglx" ;;
       esac
       case $Fullscreen in
@@ -3990,7 +4077,6 @@ $Customenvironment" ;;
   esac
 
   [ "$Sharewayland" = "yes" ] && [ -z "$Newwaylandsocket" ] && note "No wayland socket to share" && Sharewayland="no"
-
 
   [ "$Xcommand" ] && verbose -d "X server command:
   $Xcommand"
@@ -4027,7 +4113,7 @@ $Customenvironment" ;;
 
   # custom environment
   IFS=$'\n'
-  for Line in $Customenvironment; do Newxenv="$Newxenv $Line" ; done
+  for Line in $Containerenvironment; do Newxenv="$Newxenv $Line" ; done
   IFS=$' \t\n'
 
   verbose "Environment variables:
@@ -4061,6 +4147,8 @@ $Customenvironment" ;;
   sharing with X server $Xserver.
   Fallback: Disabling option --clipboard."
         Shareclipboard="no"
+        Clipsend=""
+        Clipreceive=""
       }
 
       echo "#! /bin/bash
@@ -4097,9 +4185,9 @@ done
 { #### part: check password prompt frontend (pkexec, su, sudo, ...)
   # check if x11docker can run docker without prompting for password
   [ "$Passwordfrontend" = "none" ] && Passwordneeded="no"
-  [ -z "$Passwordfrontend" ] && sudo -n env >/dev/null 2>&1 && Passwordfrontend="sudo" && Passwordneeded="no"
+  [ "$X11dockermode" = "exe" ]     && Passwordneeded="no"
   [ -z "$Passwordfrontend" ] && $Dockerexe info >/dev/null 2>&1 && Passwordfrontend="none" && Passwordneeded="no"
-  [ "$X11dockermode" = "exe" ] && Passwordneeded="no"
+  [ -z "$Passwordfrontend" ] && sudo -n env >/dev/null 2>&1     && Passwordfrontend="sudo" && Passwordneeded="no"
 
   # check sudo. Check is not reliable, compare https://unix.stackexchange.com/questions/383918/su-or-sudo-how-to-know-which-one-will-work
   ### FIXME: just guessing that members of group sudo or wheel are allowed to run commands docker and env as root
@@ -4286,7 +4374,7 @@ done
   
   # base home folder
   [ "$Homebasefolder" ] && {
-    Homebasefolder="$Winsubmount$(convertpath "$Homebasefolder" | cut -d "'" -f2)"
+    Homebasefolder="$(convertpath --subsystem "$Homebasefolder")"
     [ -e "$Homebasefolder" ] || {
       warning "Option --homebasedir: Specified path does not exist:
   $Homebasefolder
@@ -4296,7 +4384,7 @@ done
   }
   [ "$Homebasefolder" ] || case $Winsubsystem in
     "") Homebasefolder="$Benutzerhome/.local/share/x11docker" ;;
-    *)  Homebasefolder="$Winsubmount$(convertpath "$(cmd.exe /C "echo %userprofile%" | rmcr)" | cut -d"'" -f2)/x11docker/home" ;;
+    *)  Homebasefolder="$(convertpath --subsystem "$(cmd.exe /C "echo %userprofile%" | rmcr)")/x11docker/home" ;;
   esac
   
   case $Benutzerhosthome in
@@ -4345,12 +4433,12 @@ done
   case $Initsystem in
     none) ;;
     tini)
-      Tinibinary="$(command -v docker-init)"
+      Tinibinary="$(command -v docker-init ||:)"
       [ -z "$Tinibinary" ]                                      && Tinibinary="/snap/docker/current/bin/docker-init"
       [ -e "$Tinibinary" ]                                      || Tinibinary="/snap/docker/current/usr/bin/docker-init"
       [ -e "/usr/local/share/x11docker/tini-static" ]           && Tinibinary="/usr/local/share/x11docker/tini-static"
       [ -e "$Hostuserhome/.local/share/x11docker/tini-static" ] && Tinibinary="$Hostuserhome/.local/share/x11docker/tini-static"
-      Tinibinary="$(realpath "$Tinibinary" 2>/dev/null)"
+      Tinibinary="$(realpath "$Tinibinary" 2>/dev/null ||:)"
       [ -e "$Tinibinary" ] || Tinibinary=""
       [ "$Tinibinary" ] && {
         [ -x "$Tinibinary" ] || {
@@ -4434,7 +4522,7 @@ WantedBy=x11docker.target
 " >> $Systemdjournal
 
       echo "[Manager]
-DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'\n' ; for Line in $Customenvironment ; do echo -n "$Line " ; done)
+DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'\n' ; for Line in $Containerenvironment ; do echo -n "$Line " ; done)
 " >> $Systemdenvironment
     ;;
 
@@ -4506,7 +4594,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       case $Initsystem in
         none) ;;
         tini) Dockercommand="$Dockercommand \\
-  --volume $Winsubpath$Tinibinary:$Cshare/tini:ro" ;;
+  --volume $(convertpath --volume "$Tinibinary" "$Cshare/tini"):ro" ;;
         systemd)
           Switchcontaineruser="yes"
           Sharecgroup="yes"
@@ -4605,19 +4693,19 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
 
       # shared host folders
       Dockercommand="$Dockercommand \\
-  -v $(convertpath "$Sharefolder" | cut -d: -f1):$Cshare:rw"
+  -v $(convertpath --volume "$Sharefolder" $Cshare):rw"
   
       # --home, --homedir
       [ "$Benutzerhosthome" = "yes" ] && [ -n "$Benutzerhosthomefolder" ] && Dockercommand="$Dockercommand \\
-  -v $(convertpath "$Benutzerhosthomefolder" | cut -d: -f1):'$Benutzerhome':rw"
+  -v $(convertpath --volume "$Benutzerhosthomefolder" "$Benutzerhome"):rw"
   
       # --sharedir
       for ((Count=1 ; Count<=$Sharevolumescount ; Count++)) ; do
         case "${Sharevolumes[$Count]}" in
           "$Benutzerhome")  Dockercommand="$Dockercommand \\
-  -v $(convertpath "$Benutzerhome" | cut -d: -f1):'$Benutzerhome/$(basename $Benutzerhome)':rw" ;;
+  -v $(convertpath --volume "$Benutzerhome" "$Benutzerhome/$(basename $Benutzerhome)"):rw" ;;
           *) Dockercommand="$Dockercommand \\
-  -v $(convertpath "${Sharevolumes[$Count]}"):rw" ;;
+  -v $(convertpath --volume "${Sharevolumes[$Count]}"):rw" ;;
         esac
       done
 
@@ -4634,12 +4722,12 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   -e DISPLAY=$Newdisplay -e XAUTHORITY=$Cshare/Xclientcookie"
           # X socket will be softlinked to /tmp/.X11-unix in container.CMD.sh
           [ "$Newxsocket" ] && Dockercommand="$Dockercommand \\
-  -v $(convertpath "$Newxsocket" | cut -d: -f1):/X$Newdisplaynumber:rw"
+  -v $(convertpath --volume "$Newxsocket" "/X$Newdisplaynumber"):rw"
         ;;
       esac
       # Wayland socket will be softlinked to XDG_RUNTIME_DIR in container.CMD.sh
       [ "$Sharewayland" = "yes" ] && Dockercommand="$Dockercommand \\
-  -v $XDG_RUNTIME_DIR/$Newwaylandsocket:/$Newwaylandsocket:rw"
+  -v $(convertpath --volume "$XDG_RUNTIME_DIR/$Newwaylandsocket" "/$Newwaylandsocket"):rw"
       ## option --gpu : share graphics adapter device files
       [ "$Sharegpu" = "yes" ] && {
         while read -r Line ; do
@@ -4672,11 +4760,11 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   -v $Cachefolder/pulseclient.conf:/etc/pulse/client.conf:ro"
       ## option --workdir or /tmp
       Dockercommand="$Dockercommand \\
-  --workdir $Workdir"
+  --workdir '$Workdir'"
   
       # option --env: add custom environment. Only needed here for possible 'docker exec'. Otherwise set in container.CMD.sh
       IFS=$'\n'
-      for Line in $Customenvironment ; do
+      for Line in $Containerenvironment ; do
         Dockercommand="$Dockercommand \\
   --env $Line"
       done
@@ -4734,7 +4822,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo "Imagecommand=\"$Imagecommand\""
   echo ""
   
-  [ "$Winsubsystem" ] && echo 'export PATH="'$Winsubmount'/c/Program Files/docker:'$Winsubmount'/c/Program Files/Docker/Docker/resources/bin:$PATH"'
+  [ "$Winsubsystem" ] && echo "export PATH=\"$(convertpath --subsystem "C:/Program Files/docker"):$(convertpath --subsystem "C:/Program Files/Docker/Docker/resources/bin"):$PATH\""
 
   echo "# check whether docker daemon is running and refresh images.list for x11docker-gui"
   echo "mkfile $Cachebasefolder/x11docker-gui/images.list"
@@ -4940,7 +5028,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
 
   echo   "  echo '# custom environment (--env)'"
   IFS=$'\n'
-  for Line in $Customenvironment ; do
+  for Line in $Containerenvironment ; do
     echo "  echo export $(escapestring $Line)"
   done
   IFS=$' \t\n'
@@ -5105,7 +5193,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
 
   # custom environment variables
   IFS=$'\n'
-  for Line in $Customenvironment ; do
+  for Line in $Containerenvironment ; do
     [ "$Line" ] && echo "export $Line"
   done
   IFS=$' \t\n'
@@ -5521,7 +5609,7 @@ exit 0' >> /etc/rc.local"
   echo "}"
   echo "trap touchpullready EXIT"
   echo "echo ''"
-  [ "$Winsubsystem" ] && echo "export PATH=\"$Winsubmount/c/Program Files/docker:$Winsubmount/c/Program Files/Docker/Docker/resources/bin:\$PATH\""
+  [ "$Winsubsystem" ] && echo "export PATH=\"$(convertpath --subsystem "C:/Program Files/docker"):$(convertpath --subsystem "C:/Program Files/Docker/Docker/resources/bin"):\$PATH\""
   echo "read -n1 -e -p \"Image '$Imagename' not found locally. "
   echo "Do you want to pull it from docker hub? [Y|n]\" Choice"
   echo "[[ \"\$Choice\" == [YyJj]* ]] || [ -z \"\$Choice\" ] && $Sudo $Dockerexe pull $Imagename 2>> $Containerlogfile"
@@ -5562,10 +5650,12 @@ exit 0' >> /etc/rc.local"
 
   # declaring functions echoes them into xinitrc
   echo "Timetosaygoodbye=$Timetosaygoodbye"
+  echo "Timetosaygoodbyefifo=$Timetosaygoodbyefifo"
+  echo "Sharefolder=$Sharefolder"
   echo "Bgpidfile=$Bgpidfile"
   echo "Winsubsystem=$Winsubsystem"
   declare -f storepid
-  declare -f rocknroll waitfortheend
+  declare -f rocknroll waitfortheend saygoodbye
   declare -f rmcr no_xhost
 
   echo "$Messagefifofuncs"
@@ -5704,9 +5794,9 @@ exit 0' >> /etc/rc.local"
 
       [ "$Shareclipboard" = "yes" ] && [ -n "$Hostdisplay" ] && {
         case $Xserver in
-          --xpra|--xpra-xwayland|--nxagent|--vcxsrv) ;;     # have their own clipboard management
-          --hostdisplay) ;;                                 # already same clipboard
-          *)                                                # synchronizing between different X servers
+          --xpra|--xpra-xwayland|--nxagent|--vcxsrv|--xwin) ;;  # have their own clipboard management
+          --hostdisplay) ;;                                     # already same clipboard
+          *)                                                    # synchronizing between different X servers
             echo "# option '-c, --clipboard': Run clipboard script "
             echo "# (text copy only) (xpra has its own clipboard managment including images)"
             echo "bash $Shareclipboardscript & storepid \$! shareclipboard"
@@ -5878,8 +5968,10 @@ exit 0' >> /etc/rc.local"
   Terminal for password frontend:                 $Passwordterminal
   Terminal to show docker pull progress:          $Pullterminal
   Running on console:                             $Tty
-  Running over SSH:                               $Ssh
-  Running on Windows subsystem:                   ${Winsubsystem:-no}"
+  Running over SSH:                               $Ssh"
+    [ "$Winsubsystem" ] && verbose -d "Running on Windows subsystem: $Winsubsystem
+  Path to subsystem: $(convertpath --windows $Winsubpath)
+  Mount path in subsystem: $Winsubmount/"
     case $X11dockermode in
       run)
         verbose "Generated container.rootsetup.sh:
@@ -5962,7 +6054,7 @@ Keywords=docker x11docker $(echo $Name | tr -c '[:alpha:][:digit:][:blank:]' ' '
     Count=$(( Count + 1 ))
     Dauer=$(( $(date +%s) - $Zeit ))
     sleep $(awk "BEGIN { print $Count * 0.1 }")
-    [ $Dauer -gt 30 ] && error "X server $Xserver not ready after 30s."
+    [ $Dauer -gt 60 ] && error "X server $Xserver not ready after 60s."
     verbose "Waiting since ${Dauer}s for $Xserver to be ready."
     rocknroll || { verbose -d "Stopped waiting for $Xserver due to terminating signal." ; break ; }
     grep -q -E 'xinit: giving up|unable to connect to X server|Connection refused|server error|Only console users are allowed' <$Xinitlogfile && error "Error during startup of X server $Xserver.
@@ -5997,15 +6089,13 @@ $(tail $Compositorlogfile)"
 
   # option '--showenv': show display environment variables on stdout
   [ "$Showdisplayenvironment" = "yes" ] && echo $Newxenv
-  # create easy to find file with latest created X environment for custom access
-  mkfile "$Cachebasefolder/Xenv.latest"
-  for Line in $Newxenv ; do echo $Line >> "$Cachebasefolder/Xenv.latest" ; done
+  verbose -d "New X environment: $Newxenv"
 }
 
 { #### part: options --xpra / --xpra-xwayland: start and watch xpra server and xpra client
   case $Xserver in
     --xpra|--xpra-xwayland)
-      notify-send 'Stay tuned, xpra will start soon.' 2>/dev/null
+      notify-send 'Stay tuned, xpra will start soon.' 2>/dev/null &
       note        'Stay tuned, xpra will start soon.'
       # loop to keep xpra running.
       # xpra server can crash with some applications like atom editor, --mmap=no fixes that.
@@ -6077,19 +6167,18 @@ $(tail $Xpraserverlogfile)"
       Containerpid=$(cat $Containerpidfile)
       Containerid=$(cat $Containeridfile)
       Containerip=$(cat $Containeripfile)
+      Containerpid1=$(cat $Containerpid1pidfile)
       
       # watch container
       [ "$Containerpid" ] && checkpid $Containerpid && {
         storepid $Containerpid container
-        setonwatchpidlist $(cat $Containerpid1pidfile) containerpid1
+        sleep 2
+        setonwatchpidlist $Containerpid container
       }
       [ "$Winsubsystem" ] && [ "$Containerid" ] && setonwatchpidlist "CONTAINER$Containerid"
       
-      {
-        sleep 2
-        verbose -d "Process tree of container (maybe not complete yet):
-$(pstree -cp $(cat $Containerpid1pidfile) 2>&1 ||:)"
-      } &
+      [ "$Containerpid1" ] && verbose -d "Process tree of container:
+$(pstree -cp $Containerpid1 2>&1 ||:)"
     ;;
 
     exe) # --exe: run host application without docker. includes --xonly
@@ -6128,7 +6217,6 @@ $(tail $Logfile)"
       [ "$Showcontainerid" = "yes" ] && echo ""
       [ "$Showcontainerpid1pid" = "yes" ] && echo $Hostexepid
       echo $Hostexepid >>$Containerpid1pidfile
-      
       storepid $Hostexepid hostexe
       setonwatchpidlist $Hostexepid hostexe
       
@@ -6140,11 +6228,11 @@ $(pstree -p $Hostexepid 2>&1 ||:)"
   
 { #### part: --pulseaudio: load unix socket module (authenticated with cookie) or TCP module (authenticated with container IP)
   case $Pulseaudiomode in
-    socket) $Mksu "pactl load-module module-native-protocol-unix socket=$Sharefolder/pulseaudio.socket 2>&1" >>$Pulseaudiologfile ;;
+    socket) $Mksu "pactl load-module module-native-protocol-unix socket=$Sharefolder/pulseaudio.socket 2>&1" >>$Messagelogfile ;;
     tcp) 
       case $Winsubsystem in
-        "") $Mksu "pactl load-module module-native-protocol-tcp  port=$Pulseaudioport auth-ip-acl=${Containerip:-"127.0.0.1"} 2>&1" >>$Pulseaudiologfile ;;
-        *)  env XDG_RUNTIME_DIR="" HOME="" cmd.exe /C "C:/cygwin64/bin/pactl.exe load-module module-native-protocol-tcp  port=$Pulseaudioport auth-ip-acl=${Containerip:-$Hostip} 2>&1" 2>&1 >>$Pulseaudiologfile ;;
+        "") $Mksu "pactl load-module module-native-protocol-tcp  port=$Pulseaudioport auth-ip-acl=${Containerip:-"127.0.0.1"} 2>&1" >>$Messagelogfile ;;
+        *)  env XDG_RUNTIME_DIR="" HOME="" cmd.exe /C "C:/cygwin64/bin/pactl.exe load-module module-native-protocol-tcp  port=$Pulseaudioport auth-ip-acl=${Containerip:-$Hostip} 2>&1" 2>&1 >>$Messagelogfile ;;
       esac
     ;;
   esac
@@ -6161,14 +6249,12 @@ $(pstree -p $$ 2>&1 ||:)"
     --weston|--weston-xwayland|--xpra-xwayland|--xdummy-xwayland) Compositorkeyword="weston-desktop-shell" ;;
     --kwin|--kwin-xwayland)                                       Compositorkeyword="X-Server" ;;
   esac
-
   [ "$Compositorcommand" ] && {
     $Mksu "exec dbus-launch    $Compositorcommand  >> $Compositorlogfile  2>&1 & echo \$! >>$Compositorpidfile"
     waitforlogentry compositor $Compositorlogfile    "$Compositorkeyword" || error "Startup of Wayland compositor failed.
   Can not run $Xserver.
   Last lines of compositor log:
 $(tail $Compositorlogfile)"
-
     case $Xserver in
       --xpra-xwayland|--xdummy-xwayland)  # hide weston window
         $Mksu "xdotool windowunmap 0x$(printf '%x\n' $(grep 'window id' $Compositorlogfile | rev | cut -d' ' -f1 | rev))" ;;
@@ -6178,8 +6264,9 @@ $(tail $Compositorlogfile)"
 
 { #### part: start X server
   case $Xserver in
-    --xpra|--xephyr|--xdummy|--xvfb|--xwayland|--nxagent|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland|--xwin)
-      $Mksu "exec env WAYLAND_DISPLAY=$Newwaylandsocket      xinit $Xinitrc -- $Xcommand 2>&1 | rmcr >> $Xinitlogfile" ;;
+    --xpra|--xephyr|--xdummy|--xvfb|--xwayland|--nxagent|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland)
+      $Mksu "exec env WAYLAND_DISPLAY=$Newwaylandsocket      xinit $Xinitrc -- $Xcommand             >> $Xinitlogfile  2>&1 " ;;
+    --xwin) Xcommand="$(echo $Xcommand | sed 's/\\//g')" ;   xinit $Xinitrc -- $Xcommand             >> $Xinitlogfile  2>&1   ;;
     --xorg)
       case $Xlegacywrapper in
         yes) $Mksu   "exec                                   xinit $Xinitrc -- $Xcommand             >> $Xinitlogfile  2>&1 " ;;
@@ -6223,24 +6310,29 @@ $(tail $Compositorlogfile)")"
 }
 ######### ToDo notes for development
 todo() {
+# --hostdisplay: check xdpyinfo for MIT-SHM to avoid --hostipc
+# --dbus-system: give up restricted setup?
+# ISSUE nested x11docker setup: parent x11docker `--stderr` prints with big delays
+
 # MSYS2/Cygwin/WSL:
-#       needs development:
-#          --pulseaudio should run authenticated
+#       needs test:
+#          --pulseaudio
+#          --wayland: Nested setup in WSL with weston may work:
+#                     x11docker --stderr --exe -- x11docker --wayland x11docker/xfce xfce4-terminal
 #       not implemented, but maybe possible:
 #          --wayland:    create nested setup for WSL in X?
 #          --sharessh:   socket sharing impossible, but maybe similar setup?
 #       impossible:
 #          --alsa
 #          --systemd, --sharecgroup, elogind
+#          --hostuser
 #       useless:
 #          --showpid1 (shows pid in docker VM)
 
 # BUG x11docker/cde fails
 # jess/cathode fails with xcb error, needs bug report
-# check xhost +localhost
-# BUG --pulseaudio fails with --user due to wrong socket ownership (#54). Fallback to tcp?
 
-# --hostdisplay: check xdpyinfo for MIT-SHM to avoid --hostipc
+# check xhost +localhost
 # further checks of pam.d
 # error message window in wayland fails: xterm: no display. should use konsole
 
@@ -6263,7 +6355,7 @@ todo() {
 # bug report to docker about --volume waylandsocket in --volume
 # --xpra-xwayland, xdummy-xwayland: use kwin-wayland as fallback for missing weston?
 # --xorg: getty and autologin to avoid Xwrapper.config changes?
-# --wayland --user/--hostuser: wayland socket access denied due to XDG_RUNTIME_DIR
+# --wayland --user/--hostuser: wayland socket access denied due to XDG_RUNTIME_DIR file access permissions
 # --nxagent 3.5.0: Mageia 6: seamless mode fails
 # fedora: SElinux issue: '--security-opt label=type:container_runtime_t': need more restrictive setting
 #         https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix
@@ -6272,7 +6364,7 @@ todo() {
 # check X in container #7
 # some tests with Xephyrglamor=no
 
-### BUG collection: non x11docker bugs
+### BUG collection: 3rd party bugs
 # BUG segmentation faults in gnome3 based desktops: pantheon budgie gnome3
 # BUG Xwayland does not always sit at 0.0 on multiple outputs.
 #     bugreport: https://bugzilla.redhat.com/show_bug.cgi?id=1498665
