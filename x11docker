@@ -1491,6 +1491,7 @@ Hostutctime=$(date +%:::z) ; [ "$(cut -c1 <<< "$Hostutctime")" = "+" ] && Hostut
 Ssh=""
 Tty=""
 Ttyinuse=""
+Hostmitshm="yes"                               # X on host has extension MIT-SHM enabled? Assume yes, check later
 
 # Check for MS Windows subsystem
 Winsubsystem=""
@@ -2331,6 +2332,11 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
     }
   }
   
+  # Check whether host X server has MIT-SHM enabled.
+  command -v xdpyinfo >/dev/null && xdpyinfo >/dev/null 2>&1 && {
+    xdpyinfo | grep -q "MIT-SHM" && Hostmitshm="yes" || Hostmitshm="no"
+  }
+  
   # --fullscreen is nonsense on tty at all. Avoids weston error on tty.
   [ "$Tty" = "yes" ] && Fullscreen="no"
           
@@ -2351,11 +2357,9 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   [ "$Forcetrusted" = "yes" ]      && Trusted="yes"
 
   # --hostdisplay --gpu
-  [ "$Xserver" = "--hostdisplay" ] && [ "$Sharehostipc" = "no" ] && [ "$Sharegpu" = "yes" ] && {
+  [ "$Xserver" = "--hostdisplay" ] && [ "$Sharegpu" = "yes" ] && {
     note "To allow GPU acceleration (option --gpu) with --hostdisplay,
-  x11docker will share host resources with insecure option --hostipc
-  and allow trusted cookies with option --trusted."
-    Sharehostipc="yes"
+  x11docker will allow trusted cookies (option --trusted)."
     Trusted="yes"
   }
 
@@ -2364,13 +2368,13 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
     command -v xdpyinfo >/dev/null && {
       xdpyinfo | grep -q SECURITY || {
         note "Your X server does not support untrusted cookies.
-  Have to use trusted cookies and to enable insecure option --hostipc.
+  Have to allow trusted cookies.
   Consider to use options --xpra or --nxagent instead of --hostdisplay."
         Trusted="yes"
-        Sharehostipc="yes"
       }
     } || note "Command 'xdpyinfo' not found. Need it to check
-  whether Xorg supports untrusted cookies for --hostdisplay.
+  whether Xorg supports untrusted cookies for --hostdisplay
+  and whether extension MIT-SHM for shared memory is enabled.
   Please install 'xdpyinfo'."
   }
 
@@ -2382,11 +2386,10 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   Cannot enable or disable it, it depends on your Wayland compositor." ;;
       --hostdisplay)
         warning "To allow clipboard sharing with option --hostdisplay,
-  trusted cookies and insecure option --hostipc will be enabled.
+  trusted cookies will be enabled.
   No protection against X security leaks is left!
   Please consider to use another X server option."
         Trusted="yes"
-        Sharehostipc="yes"
       ;;
     esac
     case $Xserver in
@@ -2400,15 +2403,22 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   [ "$Xserver" = "--hostdisplay" ] && [ "$Ssh" = "yes" ] && {
     [ "$Sharehostipc" = "no" ] || [ "$Trusted" = "no" ] || [ "$Sharehostnet" = "no" ]  && {
       warning "For SSH connection with option --hostdisplay
-  x11docker must enable options --hostipc, --hostnet and --trusted.
+  x11docker must enable options --hostnet and --trusted.
   It is recommended to use other X server options
   like --xpra, --xephyr or --nxagent."
-      Sharehostipc="yes"
       Sharehostnet="yes"
       Trusted="yes"
     }
   }
 
+  [ "$Xserver" = "--hostdisplay" ] && [ "$Trusted" = "yes" ] && [ "$Hostmitshm" = "yes" ] && [ "$Sharehostipc" = "no" ] && {
+    warning "To allow --hostdisplay with trusted cookies,
+  x11docker must share host IPC namespace with container to allow 
+  shared memory for X extension MIT-SHM. 
+  Enabling option --hostipc to avoid Video RAM access errors."
+    Sharehostipc="yes"
+  }
+  
   # --hostnet --no-internet
   [ "$Sharehostnet" = "yes" ] && [ "$Internetaccess" = "no" ] && {
     note "You have chosen --hostnet and --no-internet. That does not work.
@@ -2603,7 +2613,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
         warning "Option --hostdisplay with trusted cookies provides
       QUITE BAD CONTAINER ISOLATION !
   Keylogging and controlling host applications is possible!"
-        [ "$Sharehostipc" = "no" ] && warning "Using --hostdisplay with --trusted but without
+        [ "$Sharehostipc" = "no" ] && [ "$Hostmitshm" = "yes" ] && warning "Using --hostdisplay with --trusted but without
   insecure option --hostipc can lead to graphical issues and RAM access errors."
       }
       [ "$Desktopmode" = "yes" ] && note "Can not avoid to use host window manager
@@ -3557,12 +3567,12 @@ fi
   -extension X-Resource +extension SECURITY +extension DAMAGE"
       Xserveroptions="$Xserveroptions \\
   -extension XINERAMA -xinerama"
-      { [ "$Sharehostipc" = "yes" ] || [ "$X11dockermode" = "exe" ] ; } && { # --hostipc needed for shared memory.
-        Xserveroptions="$Xserveroptions +extension MIT-SHM"
-      } || {
-        Xserveroptions="$Xserveroptions -extension MIT-SHM"
-        Xprashm="XPRA_XSHM=0"
-      }
+      case $Sharehostipc in
+        yes) Xserveroptions="$Xserveroptions +extension MIT-SHM" ;;
+        no)
+          Xserveroptions="$Xserveroptions -extension MIT-SHM"
+          Xprashm="XPRA_XSHM=0" ;;
+      esac
     ;;
   esac
   
@@ -6310,7 +6320,6 @@ $(tail $Compositorlogfile)")"
 }
 ######### ToDo notes for development
 todo() {
-# --hostdisplay: check xdpyinfo for MIT-SHM to avoid --hostipc
 # --dbus-system: give up restricted setup?
 # ISSUE nested x11docker setup: parent x11docker `--stderr` prints with big delays
 
