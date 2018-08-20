@@ -20,7 +20,7 @@ System changes in running containers are discarded after use.
    - Restricts container capabilities to bare minimum.
    - Container user is same as host user to avoid root in container.
  - No dependencies inside of docker images.
- - No obliging [dependencies](#dependencies) on host beside X and docker. Recommended: `nxagent` and `Xephyr`.
+ - No obliging [dependencies](#dependencies) on host beside X and docker. Recommended: `xpra` and `Xephyr`.
  - [Wayland](#wayland) support.
  - [Optional features](#options): 
    - [Persistent data storage](#shared-folders-and-home-in-container) with shared host folders and a persistant `HOME` in container.
@@ -30,7 +30,7 @@ System changes in running containers are discarded after use.
    - [Language locale](#language-locales) creation.
  - [Network setup](#network-setup) with [SSH](#ssh-x-forwarding), [VNC](#vnc) or [HTML5](#html5-web-applications) possible.
  - Supports [init systems](#init-system) `tini`, `runit`, `openrc`, `SysVinit` and `systemd` in container.
- - Developed on debian 9. Tested on fedora 28, CentOS 7, openSUSE 42.3, Ubuntu 18.04, Manjaro 17, Mageia 6 and Arch Linux.
+ - Developed on debian 9. Tested on fedora 28, CentOS 7, openSUSE 42.3, Ubuntu 18.04, Manjaro 17, Mageia 6 and Arch Linux. Runs also on MS Windows in [MSYS2, Cygwin and WSL](#msys2-cygwin-and-wsl-on-ms-windows).
  - Easy to use. [Examples](#examples): 
    - `x11docker jess/cathode`
    - `x11docker --desktop --size 320x240 x11docker/lxde`
@@ -50,7 +50,8 @@ General syntax:
 ```
 To run a docker image with new X server (auto-choosing X server):
   x11docker [OPTIONS] IMAGE [COMMAND]
-  x11docker [OPTIONS] -- "[DOCKER_RUN_OPTIONS]" IMAGE [COMMAND [ARG1 ARG2 ...]]
+  x11docker [OPTIONS] -- IMAGE [COMMAND [ARG1 ARG2 ...]]
+  x11docker [OPTIONS] -- DOCKER_RUN_OPTIONS -- IMAGE [COMMAND [ARG1 ARG2 ...]]
 To run a host application on a new X server:
   x11docker [OPTIONS] --exe COMMAND
   x11docker [OPTIONS] --exe -- COMMAND [ARG1 ARG2 ...]
@@ -421,6 +422,14 @@ env $Xenv x11vnc -noshm -forever -localhost -rfbport 5910
 In another terminal, start VNC viewer with `vncviewer localhost:5910`.
 See `man x11vnc`  for many details and further infos.
 Option `-noshm` disables shared memory (MIT-SHM). To allow shared memory, remove `-noshm` and use isolation breaking x11docker option `--hostipc`.
+ 
+# MSYS2, Cygwin and WSL on MS Windows
+x11docker runs on MS Windows in [MSYS2](https://www.msys2.org/), [Cygwin](https://www.cygwin.com/) 
+and [WSL (Windows subsystem for Linux)](https://docs.microsoft.com/en-us/windows/wsl/about).
+ - Install X server [`VcXsrv`](https://sourceforge.net/projects/vcxsrv/) on Windows into `C:/Program Files/VcXsrv` (option `--vcxsrv`).
+ - Cygwin/X also provides `Xwin` (option `--xwin`). Install `xinit` package in Cygwin.
+ - For sound with option `--pulseaudio` install Cygwin in `C:/cygwin64` with package `pulseaudio`. It runs in MSYS2 and WSL, too.
+ - Error messages like `./x11docker: line 2: $'\r': command not found` indicate a wrong line ending conversion from git. Run `dos2unix x11docker`.
  
 # Simple but insecure alternative
 There are short and simple but insecure alternatives for x11docker. 

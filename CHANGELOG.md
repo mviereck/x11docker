@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [5.0.0](https://github.com/mviereck/x11docker/releases/tag/v5.0.0) - 2018-08-20
 ### Added
  - Support of MSYS2, Cygwin and WSL on MS Windows. 
    [(#55)](https://github.com/mviereck/x11docker/issues/55)
@@ -20,7 +20,6 @@ Project website: https://github.com/mviereck/x11docker
    [(#61)](https://github.com/mviereck/x11docker/issues/61)
  - `--cachebasedir`: Set custom cache base directory. Replaces `--cachedir`.
  - `--homebasedir`: Set base directory where to store folders for `--home`.
-
 ### Changed
  - **API CHANGE**: Syntax changed for custom `DOCKER_RUN_OPTIONS` 
    [(#58)](https://github.com/mviereck/x11docker/issues/58). New:
@@ -43,6 +42,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--pulseaudio` allows optional argument `=tcp` or `=socket`.
    Defaults to connection over shared socket on Linux and to TCP connection
    on MS Windows. On Linux both modes are possible, on MS Windows TCP only.
+ - `--verbose`: takes optional argument `c` for colored output, eg `-vc`.
 ### Deprecated
  - `--cachedir`: Use `--cachebasedir` instead.
 ### Removed
@@ -75,7 +75,6 @@ Project website: https://github.com/mviereck/x11docker
  - `--xorg`: Allow running Xorg as root from within X 
    if `/etc/X11/Xwrapper.config` is not configured to allow it.
  - `--xpra`, `--xpra-xwayland`: Set maximal `--quality 100`.
- - `--verbose`: takes optional argument `c` for colored output, eg `-vc`.
 
 ### Fixed
  - `--xpra`: Check for tty timeout had a bug that caused all clients 
