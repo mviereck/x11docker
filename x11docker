@@ -1334,6 +1334,12 @@ verlte() {              # version number check $1 less than or equal $2
 verlt() {               # version number check $1 less than $2
   [ "${1:-}" = "${2:-}" ] && return 1 || { verlte "${1:-}" "${2:-}" && return 0 || return 1 ; }
 }
+getrandomnumber() {
+  # chosen by fair dice roll
+  # guaranteed to be random
+  echo "4"
+  
+}
 isnum() {               # check if $1 is a number
   [ "1" = "$(awk -v a="${1:-}" 'BEGIN {print (a == a + 0)}')" ]
 }
@@ -1343,18 +1349,14 @@ escapestring() {        # escape special chars of $1
 }
 writeaccess() {         # check if useruid $1 has write access to folder $2
   local dirVals= gMember= IFS=
-  if IFS=$'\t' read -a dirVals < <(stat -Lc "%U	%G	%A" "${2:-}") && (
-    ( [ "$(id -u $dirVals)" == "${1:-}" ] && [ "${dirVals[2]:2:1}" == "w" ] ) ||
-    ( [ "${dirVals[2]:8:1}" == "w" ] ) ||
-    ( [ "${dirVals[2]:5:1}" == "w" ] && (
-        gMember=($(groups ${1:-} 2>/dev/null)) &&
-        [[ "${gMember[*]:2}" =~ ^(.* |)${dirVals[1]}( .*|)$ ]]
-    ) ) )
-  then
-    return 0
-  else
-    [ "w" = "$(getfacl -pn "${2:-}" | grep user:${1:-}: | rev | cut -c2)" ] && return 0 || return 1   # FIXME: could check write access for gid, if uid access fails.
-  fi
+  IFS=$'\t' read -a dirVals < <(stat -Lc "%U	%G	%A" "${2:-}")
+  [ "$(id -u $dirVals)" == "${1:-}" ] && [ "${dirVals[2]:2:1}" == "w" ]   && return 0
+  [ "${dirVals[2]:8:1}" == "w" ]                                          && return 0
+  [ "${dirVals[2]:5:1}" == "w" ] && {
+    gMember="$(groups ${1:-} 2>/dev/null)"
+    [[ "${gMember[*]:2}" =~ ^(.* |)${dirVals[1]}( .*|)$ ]]                && return 0
+  }
+  [ "w" = "$(getfacl -pn "${2:-}" | grep user:${1:-}: | rev | cut -c2)" ] && return 0 || return 1
 }
 
 { #### part: declare variables
@@ -1608,7 +1610,7 @@ Internetaccess="yes"                            # option --no-internet: disable 
 Langwunsch=""                                   # option --lang: search or create UTF-8 locale and set LANG
 
 # --pulseaudio
-Pulseaudiomode=""                               # option --pulseaudio: 'tcp' or 'socket'
+Pulseaudiomode=""                               # option --pulseaudio: 'tcp', 'socket' or 'auto'
 Pulseaudioconf=pulseclient.conf
 Lowerport=""
 Upperport=""
@@ -1794,7 +1796,7 @@ stdout() {
          --alsa)       Alsa="yes" ;;                       # enable ALSA sound (shares /dev/snd)
       -p)              Pulseaudiomode="socket" ;;          # enable pulseaudio sound
          --pulseaudio) Pulseaudiomode="${2:-}" ; shift     # enable pulseaudio sound
-                       [ "$Pulseaudiomode" ] || Pulseaudiomode="socket" ;;
+                       [ "$Pulseaudiomode" ] || Pulseaudiomode="auto" ;;
          --lang)       Langwunsch=${2:-} ; shift ;;        # locale/language setting
 
      #### Advanced options
@@ -3303,21 +3305,29 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
   Fallback: Enabling --pulseaudio=tcp"
     Pulseaudiomode="tcp"
     Alsa="no"
-  }    
-  [ "$Winsubsystem" ] &&  [ "$Pulseaudiomode" = "socket" ]  && Pulseaudiomode="tcp"
+  }
+  case $Pulseaudiomode in
+    auto) 
+      [ "$Winsubsystem" ] && Pulseaudiomode="tcp" || Pulseaudiomode="socket" # windows supports tcp mode only. 
+      [ "$Benutzer" ]     && Pulseaudiomode="tcp"  # shared socket works for same user only. Fallback to tcp if --user is specified.
+    ;;
+  esac
 
   # option '--pulseaudio'
   [ "$Pulseaudiomode" ] && warning "Option --pulseaudio allows container applications
   to catch your audio output and microphone input."
   
-  # shared socket works for same user only. Fallback to tcp if --user is specified.
-  [ "$Pulseaudiomode" ] && [ "$Benutzer" ] && Pulseaudiomode="tcp"
   
   case $Pulseaudiomode in
     socket)
-      Containerenvironment="PULSE_SERVER=unix:$Cshare/pulseaudio.socket
+      case $X11dockermode in
+        run) Containerenvironment="PULSE_SERVER=unix:$Cshare/pulseaudio.socket
 PULSE_COOKIE=$Cshare/pulseaudio.cookie
-$Containerenvironment"
+$Containerenvironment" ;;
+        exe) Containerenvironment="PULSE_SERVER=unix:$Sharefolder/pulseaudio.socket
+PULSE_COOKIE=$Sharefolder/pulseaudio.cookie
+$Containerenvironment" ;;
+      esac
 
       echo "# Connect to host pulseaudio server using mounted UNIX socket
 default-server = unix:$Cshare/pulseaudio.socket
@@ -5754,7 +5764,7 @@ exit 0' >> /etc/rc.local"
         echo     "verbose -d \"Created cookie: \$($Xauth -f Xclientcookie list 2>&1 | rmcr)\""
         echo     "chmod 644 $Xclientcookie"
         [ "$Xserver" = "--hostdisplay" ] && echo "[ '\$Xhostentry' = 'yes' ] && env XAUTHORITY=$Hostxauthority xhost -SI:localuser:$Hostuser | rmcr"
-        [ "$Xserver" = "--nxagent" ]     && echo "rm $Xclientcookie.bak"
+        [ "$Xserver" = "--nxagent" ]     && echo "rm $Xclientcookie.bak" && echo "xhost -"
       }
 
       echo "export XAUTHORITY=$Xclientcookie"
@@ -6319,6 +6329,8 @@ $(tail $Compositorlogfile)")"
 }
 ######### ToDo notes for development
 todo() {
+# BUG: --nxagent runs with xhost +
+# x11docker/xwayland: where is the X socket ??
 
 # MSYS2/Cygwin/WSL:
 #       needs test:
@@ -6337,6 +6349,8 @@ todo() {
 # --group-add: compare host and container GID? warn if group misses in container, or create it?
 # BUG x11docker/cde fails
 # jess/cathode fails with xcb error, needs bug report
+
+# BUG --pulseaudio=socket: PULSE_SERVER and PULSE_COOKIE: point to /x11docker for --exe
 
 # --dbus-system: give up restricted setup?
 # check xhost +localhost
