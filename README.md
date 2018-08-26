@@ -15,6 +15,8 @@ Persistant data and configuration storage is done with shared folders.
 Persistant container system changes can be done in Dockerfile. 
 System changes in running containers are discarded after use.
 
+[x11docker wiki](https://github.com/mviereck/x11docker/wiki) provides some Howto's for basic setups without x11docker.
+
  - Avoids X security leaks by running [additional X servers](#choice-of-x-servers-and-wayland-compositors).
  - Improves container [security](#security):
    - Restricts container capabilities to bare minimum.
@@ -28,7 +30,7 @@ System changes in running containers are discarded after use.
    - [Hardware acceleration](#hardware-acceleration) for OpenGL.
    - [Clipboard](#clipboard) sharing.
    - [Language locale](#language-locales) creation.
- - [Network setup](#network-setup) with [SSH](#ssh-x-forwarding), [VNC](#vnc) or [HTML5](#html5-web-applications) possible.
+ - Remote access with [SSH](https://github.com/mviereck/x11docker/wiki/Remote-access-with-SSH), [VNC](https://github.com/mviereck/x11docker/wiki/VNC) or [HTML5 in browser](https://github.com/mviereck/x11docker/wiki/Container-applications-running-in-Browser-with-HTML5) possible.
  - Supports [init systems](#init-system) `tini`, `runit`, `openrc`, `SysVinit` and `systemd` in container.
  - Developed on debian 9. Tested on fedora 28, CentOS 7, openSUSE 42.3, Ubuntu 18.04, Manjaro 17, Mageia 6 and Arch Linux. Runs also on MS Windows in [MSYS2, Cygwin and WSL](#msys2-cygwin-and-wsl-on-ms-windows).
  - Easy to use. [Examples](#examples): 
@@ -102,24 +104,26 @@ FROM x11docker/xfce
 RUN apt-get update && apt-get install -y midori
 ```
 ## Hardware acceleration
-Hardware acceleration for OpenGL is possible with option `--gpu`. This will work out of the box in most cases with open source drivers on host. Otherwise have a look at [Dependencies](#Dependencies).
+Hardware acceleration for OpenGL is possible with option `--gpu`. This will work out of the box in most cases with open source drivers on host. Otherwise have a look at [Dependencies](#dependencies). 
+x11docker wiki provides some [background information about hardware acceleration for docker containers.](https://github.com/mviereck/x11docker/wiki/Hardware-acceleration)
 ## Clipboard
 Clipboard sharing is possible with option `--clipboard`. Image clips are possible with `--xpra` and `--hostdisplay`. Some X server options need package `xclip` on host.
 ## Sound
-Sound is possible with options `--pulseaudio` and `--alsa`.
+Sound is possible with options `--pulseaudio` and `--alsa`. 
+(Some background information is given in [x11docker wiki about sound for docker containers.](https://github.com/mviereck/x11docker/wiki/Pulseaudio-sound-over-TCP-or-with-shared-socket)
  - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and in image.
  - For ALSA sound with `--alsa` you can specify the desired sound card with e.g. `--env ALSA_CARD=Generic`. Get a list of available sound cards with `aplay -l`.
 ## Language locales
 You have two possibilities to set [language locale](https://wiki.archlinux.org/index.php/locale) in docker image. 
  - For support of chinese, japanese and korean characters install a font like `fonts-arphic-uming` in image.
-### language locale created offhand
+### Language locale created offhand
 x11docker provides option `--lang $LANG` for flexible language locale settings. 
  - x11docker will check on container startup if the desired locale is already present in image and enable it. 
  - If x11docker does not find the locale, it creates it on container startup.
    - Debian images need package `locales`. 
    - x11docker will only look for or create `UTF-8`/`utf8` locales. 
  - Examples: `--lang de` for German, `--lang zh_CN` for Chinese, `--lang ru` for Russian, `--lang $LANG` for your host locale.
-### language locale precompiled in image
+### Language locale precompiled in image
 You can choose between already installed language locales in image setting environment variable `LANG`, e.g. in image with `ENV LANG=en_US.utf8` or with x11docker option `--env LANG=en_US.utf8`.  
  - Already installed locales in image can be checked with `docker run IMAGENAME locale -a`. 
  - Example to create a language locale in image:
@@ -369,59 +373,6 @@ mount -t cgroup cgroup /sys/fs/cgroup/systemd -o none,name=systemd
 Some desktop environments and applications need a running dbus daemon and/or dbus user session. 
  - use `--dbus-system` to run dbus system daemon. This includes option `--dbus`.
  - use `--dbus` to run image command with `dbus-launch` (fallback: `dbus-run-session`) for a dbus user session.
-
-# Network setup
-## SSH X forwarding
-You can run x11docker on remote servers with `ssh -X` like a regular X application. 
-### SSH with xpra
-Example for an SSH setup with xpra:
-```
-read Xenv < <(x11docker --xdummy --display=30 x11docker/lxde pcmanfm)
-echo $Xenv && export $Xenv
-# replace "start" with "start-desktop" to forward a desktop environment
-xpra start :30 --use-display --start-via-proxy=no
-```
-On another system in your network, attach with xpra over SSH:
-```
-xpra attach ssh:HOSTNAME:30     # replace HOSTNAME with IP or host name of ssh server
-```
-You can detach the SSH connection and reattach later again without terminating the application:
-```
-xpra detach ssh:HOSTNAME:30
-```
-You can stop xpra server without terminating x11docker:
-```
-xpra stop ssh:HOSTNAME:30
-```
-Warning: don't try this on localhost due to an xpra memory bug. On localhost, use `xpra attach :30` instead.
-
-## HTML5 web applications
-To provide dockered applications as HTML5 web applications, you need `xpra` and `websockify`. Example:
-```
-read Xenv < <(x11docker --xdummy  x11docker/lxde pcmanfm)
-echo $Xenv && export $Xenv
-# replace "start" with "start-desktop" to forward a desktop environment
-xpra start $DISPLAY --use-display --html=on --bind-tcp=localhost:14501 --start-via-proxy=no
-```
-Now you can access your application at http://localhost:14501. Option settings are possible at http://localhost:14501/connect.html. Further infos at [xpra wiki: HTML5 clients](https://xpra.org/trac/wiki/Clients/HTML5).
-
-### HTML5 web applications with GTK3 broadway
-[Broadway](https://developer.gnome.org/gtk3/stable/gtk-broadway.html) is a GTK3 specific feature to allow HTML5 web applications. The image needs `libgtk-3-bin` (debian) or `gtk3` (Arch Linux) to be installed. A possible setup with x11docker:
-```
-x11docker --nothing --env BROADWAY_DISPLAY=:5 --env GDK_BACKEND=broadway \
-          -- --publish=8085:8085 x11docker/xfce "broadwayd :5 & sleep 2 && xfce4-terminal"
-```
-Now you can access the dockered web application at http://localhost:8085. A sample setup without x11docker is [moondev/gtk3-docker](https://github.com/moondev/gtk3-docker). 
-
-## VNC
-Sample setup for VNC access:
-```
-read Xenv < <(x11docker --xdummy --showenv x11docker/lxde)
-env $Xenv x11vnc -noshm -forever -localhost -rfbport 5910
-```
-In another terminal, start VNC viewer with `vncviewer localhost:5910`.
-See `man x11vnc`  for many details and further infos.
-Option `-noshm` disables shared memory (MIT-SHM). To allow shared memory, remove `-noshm` and use isolation breaking x11docker option `--hostipc`.
  
 # MSYS2, Cygwin and WSL on MS Windows
 x11docker runs on MS Windows in [MSYS2](https://www.msys2.org/), [Cygwin](https://www.cygwin.com/) 
@@ -431,40 +382,6 @@ and [WSL (Windows subsystem for Linux)](https://docs.microsoft.com/en-us/windows
  - For sound with option `--pulseaudio` install Cygwin in `C:/cygwin64` with package `pulseaudio`. It runs in MSYS2 and WSL, too.
  - Error messages like `./x11docker: line 2: $'\r': command not found` indicate a wrong line ending conversion from git. Run `dos2unix x11docker`.
  
-# Simple but insecure alternative
-There are short and simple but insecure alternatives for x11docker. 
-### Alternative for single applications
-This is similar to x11docker option `--hostdisplay`:
- - Share access to host X server with environment variable `DISPLAY` and X unix socket in `/tmp/.X11-unix`. 
- - Allow access with `xhost` for current local user and create a similar container user.
- - Allow shared memory with `--ipc=host` to avoid RAM access failures and rendering glitches due to extension `MIT-SHM`.
- - Drop all capabilities with `--cap-drop=ALL --security-opt=no-new-privileges` to improve container security.
-```
-xhost +SI:localuser:$(id -un)
-docker run --rm -e DISPLAY=$DISPLAY \
-            -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-            --user $(id -u):$(id -g) \
-            --ipc=host \
-            --cap-drop=ALL --security-opt=no-new-privileges \
-            IMAGENAME IMAGECOMMAND
-```
-This nice short solution has the disadvantage of breaking container isolation. X security leaks like keylogging and remote host control can be abused by container applications.
-### Alternative for desktop environments
-This is similar to x11docker option `--xephyr`:
- - Run Xephyr with disabled shared memory (extension `MIT-SHM`) and disabled extension `XTEST`.
- - Set `DISPLAY` and share access to new unix socket `/tmp/.X11-unix/X1`.
- - Create unprivileged container user to avoid root in container.
- - Drop all capabilities with `--cap-drop=ALL --security-opt=no-new-privileges` to improve container security.
-```
-Xephyr :1 -extension MIT-SHM -extension XTEST &
-docker run --rm -e DISPLAY=:1 \
-            -v /tmp/.X11-unix/X1:/tmp/.X11-unix/X1:rw \
-            --user $(id -u):$(id -g) \
-            --cap-drop=ALL --security-opt=no-new-privileges \
-            IMAGENAME IMAGECOMMAND
-```
-This solution is more secure than the above one as it does not give access to display :0 with host applications and does not need `--ipc=host`. To use this with single applications you can run a host window manager on Xephyr display, too, for example with `env DISPLAY=:1 x-window-manager`.
-
 # Examples
 Some image examples can be found on docker hub: https://hub.docker.com/u/x11docker/
 
