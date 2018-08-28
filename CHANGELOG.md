@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Fixed
+ - `--nxagent`: X authentication was set to `xhost +`. 
+   Now restricted to cookie using clients again.
+
 ## [5.0.0](https://github.com/mviereck/x11docker/releases/tag/v5.0.0) - 2018-08-20
 ### Added
  - Support of MSYS2, Cygwin and WSL on MS Windows. 
