@@ -29,6 +29,7 @@ System changes in running containers are discarded after use.
    - [Sound](#sound) with pulseaudio or ALSA.
    - [Hardware acceleration](#hardware-acceleration) for OpenGL.
    - [Clipboard](#clipboard) sharing.
+   - [Printing](#Printer) over CUPS.
    - [Language locale](#language-locales) creation.
  - Remote access with [SSH](https://github.com/mviereck/x11docker/wiki/Remote-access-with-SSH), [VNC](https://github.com/mviereck/x11docker/wiki/VNC) or [HTML5 in browser](https://github.com/mviereck/x11docker/wiki/Container-applications-running-in-Browser-with-HTML5) possible.
  - Supports [init systems](#init-system) `tini`, `runit`, `openrc`, `SysVinit` and `systemd` in container.
@@ -113,6 +114,8 @@ Sound is possible with options `--pulseaudio` and `--alsa`.
 (Some background information is given in [x11docker wiki about sound for docker containers.](https://github.com/mviereck/x11docker/wiki/Pulseaudio-sound-over-TCP-or-with-shared-socket)
  - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and in image.
  - For ALSA sound with `--alsa` you can specify the desired sound card with e.g. `--env ALSA_CARD=Generic`. Get a list of available sound cards with `aplay -l`.
+## Printer
+Printers on host can be provided to container with option `--printer`. It needs CUPS on host, the default printer server for most linux distributions. The container needs package `libcups2` (debian) or `libcups` (arch).
 ## Language locales
 You have two possibilities to set [language locale](https://wiki.archlinux.org/index.php/locale) in docker image. 
  - For support of chinese, japanese and korean characters install a font like `fonts-arphic-uming` in image.
@@ -245,7 +248,7 @@ _Rather special options reducing security, but not needed for regular use:_
   - `--cap-default` disables x11docker's container security hardening and falls back to default docker container capabilities.
   - `--dbus-system`, `--systemd`, `--sysvinit`, `--openrc` and `--runit` allow some container capabilities that x11docker would drop otherwise. `--systemd` also shares access to `/sys/fs/cgroup`.
   - `--hostipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory. Disables IPC namespacing.)
-  - `--hostnet` sets docker run option `--net=host`. (Allows dbus connection to host. Shares host network stack.)
+  - `--hostnet` sets docker run option `--net=host`. (Shares host network stack. Disables network namespacing. Container can spy on network traffic.)
    
 # Choice of X servers and Wayland compositors
 If no X server option is specified, x11docker automatically chooses one depending on installed dependencies and on given or missing options `--desktop`, `--gpu` and `--wayland`. 
@@ -391,7 +394,7 @@ Some image examples can be found on docker hub: https://hub.docker.com/u/x11dock
      - `x11docker --home xorilog/telegram`
    - Fractal generator [XaoS](https://github.com/patrick-nw/xaos): `x11docker patricknw/xaos`
    - GLXgears with hardware acceleration: `x11docker --gpu x11docker/xfce glxgears`
-   - Firefox with shared Download folder: `x11docker --hostipc --sharedir $HOME/Downloads jess/firefox`
+   - Firefox with shared Download folder: `x11docker --hostipc --sharedir $HOME/Downloads jess/firefox` (Option `--hostipc` avoids tab crashes. Better avoid them in `about:config` setting `browser.tabs.remote.autostart` to `false`).
    - Chromium browser: `x11docker -- jess/chromium --no-sandbox`
    - [Tor browser](https://www.torproject.org/projects/torbrowser.html): `x11docker jess/tor-browser`
    - VLC media player with shared Video folder and pulseaudio sound: 
