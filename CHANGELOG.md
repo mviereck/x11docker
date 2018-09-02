@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
+### Added
+ - `--printer`: New option to access CUPS printer server.
+    [(#73)](https://github.com/mviereck/x11docker/issues/73)
 ### Fixed
  - `--nxagent`: X authentication was set to `xhost +`. 
    Now restricted to cookie using clients again.
