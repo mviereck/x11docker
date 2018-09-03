@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Added
+ - `--webcam`: New option to share webcam devices `/dev/video*`.
+    [(#75)](https://github.com/mviereck/x11docker/issues/75)
+
 ## [5.1.0](https://github.com/mviereck/x11docker/releases/tag/v5.1.0) - 2018-09-02
 ### Added
  - `--printer`: New option to access CUPS printer server.

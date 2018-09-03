@@ -11,7 +11,7 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="5.1.0"
+Version="5.2.0-beta"
 
 usage() {               # --help: show usage information
   echo "
@@ -107,7 +107,8 @@ Clipboard, sound, printer, language:
                        create it if missing. Needs package 'locale' im image.
                        LOCALE can be e.g. ru, en, de, zh_CN, cz, fr, fr_BE.
                        Same as host: --lang=\$LANG.
-     --printer         Printer access through CUPS server.
+     --printer         Share host printers through CUPS server.
+     --webcam          Share host webcam device files.
 
 Special options:
      --env VAR=value   Set custom environment variable VAR=value
@@ -800,6 +801,55 @@ checkpid() {            # check if PID $1 is active
 pspid() {               # ps -p $1 --no-headers
   ps -p ${1:-} | tail -n+2
 }
+addrunopt() {          # store env, volume or device for docker command
+  local Count
+  case ${1:-} in
+    env)
+      Containerenvironmentcount=$((Containerenvironmentcount + 1))
+      Containerenvironment[$Containerenvironmentcount]="${2:-}"
+    ;;
+    volume) 
+      [ -e "$(convertpath --subsystem "${2:-}")" ] && {
+        Sharevolumescount=$((Sharevolumescount + 1))
+        Sharevolumes[$Sharevolumescount]="${2:-}"
+      } || warning "File or folder not found:
+  ${2:-}"
+    ;;
+    device) 
+      [ -e "$(convertpath --subsystem "${2:-}")" ] && {
+        Sharedevicescount=$((Sharedevicescount + 1))
+        Sharedevices[$Sharedevicescount]="${2:-}"
+      } || warning "Device not found:
+  ${2:-}"
+    ;;
+    cap)
+    debugnote "${2:-}"
+      for Line in ${2:-} ; do
+        Capabilities="$Capabilities
+$Line"
+      done
+    ;;
+    dump)
+      case ${2:-} in
+        env) for ((Count=$Containerenvironmentcount ; Count>=1 ; Count --)) ; do echo "${Containerenvironment[$Count]}" ; done ;;
+        volume) for ((Count=1 ; Count<=$Sharevolumescount ; Count ++))      ; do echo "${Sharevolumes[$Count]}" ; done ;;
+        device) for ((Count=1 ; Count<=$Sharedevicescount ; Count ++))      ; do echo "${Sharedevices[$Count]}" ; done ;;
+        cap)
+          Capabilities="$(echo "$Capabilities" | sort | uniq)"
+          for Line in $Capabilities ; do
+            case $Capdropall in
+              no) 
+                grep -w -q "$Line" <<< "SETPCAP MKNOD AUDIT_WRITE CHOWN NET_RAW DAC_OVERRIDE FOWNER FSETID KILL SETGID SETUID NET_BIND_SERVICE SYS_CHROOT SETFCAP" || echo "$Line"
+              ;;
+              yes)
+                echo "$Line"
+              ;;
+            esac
+          done
+      esac
+    ;;
+  esac
+}
 no_xhost() {            # remove any access to X server granted by xhost
   local Line=
   command -v xhost >/dev/null || {
@@ -1446,6 +1496,8 @@ Customdockeroptions=""                                # custom options for "dock
 Containername=""                                # generated container name
 Containerpid=""                                 # container PID
 Nonewprivileges="yes"                           # docker run option --security-opt=no-new-privileges. Default: yes. Disabled by options --cap-default and --sudouser.
+Capabilities=""                                 # capabilities to add
+Stopsignal=""
 
 # docker related files
 Dockerrc=dockerrc                               # generated script to check image, set up host and create $Imagecommandscript
@@ -1612,6 +1664,9 @@ Internetaccess="yes"                            # option --no-internet: disable 
 Langwunsch=""                                   # option --lang: search or create UTF-8 locale and set LANG
 Sharecups="no"                                  # option --printer: share access to cups printer server
 Cupsserver=""                                   #             "   : cups server address
+Sharewebcam="no"                                # option --webcam: Share webcam /dev/video*
+Sharedevices=""
+Sharedevicescount="0"
 
 # --pulseaudio
 Pulseaudiomode=""                               # option --pulseaudio: 'tcp', 'socket' or 'auto'
@@ -1634,6 +1689,7 @@ DebugPS4='+ \033[32m${LINENO}:${FUNCNAME[0]:+${FUNCNAME[0]}(): }\033[0m'
 
 # advanced options
 Containerenvironment=""                         # option '--env': set custom environment variables
+Containerenvironmentcount="0"
 Capdropall="yes"                                # option --cap-default: (don't) drop all container capabilities
 Adminusercaps="no"                              # options --sudouser, --systemd: add capabilities for general sys administration
 Switchcontaineruser="no"                        # options for init systems: user switching to toggle login daemons
@@ -1724,7 +1780,7 @@ stdout() {
   Longoptions="$Longoptions,wm:,desktop,exe,xonly"
   Longoptions="$Longoptions,fullscreen,size:,scale:,rotate:,dpi:,output-count:,gpu,xfishtank"                              # X appearance options
   Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,xtest,no-xtest,env:,showenv,showid,showpid1"                       # X and environment options
-  Longoptions="$Longoptions,home,clipboard,pulseaudio::,alsa,lang:,printer"                                                # comfort options
+  Longoptions="$Longoptions,home,clipboard,pulseaudio::,alsa,lang:,printer,webcam"                                         # comfort options
   Longoptions="$Longoptions,no-xhost,trusted,untrusted,dbus,dbus-system,pw:,no-internet,workdir:,sharessh"                 # advanced options
   Longoptions="$Longoptions,homedir:,sharedir:,cachebasedir:,homebasedir:"                                                 # host folders
   Longoptions="$Longoptions,tini,no-init,systemd,runit,openrc,sysvinit,sys-admin,sharecgroup"                              # init system options
@@ -1799,17 +1855,18 @@ stdout() {
       -m|--home)       Benutzerhosthome="yes" ;;           # share folder ~/x11docker/Imagename with container
       -c|--clipboard)  Shareclipboard="yes"  ;;            # share host clipboard with dockered applications (xpra only)
          --alsa)       Alsa="yes" ;;                       # enable ALSA sound (shares /dev/snd)
-      -p)              Pulseaudiomode="socket" ;;          # enable pulseaudio sound
+      -p)              Pulseaudiomode="auto" ;;            # enable pulseaudio sound
          --pulseaudio) Pulseaudiomode="${2:-}" ; shift     # enable pulseaudio sound
                        [ "$Pulseaudiomode" ] || Pulseaudiomode="auto" ;;
          --lang)       Langwunsch=${2:-} ; shift ;;        # locale/language setting
          --printer)    Sharecups="yes" ;;                  # share printer (cups)
+         --webcam)     Sharewebcam="yes" ;;                # share webcam
 
      #### Advanced options
       -b|--dbus)       Dbuslaunch="yes" ;;                 # run image command with dbus-launch or dbus-run-session
          --no-entrypoint) Noentrypoint="yes" ;;            # don't use ENTRYPOINT of image
          --no-internet)Internetaccess="no" ;;              # disallow internet access
-         --workdir)    Workdir="$(escapestring "${2:-}")" ; shift ;; # set working directory
+         --workdir)    Workdir="${2:-}" ; shift ;;         # set working directory
          --pw)         Passwordfrontend="${2:-}" ; shift ;;  # frontend for password prompt
          --runfromhost) Runfromhost="$Runfromhost
 ${2:-}"                ; shift ;;                          # add custom host command in xinitrc
@@ -1828,10 +1885,8 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
 
      #### Developer options
          --sharessh)   [ -e "${SSH_AUTH_SOCK:-}" ] && {                # share host folder at same location in container with rw access
-                         Sharevolumescount=$(($Sharevolumescount + 1))
-                         Sharevolumes[$Sharevolumescount]=$(dirname $SSH_AUTH_SOCK)
-                         Containerenvironment="SSH_AUTH_SOCK=$(escapestring "${SSH_AUTH_SOCK:-}")
-$Containerenvironment"
+                         addrunopt volume "$(dirname $SSH_AUTH_SOCK)"
+                         addrunopt env "SSH_AUTH_SOCK=$(escapestring "${SSH_AUTH_SOCK:-}")"
                        } || warning "Option --sharessh: environment variable \$SSH_AUTH_SOCK not set:" ; ;;
        ## User settings
          --user)       Benutzer="${2:-}"  ; shift ;;       # set container user instead of host user
@@ -1854,8 +1909,8 @@ $Containerenvironment"
          --showid)     Showcontainerid="yes" ;;            # output of container id on stdout
          --showenv)    Showdisplayenvironment="yes" ;;     # output of display number and cookie file on stdout. Catch with  ~$ read xdenv < <(x11docker --showenv)
          --showpid1)   Showcontainerpid1pid="yes" ;;       # output of host PID of container PID 1
-         --env)        Containerenvironment="$(escapestring "${2:-}")
-$Containerenvironment"    ;  shift ;;                         # set custom environment variables
+         --env)        addrunopt env "${2:-}"              # set environment variables
+                       shift ;;                            
          --vt)         Newxvt="${2:-}" ;         shift ;;  # set virtual console to use
          --display)    Newdisplaynumber=${2:-}             # display number to use
                        [ "$(echo $Newdisplaynumber | cut -c1)" = ":" ] && Newdisplaynumber="$(echo $Newdisplaynumber | cut -c2-)"
@@ -1879,12 +1934,7 @@ $Containerenvironment"    ;  shift ;;                         # set custom envir
          --cachedir)     Cachebasefolder="${2:-}" ; shift 
                          note "Option --cachedir is deprecated.
   Please use instead: --cachebasedir" ;;
-         --sharedir)   [ -z "$Winsubsystem" ] && [ ! -e "${2:-}" ] && warning "Option --sharedir: file or folder not found:
-  ${2:-}"             || {
-                         # share host folder at same location in container with rw access
-                         Sharevolumescount=$(($Sharevolumescount + 1))
-                         Sharevolumes[$Sharevolumescount]="${2:-}"
-                       }
+         --sharedir)   addrunopt volume "${2:-}"          # share host directory
                        shift ;;
 
        ## docker options
@@ -2829,7 +2879,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
       Newxlock="/tmp/.X$Newdisplaynumber-lock"
       [ -e "$Newxlock" ] || Newxlock=""
     ;;
-    --vcxsrv)
+    --vcxsrv|--xwin)
       Newxsocket=""
       Newdisplay="$Hostip:$Newdisplaynumber"
     ;;
@@ -3138,12 +3188,16 @@ After finish: $Logbackup"
   $(xrandr 2>/dev/null | grep Screen ||:)"
 }
 
-{ #### part: --gpu: check nvidia driver
+{ #### part: --gpu: check nvidia driver and /dev/dri
   [ "$Sharegpu" = "yes" ] && {
     warning "Option --gpu degrades container isolation.
   Container gains access to GPU hardware.
   This allows reading host window content (palinopsia leak)
   and GPU rootkits (compare proof of concept: jellyfish)."
+    # check device files
+    while read -r Line ; do
+      addrunopt device "$Line"
+    done < <(find /dev/dri /dev/nvidia* /dev/vga_arbiter -maxdepth 0 2>/dev/null ||:)
   }
 
   # check for closed source nvidia driver on host, provide automated installation, warn about disadvantages
@@ -3222,6 +3276,14 @@ After finish: $Logbackup"
   }
 }
 
+{ #### part: --webcam: check webcam devices
+  [ "$Sharewebcam" = "yes" ] && {
+    while read -r Line ; do
+      addrunopt device "$Line"
+    done < <(find /dev/video* -maxdepth 0 2>/dev/null ||:)
+  }
+}
+
 { #### part: --cups: check cups printer server
   [ "$Sharecups" = "yes" ] && {
     command -v lpstat >/dev/null || {
@@ -3247,12 +3309,8 @@ Port 631
 </Location>"
     }
     
-    [ "$Cupsserver" ] && Containerenvironment="CUPS_SERVER=$Cupsserver
-$Containerenvironment"
-    [ -e "$Cupsserver" ] && {
-      Sharevolumescount=$((Sharevolumescount + 1))
-      Sharevolumes[$Sharevolumescount]="$Cupsserver"
-    }
+    [ "$Cupsserver" ]    && addrunopt env "CUPS_SERVER=$Cupsserver"
+    [ -e "$Cupsserver" ] && addrunopt volume "$Cupsserver"
   }
 }
 
@@ -3364,12 +3422,14 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
   case $Pulseaudiomode in
     socket)
       case $X11dockermode in
-        run) Containerenvironment="PULSE_SERVER=unix:$Cshare/pulseaudio.socket
-PULSE_COOKIE=$Cshare/pulseaudio.cookie
-$Containerenvironment" ;;
-        exe) Containerenvironment="PULSE_SERVER=unix:$Sharefolder/pulseaudio.socket
-PULSE_COOKIE=$Sharefolder/pulseaudio.cookie
-$Containerenvironment" ;;
+        run) 
+          addrunopt env "PULSE_SERVER=unix:$Cshare/pulseaudio.socket"
+          addrunopt env "PULSE_COOKIE=$Cshare/pulseaudio.cookie"
+        ;;
+        exe) 
+          addrunopt env "PULSE_SERVER=unix:$Sharefolder/pulseaudio.socket"
+          addrunopt env "PULSE_COOKIE=$Sharefolder/pulseaudio.cookie"
+        ;;
       esac
 
       echo "# Connect to host pulseaudio server using mounted UNIX socket
@@ -3412,8 +3472,7 @@ $(nl -ba <$Pulseaudioconf)"
           env XDG_RUNTIME_DIR="" HOME="" cmd.exe /C "C:/cygwin64/bin/pulseaudio.exe -D 2>&1" 2>&1 >>$Messagelogfile
         ;;
       esac
-      [ "$Pulseaudiomode" ] && Containerenvironment="PULSE_SERVER=tcp:$Hostip:$Pulseaudioport
-$Containerenvironment"
+      [ "$Pulseaudiomode" ] && addrunopt env "PULSE_SERVER=tcp:$Hostip:$Pulseaudioport"
     ;;
     "") ;;
     *) 
@@ -3442,12 +3501,8 @@ $(grep ':' </proc/asound/cards | cut -d"[" -f2 | cut -d"]" -f1)
   Pulseaudio can interfere with ALSA sound (option --alsa).
   Host sound may not work while container is playing sound and vice versa.
   Alternative: with pulseaudio on host and in image, use option --pulseaudio."
-  
-    [ -z "$(ls /dev/snd 2>/dev/null)" ] && {
-      note "No sound hardware found in /dev/snd.
-  Fallback: Disabling option --alsa."
-      Alsa="no"
-    }
+    
+    addrunopt device "/dev/snd"
   }
 }
 
@@ -4101,17 +4156,14 @@ esac
     --vcxsrv|--xwin)
       [ "$Xserver" = "--vcxsrv" ] && Xcommand="$(escapestring "$Vcxsrvpath")/vcxsrv.exe :$Newdisplaynumber"
       [ "$Xserver" = "--xwin" ]   && Xcommand="$(command -v Xwin) :$Newdisplaynumber"
-      [ "$Xserver" = "--xwin" ]   && Containerenvironment="DISPLAY=$Hostip:$Newdisplaynumber
-$Containerenvironment"
       
       Xcommand="$Xcommand \\
   $Xserveroptions \\
  "
       case $Sharegpu in
-        yes) Xcommand="$Xcommand -wgl +iglx" 
-             Containerenvironment="LIBGL_ALWAYS_INDIRECT=1
-$Containerenvironment" ;;
         no)  Xcommand="$Xcommand -nowgl -iglx" ;;
+        yes) Xcommand="$Xcommand -wgl +iglx" 
+          addrunopt env "LIBGL_ALWAYS_INDIRECT=1" ;;
       esac
       case $Fullscreen in
         yes)
@@ -4175,12 +4227,26 @@ $Containerenvironment" ;;
   Newxenv="$Newxenv X11DOCKER_CACHE=$Cachefolder"
 
   # custom environment
-  IFS=$'\n'
-  for Line in $Containerenvironment; do Newxenv="$Newxenv $Line" ; done
-  IFS=$' \t\n'
+  while read -r Line ; do
+    Newxenv="$Newxenv '$Line'"
+  done < <(addrunopt dump env)
 
-  verbose "Environment variables:
+  verbose -d "New X environment:
   $Newxenv"
+  
+  # Environment variables partially different from $Newxenv but matching container
+  case $Xserver in
+    --xpra|--xephyr|--xpra-xwayland|--weston-xwayland|--hostdisplay|--xorg|--xdummy|--xvfb|--xdummy-xwayland|--xwayland|--kwin-xwayland|--nxagent|--vcxsrv|--xwin)
+      addrunopt env "DISPLAY=$Newdisplay"
+      addrunopt env "XAUTHORITY=$Cshare/Xclientcookie"
+    ;;
+    --weston|--kwin|--hostwayland|--nothing)
+      addrunopt env "WAYLAND_DISPLAY=$Newwaylandsocket"
+      addrunopt env "XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR"
+    ;;
+  esac
+  # At least OpenRC and systemd regard this hint
+  addrunopt env "container=docker"
 }
 
 { #### part: create shareclipboard script (option --clipboard)
@@ -4486,11 +4552,6 @@ done
 
 { #### part: create init service files (options --systemd, --runit, --openrc) and check tini binary (--tini).
 
-  # enable dbus
-  case $Initsystem in
-    systemd|sysvinit|openrc|runit) Dbusdaemon="yes" ;;
-  esac
-
   # Check docker-init / tini-static
 
   case $Initsystem in
@@ -4531,6 +4592,8 @@ done
       warning "Option --systemd degrades container isolation.
   It allows some docker container capabilities (nearly like --cap-default).
   It shares access to host cgroups in /sys/fs/cgroup."
+  
+      Stopsignal="SIGRTMIN+3"
 
       Systemdtarget=$Cachefolder/x11docker.target             && mkfile $Systemdtarget
       Systemdstartcmd=$Cachefolder/x11docker-startcmd.service && mkfile $Systemdstartcmd
@@ -4585,7 +4648,7 @@ WantedBy=x11docker.target
 " >> $Systemdjournal
 
       echo "[Manager]
-DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'\n' ; for Line in $Containerenvironment ; do echo -n "$Line " ; done)
+DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(while read -r Line; do echo -n "$Line" ; done < <(addrunopt dump env))
 " >> $Systemdenvironment
     ;;
 
@@ -4593,6 +4656,8 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       warning "Option --runit slightly degrades container isolation.
   Beside some user switching capabilities x11docker would disable otherwise
   it adds capability SYS_BOOT."
+      Stopsignal="HUP"
+      addrunopt env "VIRTUALIZATION=docker"
     ;;
 
     openrc)
@@ -4605,116 +4670,99 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       warning "Option --sysvinit slightly degrades container isolation.
   Beside some user switching capabilities x11docker would disable otherwise
   it adds capability SYS_BOOT."
+      Stopsignal="INT"
     ;;
   esac
+}
+
+{ #### part: check capabilities
+
+  [ "$Benutzeruid" = "0" ]     && Sudouser="yes"
+  [ "$Sudouser" = "yes" ]      && Adminusercaps="yes"
+  [ "$Capdropall" = "no" ]     && Nonewprivileges="no"
+  
+  # enable dbus
+  case $Initsystem in
+    systemd|sysvinit|openrc|runit) Dbusdaemon="yes" ;;
+  esac  
+  [ "$Dbusdaemon" = "yes" ]    && {
+    Dbuslaunch="yes"
+    addrunopt cap "CHOWN"
+    case $Sharewayland in
+      yes) Switchcontaineruser="yes" ;;
+      no)  Switchcontainerusercaps="yes" ;;
+    esac
+  }
+      
+  # option --sys-admin
+  [ "$Capsysadmin" = "yes" ] && addrunopt cap "SYS_ADMIN"
+  
+  case $Initsystem in
+    none|tini) ;;
+    systemd)
+      Switchcontaineruser="yes"
+      Sharecgroup="yes"
+      addrunopt cap "FSETID FOWNER SETPCAP SYS_BOOT"
+    ;;
+    runit|openrc|sysvinit)
+      Switchcontaineruser="yes"
+      addrunopt cap "SYS_BOOT KILL"
+    ;;
+  esac 
+
+  [ "$Sharecgroup" = "yes" ]         && Switchcontaineruser="yes" # needed for elogind
+  [ "$Switchcontaineruser" = "yes" ] && Switchcontainerusercaps="yes"
+  
+  [ "$Adminusercaps" = "yes" ] && {
+    Switchcontainerusercaps="yes"
+    Nonewprivileges="no"
+    addrunopt cap "CHOWN KILL FSETID FOWNER SETPCAP"
+  }
+  [ "$Switchcontainerusercaps" = "yes" ] && addrunopt cap "SETUID SETGID DAC_OVERRIDE AUDIT_WRITE"
+  
+  [ "$Sharegpu" = "yes" ] && [ "$Nvidiadriver" ] && addrunopt cap "SETUID SETGID DAC_OVERRIDE CHOWN FOWNER"
 }
 
 { #### part: create command to run docker
   case $X11dockermode in
     exe) Dockercommand="# dontrundocker"  ;;
-    run) Dockercommand="$Dockerexe run -d --tty"
+    run) Dockercommand="$Dockerexe run --detach --tty"
       [ "$Preservecachefiles" = "no" ] && Dockercommand="$Dockercommand --rm"
 
       [ -z "$Containername" ] && Containername="x11docker_X${Newdisplaynumber}_${Mycookie}_$Imagenametr"
-      Dockercommand="$Dockercommand --name=$Containername"
-      verbose "Container name: $Containername"
+      Dockercommand="$Dockercommand \\
+  --name $Containername"
 
-      [ "$Benutzeruid" = "0" ]     && Sudouser="yes"
-      [ "$Sudouser" = "yes" ]      && Adminusercaps="yes"
-      [ "$Dbusdaemon" = "yes" ]    && {
-        case $Sharewayland in
-          yes) Switchcontaineruser="yes" ;;
-          no)  Switchcontainerusercaps="yes" ;;
-        esac
-      }
-      [ "$Sharecgroup" = "yes" ] && Switchcontaineruser="yes" # needed for elogind
-
+      # Disable user namespacing to avoid file permission issues with --home or --sharedir. Files need same UID/GID.
+      Dockercommand="$Dockercommand \\
+  --userns host"
+  
+      # container user. init systems switch later.
       case $Initsystem in
         none|tini)
           case $Switchcontaineruser in
             no) Dockercommand="$Dockercommand \\
-  --user=$Benutzeruid:$Benutzergid --env USER=$Benutzer" ;;
+  --user $Benutzeruid:$Benutzergid \\
+  --env USER=$Benutzer" ;;
             yes) Dockercommand="$Dockercommand \\
-  --user=root --env USER=root" ;;
+  --user root \\
+  --env USER=root" ;;
           esac
         ;;
         systemd|runit|openrc|sysvinit)
           Dockercommand="$Dockercommand \\
-  --user=root" ;;
+  --user root" ;;
       esac
 
-      # Disable user namespacing if host home folder is in use. Files need same UID/GID.
-      [ "$Benutzerhosthome" = "yes" ] && Dockercommand="$Dockercommand \\
-  --userns=host"
-
+      # capabilities
       [ "$Capdropall" = "yes" ] && Dockercommand="$Dockercommand \\
   --cap-drop ALL"
+      while read Line ; do
+         Dockercommand="$Dockercommand \\
+  --cap-add $Line"
+      done < <(addrunopt dump cap)
 
-      # option --sys-admin (deprecated)
-      [ "$Capsysadmin" = "yes" ] && Dockercommand="$Dockercommand \\
-  --cap-add SYS_ADMIN"
-
-      case $Initsystem in
-        none) ;;
-        tini) Dockercommand="$Dockercommand \\
-  --volume $(convertpath --volume "$Tinibinary" "$Cshare/tini"):ro" ;;
-        systemd)
-          Switchcontaineruser="yes"
-          Sharecgroup="yes"
-          Dockercommand="$Dockercommand \\
-  --stop-signal SIGRTMIN+3 \\
-  --cap-add FSETID      --cap-add FOWNER  --cap-add SETPCAP \\
-  --cap-add SYS_BOOT \\
-  -v $Systemdtarget:/etc/systemd/system/x11docker.target:ro \\
-  -v $Systemdstartcmd:/etc/systemd/system/x11docker-startcmd.service:ro \\
-  -v $Systemdwatch:/etc/systemd/system/x11docker-watch.service:ro \\
-  -v $Systemdjournal:/etc/systemd/system/x11docker-journal.service \\
-  -v $Systemdenvironment:/etc/systemd/system.conf.d/x11docker.conf"
-        ;;
-
-        runit)
-          Switchcontaineruser="yes"
-          Dockercommand="$Dockercommand \\
-  --stop-signal HUP     --env VIRTUALIZATION=docker \\
-  --cap-add SYS_BOOT    --cap-add KILL"
-        ;;
-
-        openrc)
-          Switchcontaineruser="yes"
-          Dockercommand="$Dockercommand \\
-  --cap-add SYS_BOOT    --cap-add KILL"
-        ;;
-
-        sysvinit)
-          Switchcontaineruser="yes"
-          Dockercommand="$Dockercommand \\
-  --stop-signal INT \\
-  --cap-add SYS_BOOT    --cap-add KILL"
-        ;;
-      esac
-
-      [ "$Switchcontaineruser" = "yes" ] && Switchcontainerusercaps="yes"
-      case "$Capdropall" in
-        "yes")
-          [ "$Adminusercaps" = "yes" ] && {
-            Switchcontainerusercaps="yes"
-            Nonewprivileges="no"
-            Dockercommand="$Dockercommand \\
-  --cap-add CHOWN       --cap-add KILL\\
-  --cap-add FSETID      --cap-add FOWNER  --cap-add SETPCAP"
-          }
-          [ "$Switchcontainerusercaps" = "yes" ] && {
-            Dockercommand="$Dockercommand \\
-  --cap-add SETUID      --cap-add SETGID  --cap-add DAC_OVERRIDE\\
-  --cap-add AUDIT_WRITE"
-          }
-          # option --dbusdaemon: dbus needs CHOWN for XDG_RUNTIME_DIR
-          [ "$Dbusdaemon" = "yes" ] && [ "$Adminusercaps" = "no" ] && Dockercommand="$Dockercommand \\
-  --cap-add CHOWN"
-        ;;
-        no) Nonewprivileges="no" ;;
-      esac
-
+      # default yes, do not gain privileges
       [ "$Nonewprivileges" = "yes" ] && Dockercommand="$Dockercommand \\
   --security-opt no-new-privileges"
 
@@ -4722,9 +4770,29 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       Dockercommand="$Dockercommand \\
   --security-opt label=type:container_runtime_t"
 
+      # stop signal for some init systems
+      [ "$Stopsignal" ] &&  Dockercommand="$Dockercommand \\
+  --stop-signal $Stopsignal"
+  
+      # shared files for some init systems
+      case $Initsystem in
+        tini) 
+          Dockercommand="$Dockercommand \\
+  --volume $(convertpath --volume "$Tinibinary" "$Cshare/tini"):ro" 
+        ;;
+        systemd)
+          Dockercommand="$Dockercommand \\
+  -v $Systemdtarget:/etc/systemd/system/x11docker.target:ro \\
+  -v $Systemdstartcmd:/etc/systemd/system/x11docker-startcmd.service:ro \\
+  -v $Systemdwatch:/etc/systemd/system/x11docker-watch.service:ro \\
+  -v $Systemdjournal:/etc/systemd/system/x11docker-journal.service \\
+  -v $Systemdenvironment:/etc/systemd/system.conf.d/x11docker.conf"
+        ;;
+      esac
+
       # option --sharecgroup
       [ "$Sharecgroup" = "yes" ] && Dockercommand="$Dockercommand \\
-  -v /sys/fs/cgroup:/sys/fs/cgroup:ro"
+  --volume /sys/fs/cgroup:/sys/fs/cgroup:ro"
   
       # Add video group for GPU access, needed by some systems
       # Add audio group for ALSA
@@ -4745,94 +4813,69 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
       # Needed especially for --systemd and --dbus-daemon
       Dockercommand="$Dockercommand \\
   --tmpfs /run --tmpfs /run/lock"
-  
-      # entrypoint is checked in dockerrc
-      Dockercommand="$Dockercommand \\
-  --entrypoint=env"
 
-      # At least OpenRC and systemd regard this hint
+      # shared cache folder
       Dockercommand="$Dockercommand \\
-  --env container=docker"
-
-      # shared host folders
-      Dockercommand="$Dockercommand \\
-  -v $(convertpath --volume "$Sharefolder" $Cshare):rw"
+  --volume $(convertpath --volume "$Sharefolder" $Cshare):rw"
   
       # --home, --homedir
       [ "$Benutzerhosthome" = "yes" ] && [ -n "$Benutzerhosthomefolder" ] && Dockercommand="$Dockercommand \\
-  -v $(convertpath --volume "$Benutzerhosthomefolder" "$Benutzerhome"):rw"
+  --volume $(convertpath --volume "$Benutzerhosthomefolder" "$Benutzerhome"):rw"
   
       # --sharedir
-      for ((Count=1 ; Count<=$Sharevolumescount ; Count++)) ; do
-        case "${Sharevolumes[$Count]}" in
+      while read -r Line; do
+        case "$Line" in
           "$Benutzerhome")  Dockercommand="$Dockercommand \\
-  -v $(convertpath --volume "$Benutzerhome" "$Benutzerhome/$(basename $Benutzerhome)"):rw" ;;
+  --volume $(convertpath --volume "$Benutzerhome" "$Benutzerhome/$(basename $Benutzerhome)"):rw" ;;
           *) Dockercommand="$Dockercommand \\
-  -v $(convertpath --volume "${Sharevolumes[$Count]}"):rw" ;;
+  --volume $(convertpath --volume "$Line"):rw" ;;
         esac
-      done
+      done < <(addrunopt dump volume)
+      
+      # devices: --gpu, --webcam, --alsa
+      while read -r Line; do
+        Dockercommand="$Dockercommand \\
+  --device $(convertpath --volume "$Line"):rw \\
+  --volume $(convertpath --volume "$Line"):rw"
+      done < <(addrunopt dump device)
+      
+      ## option --gpu: nvidia driver for automated install
+      [ "$Sharegpu" = "yes" ] && [ "$Nvidiadriver" ] && Dockercommand="$Dockercommand \\
+  --volume $Nvidiadriver:$Cshare/NVIDIA-$Nvidiaversion.run:ro"
 
-      case $Xserver in
-        --nothing) ;;
-        --weston|--hostwayland|--kwin)
-          Dockercommand="$Dockercommand \\
-  -e WAYLAND_DISPLAY=$Newwaylandsocket -e XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR"
-        ;;
-        *)
-          # not really needed here as vars are set in container.CMD.sh
-          # but useful for custom access with docker exec
-          Dockercommand="$Dockercommand \\
-  -e DISPLAY=$Newdisplay -e XAUTHORITY=$Cshare/Xclientcookie"
-          # X socket will be softlinked to /tmp/.X11-unix in container.CMD.sh
-          [ "$Newxsocket" ] && Dockercommand="$Dockercommand \\
-  -v $(convertpath --volume "$Newxsocket" "/X$Newdisplaynumber"):rw"
-        ;;
-      esac
+      # X socket will be softlinked to /tmp/.X11-unix in container.CMD.sh
+      [ "$Newxsocket" ] && Dockercommand="$Dockercommand \\
+  --volume $(convertpath --volume "$Newxsocket" "/X$Newdisplaynumber"):rw"
+  
       # Wayland socket will be softlinked to XDG_RUNTIME_DIR in container.CMD.sh
       [ "$Sharewayland" = "yes" ] && Dockercommand="$Dockercommand \\
-  -v $(convertpath --volume "$XDG_RUNTIME_DIR/$Newwaylandsocket" "/$Newwaylandsocket"):rw"
-      ## option --gpu : share graphics adapter device files
-      [ "$Sharegpu" = "yes" ] && {
-        while read -r Line ; do
-          Dockercommand="$Dockercommand \\
-  --device=$Line:$Line:rw \\
-  -v $Line:$Line:rw"
-        done < <(find /dev/dri /dev/nvidia* /dev/vga_arbiter -maxdepth 0 2>/dev/null ||:)
-        [ "$Nvidiadriver" ] && {
-          Dockercommand="$Dockercommand \\
-  -v $Nvidiadriver:$Cshare/NVIDIA-$Nvidiaversion.run:ro"
-          [ "$Capdropall" = "yes" ] && [ "$Adminusercaps" = "no" ] && Dockercommand="$Dockercommand \\
-  --cap-add SETUID      --cap-add SETGID  --cap-add DAC_OVERRIDE\\
-  --cap-add CHOWN       --cap-add FOWNER"
-        }
-      }
+  --volume $(convertpath --volume "$XDG_RUNTIME_DIR/$Newwaylandsocket" "/$Newwaylandsocket"):rw"
 
       ## options --hostipc and --hostnet
       [ "$Sharehostipc" = "yes" ]      && Dockercommand="$Dockercommand \\
-  --ipc=host"
+  --ipc host"
       [ "$Sharehostnet" = "yes" ]      && Dockercommand="$Dockercommand \\
-  --net=host"
+  --net host"
       ## option --no-internet
       [ "$Internetaccess" = "no" ]     && Dockercommand="$Dockercommand \\
-  --net=none"
-      ## option --alsa
-      [ "$Alsa" = "yes" ]              && Dockercommand="$Dockercommand \\
-  --device=/dev/snd:/dev/snd:rw -v /dev/snd:/dev/snd:rw"
+  --net none"
       ## option --pulseaudio
       [ "$Pulseaudiomode" = "socket" ] && Dockercommand="$Dockercommand \\
-  -v $Cachefolder/pulseclient.conf:/etc/pulse/client.conf:ro"
+  --volume $Cachefolder/pulseclient.conf:/etc/pulse/client.conf:ro"
       ## option --workdir or /tmp
       Dockercommand="$Dockercommand \\
   --workdir '$Workdir'"
   
-      # option --env: add custom environment. Only needed here for possible 'docker exec'. Otherwise set in container.CMD.sh
-      IFS=$'\n'
-      for Line in $Containerenvironment ; do
+      # real entrypoint is checked in dockerrc
+      Dockercommand="$Dockercommand \\
+  --entrypoint env"
+  
+      # add environment variables. Only needed here for possible 'docker exec'. Otherwise set in container.CMD.sh
+      while read Line; do
         Dockercommand="$Dockercommand \\
-  --env $Line"
-      done
-      IFS=$' \t\n'
-
+  --env '$Line'"
+      done < <(addrunopt dump env)
+      
       # add custom docker arguments, imagename and imagecommand
       [ "$Customdockeroptions" ] && Dockercommand="$Dockercommand \\
   $Customdockeroptions"
@@ -5025,10 +5068,10 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo   "  echo export USER=\"$Benutzer\""
   [ "$Benutzerhosthome" = "no" ] && {
     echo "  echo mkdir -p -v $Benutzerhome"
-    for ((Count=1 ; Count<=$Sharevolumescount ; Count++)) ; do
+    while read -r Line; do
       echo "  echo '# create soft links of shared folders to fake home'"
-      echo "  echo 'ln -s ${Sharevolumes[$Count]} $Benutzerhome'"
-    done
+      echo "  echo 'ln -s \"$Line\" \"$Benutzerhome\"'"
+    done < <(addrunopt dump volume)
   }
   echo   "  echo 'export HOME=\"$Benutzerhome\"'"
 
@@ -5039,7 +5082,6 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   }
   [ "$Xauthentication" = "yes" ] && echo "  echo 'export XAUTHORITY=$Cshare/Xclientcookie'"
   [ "$Xserver" = "--nothing" ]   && echo "  echo 'unset DISPLAY WAYLAND_DISPLAY XAUTHORITY'"
-  [ "$Dbusdaemon" = "yes" ] && Dbuslaunch="yes"
   [ "$Dbuslaunch" = "yes" ] && {
     echo "  echo ''"
     echo "  echo 'Dbus=\"\$(dbus-launch --help >/dev/null 2>&1 && echo dbus-launch)\"'"
@@ -5089,12 +5131,10 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo   "  echo '[ \"\$DEBIAN_FRONTEND\" = noninteractive ] && unset DEBIAN_FRONTEND'"
   echo   "  echo '[ \"\$DEBIAN_FRONTEND\" = newt ]           && unset DEBIAN_FRONTEND'"
 
-  echo   "  echo '# custom environment (--env)'"
-  IFS=$'\n'
-  for Line in $Containerenvironment ; do
-    echo "  echo export $(escapestring $Line)"
-  done
-  IFS=$' \t\n'
+  echo   "  echo '# container environment (--env)'"
+  while read -r Line ; do
+    echo "  echo 'export \"$Line\"'"
+  done < <(addrunopt dump env)
   echo   "  echo ''"
 
   echo   "  echo 'env >> $Cshare/environment'"
@@ -5255,11 +5295,9 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(IFS=$'
   echo ""
 
   # custom environment variables
-  IFS=$'\n'
-  for Line in $Containerenvironment ; do
-    [ "$Line" ] && echo "export $Line"
-  done
-  IFS=$' \t\n'
+  while read -r Line; do
+    echo "export '$Line'"
+  done < <(addrunopt dump env)
   echo ""
 
   # create container user
