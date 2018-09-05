@@ -278,10 +278,12 @@ Miscellaneous:
 Verbosity options:
  -v, --verbose [=c]    Be verbose. Output of logfile on stderr.
                        Optional argument '=c' generates colored output. 
-     --silent          Do not show terminal messages.
-     --debug           Debug mode: Show some debug output,
+ -D, --debug           Debug mode: Show some debug output,
+     --silent          Do not show x11docker terminal messages.
      --stdout          Show stdout of container applications.
      --stderr          Show stderr of container applications.
+ -Q                    Shortcut for: --stdout --stderr
+ -q                    Shortcut for: --stdout --stderr --silent
 
 Installation options (need root permissions):
      --install         Install x11docker and x11docker-gui from current folder.
@@ -391,7 +393,7 @@ error() {               # show error messages on stderr and exit
   Message="$*
 
   Type 'x11docker --help' for usage information
-  For debugging, run x11docker in terminal and/or enable option '--verbose'
+  For debugging, enable options '--verbose' (full log) or '-q' (app output),
   or look afterwards at logfile $Logbackup
   Please report issues at https://github.com/mviereck/x11docker"
   
@@ -504,11 +506,16 @@ $(cat $Bgpidfile 2>/dev/null)"
               verbose -d "Sending TERM to PID 1 of container: $(pspid $Pid1pid)"
               killpid $Pid1pid containerPID1 2>/dev/null || note "Could not terminate PID 1 of container: $(pspid $Pid1pid)"
               # Give container a bit time for graceful shutdown
-              for Count in 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0; do
-                checkpid $Pid1pid || break
-                sleep $( awk "BEGIN { print $Count * 0.1 }")
-                debugnote "Waiting for container PID 1: $Pid1pid to terminate"
-              done
+              case $Initsystem in
+                systemd) ;;
+                *)
+                  for Count in 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0; do
+                    checkpid $Pid1pid || break
+                    sleep $( awk "BEGIN { print $Count * 0.1 }")
+                    debugnote "Waiting for container PID 1: $Pid1pid to terminate"
+                  done
+                ;;
+              esac
             }
             # Try 'docker stop' if TERM failed
             checkpid $Containerpid && {
@@ -801,8 +808,8 @@ checkpid() {            # check if PID $1 is active
 pspid() {               # ps -p $1 --no-headers
   ps -p ${1:-} | tail -n+2
 }
-addrunopt() {          # store env, volume or device for docker command
-  local Count
+addrunopt() {           # store env, volume or device for docker command
+  local Count Line
   case ${1:-} in
     env)
       Containerenvironmentcount=$((Containerenvironmentcount + 1))
@@ -823,7 +830,6 @@ addrunopt() {          # store env, volume or device for docker command
   ${2:-}"
     ;;
     cap)
-    debugnote "${2:-}"
       for Line in ${2:-} ; do
         Capabilities="$Capabilities
 $Line"
@@ -835,17 +841,13 @@ $Line"
         volume) for ((Count=1 ; Count<=$Sharevolumescount ; Count ++))      ; do echo "${Sharevolumes[$Count]}" ; done ;;
         device) for ((Count=1 ; Count<=$Sharedevicescount ; Count ++))      ; do echo "${Sharedevices[$Count]}" ; done ;;
         cap)
-          Capabilities="$(echo "$Capabilities" | sort | uniq)"
-          for Line in $Capabilities ; do
+          while read Line; do
             case $Capdropall in
-              no) 
-                grep -w -q "$Line" <<< "SETPCAP MKNOD AUDIT_WRITE CHOWN NET_RAW DAC_OVERRIDE FOWNER FSETID KILL SETGID SETUID NET_BIND_SERVICE SYS_CHROOT SETFCAP" || echo "$Line"
-              ;;
-              yes)
-                echo "$Line"
-              ;;
+              yes) echo "$Line" ;;
+              no)  grep -w -q "$Line" <<< "SETPCAP MKNOD AUDIT_WRITE CHOWN NET_RAW DAC_OVERRIDE FOWNER FSETID KILL SETGID SETUID NET_BIND_SERVICE SYS_CHROOT SETFCAP" || echo "$Line" ;;
             esac
-          done
+          done < <(echo "$Capabilities" | sort | uniq | grep -v '^$')
+        ;;
       esac
     ;;
   esac
@@ -1386,7 +1388,7 @@ verlte() {              # version number check $1 less than or equal $2
 verlt() {               # version number check $1 less than $2
   [ "${1:-}" = "${2:-}" ] && return 1 || { verlte "${1:-}" "${2:-}" && return 0 || return 1 ; }
 }
-getrandomnumber() {
+getrandomnumber() {     # get random number
   # chosen by fair dice roll
   # guaranteed to be random
   echo "4"
@@ -1462,13 +1464,13 @@ Benutzeruid=""
 Benutzergid=""
 Benutzerhome=""
 Benutzergruppe=""
+Benutzergruppen="video audio"                   # option --group-add: additional groups for container user
 Benutzerpasswdentry=""
 Benutzerpasswort="sac19FwGGTx/A"                # encrypted password "x11docker", suits /etc/shadow. Generated with:  perl -e 'print crypt("x11docker", "salt"),"\n"'
 Mksu=""                                         # prefix to run unprivileged commands (auto or --hostuser)
 Mksubenutzer=""                                 # prefix to run commands as user defined by --user
 Hostgidaudio=""                                 # host GID of group audio. Can differ from container GID
 Hostgidvideo=""                                 # host GID of group video. Can differ from container GID
-Groupadd=""                                     # option --group-add: additional groups for container user
 
 # Gaining root privileges to run docker
 Passwordfrontend=""                             # --pw: method to prompt for password. one of pkexec, su, sudo, gksu, gksudo, kdesu, kdesudo, lxsu, lxsudo, beesu, auto, none
@@ -1774,7 +1776,7 @@ stdout() {
 }
 
 { #### part: parsing cli options
-  Shortoptions="aAbcdefgGhHKml:MnNopPrsutTv::w:WxXyY"
+  Shortoptions="aAbcdDefgGhHKl:mMnNopPqQrstTuv::w:WxXyY"
   Longoptions="auto,x,X,xpra,xephyr,x11,xorg,hostdisplay,xwayland,weston-xwayland,xpra-xwayland,nxagent,wayland"           # X servers
   Longoptions="$Longoptions,weston,hostwayland,kwin,kwin-xwayland,xdummy,xvfb,nothing,vcxsrv,xwin"                         # more X/Wayland servers
   Longoptions="$Longoptions,wm:,desktop,exe,xonly"
@@ -1880,8 +1882,10 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
                        [ "${2:-}" = "c" ] && Verbosecolors="yes" && shift ;;
          --stdout)     Showstdout="yes" ;;                 # show stdout of image command
          --stderr)     Showstderr="yes" ;;                 # show stderr of image command
-         --silent)     Silent="yes" ; exec 3>/dev/null ;;  # do not show warnings or errors
-         --debug)      Debugmode="yes" ;;                      # debugging mode
+         --silent)     Silent="yes" ;;                     # do not show warnings or errors
+      -D|--debug)      Debugmode="yes" ;;                  # debugging mode
+      -Q)              Showstdout="yes" ; Showstderr="yes" ;;
+      -q)              Showstdout="yes" ; Showstderr="yes" ; Silent="yes" ;;
 
      #### Developer options
          --sharessh)   [ -e "${SSH_AUTH_SOCK:-}" ] && {                # share host folder at same location in container with rw access
@@ -1892,7 +1896,7 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
          --user)       Benutzer="${2:-}"  ; shift ;;       # set container user instead of host user
          --hostuser)   Hostuser="${2:-}" ; shift ;;        # set host user different from logged in user
          --sudouser)   Sudouser="yes" ;;                   # give container user sudo without password
-         --group-add)  Groupadd="$Groupadd ${2:-}" ; shift ;; # additional groups for user
+         --group-add)  Benutzergruppen="$Benutzergruppen ${2:-}" ; shift ;; # additional groups for user
 
        ## init system
          --no-init)    Initsystem="none" ;;                # no init, image command is PID 1
@@ -2061,13 +2065,7 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
   cache folder $Cachebasefolder"  # can happen with --cachedir
   Logbackup="$Cachebasefolder/x11docker.log"       # afterward copy of $Logfile in $Cachebasefolder
   
-  grep -q beta <<<$Version && note "You are running a beta version of x11docker.
-  Beta versions change often and may introduce temporary new bugs.
-  If you prefer latest stable release, run 'x11docker --update'.
-  If you prefer to follow development, run 'x11docker --update-master'.
-
-  You can contribute to x11docker if you find bugs and report them at:
-    https://github.com/mviereck/x11docker"
+  [ "$Silent" = "yes" ] && exec 3>/dev/null
 
   verbose -d "x11docker version $Version
 docker version: $($Dockerexe --version 2>&1)
@@ -2081,7 +2079,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   [ "$Debugmode" = "yes" ] && {
     #PS4="$DebugPS4"    # useful output for set -x
     #set -x             # show every executed line
-    set -Eu -o pipefail
+    set -Eu
     trap 'traperror $? $LINENO $BASH_LINENO "$BASH_COMMAND" $(printf "::%s" ${FUNCNAME[@]})'  ERR
   }
 
@@ -2394,7 +2392,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   command -v xdpyinfo >/dev/null && xdpyinfo >/dev/null 2>&1 && {
     xdpyinfo | grep -q "MIT-SHM" && Hostmitshm="yes" || Hostmitshm="no"
   }
-  
+
   # --fullscreen is nonsense on tty at all. Avoids weston error on tty.
   [ "$Tty" = "yes" ] && Fullscreen="no"
           
@@ -2460,7 +2458,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   # --hostdisplay with SSH
   [ "$Xserver" = "--hostdisplay" ] && [ "$Ssh" = "yes" ] && {
     [ "$Sharehostipc" = "no" ] || [ "$Trusted" = "no" ] || [ "$Sharehostnet" = "no" ]  && {
-      warning "For SSH connection with option --hostdisplay
+      note "For SSH connection with option --hostdisplay
   x11docker must enable options --hostnet and --trusted.
   It is recommended to use other X server options
   like --xpra, --xephyr or --nxagent."
@@ -2470,13 +2468,12 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   }
 
   [ "$Xserver" = "--hostdisplay" ] && [ "$Trusted" = "yes" ] && [ "$Hostmitshm" = "yes" ] && [ "$Sharehostipc" = "no" ] && {
-    warning "To allow --hostdisplay with trusted cookies,
-  x11docker must share host IPC namespace with container to allow 
-  shared memory for X extension MIT-SHM. 
-  Enabling option --hostipc to avoid Video RAM access errors."
+    note "To allow --hostdisplay with trusted cookies,
+  x11docker must share host IPC namespace with container (option --hostipc)
+  to allow shared memory for X extension MIT-SHM."
     Sharehostipc="yes"
   }
-  
+
   # --hostnet --no-internet
   [ "$Sharehostnet" = "yes" ] && [ "$Internetaccess" = "no" ] && {
     note "You have chosen --hostnet and --no-internet. That does not work.
@@ -2764,17 +2761,12 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   }
 
   # --hostipc
-  [ "$Sharehostipc" = "yes" ] && warning "Security risk:
-  Option --hostipc causes severe reduction of container isolation!
-  Drawback: IPC namespace remapping is disabled.
-  Advantage: X extension MIT-SHM is possible."
+  [ "$Sharehostipc" = "yes" ] && warning "Option --hostipc degrades container isolation.
+  IPC namespace remapping is disabled."
 
   # --hostnet
-  [ "$Sharehostnet" = "yes" ] && warning "Security risk:
-  Option --hostnet causes severe reduction of container isolation!
-  Network namespacing is disabled.
-  Drawback: Container shares host network stack.
-  Advantage: dbus communication between host and container is possible."
+  [ "$Sharehostnet" = "yes" ] && warning "Option --hostnet degrades container isolation.
+  Network namespacing is disabled. Container shares host network stack."
 
   # --keymap: XKB keyboard layount
   [ -n "$Xkblayout" ] && case $Xserver in
@@ -2914,6 +2906,14 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   Xdummyconf="$Cachefolder/$Xdummyconf"                             && mkfile $Xdummyconf
   Xorgwrapper="$Cachefolder/$Xorgwrapper"                           && mkfile $Xorgwrapper
   Xkbkeymapfile="$Cachefolder/$Xkbkeymapfile"                       && mkfile $Xkbkeymapfile
+  
+  
+  Systemdtarget=$Cachefolder/x11docker.target             && mkfile $Systemdtarget
+  Systemdstartcmd=$Cachefolder/x11docker-startcmd.service && mkfile $Systemdstartcmd
+  Systemdwatch=$Cachefolder/x11docker-watch.service       && mkfile $Systemdwatch
+  Systemdjournal=$Cachefolder/x11docker-journal.service   && mkfile $Systemdjournal
+  Journallogfile=$Sharefolder/journalctl.log              && mkfile $Journallogfile
+  Systemdenvironment=$Cachefolder/systemd.env.conf        && mkfile $Systemdenvironment
 
   # Cache folder for x11docker-gui. Created here to store image list in dockerrc for x11docker-gui
   mkdir -p $Cachebasefolder/x11docker-gui && chown $Hostuser $Cachebasefolder/x11docker-gui
@@ -3421,6 +3421,9 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
   
   case $Pulseaudiomode in
     socket)
+      # create pulseaudio socket
+      $Mksu "pactl load-module module-native-protocol-unix socket=$Sharefolder/pulseaudio.socket 2>&1" >>$Messagelogfile
+      
       case $X11dockermode in
         run) 
           addrunopt env "PULSE_SERVER=unix:$Cshare/pulseaudio.socket"
@@ -3807,7 +3810,7 @@ fi
       [ "$Desktopmode" = "yes" ] && Xpraservercommand="xpra start-desktop" || Xpraservercommand="xpra start"
       Xpraservercommand="$Xpraservercommand $Newdisplay --use-display $Xpraoptions \\
   --no-daemon --fake-xinerama=no --mdns=no \\
-  --notifications=no --file-transfer=off --printing=no \\
+ --file-transfer=off --printing=no \\
   --start-new-commands=no --dbus-proxy=no --no-pulseaudio \\
   --html=off --session-name=\"$Hostexebasename$Imagename \""
       verlt  "$Xprarelease" "r13378" || Xpraservercommand="$Xpraservercommand --systemd-run=no"
@@ -3817,7 +3820,8 @@ fi
       # xpra client command ### --window-close=shutdown
       Xpraclientcommand="xpra attach $Newdisplay $Xpraoptions \\
   -z0 --quality 100 \\
-  --no-speaker --no-pulseaudio"
+  --no-speaker --no-pulseaudio \\
+  --notifications=no"
       [ "$Desktopmode" = "yes" ] && Xpraclientcommand="$Xpraclientcommand \\
   --title='$Imagename on $Newdisplay (shift+F11 toggles fullscreen)'" || Xpraclientcommand="$Xpraclientcommand \\
   --title='@title@ on ${Imagename:-"host"}'"
@@ -4594,13 +4598,7 @@ done
   It shares access to host cgroups in /sys/fs/cgroup."
   
       Stopsignal="SIGRTMIN+3"
-
-      Systemdtarget=$Cachefolder/x11docker.target             && mkfile $Systemdtarget
-      Systemdstartcmd=$Cachefolder/x11docker-startcmd.service && mkfile $Systemdstartcmd
-      Systemdwatch=$Cachefolder/x11docker-watch.service       && mkfile $Systemdwatch
-      Systemdjournal=$Cachefolder/x11docker-journal.service   && mkfile $Systemdjournal
-      Journallogfile=$Sharefolder/journalctl                  && mkfile $Journallogfile
-      Systemdenvironment=$Cachefolder/systemd.env.conf        && mkfile $Systemdenvironment
+      Benutzergruppen="$Benutzergruppen systemd-journal"
 
       echo "[Unit]
 Description=x11docker target
@@ -4642,7 +4640,7 @@ WantedBy=x11docker.target
 Description=x11docker journal log service
 [Service]
 Type=simple
-ExecStart=/bin/sh -c '/bin/journalctl --follow --no-tail --merge >> $Cshare/journalctl 2>&1'
+ExecStart=/bin/sh -c '/bin/journalctl --follow --no-tail --merge >> $Cshare/journalctl.log 2>&1'
 [Install]
 WantedBy=x11docker.target
 " >> $Systemdjournal
@@ -4794,19 +4792,11 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(while 
       [ "$Sharecgroup" = "yes" ] && Dockercommand="$Dockercommand \\
   --volume /sys/fs/cgroup:/sys/fs/cgroup:ro"
   
-      # Add video group for GPU access, needed by some systems
-      # Add audio group for ALSA
-      # Does only have real effect if /dev/dri or /dev/snd is shared
-      # Use GID instead of group name as they can differ from container GIDs
-      # entries in /etc/group are not regarded without user switching in container
+      # add container groups, mainly video and audio and --group-add
       [ "$Switchcontaineruser" = "no" ] && {
-        [ "$Hostgidaudio" ] && Dockercommand="$Dockercommand \\
-  --group-add $Hostgidaudio"
-        [ "$Hostgidvideo" ] && Dockercommand="$Dockercommand \\
-  --group-add $Hostgidvideo"
-        for Line in $Groupadd; do          ### FIXME: should compare GIDs from host and container
-          Dockercommand="$Dockercommand \\
-  --group-add $Line"
+        for Line in $Benutzergruppen; do          ### FIXME: should compare GIDs from host and container
+          getent group ${Line:-nonsense} >/dev/null && Dockercommand="$Dockercommand \\
+  --group-add $(getent group $Line | cut -d: -f3)"
         done
       }
 
@@ -5033,8 +5023,8 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(while 
   echo   "  echo '# wait for container setup script do be ready'"
   echo   "  echo 'Zeit=\$(date +%s)'"
   echo   "  echo 'for Count in $(seq -s' ' 50); do'"
-  echo   "  echo '  [ -e /x11docker.setupready ] && break'"
   echo   "  echo '  verbose \"Waiting since \$((\$(date +%s) - \$Zeit))s for container setup to be ready\"'"
+  echo   "  echo '  [ -e /x11docker.setupready ] && break'"
   echo   "  echo '  sleep \$(awk \"BEGIN { print \$Count*0.2 }\")'"
   echo   "  echo 'done'"
   echo   "  echo ''"
@@ -5251,8 +5241,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(while 
   echo "#! /bin/sh"
   echo "# set up docker container as root before ongoing in unprivileged container.CMD.sh"
   echo "# commands in this script are executed as root in container"
-  echo ""
-
+  
   #[ "$Debugmode" = "yes" ] && echo "set -x"
   
   echo "$Messagefifofuncs"
@@ -5319,19 +5308,20 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(while 
     ;;
   esac
   echo ""
-  echo "# add user to groups video, audio, systemd-journal"
-  echo "# replace container GIDs of video and audio with host GIDs"
-  echo "Gidvideo=$Hostgidvideo"
-  echo "Gidaudio=$Hostgidaudio"
-  echo "[ \"\$Gidvideo\" ] || Gidvideo=\$(getent group video | cut -d: -f3)"
-  echo "[ \"\$Gidaudio\" ] || Gidaudio=\$(getent group audio | cut -d: -f3)"
-  echo "getent group | sed \"s/^video.*/video:x:\$Gidvideo:\$(getent group video | cut -d: -f4 ),$Benutzer/ ;"
-  echo "                     s/^audio.*/audio:x:\$Gidaudio:\$(getent group audio | cut -d: -f4 ),$Benutzer/ ;"
-  for Line in $Groupadd ; do
-    echo "                     s/^$Line.*/\0,$Benutzer/ ;"
+  
+  for Line in $Benutzergruppen ; do
+    echo "Groupname=$(getent group $Line | cut -d: -f1)"
+    echo "Groupid=$(getent group $Line | cut -d: -f3)"
+    echo "[ \"\$Groupname\" ] || Groupname=\$(getent group $Line | cut -d: -f1)"
+    echo "[ \"\$Groupid\" ]   || Groupid=\$(getent group $Line | cut -d: -f3)"
+    echo "[ \"\$Groupname\" ] && {"
+    echo "  getent group | sed \"s/^\$Groupname.*/\$Groupname:x:\$Groupid:\$(getent group \$Groupname | cut -d: -f4 ),$Benutzer/\" | sed 's/:,/:/' > /tmp/group"
+    echo "  getent group \$Groupname >/dev/null || echo \$Groupname:x:\$Groupid:$Benutzer >> /tmp/group"
+    echo "  cp /tmp/group /etc/group"
+    echo "}"
+    echo ""
   done
-  echo "                     s/^systemd-journal.*/\0,$Benutzer/ \" | sed 's/:,/:/' > /tmp/group"
-  echo "cp /tmp/group /etc/group"
+  
   echo ""
   echo "# create user group entry (and delete possibly existing same gid)"
   echo "getent group | grep -v \$(getent group $Benutzergid || echo USERNOTFOUND) > /tmp/group"
@@ -5405,6 +5395,7 @@ Fallback: Skipping installation of nvidia driver'"
     systemd)
       echo "# enable x11docker CMD service"
       echo "systemctl enable x11docker-startcmd.service"
+      echo "systemctl enable x11docker-journal.service"
 
       echo "# to be sure, allow/unmask most important services"
       echo "systemctl unmask systemd-logind dbus"
@@ -5480,11 +5471,12 @@ exit 0' >> /etc/rc.local"
   echo "[ -e /etc/inittab ] && sed -i 's/.*getty/##getty disabled by x11docker## \0/' /etc/inittab"
 
   # start dbus daemon and dbus services
-  case $Dbusdaemon in
+  [ "$Initsystem" = "systemd" ] || case $Dbusdaemon in
     yes)
       echo 'warning "Will run DBus system services as root in container.
   If the image contains malicious applications started by DBus service files,
   they may abuse their root privileges and may try to break out of container."'
+      echo '[ "$Containersystem" = "arch" ] && warning "Option --dbus-system can be quite slow in arch linux containers. Rather install systemd in arch image and run with --systemd."'
       echo "verbose 'DBus: removing failing or useless services.'"
       echo "for Line in \$(find /usr/share/dbus-1/system-services /usr/share/dbus-1/services -type f); do"
       echo '  Name="$(cat $Line | grep Name= | cut -d= -f2)"'
@@ -5543,7 +5535,8 @@ exit 0' >> /etc/rc.local"
       echo "done"
 
       echo "echo 'x11docker: DBus: starting dbus system daemon'"
-      echo "dbus-daemon --system --fork"
+#      echo "dbus-daemon --system --nosyslog --fork"
+      echo "dbus-daemon --system --nosyslog &"
       echo "for Count in 1 2 3 4 5; do"
       echo "  [ -e /run/dbus/system_bus_socket ] && break"
       echo "  sleep 0.1"
@@ -6334,9 +6327,8 @@ $(pstree -p $Hostexepid 2>&1 ||:)"
     ;;
   esac
   
-{ #### part: --pulseaudio: load unix socket module (authenticated with cookie) or TCP module (authenticated with container IP)
+{ #### part: --pulseaudio=tcp: load TCP module (authenticated with container IP)
   case $Pulseaudiomode in
-    socket) $Mksu "pactl load-module module-native-protocol-unix socket=$Sharefolder/pulseaudio.socket 2>&1" >>$Messagelogfile ;;
     tcp) 
       case $Winsubsystem in
         "") $Mksu "pactl load-module module-native-protocol-tcp  port=$Pulseaudioport auth-ip-acl=${Containerip:-"127.0.0.1"} 2>&1" >>$Messagelogfile ;;
@@ -6418,6 +6410,7 @@ $(tail $Compositorlogfile)")"
 }
 ######### ToDo notes for development
 todo() {
+
 # x11docker/xwayland nested: where is the X socket ??
 # --wayland on win: weston dbus-x11 qtwayland
 
@@ -6435,7 +6428,7 @@ todo() {
 #       useless:
 #          --showpid1 (shows pid in docker VM)
 
-# --group-add: compare host and container GID? warn if group misses in container, or create it?
+# --group-add: further checks? mismatch messagebus-101-systemd-journal
 # BUG x11docker/cde fails
 # jess/cathode fails with xcb error. bug report: https://github.com/jessfraz/dockerfiles/issues/401
 
