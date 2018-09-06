@@ -12,6 +12,10 @@ Project website: https://github.com/mviereck/x11docker
    [(#75)](https://github.com/mviereck/x11docker/issues/75)
  - `-q`: New option, shortcut for `--stdout --stderr --silent`.
  - `-Q`: New option, shortcut for `--stdout --stderr`.
+### Changed
+ - `--wayland`: Does not run `--dbus-system` anymore to avoid complexity
+   and issues on arch linux. Some old GTK3 applications may fail now.
+   In that case, use `--weston` instead.
 ### Fixed
  - `--systemd --verbose`: journalctl.log was not shown.
  - `--systemd`: fixed slow dbus startup.
