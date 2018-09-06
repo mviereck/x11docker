@@ -29,7 +29,8 @@ System changes in running containers are discarded after use.
    - [Sound](#sound) with pulseaudio or ALSA.
    - [Hardware acceleration](#hardware-acceleration) for OpenGL.
    - [Clipboard](#clipboard) sharing.
-   - [Printing](#Printer) over CUPS.
+   - [Printing](#Printer) through CUPS.
+   - [Webcam](#Webcam) support.
    - [Language locale](#language-locales) creation.
  - Remote access with [SSH](https://github.com/mviereck/x11docker/wiki/Remote-access-with-SSH), [VNC](https://github.com/mviereck/x11docker/wiki/VNC) or [HTML5 in browser](https://github.com/mviereck/x11docker/wiki/Container-applications-running-in-Browser-with-HTML5) possible.
  - Supports [init systems](#init-system) `tini`, `runit`, `openrc`, `SysVinit` and `systemd` in container.
@@ -105,17 +106,27 @@ FROM x11docker/xfce
 RUN apt-get update && apt-get install -y midori
 ```
 ## Hardware acceleration
-Hardware acceleration for OpenGL is possible with option `--gpu`. This will work out of the box in most cases with open source drivers on host. Otherwise have a look at [Dependencies](#dependencies). 
-x11docker wiki provides some [background information about hardware acceleration for docker containers.](https://github.com/mviereck/x11docker/wiki/Hardware-acceleration)
+Hardware acceleration for OpenGL is possible with option `--gpu`. 
+ - This will work out of the box in most cases with open source drivers on host. Otherwise have a look at [Dependencies](#dependencies). 
+ - x11docker wiki provides some [background information about hardware acceleration for docker containers.](https://github.com/mviereck/x11docker/wiki/Hardware-acceleration)
 ## Clipboard
-Clipboard sharing is possible with option `--clipboard`. Image clips are possible with `--xpra` and `--hostdisplay`. Some X server options need package `xclip` on host.
+Clipboard sharing is possible with option `--clipboard`. 
+ - Image clips are possible with `--xpra` and `--hostdisplay`. 
+ - Some X server options need package `xclip` on host.
 ## Sound
 Sound is possible with options `--pulseaudio` and `--alsa`. 
 (Some background information is given in [x11docker wiki about sound for docker containers.](https://github.com/mviereck/x11docker/wiki/Pulseaudio-sound-over-TCP-or-with-shared-socket)
  - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and in image.
  - For ALSA sound with `--alsa` you can specify the desired sound card with e.g. `--env ALSA_CARD=Generic`. Get a list of available sound cards with `aplay -l`.
+## Webcam
+Webcams on host can be shared with option `--webcam`.
+ - If webcam application in image fails, install `mesa-utils` (debian) or `mesa-demos` (arch) in image. 
+ - `cheese` is not recommended. It needs `--systemd` and `--privileged`. Privileged setup is a no-go.
+ - `guvcview` needs `--pulseaudio` or `--alsa`.
 ## Printer
-Printers on host can be provided to container with option `--printer`. It needs CUPS on host, the default printer server for most linux distributions. The container needs package `libcups2` (debian) or `libcups` (arch).
+Printers on host can be provided to container with option `--printer`. 
+ - It needs CUPS on host, the default printer server for most linux distributions. 
+ - The container needs package `libcups2` (debian) or `libcups` (arch).
 ## Language locales
 You have two possibilities to set [language locale](https://wiki.archlinux.org/index.php/locale) in docker image. 
  - For support of chinese, japanese and korean characters install a font like `fonts-arphic-uming` in image.
@@ -263,29 +274,14 @@ If no X server option is specified, x11docker automatically chooses one dependin
 ![x11docker-gui server screenshot](/../screenshots/x11docker-server.png?raw=true)
 
 ## Wayland
-Beside the X servers to choose from there are options `--wayland`, `--weston`, `--kwin` and `--hostwayland` to run pure [Wayland](https://wayland.freedesktop.org/) applications without X.
- - Option `--wayland` automatically sets up a Wayland environment with some special environment variables and a dbus system daemon in container to support both QT5 and GTK3 applications.
- - Options `--kwin` and `--weston` run Wayland compositors `kwin_wayland` or `weston`. 
+To run  [Wayland](https://wayland.freedesktop.org/) instead of an X server x11docker provides options `--wayland`, `--weston`, `--kwin` and `--hostwayland`.
+ - Option `--wayland` automatically sets up a Wayland environment with some related environment variables.
+ - Options `--kwin` and `--weston` run Wayland compositors `kwin_wayland` or `weston`.
    - For QT5 applications without option `--wayland` you need to manually add options `--dbus`  and `--env QT_QPA_PLATFORM=wayland`.
  - Option `--hostwayland` can run single applications on host Wayland desktops like Gnome 3, KDE 5 and [Sway](https://github.com/swaywm/sway).
-
-_Examples:_
- - xfce4-terminal (GTK3) in Wayland: 
+ - Example: KDE `konsole` terminal on Wayland:
  ```
-x11docker --wayland x11docker/xfce xfce4-terminal
-```  
- - KDE plasma shell (QT5) in a pure Wayland environment with hardware acceleration. Option `--kwin` is used as `kwin_wayland` on host supports plasma panel placing while default `--weston` does not:
- ```
-x11docker --kwin --wayland --gpu -- x11docker/plasma plasmashell
-```
-
-You can also run Wayland applications from host with option `--exe`. 
- - gnome-calculator (GTK3) and neverball (SDL) from host in Weston without X:
-```
-x11docker --weston --exe gnome-calculator
-```
-```
-x11docker --weston --exe neverball
+x11docker --wayland x11docker/plasma konsole
 ```
 
 ## Setup for option --xorg
@@ -303,22 +299,6 @@ needs_root_rights=yes
 ```
 On debian 9 and Ubuntu 16.04 you need to install package `xserver-xorg-legacy`. 
 (Depending on your hardware and system setup, you may not need line `needs_root_rights=yes`).
-
-## Custom access to X server
-Running x11docker without an image name (or explicitly with option `--xonly`) creates an empty X server. In that case, or enforced with option `--showenv`, x11docker writes some environment variables on stdout. You can use this for custom access to new X server. Example:
-```
-read Xenv < <(x11docker --xephyr --showenv)
-# run xterm from host on new X server
-env $Xenv xterm
-# run docker image on new X server
-export $Xenv
-docker run --env DISPLAY --env XAUTHORITY -v $XAUTHORITY:$XAUTHORITY -v $XSOCKET:$XSOCKET x11docker/xfce
-```
-If you like to, you can run two docker images sharing the same X server. Example:
-```
-read Xenv < <(x11docker --xephyr --showenv x11docker/lxde)  # LXDE desktop in Xephyr
-env $Xenv x11docker --hostdisplay x11docker/xfce thunar  # Thunar from another image appears on LXDE desktop
-```
 
 # Init system
 x11docker supports init systems as PID 1 in container. Init in container solves the [zombie reaping issue](https://blog.phusion.nl/2015/01/20/docker-and-the-pid-1-zombie-reaping-problem/).
