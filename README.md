@@ -29,8 +29,8 @@ System changes in running containers are discarded after use.
    - [Sound](#sound) with pulseaudio or ALSA.
    - [Hardware acceleration](#hardware-acceleration) for OpenGL.
    - [Clipboard](#clipboard) sharing.
-   - [Printing](#Printer) through CUPS.
-   - [Webcam](#Webcam) support.
+   - [Printing](#printer) through CUPS.
+   - [Webcam](#webcam) support.
    - [Language locale](#language-locales) creation.
  - Remote access with [SSH](https://github.com/mviereck/x11docker/wiki/Remote-access-with-SSH), [VNC](https://github.com/mviereck/x11docker/wiki/VNC) or [HTML5 in browser](https://github.com/mviereck/x11docker/wiki/Container-applications-running-in-Browser-with-HTML5) possible.
  - Supports [init systems](#init-system) `tini`, `runit`, `openrc`, `SysVinit` and `systemd` in container.
@@ -325,9 +325,9 @@ x11docker sets up the init system to run desired command. No special setup is ne
    - To get a faster startup, it helps to look for services that fail to start in container and to mask them in image with `systemctl mask servicename`.
    - Tested with fedora, debian and Arch Linux images. Debian 10 images run well; debian 9 images additionally need insecure option `--sys-admin`.
    - Image example based on debian buster: [x11docker/cinnamon](https://hub.docker.com/r/x11docker/cinnamon/)
- - `--runit`: [runit](https://wiki.voidlinux.eu/Runit) in container.
+ - `--runit`: [runit](https://wiki.voidlinux.org/Runit) in container.
    - For a bit faster startup, failing services can be disabled by deleting their softlinks in `/etc/runit/runsvdir/default`.
-   - Image examples based on [Void Linux](https://www.voidlinux.eu/): [x11docker/enlightenment](https://hub.docker.com/r/x11docker/enlightenment/) and [x11docker/lumina](https://hub.docker.com/r/x11docker/lumina/).
+   - Image examples based on [Void Linux](https://www.voidlinux.org/): [x11docker/enlightenment](https://hub.docker.com/r/x11docker/enlightenment/) and [x11docker/lumina](https://hub.docker.com/r/x11docker/lumina/).
  - `--openrc`: [OpenRC](https://wiki.gentoo.org/wiki/OpenRC) in container.
    - cgroup usage possible with option `--sharecgroup`.
    - Image example based on [Alpine Linux](https://alpinelinux.org/): [x11docker/fvwm](https://hub.docker.com/r/x11docker/fvwm/)
@@ -387,7 +387,7 @@ Some image examples can be found on docker hub: https://hub.docker.com/u/x11dock
      - fluxbox: `x11docker --desktop x11docker/fluxbox` (based on debian, 87 MB)
 
    - Lightweight, small image:
-     - [Lumina](https://lumina-desktop.org): `x11docker --desktop x11docker/lumina` (based on [Void Linux](https://www.voidlinux.eu/))
+     - [Lumina](https://lumina-desktop.org): `x11docker --desktop x11docker/lumina` (based on [Void Linux](https://www.voidlinux.org/))
      - LXDE: `x11docker --desktop x11docker/lxde`
      - LXQt: `x11docker --desktop x11docker/lxqt`
      - Xfce: `x11docker --desktop x11docker/xfce`
@@ -395,7 +395,7 @@ Some image examples can be found on docker hub: https://hub.docker.com/u/x11dock
      
    - Medium:
      - Mate: `x11docker --desktop x11docker/mate`
-     - Enlightenment: `x11docker --desktop --gpu --runit x11docker/enlightenment` (Based on [Void Linux](https://www.voidlinux.eu/))
+     - Enlightenment: `x11docker --desktop --gpu --runit x11docker/enlightenment` (Based on [Void Linux](https://www.voidlinux.org/))
      - [Trinity](https://www.trinitydesktop.org/) (successor of KDE 3): `x11docker --desktop x11docker/trinity`
      
    - Heavy, option `--gpu` recommended:
