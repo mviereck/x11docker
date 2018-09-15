@@ -401,6 +401,7 @@ Some image examples can be found on docker hub: https://hub.docker.com/u/x11dock
    - Heavy, option `--gpu` recommended:
      - Cinnamon: `x11docker --desktop --gpu --dbus-system x11docker/cinnamon`
      - [deepin](https://www.deepin.org/en/dde/): `x11docker --desktop --gpu --systemd x11docker/deepin`
+     - [LiriOS](https://liri.io/): `x11docker --desktop --gpu lirios/unstable` (Needs at least docker 18.06 or this [xcb bugfix](https://github.com/mviereck/x11docker/issues/76).)
      - KDE Plasma: `x11docker --desktop --gpu x11docker/plasma`
      - KDE Plasma as nested Wayland compositor: 
        - `x11docker --hostdisplay --gpu x11docker/plasma startplasmacompositor`
