@@ -91,8 +91,7 @@ Shared folders:
      --homedir DIR     Specify custom host folder DIR for option --home.
      --homebasedir DIR Custom base folder for option --home.
                        (Compare --cachebasedir below).
-     --sharedir DIR    Share host folder (or file) DIR with r/w access.
-                       (Can be specified multiple times).
+     --sharedir DIR    Share host folder (or file) DIR. DIR:ro sets read-only. 
 
 Clipboard, sound, printer, language:
  -c, --clipboard       Share clipboard between X servers (works best with xpra.
@@ -252,6 +251,7 @@ Init system and dbus daemon:
  -b, --dbus            Run dbus user session daemon for image command.
      --dbus-system     Run dbus system daemon in container (includes --dbus).
                        Default for --wayland and for init options except --tini.
+     --hostdbus        Connect to DBus session from host.
 
 Container capabilities:
      --hostipc         Sets docker option --ipc=host, disables IPC namespacing.
@@ -810,6 +810,11 @@ pspid() {               # ps -p $1 --no-headers
   ps -p ${1:-} | tail -n+2
 }
 addrunopt() {           # store env, cap, volume or device for docker command
+  # $1  env     store environment variable $2
+  #     volume  store volume path $2
+  #     device  store device $2
+  #     cap     store apability $2
+  #     dump    dump all entries of $2
   local Count Line
   case ${1:-} in
     env)
@@ -1272,19 +1277,26 @@ convertpath() {         # convert unix and windows pathes
   #   --windows   echo windows path               - result: C:/path
   #   --unix      echo unix path                  - result: /c/path
   #   --subsystem echo path within subsystem      - result: /cygdrive/c/path  or  /path
-  #   --volume    echo --volume compatible syntax - result: 'unixpath':'containerpath'
+  #   --volume    echo --volume compatible syntax - result: 'unixpath':'containerpath':rw  (or ":ro")
   # $2: Path to convert. Arbitrary syntax, can be C:/path, /c/path, /cygdrive/c/path, /path
+  #     Can have suffix :rw or :ro. If none is given, return with :rw
   # $3: Optional for --volume: containerpath
   
-  local Mode= Path= Drive=
+  local Mode= Path= Drive= Readwritemode=
   
   Mode="${1:-}"
   Path="${2:-}"
-  
+
+  # check path for suffix :rw or :ro
+  Readwritemode="$(echo "$Path" | rev | cut -c1-3 | rev)"
+  [ "$(cut -c1 <<< "$Readwritemode")" = ":" ] && {
+    Path="$(echo "$Path" | rev | cut -c4- | rev)"
+  } || Readwritemode=":rw"
+
   # not on Windows
   [ -z "$Winsubsystem" ] && {
     case $Mode in
-      --volume) echo "'$Path':'${3:-$Path}'" ;;
+      --volume) echo "'$Path':'${3:-$Path}'$Readwritemode" ;;
       --unix|--subsystem) echo "$Path" ;;
       --windows) warning "Nonsense path conversion $Mode: $Path" ; return 1 ;;
     esac
@@ -1329,7 +1341,7 @@ convertpath() {         # convert unix and windows pathes
         --windows)   echo "${Drive^}:$(cut -c3- <<<$Winsubpath)$Path" ;;
         --unix)      echo "$Winsubpath$Path" ;;
         --subsystem) echo "$Path" ;;
-        --volume)    echo "'$Winsubpath$Path':'${3:-$Path}'" ;;
+        --volume)    echo "'$Winsubpath$Path':'${3:-$Path}'$Readwritemode" ;;
       esac
     ;;
     *) # Path outside of subsystem
@@ -1337,7 +1349,7 @@ convertpath() {         # convert unix and windows pathes
         --windows)   echo "${Drive^}:$Path" ;;
         --unix)      echo "/$Drive$Path" ;;
         --subsystem) echo "$Winsubmount/$Drive$Path" ;;
-        --volume)    echo "'/$Drive$Path':'${3:-/$Drive$Path}'" ;;
+        --volume)    echo "'/$Drive$Path':'${3:-/$Drive$Path}'$Readwritemode" ;;
       esac
     ;;
   esac
@@ -1710,6 +1722,7 @@ Initsystem="tini"                               # options --systemd --openrc --r
 Sharecgroup="no"                                # options --systemd, --cgroup: share /sys/fs/cgroup
 Dbuslaunch="no"                                 # option '--dbus': run image command with dbus-launch
 Dbusdaemon="no"                                 # option '--dbus-dameon': set up dbus daemon in container
+Sharehostdbus="no"                              # option '--hostdbus'
 Tinibinary=""                                   # option --tini/default: binary for tini; either /usr/bin/docker-exec or provided by user in ...share/x11docker
 
 # X authentication
@@ -1784,11 +1797,11 @@ stdout() {
   Longoptions="$Longoptions,fullscreen,size:,scale:,rotate:,dpi:,output-count:,gpu,xfishtank"                              # X appearance options
   Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,xtest,no-xtest,env:,showenv,showid,showpid1"                       # X and environment options
   Longoptions="$Longoptions,home,clipboard,pulseaudio::,alsa,lang:,printer,webcam"                                         # comfort options
-  Longoptions="$Longoptions,no-xhost,trusted,untrusted,dbus,dbus-system,pw:,no-internet,workdir:,sharessh"                 # advanced options
+  Longoptions="$Longoptions,no-xhost,trusted,untrusted,dbus,dbus-system,hostdbus,pw:,no-internet,workdir:,sharessh"        # advanced options
   Longoptions="$Longoptions,homedir:,sharedir:,cachebasedir:,homebasedir:"                                                 # host folders
   Longoptions="$Longoptions,tini,no-init,systemd,runit,openrc,sysvinit,sys-admin,sharecgroup"                              # init system options
   Longoptions="$Longoptions,starter,cleanup,license,licence,help,version,install,update,update-master,remove,wmlist"       # special options without starting X or container
-  Longoptions="$Longoptions,verbose::,silent,debug,stdout,stderr,stdin"                                                      # verbose options
+  Longoptions="$Longoptions,verbose::,silent,debug,stdout,stderr,stdin"                                                    # verbose options
   Longoptions="$Longoptions,hostipc,hostnet,ps,cache,cap-default,sudouser,hostuser:,user:,group-add:,name:"                # capabilities, users
   Longoptions="$Longoptions,keymap:,name:,no-entrypoint,runfromhost:,runasroot:,westonini:"                                # developer options
   Longoptions="$Longoptions,cachedir:"                                                                                     # deprecated
@@ -1865,7 +1878,6 @@ stdout() {
          --webcam)     Sharewebcam="yes" ;;                # share webcam
 
      #### Advanced options
-      -b|--dbus)       Dbuslaunch="yes" ;;                 # run image command with dbus-launch or dbus-run-session
          --no-entrypoint) Noentrypoint="yes" ;;            # don't use ENTRYPOINT of image
          --no-internet)Internetaccess="no" ;;              # disallow internet access
          --workdir)    Workdir="${2:-}" ; shift ;;         # set working directory
@@ -1908,6 +1920,8 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
          --sharecgroup)Sharecgroup="yes" ;;                # share /sys/fs/cgroup. default for --systemd, possible use with --openrc
          --sys-admin)  Capsysadmin="yes" ;;                # add capability SYS_ADMIN for older systemd versions in image (i.e. debian 9 needs it, debian 10 runs well)
          --dbus-system) Dbusdaemon="yes" ;;                # set up dbus system daemon
+      -b|--dbus)       Dbuslaunch="yes" ;;                 # run image command with dbus-launch or dbus-run-session
+         --hostdbus)   Sharehostdbus="yes" ;;              # connect to host DBus
 
        ## Environment
          --showid)     Showcontainerid="yes" ;;            # output of container id on stdout
@@ -3004,7 +3018,7 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   esac
 }
 
-{ #### part: options --verbose, --stdout, --stderr
+{ #### part: --verbose, --stdout, --stderr
   # create summary logfile
   tail --pid=$$ --retry -n +1 -F $Messagelogfile $Containerlogfile \
                                  $Cmdstdoutlogfile $Cmdstderrlogfile ${Journallogfile:-} \
@@ -3284,7 +3298,7 @@ After finish: $Logbackup"
   }
 }
 
-{ #### part: --cups: check cups printer server
+{ #### part: --printer: check cups printer server
   [ "$Sharecups" = "yes" ] && {
     command -v lpstat >/dev/null || {
       warning "Option --printer: command lpstat not found.
@@ -3314,7 +3328,7 @@ Port 631
   }
 }
 
-{ #### part: check window manager (option --wm)
+{ #### part: --wm: check window manager
   case $Windowmanager in
     ""|"none") Windowmanager="" ;;
     *)
@@ -3398,7 +3412,7 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
   [ "$Windowmanager" ] && verbose -d "As window manager from host serves: $Windowmanager"
 }
 
-{ #### part: check sound (options --pulseaudio and --alsa)
+{ #### part: --pulseaudio, --alsa: check sound
 
   # --alsa currently not supported on Windows
   [ "$Winsubsystem" ] &&  [ "$Alsa" = "yes" ]  && {
@@ -3509,7 +3523,7 @@ $(grep ':' </proc/asound/cards | cut -d"[" -f2 | cut -d"]" -f1)
   }
 }
 
-{ #### part: create xorg.conf and Xorg wrapper for --xdummy (options --xdummy, --xpra)
+{ #### part: --xdummy, --xpra: create xorg.conf and Xorg wrapper
   case $Xserver in
     --xpra|--xdummy)
       # create xorg.conf for Xdummy
@@ -4253,7 +4267,7 @@ esac
   addrunopt env "container=docker"
 }
 
-{ #### part: create shareclipboard script (option --clipboard)
+{ #### part: --clipboard: create shareclipboard script
   # use xclip or xsel to share text clipboard content between X servers.
   # xpra and nxagent have their own clipboard management.
   # only xpra supports image clips.
@@ -4315,7 +4329,7 @@ done
   esac
 }
 
-{ #### part: check password prompt frontend (pkexec, su, sudo, ...)
+{ #### part: --pw: check password prompt frontend (pkexec, su, sudo, ...)
   # check if x11docker can run docker without prompting for password
   [ "$Passwordfrontend" = "none" ] && Passwordneeded="no"
   [ "$X11dockermode" = "exe" ]     && Passwordneeded="no"
@@ -4721,6 +4735,45 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(while 
   [ "$Sharegpu" = "yes" ] && [ "$Nvidiadriver" ] && addrunopt cap "SETUID SETGID DAC_OVERRIDE CHOWN FOWNER"
 }
 
+{ #### part: --hostdbus: Connect to host DBus session daemon.
+  [ "$Sharehostdbus" = "yes" ] && {
+    warning "--hostdbus: Connecting container to host DBus degrades
+  container isolation."
+    Line="${DBUS_SESSION_BUS_ADDRESS:-}"
+    addrunopt env "NO_AT_BRIDGE=1"
+    Dbuslaunch=no
+    
+    [ "$Line" ] || {
+      # no running DBus session?
+      command -v dbus-launch >/dev/null && {
+        export $(dbus-launch)
+        note "Option --hostdbus: DBUS_SESSION_BUS_ADDRESS is empty.
+  Creating abstract DBus socket with dbus-launch."
+      } || note "Option --hostdbus: Is DBus running on host?
+  Did not find an active session and did not find dbus-launch.
+  DBUS_SESSION_BUS_ADDRESS is empty."
+    }
+    
+    grep -q "unix:path" <<< "$Line" && {
+      # DBus socket file
+      addrunopt env "DBUS_SESSION_BUS_ADDRESS=$Line"
+      addrunopt volume "/$(cut -d/ -f2- <<<"$Line"):ro"
+    }
+    
+    grep -q "unix:abstract" <<< "$Line" && {
+      # DBus abstract socket (dbus-launch)
+      addrunopt env "DBUS_SESSION_BUS_ADDRESS=$Line"
+      [ "${DBUS_SESSION_BUS_PID:-}" ]      && addrunopt env  "${DBUS_SESSION_BUS_PID:-}"
+      [ "${DBUS_SESSION_BUS_WINDOWID:-}" ] && addrunopt env  "${DBUS_SESSION_BUS_WINDOWID:-}"
+      Sharehostnet="yes"
+      warning "Option --hostdbus: Did not find a DBus session socket file
+  but an abstract unix socket. To allow access for container,
+  x11docker sets docker run option '--network=host' (option --hostnet).
+  This degrades container isolation. Container shares host network stack."
+    }
+  }
+}
+
 { #### part: create command to run docker
   case $X11dockermode in
     exe) Dockercommand="# dontrundocker"  ;;
@@ -4776,7 +4829,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(while 
       case $Initsystem in
         tini) 
           Dockercommand="$Dockercommand \\
-  --volume $(convertpath --volume "$Tinibinary" "$Cshare/tini"):ro" 
+  --volume $(convertpath --volume "$Tinibinary:ro" "$Cshare/tini")" 
         ;;
         systemd)
           Dockercommand="$Dockercommand \\
@@ -4806,27 +4859,27 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(while 
 
       # shared cache folder
       Dockercommand="$Dockercommand \\
-  --volume $(convertpath --volume "$Sharefolder" $Cshare):rw"
+  --volume $(convertpath --volume "$Sharefolder:rw" $Cshare)"
   
       # --home, --homedir
       [ "$Benutzerhosthome" = "yes" ] && [ -n "$Benutzerhosthomefolder" ] && Dockercommand="$Dockercommand \\
-  --volume $(convertpath --volume "$Benutzerhosthomefolder" "$Benutzerhome"):rw"
+  --volume $(convertpath --volume "$Benutzerhosthomefolder:rw" "$Benutzerhome")"
   
       # --sharedir
       while read -r Line; do
         case "$Line" in
           "$Benutzerhome")  Dockercommand="$Dockercommand \\
-  --volume $(convertpath --volume "$Benutzerhome" "$Benutzerhome/$(basename $Benutzerhome)"):rw" ;;
+  --volume $(convertpath --volume "$Benutzerhome" "$Benutzerhome/$(basename $Benutzerhome)")" ;;
           *) Dockercommand="$Dockercommand \\
-  --volume $(convertpath --volume "$Line"):rw" ;;
+  --volume $(convertpath --volume "$Line")" ;;
         esac
       done < <(addrunopt dump volume)
       
       # devices: --gpu, --webcam, --alsa
       while read -r Line; do
         Dockercommand="$Dockercommand \\
-  --device $(convertpath --volume "$Line"):rw \\
-  --volume $(convertpath --volume "$Line"):rw"
+  --device $(convertpath --volume "$Line") \\
+  --volume $(convertpath --volume "$Line")"
       done < <(addrunopt dump device)
       
       ## option --gpu: nvidia driver for automated install
@@ -4835,11 +4888,11 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(while 
 
       # X socket will be softlinked to /tmp/.X11-unix in container.CMD.sh
       [ "$Newxsocket" ] && Dockercommand="$Dockercommand \\
-  --volume $(convertpath --volume "$Newxsocket" "/X$Newdisplaynumber"):rw"
+  --volume $(convertpath --volume "$Newxsocket" "/X$Newdisplaynumber")"
   
       # Wayland socket will be softlinked to XDG_RUNTIME_DIR in container.CMD.sh
       [ "$Sharewayland" = "yes" ] && Dockercommand="$Dockercommand \\
-  --volume $(convertpath --volume "$XDG_RUNTIME_DIR/$Newwaylandsocket" "/$Newwaylandsocket"):rw"
+  --volume $(convertpath --volume "$XDG_RUNTIME_DIR/$Newwaylandsocket" "/$Newwaylandsocket")"
 
       ## options --hostipc and --hostnet
       [ "$Sharehostipc" = "yes" ]      && Dockercommand="$Dockercommand \\
@@ -6429,8 +6482,9 @@ todo() {
 #          --showpid1 (shows pid in docker VM)
 
 # --group-add: further checks? mismatch messagebus-101-systemd-journal
+# BUG x11docker/deepin: new builds have strange issues
+# BUG HTML5 with xpra fails
 # BUG x11docker/cde fails
-# jess/cathode fails with xcb error. bug report: https://github.com/jessfraz/dockerfiles/issues/401
 
 # --dbus-system: give up restricted setup?
 # check xhost +localhost

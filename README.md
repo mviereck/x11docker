@@ -279,10 +279,7 @@ To run  [Wayland](https://wayland.freedesktop.org/) instead of an X server x11do
  - Options `--kwin` and `--weston` run Wayland compositors `kwin_wayland` or `weston`.
    - For QT5 applications without option `--wayland` you need to manually add options `--dbus`  and `--env QT_QPA_PLATFORM=wayland`.
  - Option `--hostwayland` can run single applications on host Wayland desktops like Gnome 3, KDE 5 and [Sway](https://github.com/swaywm/sway).
- - Example: KDE `konsole` terminal on Wayland:
- ```
-x11docker --wayland x11docker/plasma konsole
-```
+ - Example: `xfce4-terminal` on Wayland: `x11docker --wayland x11docker/xfce xfce4-terminal`
 
 ## Setup for option --xorg
  - Option `--xorg` runs from console without additional setup. 
@@ -352,10 +349,11 @@ mkdir -p /sys/fs/cgroup/systemd
 mount -t cgroup cgroup /sys/fs/cgroup/systemd -o none,name=systemd
 ```
 
-## dbus
-Some desktop environments and applications need a running dbus daemon and/or dbus user session. 
- - use `--dbus-system` to run dbus system daemon. This includes option `--dbus`.
- - use `--dbus` to run image command with `dbus-launch` (fallback: `dbus-run-session`) for a dbus user session.
+## DBus
+Some desktop environments and applications need a running DBus daemon and/or DBus user session. 
+ - use `--dbus-system` to run DBus system daemon. This includes option `--dbus`.
+ - use `--dbus` to run image command with `dbus-launch` (fallback: `dbus-run-session`) for a DBus user session.
+ - use `--hostdbus` to connect to host DBus user session.
  
 # MSYS2, Cygwin and WSL on MS Windows
 x11docker runs on MS Windows in [MSYS2](https://www.msys2.org/), [Cygwin](https://www.cygwin.com/) 

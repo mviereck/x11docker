@@ -10,12 +10,14 @@ Project website: https://github.com/mviereck/x11docker
 ### Added
  - `--webcam`: New option to share webcam devices `/dev/video*`.
    [(#75)](https://github.com/mviereck/x11docker/issues/75)
+ - `--hostdbus`: New option to connect container to DBus session from host.
  - `-q`: New option, shortcut for `--stdout --stderr --silent`.
  - `-Q`: New option, shortcut for `--stdout --stderr`.
 ### Changed
  - `--wayland`: Does not run `--dbus-system` anymore to avoid complexity
    and issues on arch linux. Some old GTK3 applications may fail now.
    In that case, use `--weston` instead.
+ - `--sharedir DIR`: Appending `:ro` to `DIR` restricts to read-only access.
 ### Fixed
  - `--systemd --verbose`: journalctl.log was not shown.
  - `--systemd`: fixed slow dbus startup.
