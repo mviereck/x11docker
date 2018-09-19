@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Fixed
+ - `--xdummy`, `--xvfb`: avoid X message boxes if there is no host X.
+   Affects error messages and `docker pull`.
+   [(#77)](https://github.com/mviereck/x11docker/issues/77)
+
 ## [5.2.0](https://github.com/mviereck/x11docker/releases/tag/v5.2.0) - 2018-09-17
 ### Added
  - `--webcam`: New option to share webcam devices `/dev/video*`.
