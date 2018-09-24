@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
+### Added
+ - `--launcher`: Replaces `--starter`, creates an application launcher.
+### Changed
+ - Major code cleanup and restructuring. New: commented `main()` routine.
+ - `--dbus`: Always uses `dbus-run-session`, doesn't try `dbus-launch` anymore.
+ - `--xpra`: Allow choice of vfb with `--xdummy` or `--xvfb`. 
+   If not specified: defaults to Xvfb, fallback to Xdummy.
+### Deprecated
+ - `--starter`: Use `--launcher` instead.
 ### Fixed
  - `--xdummy`, `--xvfb`: avoid X message boxes if there is no host X.
    Affects error messages and `docker pull`.
