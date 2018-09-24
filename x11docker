@@ -1210,7 +1210,7 @@ cleanup() {                     # --cleanup : check for non-removed containers a
 
   cd $Cachebasefolder || error "Could not cd to cache folder '$Cachebasefolder'."
 
-  grep -q .cache/x11docker <<<$Cachebasefolder && Orphanedfolders=$(find "$Cachebasefolder" -mindepth 1 -maxdepth 1 -type d | sed s%$Cachebasefolder/%% | grep -v x11docker-gui)
+  grep -q .cache/x11docker <<<$Cachebasefolder && Orphanedfolders=$(find "$Cachebasefolder" -mindepth 1 -maxdepth 1 -type d | sed s%$Cachebasefolder/%% | grep -w -v x11docker-gui)
   # e X11DOCKER_LASTCLEANFOLDER may be set by x11docker-gui to spare its cache folder.
   [ "${X11DOCKER_LASTCLEANFOLDER:-}" ] && Orphanedfolders="$(echo "$Orphanedfolders" | grep -v $X11DOCKER_LASTCLEANFOLDER)"
   Orphanedcontainers="$($Dockerexe ps -a --filter name=x11docker_X --format "{{.Names}}")"
@@ -2386,8 +2386,36 @@ fi
 ' >> $Xorgwrapper
 }
 create_xcommand() {             # create command to start X server and/or Wayland compositor
-  local Xserveroptions= Compositorpid= Westonoutput= Needweston= Xephyroptions= Nxagentoptions= Xpraoptions=
+  local Xserveroptions= Compositorpid= Westonoutput= Needweston= Xephyroptions= Nxagentoptions= Xpraoptions= Count=
 
+  # find free display number
+  [ "$Newdisplaynumber" ] || for ((Newdisplaynumber=100 ; Newdisplaynumber <=1000 ; Newdisplaynumber++)); do
+    [ -n "$(find /tmp/.X11-unix/X$Newdisplaynumber /tmp/.X$Newdisplaynumber-lock $XDG_RUNTIME_DIR/wayland-$Newdisplaynumber 2>/dev/null)" ] || { 
+      case $Xserver in
+        --vcxsrv) grep -q -E 'Authorization|Absolute' <<< "$(xwininfo.exe -display :$Newdisplaynumber -root 2>&1)" || break ;;
+        *) break ;;
+      esac
+    }
+  done
+  
+  # set Newdisplay (DISPLAY of container) and Newxsocket
+  case $Xserver in
+    --hostdisplay)
+      Newdisplay=$Hostdisplay
+      Newdisplaynumber=$(echo $Newdisplay | cut -d: -f2 | cut -d. -f1)
+      [ -e "$Hostxsocket" ] && Newxsocket=$Hostxsocket || Newxsocket=
+    ;;
+    --vcxsrv|--xwin)
+      Newdisplay="$Hostip:$Newdisplaynumber"
+    ;;
+    *)
+      Newdisplay=":$Newdisplaynumber"
+      Newxsocket="/tmp/.X11-unix/X$Newdisplaynumber"
+      Newxlock="/tmp/.X$Newdisplaynumber-lock"
+      [ -n "$(find $Newxsocket $Newxlock 2>/dev/null)" ] && error "Display $Newdisplay is already in use."
+    ;;
+  esac
+  
   Xserveroptions="-dpms -s off"
   case $Xserver in
     --nxagent)
@@ -2535,7 +2563,7 @@ create_xcommand() {             # create command to start X server and/or Waylan
       [ "$Desktopmode" = "yes" ] && Xpraservercommand="xpra start-desktop" || Xpraservercommand="xpra start"
       Xpraservercommand="$Xpraservercommand $Newdisplay --use-display $Xpraoptions \\
   --no-daemon --fake-xinerama=no --mdns=no \\
-  --file-transfer=off --printing=no \\
+  --file-transfer=off --printing=no --notifications=no \\
   --start-new-commands=no --dbus-proxy=no --no-pulseaudio \\
   --html=off --session-name=\"$Codename \""
       verlt  "$Xprarelease" "r13378" || Xpraservercommand="$Xpraservercommand --systemd-run=no"
@@ -5003,7 +5031,7 @@ check_hostuser() {              # check for unprivileged host user
 }
 check_hostxenv() {              # check environment variables for host X display
 
-  Hostdisplay="$DISPLAY"
+  Hostdisplay="${DISPLAY:-}"
   Hostdisplaynumber="$(echo $Hostdisplay | cut -d: -f2 | cut -d. -f1)"                         # display number without ":" and ".0"
   [ -n "$Hostdisplay" ] && Hostxsocket="/tmp/.X11-unix/X$Hostdisplaynumber" || Hostxsocket=""  # X socket from host, needed for --hostdisplay
   [ -e "$Hostxsocket" ] || Hostxsocket=""                                                      # can miss in SSH session
@@ -5041,9 +5069,11 @@ check_hostxenv() {              # check environment variables for host X display
   [ -n "$Hostwaylandsocket" ] && Hostxenv="$Hostxenv WAYLAND_DISPLAY=$Hostwaylandsocket"
   Hostxenv="$Hostxenv XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
   [ -n "$Hostdisplay" ] && [ -z "$Hostxauthority" ] && warning "Your host X server runs without cookie authentication."
+  
   return 0
 }
-create_cachebasefolder() {      # create base cache folder
+create_cachefiles() {           # create empty cache files owned by unprivileged user
+  # create base cache folder
   [ "$Cachebasefolder" ] || {
     case $Winsubsystem in
       "") Cachebasefolder="$Hostuserhome/.cache/x11docker" ;;
@@ -5059,10 +5089,9 @@ create_cachebasefolder() {      # create base cache folder
 
   [ "$Cachebasefolder" != "$(echo $Cachebasefolder | sed -e 's/ *//g')" ] && error "Cache root folder must not contain whitespaces.
   $Cachebasefolder"
-  return 0
-}
-create_cachefiles() {           # create empty cache files owned by unprivileged user
-  Cachefolder="$Cachebasefolder/X$Cachenumber-$Codename"
+  
+  # create cache subfolder
+  Cachefolder="$Cachebasefolder/$Codename-$Mycookie"
   [ -d "$Cachefolder" ] && error "Cache folder already exists:
   $Cachefolder"
 
@@ -5124,38 +5153,6 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Cmdstderrlogfile="$Sharefolder/$Cmdstderrlogfile"                 && mkfile $Cmdstderrlogfile 666
 
   mkfile "$Sharefolder/environment"
-  return 0
-}
-check_free_display() {          # find free display number
-  for ((Cachenumber=100 ; Cachenumber <=1000 ; Cachenumber++)); do
-    [ -n "$(find /tmp/.X11-unix/X$Cachenumber /tmp/.X$Cachenumber-lock /tmp/.X11-unix/X$Cachenumber $XDG_RUNTIME_DIR/wayland-$Cachenumber $Cachebasefolder/X$Cachenumber-* 2>/dev/null)" ] || { 
-      case $Xserver in
-        --vcxsrv) grep -q -E 'Authorization|Absolute' <<< "$(xwininfo.exe -display :$Cachenumber -root 2>&1)" || break ;;
-        *) break ;;
-      esac
-    }
-  done
-  [ -z "$Newdisplaynumber" ] && Newdisplaynumber=$Cachenumber
-  
-  case $Xserver in
-    --hostdisplay)
-      Newdisplay=$Hostdisplay
-      Newdisplaynumber=$(echo $Newdisplay | cut -d: -f2 | cut -d. -f1)
-      [ -e "$Hostxsocket" ] && Newxsocket=$Hostxsocket || Newxsocket=
-      Newxlock="/tmp/.X$Newdisplaynumber-lock"
-      [ -e "$Newxlock" ] || Newxlock=""
-    ;;
-    --vcxsrv|--xwin)
-      Newxsocket=""
-      Newdisplay="$Hostip:$Newdisplaynumber"
-    ;;
-    *)
-      Newdisplay=":$Newdisplaynumber"
-      Newxsocket="/tmp/.X11-unix/X$Newdisplaynumber"
-      Newxlock="/tmp/.X$Newdisplaynumber-lock"
-      [ -n "$(find $Newxsocket $Newxlock 2>/dev/null)" ] && error "Display $Newdisplay is already in use."
-    ;;
-  esac
   return 0
 }
 check_runmode() {               # check run/--exe/--xonly
@@ -5859,8 +5856,6 @@ setup_fifo() {                  # set up fifo channels (also option --stdin)
 
 #### main
 declare_variables() {           # declare variables
-  #PS4='+\t ' && set -x
-
   export IFS=$' \n\t'                             # set IFS to default
 
   export PATH="$PATH:/usr/games:/usr/local/bin"   # can miss for root, but might be needed for --exe and --xfishtank
@@ -5940,7 +5935,6 @@ declare_variables() {           # declare variables
   Cachefolder=""                                  # subfolder of $Cachebasefolder for current container
   Sharefolder=share                               # subfolder of $Cachefolder for files shared with container
   Cshare=/x11docker                               # mountpoint of $Sharefolder in container
-  Cachenumber=""                                  # number of cache folder, mostly same as $Newdisplaynumber
   Codename=""                                     # Generated name for cache, containerhome and other purposes from image name or hostexe
 
   # Parsed arguments
@@ -6366,7 +6360,6 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
           [ -n "${1:-}" ] && [ -n "$Imagename" ] && Imagecommand="$Imagecommand${1:-} "
           shift
         done
-        [ -z "$Imagename" ] && X11dockermode="xonly"
       ;;
       '') ;;
       *) error "Unknown option ${1:-}
@@ -6387,10 +6380,11 @@ main() {
   declare_variables
   parse_options "$@"
 
-  [ "$Silent" = "yes" ] && exec 3>/dev/null                                   # --silent
-  [ "$Debugmode" = "yes" ] && {                                               # --debug
+  [ "$Silent" = "yes" ] && exec 3>/dev/null                                     # --silent
+  [ "$Debugmode" = "yes" ] && {                                                 # --debug
     set -Eu
     trap 'traperror $? $LINENO $BASH_LINENO "$BASH_COMMAND" $(printf "::%s" ${FUNCNAME[@]})'  ERR
+    #PS4='+\t ' && set -x
   }
 
   verbose -d "
@@ -6399,22 +6393,18 @@ docker version:    $($Dockerexe --version 2>&1)
 Host system:       $(source /etc/os-release 2>/dev/null; echo "$PRETTY_NAME")
 Command:           $0 $X11dockerargs
 Parsed options:    $Parsedoptions"
-  Wisdom="$(fortune -s 2>/dev/null || echo "Install fortunes to find wisdom.")"
-  verbose "
-$(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   
+  # check host, create cache
   check_host                    # get some infos about host system
-  check_hostuser                # find unprivileged host user                 # --hostuser
-  check_runmode                 # run image, or host executeable, or X only   # --exe, --xonly
-  create_cachebasefolder                                                      # --cachebasedir
-  check_free_display            # find free display and cache number          # --display
+  check_hostuser                # find unprivileged host user                   # --hostuser
+  check_runmode                 # run image, or host executeable, or X only     # --exe, --xonly
   create_cachefiles             # create empty cache files owned by unprivileged user
   check_hostxenv                # check X environment from host
   
   # Special x11docker jobs
-  [ "$Createlauncher" = "yes" ] && { create_launcher ; exit ; }               # --launcher: Create application launcher icon on desktop
-  [ "$Checkorphaned" = "yes" ]  && { cleanup ; exit ; }                       # --cleanup: Clean up cache and x11docker containers
-  [ "$Installermode" ] && {                                                   # --install, --update, --remove
+  [ "$Createlauncher" = "yes" ] && { create_launcher ; exit ; }                 # --launcher: Create application launcher icon on desktop
+  [ "$Checkorphaned" = "yes" ]  && { cleanup ; exit ; }                         # --cleanup: Clean up cache and x11docker containers
+  [ "$Installermode" ] && {                                                     # --install, --update, --remove
     [ "$Startuser" = "root" ] || [ "$Winsubsystem" ] || error "Must run as root to install, update or remove x11docker."
     installer $Installermode
     exit
@@ -6426,25 +6416,25 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   option_messages               # some messages depending on options, but not changing anything
   
   # some checks and setup
-  setup_verbosity               # start verbose output                        # --verbose, --stdout, --stderr
+  setup_verbosity               # create summary logfile, start verbose output  # --verbose, --stdout, --stderr
   check_terminalemulator        # find terminal emulator like xterm for error messages and 'docker pull'
-  check_passwordfrontend        # check for su/sudo/gksu/pkexec etc.          # --pw
-  check_containeruser           # unprivileged user in container              # --user, --home, --homedir, --homebasedir
+  check_passwordfrontend        # check for su/sudo/gksu/pkexec etc.            # --pw
+  check_containeruser           # unprivileged user in container                # --user, --home, --homedir, --homebasedir
   setup_fifo                    # open message channels for container, dockerrc and xinitrc
   
-  check_screensize              # size of new X server                        # --size
-  check_windowmanager           # WM for single apps in e.g. Xephyr           # --wm  
-  [ "$Sharegpu" = "yes" ]       && setup_gpu                                  # --gpu
-  [ "$Sharewebcam" = "yes" ]    && setup_webcam                               # --webcam
-  [ "$Sharecups" = "yes" ]      && setup_printer                              # --printer
-  [ "$Pulseaudiomode" ]         && setup_sound_pulseaudio                     # --pulseaudio
-  [ "$Sharealsa" = "yes" ]      && setup_sound_alsa                           # --alsa
-  [ "$Shareclipboard" = "yes" ] && setup_clipboard                            # --clipboard
+  check_screensize              # size of new X server                          # --size
+  check_windowmanager           # WM for single apps in e.g. Xephyr             # --wm  
+  [ "$Sharegpu" = "yes" ]       && setup_gpu                                    # --gpu
+  [ "$Sharewebcam" = "yes" ]    && setup_webcam                                 # --webcam
+  [ "$Sharecups" = "yes" ]      && setup_printer                                # --printer
+  [ "$Pulseaudiomode" ]         && setup_sound_pulseaudio                       # --pulseaudio
+  [ "$Sharealsa" = "yes" ]      && setup_sound_alsa                             # --alsa
+  [ "$Shareclipboard" = "yes" ] && setup_clipboard                              # --clipboard
   
   #### Create command to run X server [and/or Wayland compositor]
-  [ "$Xserver" = "--xorg" ] && [ -z "$Newxvt" ] && check_vt                   # --vt: find free tty/virtual terminal for Xorg
+  [ "$Xserver" = "--xorg" ] && [ -z "$Newxvt" ] && check_vt                     # --vt: find free tty/virtual terminal for Xorg
   { [ "$Xserver" = "--xdummy" ] || [ "$Xpravfb" = "Xdummy" ] ; } && create_xdummyxorgconf
-  create_xcommand               # set up start command for X server           # all X server and Wayland options
+  create_xcommand               # set up start command for X server             # all X server and Wayland options
   [ "$Xcommand" ] && verbose -d "X server command:
   $Xcommand"
   [ "$Compositorcommand" ] && verbose -d "Compositor command:
@@ -6468,9 +6458,9 @@ $(cowsay "$Wisdom" 2>/dev/null || echo "Wanda the fish says: $Wisdom")"
   #### Create docker command
   [ "$X11dockermode" = "run" ] && {
     # core setup of docker command
-    setup_initsystem            # init in container. Default: tini            # --tini, --systemd, --openrc, --sysvinit
+    setup_initsystem            # init in container. Default: tini              # --tini, --systemd, --openrc, --sysvinit
     setup_capabilities          # add linux capabilities if needed for some options. Default: --cap-drop=ALL
-    [ "$Sharehostdbus" = "yes" ] && setup_hostdbus                            # --hostdbus
+    [ "$Sharehostdbus" = "yes" ] && setup_hostdbus                              # --hostdbus
     create_dockercommand        # create 'docker run' command
     verbose -d "Generated docker command:
   $Dockercommand"
@@ -6509,15 +6499,15 @@ $(nl -ba <$Westonini)"
     # Thus docker runs in this subshell after X server is ready to accept connections
 
     waitfor_xserver
-    [ "$Showdisplayenvironment" = "yes" ] && echo $Newxenv                    # --showenv
-    [ "$Xpraservercommand" ] && start_xpra                                    # --xpra, --xpra-xwayland
+    [ "$Showdisplayenvironment" = "yes" ] && echo $Newxenv                      # --showenv
+    [ "$Xpraservercommand" ] && start_xpra                                      # --xpra, --xpra-xwayland
     
     case $X11dockermode in
-      run) start_docker ;;                                                    # (default)
-      exe) start_hostexe ;;                                                   # --exe, --xonly
+      run) start_docker ;;                                                      # (default)
+      exe) start_hostexe ;;                                                     # --exe, --xonly
     esac
     
-    [ "$Pulseaudiomode" = "tcp" ] && start_pulseaudiotcp                      # --pulseaudio=tcp
+    [ "$Pulseaudiomode" = "tcp" ] && start_pulseaudiotcp                        # --pulseaudio=tcp
     
     debugnote "Process tree of x11docker:
   $(pstree -p $$ 2>&1 ||:)"
@@ -6533,6 +6523,8 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
+# --hostdisplay: unrestricted default?
+# --xonly: not default for empty x11docker image name?
 # --composite: new option to enable/disable extension Composite? Of interest for --nxagent.
 
 # MSYS2/Cygwin/WSL:
