@@ -385,14 +385,9 @@ traperror() {                   # trap ERR: --debug: Output for 'set -o errtrace
   ${4:-}
   ${3:-} - ${5:-}"
 }
-error() {                       # show error messages on stderr and exit
+error() {                       # show error message and exit
   local Message=
 
-  # If there was already an error message, just show follow-up error as warning only.
-  [ -e "$Cachefolder/error" ] && warning "$*" && waitfortheend
-  [ -d "$Cachefolder" ] && mkfile $Cachefolder/error   # also regarded by finish() for exit code
-
-  sleep 1
   Message="$*
 
   Type 'x11docker --help' for usage information
@@ -411,17 +406,11 @@ ${Colredbg}x11docker ERROR:${Colnorm} $Message
   # output to logfile
   logentry "x11docker ERROR: $Message
 "
+  [ -e "$Cachefolder/error" ] && waitfortheend         # Avoid double alert boxes
+  [ -d "$Cachefolder" ] && mkfile "$Cachefolder/error" # also regarded by finish() for exit code
 
   # output to X dialogbox
-  [ -n "$Hostdisplay" ] && export ${Hostxenv:-DISPLAY} || { [ -n "$Newdisplay" ] && export ${Newxenv:-DISPLAY} ; }
-  [ -n "$Newdisplay" ] && {
-    [ "$Hosttty" = "yes" ] && export ${Newxenv:-DISPLAY}
-    case $Xserver in
-      --xorg) [ -e "$Newxsocket" ] && export ${Newxenv:-DISPLAY} ;;
-      --xdummy|--xvfb) [ "$Hostdisplay" ] || unset DISPLAY;;
-    esac
-  }
-  [ "$Silent" = "no" ] && alertbox "x11docker ERROR" "$Message"
+  [ "$Silent" = "no" ] && $Terminalxenv alertbox "x11docker ERROR" "$Message"
 
   finish 1
 }
@@ -2976,6 +2965,13 @@ esac
       store_runoption env "XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR"
     ;;
   esac
+  
+  case $Xserver in
+    --xorg) Terminalxenv="$Newxenv" ;;
+    --weston|--kwin|--weston-xwayland|--kwin-xwayland|--nothing) [ "$Hosttty" = "yes" ] && Terminalxenv="$Newxenv" ;;
+    *) Terminalxenv="$Hostxenv" ;;
+  esac
+  
   return 0
 }
 create_xinitrc() {              # create xinitrc: set up X environment, create cookies
@@ -3301,7 +3297,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
 } >> $Xinitrc
 
 #### docker command setup
-store_runoption() {                   # store env, cap, volume or device for docker command
+store_runoption() {             # store env, cap, volume or device for docker command
   # $1  env     store environment variable $2
   #     volume  store volume path $2
   #     device  store device $2
@@ -3857,16 +3853,15 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
 
   echo "# check if image is available locally"
   echo "$Dockerexe inspect --type=image $Imagename >/dev/null 2>&1 || {"
-  [ -n "$Hostxenv" ]                      && echo "  export $Hostxenv"
-  [ -n "$Newxenv" ] && [ "$Hosttty" = "yes" ] && echo "  export $Newxenv"
-  [ "$Xserver" = "--xorg" ]               && echo "  export $Newxenv"
   [ "$Pullterminal" = "$Passwordterminal" ] && [ "$Passwordneeded" = "yes" ] && Pullterminal=""
-  echo "  $Pullterminal '/bin/bash $Pullrc'"
+  echo "  env $Terminalxenv $Pullterminal /bin/bash $Pullrc"
   echo "  waitforfilecreation $Cachefolder/pullready infinity"
-  echo "  $Dockerexe inspect --type=image $Imagename 2>&1 | rmcr >>$Containerlogfile || error \"Image '$Imagename' not found locally and not pulled from docker hub.
-
-  Last lines of log:
+  echo "  $Dockerexe inspect --type=image $Imagename >>$Containerlogfile 2>&1 || {"
+  echo "    error \"Image '$Imagename' not found locally
+  and not pulled from docker hub. Last lines of log:
 \$(tail $Containerlogfile)\""
+  echo "    exit 1"
+  echo "  }"
   echo "}"
   echo "# check CMD"
   echo "[ -z \"\$Imagecommand\" ] && {"
@@ -4773,15 +4768,24 @@ start_docker() {                # start docker
   Containerid=$(cat $Containeridfile)
   Containerip=$(cat $Containeripfile)         # used by start_pulseaudiotcp()
   Containerpid1=$(cat $Containerpid1pidfile)
-      
+
   # watch container
-  [ "$Containerpid" ] && checkpid $Containerpid && {
-    storepid $Containerpid container
-    sleep 2
-    setonwatchpidlist $Containerpid container
-  }
-  [ "$Winsubsystem" ] && [ "$Containerid" ] && setonwatchpidlist "CONTAINER$Containerid"
-      
+  case $Winsubsystem in
+    "")
+      [ "$Containerpid" ] && {
+        storepid $Containerpid container
+        setonwatchpidlist $Containerpid container
+      } || error "Container startup seems to have failed.
+  Last lines of log:
+$(tail $Containerlogfile)"
+      sleep 1
+      checkpid $Containerpid1 || note "Container seems to have terminated quite fast.
+  Last lines of container application output:
+$(tail $Cmdstdoutlogfile $Cmdstderrlogfile)"
+    ;;
+    *) [ "$Containerid" ] && setonwatchpidlist "CONTAINER$Containerid" ;;
+  esac
+
   [ "$Containerpid1" ] && verbose -d "Process tree of container:
 $(pstree -cp $Containerpid1 2>&1 ||:)"
   return 0
@@ -5747,9 +5751,11 @@ check_passwordfrontend() {      # check password prompt frontend (pkexec, su, su
                Passwordcommand="$Passwordfrontend"                                       ; Passwordterminal="bash -c" ;;
   esac
   [ "$Passwordneeded" = "yes" ] && {
-    command -v $(echo $Passwordcommand|cut -d' ' -f1) >/dev/null || warning "Password prompt frontend $(echo $Passwordcommand|cut -d' ' -f1) not found.
+    command -v $(echo $Passwordcommand|cut -d' ' -f1) >/dev/null || {
+      warning "Password prompt frontend $(echo $Passwordcommand|cut -d' ' -f1) not found.
   Fallback: using no password prompt (--pw=none)." 
                Passwordcommand="bash -c" ; Passwordfrontend="none" ; Passwordneeded="no" ; Passwordterminal="bash -c"
+    }
   }
   return 0
 }
@@ -5775,11 +5781,11 @@ check_terminalemulator() {      # check terminal for password prompt of su or su
   [ "$Pullterminal" = "NOLUCK" ] && warning "Can not find a terminal emulator that works for
   option $Xserver. Please install one of:
   ${Terminallist%"NOLUCK"}"
-  
+
   [ -z "$Hostdisplay" ] && [ "$Sharewayland" = "yes" ] && {
     case $Pullterminal in
-      qterminal) Pullterminal="env QT_QPA_PLATFORM=wayland $Pullterminal" ;;
-      konsole) Pullterminal="env QT_QPA_PLATFORM=wayland dbus-run-session $Pullterminal --nofork" ;;
+      qterminal) Pullterminal="env QT_QPA_PLATFORM=wayland $Pullterminal -e" ;;
+      konsole) Pullterminal="env QT_QPA_PLATFORM=wayland dbus-run-session $Pullterminal --nofork -e" ;;
     esac
   }
   case $Pullterminal in
@@ -5939,7 +5945,6 @@ declare_variables() {           # declare variables
 
   # Parsed arguments
   X11dockermode="run"                             # can be either "xonly", "run" or "exe", depends on options. while parsing, xonly changes to run or exe
-  X11dockerargs="$*"                              # arguments for x11docker, stored for logfile and for --launcher
   Imagename=""                                    # name of image to run
   Imagecommand=""                                 # image command [+args]
   Codename=""                                     # image name with : and / replaced by - for use with container name and --home folder
@@ -6379,32 +6384,31 @@ main() {
   
   declare_variables
   parse_options "$@"
+  check_runmode                 # run image, or host executeable, or X only     # --exe, --xonly
 
-  [ "$Silent" = "yes" ] && exec 3>/dev/null                                     # --silent
+  [ "$Silent" = "yes" ]    && exec 3>/dev/null                                  # --silent
   [ "$Debugmode" = "yes" ] && {                                                 # --debug
     set -Eu
     trap 'traperror $? $LINENO $BASH_LINENO "$BASH_COMMAND" $(printf "::%s" ${FUNCNAME[@]})'  ERR
-    #PS4='+\t ' && set -x
   }
 
   verbose -d "
 x11docker version: $Version
 docker version:    $($Dockerexe --version 2>&1)
 Host system:       $(source /etc/os-release 2>/dev/null; echo "$PRETTY_NAME")
-Command:           $0 $X11dockerargs
+Command:           $0 $(for Line in "$@"; do echo -n "'$Line' " ; done)
 Parsed options:    $Parsedoptions"
   
   # check host, create cache
   check_host                    # get some infos about host system
   check_hostuser                # find unprivileged host user                   # --hostuser
-  check_runmode                 # run image, or host executeable, or X only     # --exe, --xonly
   create_cachefiles             # create empty cache files owned by unprivileged user
   check_hostxenv                # check X environment from host
   
   # Special x11docker jobs
   [ "$Createlauncher" = "yes" ] && { create_launcher ; exit ; }                 # --launcher: Create application launcher icon on desktop
   [ "$Checkorphaned" = "yes" ]  && { cleanup ; exit ; }                         # --cleanup: Clean up cache and x11docker containers
-  [ "$Installermode" ] && {                                                     # --install, --update, --remove
+  [ "$Installermode" ]          && {                                            # --install, --update, --remove
     [ "$Startuser" = "root" ] || [ "$Winsubsystem" ] || error "Must run as root to install, update or remove x11docker."
     installer $Installermode
     exit
@@ -6417,8 +6421,6 @@ Parsed options:    $Parsedoptions"
   
   # some checks and setup
   setup_verbosity               # create summary logfile, start verbose output  # --verbose, --stdout, --stderr
-  check_terminalemulator        # find terminal emulator like xterm for error messages and 'docker pull'
-  check_passwordfrontend        # check for su/sudo/gksu/pkexec etc.            # --pw
   check_containeruser           # unprivileged user in container                # --user, --home, --homedir, --homebasedir
   setup_fifo                    # open message channels for container, dockerrc and xinitrc
   
@@ -6432,14 +6434,17 @@ Parsed options:    $Parsedoptions"
   [ "$Shareclipboard" = "yes" ] && setup_clipboard                              # --clipboard
   
   #### Create command to run X server [and/or Wayland compositor]
-  [ "$Xserver" = "--xorg" ] && [ -z "$Newxvt" ] && check_vt                     # --vt: find free tty/virtual terminal for Xorg
+  [ "$Xserver" = "--xorg" ]     && [ -z "$Newxvt" ]              && check_vt    # --vt: find free tty/virtual terminal for Xorg
   { [ "$Xserver" = "--xdummy" ] || [ "$Xpravfb" = "Xdummy" ] ; } && create_xdummyxorgconf
   create_xcommand               # set up start command for X server             # all X server and Wayland options
-  [ "$Xcommand" ] && verbose -d "X server command:
+  [ "$Xcommand" ]               && verbose -d "X server command:
   $Xcommand"
-  [ "$Compositorcommand" ] && verbose -d "Compositor command:
+  [ "$Compositorcommand" ]      && verbose -d "Compositor command:
   $Compositorcommand"
     
+  check_terminalemulator        # find terminal emulator like xterm for error messages and 'docker pull'
+  check_passwordfrontend        # check for su/sudo/gksu/pkexec etc.            # --pw
+  
   verbose -d "Users and terminal:
   x11docker was started by:                       $Startuser
   As host user serves (running X, storing cache): $Hostuser
@@ -6526,6 +6531,8 @@ todo() {
 # --hostdisplay: unrestricted default?
 # --xonly: not default for empty x11docker image name?
 # --composite: new option to enable/disable extension Composite? Of interest for --nxagent.
+# --internet to allow internet access, otherwise --net=none?
+# create_xcommand() needs a nice structure
 
 # MSYS2/Cygwin/WSL:
 #       needs test:
