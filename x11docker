@@ -2167,6 +2167,86 @@ $(xhost 2>&1 | rmcr)"
   }
   return 0
 }
+check_newxenv() {               # find free display, create $Newxenv
+  # find free display number
+  [ "$Newdisplaynumber" ] || for ((Newdisplaynumber=100 ; Newdisplaynumber <=1000 ; Newdisplaynumber++)); do
+    [ -n "$(find /tmp/.X11-unix/X$Newdisplaynumber /tmp/.X$Newdisplaynumber-lock $XDG_RUNTIME_DIR/wayland-$Newdisplaynumber 2>/dev/null)" ] || { 
+      case $Xserver in
+        --vcxsrv) grep -q -E 'Authorization|Absolute' <<< "$(xwininfo.exe -display :$Newdisplaynumber -root 2>&1)" || break ;;
+        *) break ;;
+      esac
+    }
+  done
+  
+  # set $Newdisplay (DISPLAY of container) and $Newxsocket
+  case $Xserver in
+    --hostdisplay)
+      Newdisplay=$Hostdisplay
+      Newdisplaynumber=$(echo $Newdisplay | cut -d: -f2 | cut -d. -f1)
+      [ -e "$Hostxsocket" ] && Newxsocket=$Hostxsocket || Newxsocket=
+    ;;
+    --vcxsrv|--xwin)
+      Newdisplay="$Hostip:$Newdisplaynumber"
+    ;;
+    *)
+      Newdisplay=":$Newdisplaynumber"
+      Newxsocket="/tmp/.X11-unix/X$Newdisplaynumber"
+      Newxlock="/tmp/.X$Newdisplaynumber-lock"
+      [ -n "$(find $Newxsocket $Newxlock 2>/dev/null)" ] && error "Display $Newdisplay is already in use."
+    ;;
+  esac
+  # set $Newwaylandsocket
+  case $Xserver in
+    --weston|--weston-xwayland|--kwin|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland) Newwaylandsocket="wayland-$Newdisplaynumber" ;;
+    --hostwayland|--xwayland) Newwaylandsocket="Hostwaylandsocket" ;;
+  esac
+  
+  #### create $Newxenv: collection of environment variables to access new X from host (e.g. in xinitrc)
+  case $Xserver in
+    --xpra|--xephyr|--xpra-xwayland|--weston-xwayland|--hostdisplay|--xorg|--xdummy|--xvfb|--xdummy-xwayland|--xwayland|--kwin-xwayland|--nxagent|--vcxsrv|--xwin)
+      Newxenv="DISPLAY=$Newdisplay"
+      [ "$Xauthentication" = "yes" ] && Newxenv="$Newxenv XAUTHORITY=$Xclientcookie"
+      Newxenv="$Newxenv XSOCKET=$Newxsocket"
+      Newxenv="$Newxenv $Xprashm"
+    ;;
+    --weston|--kwin|--hostwayland|--nothing)
+      Newxenv="DISPLAY= XAUTHORITY="
+      Newdisplay=""
+      Newxsocket=""
+      Xclientcookie=""
+      Xservercookie=""
+    ;;
+  esac
+
+  [ "$Sharewayland" = "yes" ] && {
+    Newxenv="$Newxenv WAYLAND_DISPLAY=$Newwaylandsocket"
+    Newxenv="$Newxenv XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+  }
+  [ "$Setwaylandenv" = "yes" ] && for Line in $Waylandtoolkitenv ; do Newxenv="$Newxenv $Line" ; done
+  Newxenv="$Newxenv X11DOCKER_CACHE=$Cachefolder"
+
+  verbose -d "New X environment:
+  $Newxenv"
+  
+  # X / Wayland environment variables for container
+  case $Xserver in
+    --xpra|--xephyr|--xpra-xwayland|--weston-xwayland|--hostdisplay|--xorg|--xdummy|--xvfb|--xdummy-xwayland|--xwayland|--kwin-xwayland|--nxagent|--vcxsrv|--xwin)
+      store_runoption env "DISPLAY=$Newdisplay"
+      store_runoption env "XAUTHORITY=$Cshare/Xclientcookie"
+    ;;
+    --weston|--kwin|--hostwayland|--nothing)
+      store_runoption env "WAYLAND_DISPLAY=$Newwaylandsocket"
+      store_runoption env "XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR"
+    ;;
+  esac
+  
+  # Which X environment to use for password prompt (xtermrc) and for docker pull (pullrc)
+  case $Xserver in
+    --xorg) Terminalxenv="$Newxenv" ;;
+    --weston|--kwin|--weston-xwayland|--kwin-xwayland|--nothing) [ "$Hosttty" = "yes" ] && Terminalxenv="$Newxenv" || Terminalxenv="$Hostxenv" ;;
+    *) Terminalxenv="$Hostxenv" ;;
+  esac 
+}
 check_vt() {                    # option --xorg: find free vt / tty
   local Line= Ttyinuse=
   
@@ -2375,36 +2455,9 @@ fi
 ' >> $Xorgwrapper
 }
 create_xcommand() {             # create command to start X server and/or Wayland compositor
-  local Xserveroptions= Compositorpid= Westonoutput= Needweston= Xephyroptions= Nxagentoptions= Xpraoptions= Count=
+  local Xserveroptions= Xephyroptions= Nxagentoptions= Xpraoptions= Compositorpid= Westonoutput= Count=
 
-  # find free display number
-  [ "$Newdisplaynumber" ] || for ((Newdisplaynumber=100 ; Newdisplaynumber <=1000 ; Newdisplaynumber++)); do
-    [ -n "$(find /tmp/.X11-unix/X$Newdisplaynumber /tmp/.X$Newdisplaynumber-lock $XDG_RUNTIME_DIR/wayland-$Newdisplaynumber 2>/dev/null)" ] || { 
-      case $Xserver in
-        --vcxsrv) grep -q -E 'Authorization|Absolute' <<< "$(xwininfo.exe -display :$Newdisplaynumber -root 2>&1)" || break ;;
-        *) break ;;
-      esac
-    }
-  done
-  
-  # set Newdisplay (DISPLAY of container) and Newxsocket
-  case $Xserver in
-    --hostdisplay)
-      Newdisplay=$Hostdisplay
-      Newdisplaynumber=$(echo $Newdisplay | cut -d: -f2 | cut -d. -f1)
-      [ -e "$Hostxsocket" ] && Newxsocket=$Hostxsocket || Newxsocket=
-    ;;
-    --vcxsrv|--xwin)
-      Newdisplay="$Hostip:$Newdisplaynumber"
-    ;;
-    *)
-      Newdisplay=":$Newdisplaynumber"
-      Newxsocket="/tmp/.X11-unix/X$Newdisplaynumber"
-      Newxlock="/tmp/.X$Newdisplaynumber-lock"
-      [ -n "$(find $Newxsocket $Newxlock 2>/dev/null)" ] && error "Display $Newdisplay is already in use."
-    ;;
-  esac
-  
+  #### General X server options
   Xserveroptions="-dpms -s off"
   case $Xserver in
     --nxagent)
@@ -2429,6 +2482,29 @@ create_xcommand() {             # create command to start X server and/or Waylan
     ;;
   esac
   
+  # X cookie authentication
+  case $Xauthentication in
+    yes)
+      case $Xserver in
+        --vcxsrv) Xserveroptions="$Xserveroptions \\
+  -auth '$(convertpath --windows "$Xservercookie")'" ;;
+        *) Xserveroptions="$Xserveroptions \\
+  -auth $Xservercookie" ;;
+      esac ;;
+    no) [ "$Xserver" = "--hostdisplay" ] || warning "Option --no-auth: SECURITY RISK!
+  Allowing access to X server for everyone."
+      Xserveroptions="$Xserveroptions \\
+  -ac" ;;
+  esac
+
+  # X over TCP
+  case $Xserver in
+    --vcxsrv|--xwin) Xserveroptions="$Xserveroptions \\
+  -listen tcp" ;;
+    *) Xserveroptions="$Xserveroptions \\
+  -nolisten tcp" ;;
+  esac
+  
   # X extension COMPOSITE
   case $Xserver in
     --nxagent|--vcxsrv|--xwin) Xcomposite="no" ;;
@@ -2443,15 +2519,7 @@ create_xcommand() {             # create command to start X server and/or Waylan
   -extension Composite -extension COMPOSITE" ;;
   esac
 
-  # allow/disallow X over TCP
-  case $Xserver in
-    --vcxsrv|--xwin) Xserveroptions="$Xserveroptions \\
-  -listen tcp" ;;
-    *) Xserveroptions="$Xserveroptions \\
-  -nolisten tcp" ;;
-  esac
-
-  # extension XTEST
+  # X extension XTEST
   [ -z "$Xtest" ] && {
     case $Xserver in
       --xpra|--xpra-xwayland) Xtest="yes" ;;
@@ -2520,18 +2588,10 @@ create_xcommand() {             # create command to start X server and/or Waylan
   [ "$Dpi" = "-1" ] && Dpi=""
   [ -n "$Dpi" ] && Xserveroptions="$Xserveroptions -dpi $Dpi"
 
-  # xpra server and client command
+  
+  #### xpra server and client command
   case $Xserver in
     --xpra|--xpra-xwayland)
-      # check for version with cookie bug
-      ! verlt "$Xpraversion" "xpra v2.3" && verlt "$Xprarelease" "r19606" && {
-        command -v xhost >/dev/null || {
-          warning "Your xpra version has a cookie authentication issue.
-  also, 'xhost' is not available on your host.
-  Fallback: Disabling cookie authentication on new X server."
-          Xauthentication="no"
-        }
-      }
 
       # disable proxy for high versions
       verlt "$Xpraversion" "xpra v2.1" || Xpraoptions="$Xpraoptions \\
@@ -2589,7 +2649,8 @@ create_xcommand() {             # create command to start X server and/or Waylan
     ;;
   esac
 
-  # Prepare weston.ini: config file for Weston
+  
+  #### Prepare weston.ini: config file for Weston
   case $Xserver in
     --weston|--weston-xwayland|--xpra-xwayland|--xdummy-xwayland)
       echo "
@@ -2632,23 +2693,8 @@ $(tail "$Compositorlogfile")"
     ;;
   esac
 
-  # cookie authentication
-  case $Xauthentication in
-    yes)
-      case $Xserver in
-        --vcxsrv) Xserveroptions="$Xserveroptions \\
-  -auth '$(convertpath --windows "$Xservercookie")'" ;;
-        *) Xserveroptions="$Xserveroptions \\
-  -auth $Xservercookie" ;;
-      esac ;;
-    no) [ "$Xserver" = "--hostdisplay" ] || warning "Option --no-auth: SECURITY RISK!
-  Allowing access to X server for everyone."
-      Xserveroptions="$Xserveroptions \\
-  -ac" ;;
-  esac
-
-
-  # create command to run X server
+  
+  #### create command to run X server
   case $Xserver in
     --xorg)
       Xserveroptions="$Xserveroptions \\
@@ -2706,7 +2752,6 @@ $(tail "$Compositorlogfile")"
     --xwayland)
       Xcommand="$(command -v Xwayland) $Newdisplay \\
   $Xserveroptions"
-      Newwaylandsocket="$Hostwaylandsocket"
     ;;
 
     --xpra-xwayland|--xdummy-xwayland)
@@ -2714,46 +2759,35 @@ $(tail "$Compositorlogfile")"
   $Xserveroptions"
       [ "$Desktopmode" = "no" ] && [ "$Xserver" = "--xpra-xwayland" ] && Xcommand="$Xcommand \\
   -rootless"
-
-      # Weston is needed for Xwayland if no Wayland is running already, and also
-      # if option scale has a value smaller than 1 to provide a virtual display larger than monitor
-      [ "$Hostwaylandsocket" ] && Needweston="no" || Needweston="yes"
-      [ "1" = "$(awk -v a="${Scaling:-1}" 'BEGIN {print (a < 1)}')" ] && Needweston="yes"
-      [ "$Needweston" = "yes" ] && {
-        Newwaylandsocket="wayland-$Newdisplaynumber"
-        [ "$Hostdisplay" ] && Westonoutput="X"
-        echo "[output]" >> $Westonini
-        case $Westonoutput in
-          X|WL) echo "name=${Westonoutput}1" >> $Westonini ;;
-          *)    echo "name=${Westonoutput}"  >> $Westonini ;;
-        esac
-        echo "mode=$Screensize" >> $Westonini
-        [ -n "$Customwestonini" ] && Westonini="$Customwestonini"
-        Compositorcommand="weston --socket=$Newwaylandsocket"
-        case $Westonoutput in
-          WL) Compositorcommand="$Compositorcommand --backend=wayland-backend.so" ;;
-          X)  Compositorcommand="$Compositorcommand --backend=x11-backend.so" ;;
-          *)
-            case "$Hosttty" in
-              yes) Compositorcommand="$Compositorcommand --backend=drm-backend.so" ;;
-              no)  Compositorcommand="$Compositorcommand --backend=x11-backend.so" ;;
-            esac
-          ;;
-        esac
-        [ "$Xserver" = "--xpra-xwayland" ] && Compositorcommand="$Compositorcommand --fullscreen"
-        [ -n "$Customwestonini" ] && Westonini="$Customwestonini"
-        Compositorcommand="$Compositorcommand \\
+      [ "$Hostwaylandsocket" ] && Westonoutput="WL"
+      [ "$Hostdisplay" ]       && Westonoutput="X"
+      echo "[output]" >> $Westonini
+      case $Westonoutput in
+        X|WL) echo "name=${Westonoutput}1" >> $Westonini ;;
+        *)    echo "name=${Westonoutput}"  >> $Westonini ;;
+      esac
+      echo "mode=$Screensize" >> $Westonini
+      [ -n "$Customwestonini" ] && Westonini="$Customwestonini"
+      Compositorcommand="weston --socket=$Newwaylandsocket"
+      case $Westonoutput in
+        WL) Compositorcommand="$Compositorcommand --backend=wayland-backend.so" ;;
+        X)  Compositorcommand="$Compositorcommand --backend=x11-backend.so" ;;
+        *)
+          case "$Hosttty" in
+            yes) Compositorcommand="$Compositorcommand --backend=drm-backend.so" ;;
+            no)  Compositorcommand="$Compositorcommand --backend=x11-backend.so" ;;
+          esac
+        ;;
+      esac
+      [ "$Xserver" = "--xpra-xwayland" ] && Compositorcommand="$Compositorcommand --fullscreen"
+      [ -n "$Customwestonini" ] && Westonini="$Customwestonini"
+      Compositorcommand="$Compositorcommand \\
   --config='$Westonini'"
-      } || {
-        Newwaylandsocket="$Hostwaylandsocket"
-        Compositorcommand=""
-      }
     ;;
 
     --weston|--weston-xwayland)
       [ "$Xserver" = "--weston-xwayland" ] && Xcommand="$(command -v Xwayland) $Newdisplay \\
   $Xserveroptions"
-      Newwaylandsocket="wayland-$Newdisplaynumber"
       Compositorcommand="weston --socket=$Newwaylandsocket"
       [ -n "$Westonoutput" ] && for ((Count=1 ; Count<=$Outputcount ; Count++)) ; do
         [ "$Westonoutput" = "WL" ] || [ "$Westonoutput" = "X" ] || {
@@ -2788,7 +2822,6 @@ mode=$Screensize
     --kwin-xwayland)
       Xcommand="$(command -v Xwayland) $Newdisplay \\
   $Xserveroptions"
-      Newwaylandsocket="wayland-$Newdisplaynumber"
       Compositorcommand="kwin_wayland --xwayland --socket=$Newwaylandsocket --width=$Xaxis --height=$Yaxis"
       [ "$Outputcount" = "1" ] || Compositorcommand="$Compositorcommand --output-count=$Outputcount"
       [ "$Xkblayout" ] && Compositorcommand="KWIN_XKB_DEFAULT_KEYMAP=$Xkblayout $Compositorcommand"
@@ -2800,7 +2833,6 @@ mode=$Screensize
     ;;
 
     --kwin)
-      Newwaylandsocket="wayland-$Newdisplaynumber"
       Compositorcommand="kwin_wayland --xwayland --socket=$Newwaylandsocket --width=$Xaxis --height=$Yaxis"
       [ "$Outputcount" = "1" ] || Compositorcommand="$Compositorcommand --output-count=$Outputcount"
       #[ "$Xkblayout" ] && Compositorcommand="KWIN_XKB_DEFAULT_KEYMAP=$Xkblayout $Compositorcommand"
@@ -2923,53 +2955,7 @@ esac
       esac
     ;;
 
-    --hostwayland) Newwaylandsocket="$Hostwaylandsocket" ;;
-    --hostdisplay|--nothing) ;;
-  esac
-
-  
-  # create $Newxenv: collection of environment variables
-  case $Xserver in
-    --xpra|--xephyr|--xpra-xwayland|--weston-xwayland|--hostdisplay|--xorg|--xdummy|--xvfb|--xdummy-xwayland|--xwayland|--kwin-xwayland|--nxagent|--vcxsrv|--xwin)
-      Newxenv="DISPLAY=$Newdisplay"
-      [ "$Xauthentication" = "yes" ] && Newxenv="$Newxenv XAUTHORITY=$Xclientcookie"
-      Newxenv="$Newxenv XSOCKET=$Newxsocket"
-      Newxenv="$Newxenv $Xprashm"
-    ;;
-    --weston|--kwin|--hostwayland|--nothing)
-      Newxenv="DISPLAY= XAUTHORITY="
-      Newdisplay=""
-      Newxsocket=""
-      Xclientcookie=""
-      Xservercookie=""
-    ;;
-  esac
-  [ "$Sharewayland" = "yes" ] && {
-    Newxenv="$Newxenv WAYLAND_DISPLAY=$Newwaylandsocket"
-    Newxenv="$Newxenv XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
-  }
-  [ "$Setwaylandenv" = "yes" ] && for Line in $Waylandtoolkitenv ; do Newxenv="$Newxenv $Line" ; done
-  Newxenv="$Newxenv X11DOCKER_CACHE=$Cachefolder"
-
-  verbose -d "New X environment:
-  $Newxenv"
-  
-  # X / Wayland environment variables for container
-  case $Xserver in
-    --xpra|--xephyr|--xpra-xwayland|--weston-xwayland|--hostdisplay|--xorg|--xdummy|--xvfb|--xdummy-xwayland|--xwayland|--kwin-xwayland|--nxagent|--vcxsrv|--xwin)
-      store_runoption env "DISPLAY=$Newdisplay"
-      store_runoption env "XAUTHORITY=$Cshare/Xclientcookie"
-    ;;
-    --weston|--kwin|--hostwayland|--nothing)
-      store_runoption env "WAYLAND_DISPLAY=$Newwaylandsocket"
-      store_runoption env "XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR"
-    ;;
-  esac
-  
-  case $Xserver in
-    --xorg) Terminalxenv="$Newxenv" ;;
-    --weston|--kwin|--weston-xwayland|--kwin-xwayland|--nothing) [ "$Hosttty" = "yes" ] && Terminalxenv="$Newxenv" ;;
-    *) Terminalxenv="$Hostxenv" ;;
+    --hostwayland|--hostdisplay|--nothing) ;;
   esac
   
   return 0
@@ -3358,9 +3344,10 @@ check_containeruser() {         # check container user and shared home folder (a
     Benutzer=$(getent passwd $Benutzer | cut -d: -f1)      # can be name or uid -> now name
     Benutzeruid=$(getent passwd $Benutzer | cut -d: -f3)
     [ -z "$Benutzergid" ] && Benutzergid=$(getent passwd $Benutzer | cut -d: -f4)
-    Benutzerhome=$(getent passwd $Benutzer | cut -d: -f6)
+    [ "$Benutzerhosthome" = "no" ] && Benutzerhome="/fakehome/Benutzer" || Benutzerhome=$(getent passwd $Benutzer | cut -d: -f6)
   } || {                                                   # user does not exist on host
-    [[ $Benutzer =~ ^[0-9]+$ ]] || error "Unknown user or invalid user number '$Benutzer' for option --user."  # virtual users can only be specified as uid
+    [[ $Benutzer =~ ^[0-9]+$ ]] || error "Option --user: Unknown host user or invalid user number '$Benutzer'.
+  Non-host users can be specified with an UID only, not with a name."
     Benutzeruid=$Benutzer
     Benutzer="unknown$Benutzer"
     [ -z "$Benutzergid" ] && Benutzergid=100
@@ -3383,9 +3370,11 @@ check_containeruser() {         # check container user and shared home folder (a
   Unknpwn user '$Benutzer' set with --user is not possible on host."
     }
   }
-
+}
+check_containerhome() {
   ## option '--home':    share folder ~/.local/share/x11docker/imagename with created container as its home directory
   ## option '--homedir': share custom host folder as home
+  ## option '--homebasedir': Specify base folder here to store container home folders for --home
   
   # base home folder
   [ "$Homebasefolder" ] && {
@@ -3402,19 +3391,17 @@ check_containeruser() {         # check container user and shared home folder (a
     *)  Homebasefolder="$(convertpath --subsystem "$(cmd.exe /C "echo %userprofile%" | rmcr)")/x11docker/home" ;;
   esac
   
-  case $Benutzerhosthome in
-    yes)
-      # if no home folder on host is specified (--homedir), create a standard one in ~/.local/share/x11docker
-      [ -z "$Benutzerhosthomefolder" ] && Benutzerhosthomefolder="$Homebasefolder/$Codename"
-      [ -d "$Benutzerhosthomefolder" ] || {
-        [ "$Startuser" = "root" ] && su $Benutzer -c "mkdir -p '$Benutzerhosthomefolder'"
-        [ "$Benutzer" = "$Hostuser" ] && $Mksu "mkdir -p '$Benutzerhosthomefolder'" && {
-          # create symbolic link to ~/x11docker
-          echo "$Benutzerhosthomefolder" | grep -q .local/share/x11docker && [ ! -e "$Benutzerhome/x11docker" ] && $Mksu "ln -s '$Homebasefolder' '$Benutzerhome/x11docker'"
-          :
-        } || {
-          # errors can occur if specifying a user with --user different from current user
-          error "Can not create persistent home folder for
+  [ "$Benutzerhosthome" = "yes" ] && {
+    # if no home folder on host is specified (--homedir), create a standard one in ~/.local/share/x11docker
+    [ -z "$Benutzerhosthomefolder" ] && Benutzerhosthomefolder="$Homebasefolder/$Codename"
+    [ -d "$Benutzerhosthomefolder" ] || {
+      [ "$Startuser" = "root" ] && su $Benutzer -c "mkdir -p '$Benutzerhosthomefolder'"
+      [ "$Benutzer" = "$Hostuser" ] && $Mksu "mkdir -p '$Benutzerhosthomefolder'" && {
+        # create symbolic link to ~/x11docker
+        echo "$Benutzerhosthomefolder" | grep -q .local/share/x11docker && [ ! -e "$Benutzerhome/x11docker" ] && $Mksu "ln -s '$Homebasefolder' '$Benutzerhome/x11docker'" ||:
+      } || {
+        # errors can occur if specifying a user with --user different from current user
+        error "Can not create persistent home folder for
   user '$Benutzer' on host (option --home or --homedir).
   Four possibilities to solve issue:
   1.) Create folder with write access for user '$Benutzer'
@@ -3422,18 +3409,13 @@ check_containeruser() {         # check container user and shared home folder (a
   2.) Run x11docker one time as user '$Benutzer'.
   3.) Run x11docker one time as user 'root'.
   4.) Use option --homedir=DIR with DIR pointing to a writeable folder."
-        }
       }
-      writeaccess $Benutzeruid "$Benutzerhosthomefolder" || warning "User '$Benutzer' seems to have no write access to
+    }
+    writeaccess $Benutzeruid "$Benutzerhosthomefolder" || warning "User '$Benutzer' seems to have no write access to
   $Benutzerhosthomefolder."
-      verbose "Sharing directory $Benutzerhosthomefolder
+    verbose "Sharing directory $Benutzerhosthomefolder
   with container as its home directory $Benutzerhome"
-    ;;
-    no) Benutzerhome="/fakehome/$Benutzer" ;;
-  esac
-
-  # create entry for /etc/passwd
-  Benutzerpasswdentry="$Benutzer:x:$Benutzeruid:$Benutzergid:$Benutzer,,,:$Benutzerhome:/bin/sh"
+  }
   return 0
 }
 setup_initsystem() {            # options --tini (default), --systemd,--openrc, --sysvinit: set up capabilities, check or create files
@@ -4205,7 +4187,7 @@ create_containerrootrc() {      # create container root setup script: This scrip
   echo "getent passwd | grep -v \$(getent passwd $Benutzeruid || echo USERNOTFOUND) > /tmp/passwd"
   echo "# disable possible /etc/shadow passwords for other users"
   echo "sed -i s%:x:%:-:% /tmp/passwd"
-  echo "echo $Benutzerpasswdentry >> /tmp/passwd"
+  echo "echo '$Benutzer:x:$Benutzeruid:$Benutzergid:$Benutzer,,,:$Benutzerhome:/bin/sh' >> /tmp/passwd"
   echo "rm /etc/passwd"
   echo "mv /tmp/passwd /etc/passwd || warning 'Unable to change /etc/passwd. That may be a seurity risk.'"
   echo ""
@@ -4619,7 +4601,7 @@ create_pullrc() {               # create pullrc: interactive script to pull imag
   echo "exit"
   return 0
 } >> $Pullrc
-create_xtermrc() {              # create xtermrc: prompt for password and run dockerrc
+create_xtermrc() {              # create xtermrc: script to prompt for password and to run dockerrc
   echo "#! /bin/bash"
   #[ "$Debugmode" = "yes" ] && echo "set -x"
   echo "touchxtermready() {"
@@ -4823,8 +4805,8 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
   Hostexepid=$(grep hostexe <$Bgpidfile | cut -d' ' -f1)
   checkpid $Hostexepid || warning "Application '$Hostexe' terminated fast
   or failed at all, or the process forked itself and cannot be supervised.
-  Last lines of log:
-$(tail $Logfile)"
+  Last lines of application output:
+$(tail $Cmdstdoutlogfile $Cmdstderrlogfile)"
 
   [ "$Showcontainerid" = "yes" ] && echo ""
   [ "$Showcontainerpid1pid" = "yes" ] && echo $Hostexepid
@@ -4844,16 +4826,20 @@ start_pulseaudiotcp() {         # option --pulseaudio=tcp: load Pulseaudio TCP m
   return 0
 }
 start_compositor() {            # start Compositor Weston or KWin
-  local Compositorkeyword=
+  local Compositorkeyword= Dbuslaunch=
+  
+  command -v dbus-launch >/dev/null && Dbuslaunch=dbus-launch
   case $Xserver in
     --weston|--weston-xwayland|--xpra-xwayland|--xdummy-xwayland) Compositorkeyword="weston-desktop-shell" ;;
     --kwin|--kwin-xwayland)                                       Compositorkeyword="X-Server" ;;
   esac
-  $Mksu "exec dbus-run-session $Compositorcommand  >> $Compositorlogfile  2>&1 & echo \$! >>$Compositorpidfile"
-  waitforlogentry compositor $Compositorlogfile    "$Compositorkeyword" || error "Startup of Wayland compositor failed.
+  
+  $Mksu "exec $Dbuslaunch $Compositorcommand  >> $Compositorlogfile  2>&1 & echo \$! >>$Compositorpidfile"
+  waitforlogentry compositor $Compositorlogfile "$Compositorkeyword" || error "Startup of Wayland compositor failed.
   Can not run $Xserver.
   Last lines of compositor log:
 $(tail $Compositorlogfile)"
+
   case $Xserver in
     --xpra-xwayland|--xdummy-xwayland)  # hide weston window
       $Mksu "xdotool windowunmap 0x$(printf '%x\n' $(grep 'window id' $Compositorlogfile | rev | cut -d' ' -f1 | rev))" ;;
@@ -4958,17 +4944,18 @@ check_host() {
   # Provide dos->unix newline converter to $Mksu commands
   export -f rmcr
   
-  # Check whether running over SSH
+  # Check whether x11docker runs over SSH
   pstree -ps $$ 2>/dev/null | grep -q sshd && Hostssh="yes" || Hostssh="no"              ### FIXME pstree is not available everywhere
   command -v pstree >/dev/null || {
     [ "${SSH_CLIENT:-}" ] && Hostssh="yes" || note "Could not check whether x11docker is running over ssh.
   Please install pstree."
   }
   
-  # Check whether running on X or on tty
+  # Check whether x11docker runs on X or on tty
   tty | grep -q tty     && Hosttty="yes" || Hosttty="no"
   [ "$Winsubsystem"   ] && Hosttty="no"
   XDG_VTNR=${XDG_VTNR:-}
+  
   return 0
 }
 check_hostuser() {              # check for unprivileged host user
@@ -4981,6 +4968,9 @@ check_hostuser() {              # check for unprivileged host user
   #  x11docker with --user=someuser                   container user is someuser, host user is unprivileged user $(logname)
   #
   # root permissions are only needed to run docker. If started unprivileged, a password prompt appears.
+
+  # user who started x11docker
+  Startuser="$(id -un)"
 
   # not root? Use current user.
   [ -z "$Hostuser" ] && [ "$Startuser" != "root" ] && Hostuser="$Startuser"
@@ -5005,15 +4995,17 @@ check_hostuser() {              # check for unprivileged host user
     [ -e /etc/passwd ] || warning "Your system misses /etc/passwd"
     warning "Could not find user '$Hostuser' in /etc/passwd."
   }
+  
   Hostuser=$(id -un $Hostuser)
   Hostuseruid=$(id -u $Hostuser)
   Hostusergid=$(id -g $Hostuser)
   Hostuserhome=$(getent passwd $Hostuser 2>/dev/null | cut -d: -f6)
+  
   [ -z "$Hostuserhome" ] && {
     warning "Could not read your home directory from /etc/passwd.
   Will try HOME=${HOME:-<not found>} instead."
     Hostuserhome=${HOME:-}
-  } ||:
+  }
   [ -z "$Hostuserhome" ] && {
     warning "Please set \$HOME with a valid path.
   Fallback: setting HOME=/tmp"
@@ -5229,6 +5221,18 @@ check_option_interferences() {  # check multiple option interferences, change se
   If you encounter xpra startup errors, please install 'Xvfb'." && Xpravfb="Xdummy"
       [ "$Xpravfb" ] || { command -v Xvfb >/dev/null && Xpravfb="Xvfb" || Xpravfb="Xdummy" ; }
     ;;
+  esac
+  case $Xserver in
+    -xpra|--xpra-xwayland)
+      # check for version with cookie bug
+      ! verlt "$Xpraversion" "xpra v2.3" && verlt "$Xprarelease" "r19606" && {
+        command -v xhost >/dev/null || {
+          warning "Your xpra version has a cookie authentication issue.
+  also, 'xhost' is not available on your host.
+  Fallback: Disabling cookie authentication on new X server."
+          Xauthentication="no"
+        }
+      } ;;
   esac
   
   # add VcXsrv folder to PATH to get vcxsrv.exe, xhost.exe and xauth.exe available
@@ -5892,7 +5896,7 @@ declare_variables() {           # declare variables
   Colnorm="${Esc}[0m"
 
   # Users
-  Startuser="$(id -un)"                           # user who started x11docker
+  Startuser=""                                    # user who started x11docker
   Lognameuser=""                                  # $(logname) or $SUDO_USER or $PKEXEC_USER
   Hostuser=""                                     # $Lognameuser or --hostuser. Unprivileged user for non-root commands
   Hostuseruid=""
@@ -5905,7 +5909,6 @@ declare_variables() {           # declare variables
   Benutzerhome=""
   Benutzergruppe=""
   Benutzergruppen="video audio"                   # option --group-add: additional groups for container user
-  Benutzerpasswdentry=""
   Benutzerpasswort="sac19FwGGTx/A"                # encrypted password "x11docker", suits /etc/shadow. Generated with:  perl -e 'print crypt("x11docker", "salt"),"\n"'
   Mksu=""                                         # prefix to run unprivileged commands (auto or --hostuser)
   Mksubenutzer=""                                 # prefix to run commands as user defined by --user
@@ -6421,7 +6424,8 @@ Parsed options:    $Parsedoptions"
   
   # some checks and setup
   setup_verbosity               # create summary logfile, start verbose output  # --verbose, --stdout, --stderr
-  check_containeruser           # unprivileged user in container                # --user, --home, --homedir, --homebasedir
+  check_containeruser           # unprivileged user in container                # --user
+  check_containerhome           # create persistant container home on host      # --home, --homedir, --homebasedir
   setup_fifo                    # open message channels for container, dockerrc and xinitrc
   
   check_screensize              # size of new X server                          # --size
@@ -6436,6 +6440,7 @@ Parsed options:    $Parsedoptions"
   #### Create command to run X server [and/or Wayland compositor]
   [ "$Xserver" = "--xorg" ]     && [ -z "$Newxvt" ]              && check_vt    # --vt: find free tty/virtual terminal for Xorg
   { [ "$Xserver" = "--xdummy" ] || [ "$Xpravfb" = "Xdummy" ] ; } && create_xdummyxorgconf
+  check_newxenv                 # find free display, create $Newxenv
   create_xcommand               # set up start command for X server             # all X server and Wayland options
   [ "$Xcommand" ]               && verbose -d "X server command:
   $Xcommand"
@@ -6528,11 +6533,9 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
-# --hostdisplay: unrestricted default?
 # --xonly: not default for empty x11docker image name?
-# --composite: new option to enable/disable extension Composite? Of interest for --nxagent.
 # --internet to allow internet access, otherwise --net=none?
-# create_xcommand() needs a nice structure
+# --group-add: further checks? mismatch messagebus-101-systemd-journal
 
 # MSYS2/Cygwin/WSL:
 #       needs test:
@@ -6550,9 +6553,9 @@ todo() {
 #       useless:
 #          --showpid1 (shows pid in docker VM)
 
-# --group-add: further checks? mismatch messagebus-101-systemd-journal
 # BUG x11docker/deepin: new builds have strange issues
 # BUG x11docker/cde fails
+# BUG x11docker/fluxbox on arch: background missing, sometimes no context menu. where is the difference?
 
 # check xhost +localhost
 # further checks of pam.d
@@ -6560,11 +6563,10 @@ todo() {
 
 # x11docker-gui: menu entry management? persistant command storage?
 # --update: regard possible location in /opt
-# BUG arch: issues with x11docker/fluxbox, background missing, sometimes no context menu. where is the difference?
 # BUG?: x11docker/xwayland nested: where is the X socket ??
 
 # --weston/x: allow tty switch/option --vt if running as root?
-# --systemd: try to avoid xhost +SI:localuser:$Benutzer, needed by deepin, does not recognice XAUTHORITY
+# --systemd: try to avoid xhost +SI:localuser:$Benutzer, needed by deepin, it does not recognize XAUTHORITY
 # --no-init no-new-privileges switchuser: exec fails, but why?
 # check out capsh. replace su with capsh? (missing in alpine) But how to trigger login?
 # check echo especially in sh scripts, replace with printf if needed (#25)

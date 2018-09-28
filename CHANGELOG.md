@@ -17,6 +17,7 @@ Project website: https://github.com/mviereck/x11docker
 ### Deprecated
  - `--starter`: Use `--launcher` instead.
 ### Fixed
+ - `--weston*`, `--kwin*`: Did not terminate due to DBus issue.
  - `--xdummy`, `--xvfb`: avoid X message boxes if there is no host X.
    Affects error messages and `docker pull`.
    [(#77)](https://github.com/mviereck/x11docker/issues/77)
