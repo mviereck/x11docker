@@ -22,6 +22,7 @@ Project website: https://github.com/mviereck/x11docker
    Affects error messages and `docker pull`.
    [(#77)](https://github.com/mviereck/x11docker/issues/77)
  - `--pw`: regression fix, did not prompt for password in terminal window.
+ - `/etc/pam.d/su`: allow additional default configs.
 
 ## [5.2.0](https://github.com/mviereck/x11docker/releases/tag/v5.2.0) - 2018-09-17
 ### Added
