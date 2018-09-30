@@ -21,7 +21,7 @@ Experimental code. Please use [master branch](https://github.com/mviereck/x11doc
 | `--weston-xwayland` | All-rounder: can run nested on X or Wayland in a window or on its own from console. Supports GPU acceleration, scaling (2x, 3x, 4x ...) and display rotation (0°, 90°, 180°, 270°, flipped, flipped-90°, ...). |
 | `--kwin-xwayland` | Like `--weston-xwayland`, but uses KWin instead of Weston. Runs in X, in Wayland and from console. |
 | `--xwayland` | Core Xwayland needs a Wayland environment to run in. Fullscreen display can be moved around with `[META][LMB]`. |
-| `--xdummy` `--xvfb` | Invisible X server for custom access. Output of environment variables on stdout. With `--gpu` a setup with Weston, Xwayland and xdotool is used (instead of Xdummy or Xvfb). |
+| `--xdummy` `--xvfb` | Invisible X server for custom access e.g. with [SSH](https://github.com/mviereck/x11docker/wiki/Remote-access-with-SSH) or [HTML5](https://github.com/mviereck/x11docker/wiki/Container-applications-running-in-Browser-with-HTML5). Output of environment variables on stdout. With `--gpu` a setup with Weston, Xwayland and xdotool is used (instead of Xdummy or Xvfb). |
 
 | Wayland options | Description |
 | --- | --- |
@@ -32,9 +32,10 @@ Experimental code. Please use [master branch](https://github.com/mviereck/x11doc
 
 | Option | Dependencies on host | Runs on X | Runs on Wayland | Runs on console |
 | --- | --- | :---: | :---: | :---: |
-| recommended base | `xpra` `Xephyr` | X | - | - |
-| recommended with `--gpu` | `xpra` `weston` `Xwayland` `xdotool` | X | X | X |
-| recommended tools | `xauth` `xrandr` `xdpyinfo` | | | |
+| Minimal base | `Xorg` | X | - | X |
+| Recommended base | `Xorg` `xpra` `Xephyr` | X | - | X |
+| Recommended with `--gpu` | `xpra` `weston` `Xwayland` `xdotool` | X | X | X |
+| Recommended tools | `xauth` `xrandr` `xdpyinfo` | | | |
 | `--xpra` | `xpra` | X | - | - |
 | `--xephyr` | `Xephyr`| X | - | - |
 | `--nxagent` | `nxagent`| X | - | - |
