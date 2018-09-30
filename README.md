@@ -91,24 +91,9 @@ If you don't specify a [desired X server](#choice-of-x-servers-and-wayland-compo
     - If neither `xpra` nor `nxagent` are installed, but x11docker finds a desktop capable X server like `Xephyr`, it avoids insecure option `--hostdisplay` and runs Xephyr with a host window manager.
     - You can specify a host window manager with option `--wm WINDOWMANAGER`, for example `--wm openbox`.
   - Desktop mode with `--desktop` is supported with all X server options except `--hostdisplay`. If available, x11docker prefers `Xephyr` and `nxagent` 
-## Shared folders and HOME in container
-Changes in a running docker image are lost, the created docker container will be discarded. For persistent data storage you can share host directories:
- - Option `--home` creates a host directory in `~/x11docker/IMAGENAME` that is shared with the container and mounted as home directory. Files in container home and configuration changes will persist. 
- - Option `--sharedir DIR` mounts a host directory at the same location in container without setting `HOME`.
- - Option `--homedir DIR` is similar to `--home` but allows you to specify a custom host directory for data storage.
- - Special cases for `$HOME`:
-   - `--homedir $HOME` will use your host home as container home. Discouraged, use with care.
-   - `--sharedir $HOME` will mount your host home as a subfolder of container home. 
- 
-For persistant changes of image system, adjust Dockerfile and rebuild. To add custom applications to x11docker example images, you can create a new Dockerfile based on them. Example:
-```
-# xfce desktop with Midori internet browser
-FROM x11docker/xfce
-RUN apt-get update && apt-get install -y midori
-```
 ## Hardware acceleration
 Hardware acceleration for OpenGL is possible with option `--gpu`. 
- - This will work out of the box in most cases with open source drivers on host. Otherwise have a look at [Dependencies](#dependencies). 
+ - This will work out of the box in most cases with open source drivers on host. Otherwise have a look at [Dependencies](#option-dependencies). 
  - x11docker wiki provides some [background information about hardware acceleration for docker containers.](https://github.com/mviereck/x11docker/wiki/Hardware-acceleration)
 ## Clipboard
 Clipboard sharing is possible with option `--clipboard`. 
@@ -116,7 +101,7 @@ Clipboard sharing is possible with option `--clipboard`.
  - Some X server options need package `xclip` on host.
 ## Sound
 Sound is possible with options `--pulseaudio` and `--alsa`. 
-(Some background information is given in [x11docker wiki about sound for docker containers.](https://github.com/mviereck/x11docker/wiki/Pulseaudio-sound-over-TCP-or-with-shared-socket)
+(Some background information is given in [x11docker wiki about sound for docker containers.](https://github.com/mviereck/x11docker/wiki/Pulseaudio-sound-over-TCP-or-with-shared-socket))
  - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and in image.
  - For ALSA sound with `--alsa` you can specify the desired sound card with e.g. `--env ALSA_CARD=Generic`. Get a list of available sound cards with `aplay -l`.
 ## Webcam
@@ -129,25 +114,27 @@ Printers on host can be provided to container with option `--printer`.
  - It needs CUPS on host, the default printer server for most linux distributions. 
  - The container needs package `libcups2` (debian) or `libcups` (arch).
 ## Language locales
-You have two possibilities to set [language locale](https://wiki.archlinux.org/index.php/locale) in docker image. 
- - For support of chinese, japanese and korean characters install a font like `fonts-arphic-uming` in image.
-### Language locale created offhand
 x11docker provides option `--lang $LANG` for flexible language locale settings. 
  - x11docker will check on container startup if the desired locale is already present in image and enable it. 
- - If x11docker does not find the locale, it creates it on container startup.
-   - Debian images need package `locales`. 
-   - x11docker will only look for or create `UTF-8`/`utf8` locales. 
+ - If x11docker does not find the locale, it creates it on container startup. (Needs package `locales` in image.) 
  - Examples: `--lang de` for German, `--lang zh_CN` for Chinese, `--lang ru` for Russian, `--lang $LANG` for your host locale.
-### Language locale precompiled in image
-You can choose between already installed language locales in image setting environment variable `LANG`, e.g. in image with `ENV LANG=en_US.utf8` or with x11docker option `--env LANG=en_US.utf8`.  
- - Already installed locales in image can be checked with `docker run IMAGENAME locale -a`. 
- - Example to create a language locale in image:
-```
-RUN apt-get install -y locales
-ENV LANG en_US.utf8
-RUN localedef --verbose --force -i en_US -f UTF-8 en_US.utf8 || echo "localedef exit code: $?"
-```
+ - For support of chinese, japanese and korean characters install a font like `fonts-arphic-uming` in image.
+## Shared folders and HOME in container
+Changes in a running docker image are lost, the created docker container will be discarded. For persistent data storage you can share host directories:
+ - Option `--home` creates a host directory in `~/x11docker/IMAGENAME` that is shared with the container and mounted as home directory. Files in container home and configuration changes will persist. 
+ - Option `--sharedir DIR` mounts a host directory at the same location in container without setting `HOME`.
+ - Option `--homedir DIR` is similar to `--home` but allows you to specify a custom host directory for data storage.
+ - Special cases for `$HOME`:
+   - `--homedir $HOME` will use your host home as container home. Discouraged, use with care.
+   - `--sharedir $HOME` will mount your host home as a subfolder of container home. 
  
+For persistant changes of image system, adjust Dockerfile and rebuild. To add custom applications to x11docker example images, you can create a new Dockerfile based on them. Example:
+```
+# xfce desktop with VLC media player
+FROM x11docker/xfce
+RUN apt-get update && apt-get install -y vlc
+```
+
 # Troubleshooting
 For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. 
  - x11docker shows warnings if something is insecure, missing or going wrong. 
@@ -171,8 +158,8 @@ x11docker checks dependencies for chosen options on startup and shows terminal m
 All X server options with a description and their dependencies are listed in [wiki: X server and Wayland options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options).
  - If no additional X server is installed, only less isolated option `--hostdisplay` will work out of the box within X, and option `--xorg` from console. 
    (To use `--xorg` within X, look at [setup for option --xorg](https://github.com/mviereck/x11docker/wiki/Setup-for-option---xorg)).
- - As a **well working base** for convenience and security, it is recommended to install [`xpra`](http://xpra.org/) (seamless mode) and `Xephyr` (nested desktop mode).
-   - For advanced `--gpu`support also install `weston Xwayland xdotool`.
+ - As a **well working base** for convenience and security it is recommended to install [`xpra`](http://xpra.org/) (seamless mode) and `Xephyr` (nested desktop mode).
+   - For advanced `--gpu` support also install `weston Xwayland xdotool`.
  - Useful tools, already installed on most systems with an X server: `xrandr`, `xauth` and `xdpyinfo`.
  - [Hints to use option `--xorg` within X.](https://github.com/mviereck/x11docker/wiki/Setup-for-option---xorg)
  
@@ -186,15 +173,15 @@ All X server options with a description and their dependencies are listed in [wi
 | `--gpu` with NVIDIA | | see [x11docker wiki: NVIDIA driver](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container) |
 | `--alsa` | - | optional: ALSA client libs. Debian: `libasound2` |
 | `--pulseaudio` | `pulseaudio` | `pulseaudio` client libs. Debian: `libpulse0` |
-| `--printer` | `cups` | CUPS client library. Debian: `libcups2` |
-| `--lang` | - | `locale-gen`. Debian: `locales` |
+| `--printer` | `cups` | CUPS client library. Debian: `libcups2`, Arch: `libcups` |
+| `--lang` | - | `locales` |
 | `--xfishtank` | `xfishtank` | - |
 | `--dbus` `--hostdbus` `--dbus-system` | - | `dbus` |
 | `--launcher` | `xdg-utils` | - |
 | `--install` `--update` `--update-master` | `wget` `unzip` | - |
    
 ## List of all host packages for all possible x11docker options (debian package names):
-`kwin-wayland nxagent unzip weston wget xauth xclip  xdg-utils xdotool xdpyinfo xfishtank xpra xrandr xserver-xephyrxserver-xorg-video-dummy xvfb xwayland`, further (deeper surgery in system): `cups pulseaudio xserver-xorg-legacy`.
+`kwin-wayland nxagent unzip weston wget xauth xclip  xdg-utils xdotool xdpyinfo xfishtank xpra xrandr xserver-xephyr xserver-xorg-video-dummy xvfb xwayland`, further (deeper surgery in system): `cups pulseaudio xserver-xorg-legacy`.
 
 # Password prompt
 root permissions are needed only to run docker. X servers run as unprivileged user.
@@ -254,6 +241,7 @@ If no X server option is specified, x11docker automatically chooses one dependin
  - With option `--gpu` for hardware acceleration, x11docker prefers `--xpra-xwayland` for single applications, or `--weston-xwayland` for desktop environments. 
  - If none of above can be started due to missing dependencies, x11docker uses `--hostdisplay` or `--xorg`.
  - With option `--wayland`, x11docker creates a Wayland environment without X. See also chapter [Wayland](#wayland).
+ - [Overview of all possible X server and Wayland options.](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options)
  
  To run an X server entirely in docker, look at [x11docker/xwayland](https://github.com/mviereck/dockerfile-x11docker-xwayland).
  
@@ -266,56 +254,9 @@ To run  [Wayland](https://wayland.freedesktop.org/) instead of an X server x11do
  - Example: `xfce4-terminal` on Wayland: `x11docker --wayland x11docker/xfce xfce4-terminal`
 
 # Init system
-x11docker supports init systems as PID 1 in container. Init in container solves the [zombie reaping issue](https://blog.phusion.nl/2015/01/20/docker-and-the-pid-1-zombie-reaping-problem/).
-
-## tini
-As default, x11docker uses docker built-in [`tini`](https://github.com/krallin/tini) with docker run option `--init`.
- - You can disable init in container with option `--no-init`. 
- - On some distributions docker's init `/usr/bin/docker-init` is missing in docker package. Compare [#23](https://github.com/mviereck/x11docker/issues/23#issuecomment-386817295). 
-   To provide a replacement, download `tini-static` from https://github.com/krallin/tini and store it at one of following locations:
-   - `~/local/share/x11docker`
-   - `/usr/local/share/x11docker`
-
-Example installation code:
-```
-mkdir -p ~/.local/share/x11docker
-cd ~/.local/share/x11docker
-wget https://github.com/krallin/tini/releases/download/v0.18.0/tini-static
-chmod +x tini-static
-```
-      
-## systemd, SysVinit, runit, OpenRC
-x11docker sets up the init system to run desired command. No special setup is needed beside installing the init system in image. Installing `dbus` in image is recommended.
- - `--systemd`: [systemd](https://wiki.debian.org/systemd) in container.
-   - To get a faster startup, it helps to look for services that fail to start in container and to mask them in image with `systemctl mask servicename`.
-   - Tested with fedora, debian and Arch Linux images. Debian 10 images run well; debian 9 images additionally need insecure option `--sys-admin`.
-   - Image example based on debian buster: [x11docker/cinnamon](https://hub.docker.com/r/x11docker/cinnamon/)
- - `--runit`: [runit](https://wiki.voidlinux.org/Runit) in container.
-   - For a bit faster startup, failing services can be disabled by deleting their softlinks in `/etc/runit/runsvdir/default`.
-   - Image examples based on [Void Linux](https://www.voidlinux.org/): [x11docker/enlightenment](https://hub.docker.com/r/x11docker/enlightenment/) and [x11docker/lumina](https://hub.docker.com/r/x11docker/lumina/).
- - `--openrc`: [OpenRC](https://wiki.gentoo.org/wiki/OpenRC) in container.
-   - cgroup usage possible with option `--sharecgroup`.
-   - Image example based on [Alpine Linux](https://alpinelinux.org/): [x11docker/fvwm](https://hub.docker.com/r/x11docker/fvwm/)
- - `--sysvinit`: [SysVinit](https://wiki.archlinux.org/index.php/SysVinit) in container.
-   - Tested with [devuan](https://devuan.org/) images from [gitlab/paddy-hack](https://gitlab.com/paddy-hack/devuan/container_registry).
-
-## elogind
-x11docker automatically supports `elogind` in container with init system options `--dbus-system`, `--sysvinit`, `--runit` and `--openrc`. Set option `--sharecgroup` to allow `elogind` in container.
- - If your host does not run with `elogind` (but e.g. with `systemd`), x11docker needs an elogind cgroup mountpoint at `/sys/fs/cgroup/elogind`. Run x11docker with root privileges to automatically create it.
- - Same goes for `elogind` on host and `systemd` in container; a cgroup mountpoint for `systemd` must be created. x11docker does this automatically if it runs as root.
- - If you want to manually set up cgroup:
-   - Create elogind cgroup mountpoint on a systemd host:
-```
-mount -o remount,rw cgroup /sys/fs/cgroup  # remove write protection
-mkdir -p /sys/fs/cgroup/elogind
-mount -t cgroup cgroup /sys/fs/cgroup/elogind -o none,name=elogind
-mount -o remount,ro cgroup /sys/fs/cgroup  # restore write protection
-```
-   - Create a systemd cgroup mountpoint on an elogind host:
-```
-mkdir -p /sys/fs/cgroup/systemd
-mount -t cgroup cgroup /sys/fs/cgroup/systemd -o none,name=systemd
-```
+x11docker supports several init systems as PID 1 in container. Init in container solves the [zombie reaping issue](https://blog.phusion.nl/2015/01/20/docker-and-the-pid-1-zombie-reaping-problem/).
+As default it uses `tini` in`/usr/bin/docker-init`. 
+See also: [Init systems in docker: tini, systemd, SysVinit, runit, OpenRC and elogind.](https://github.com/mviereck/x11docker/wiki/Init-systems-in-docker:-tini,-systemd,-SysVinit,-runit,-OpenRC-and-elogind)
 
 ## DBus
 Some desktop environments and applications need a running DBus daemon and/or DBus user session. 
