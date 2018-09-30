@@ -39,7 +39,7 @@ Experimental code. Please use [master branch](https://github.com/mviereck/x11doc
 | `--xephyr` | `Xephyr`| X | - | - |
 | `--nxagent` | `nxagent`| X | - | - |
 | `--hostdisplay` | - | X | - | - |
-| `--xorg` | `Xorg`| (X) | - | X |
+| `--xorg` | `Xorg`| [(X)](#setup-for-option---xorg) | [(X)](#setup-for-option---xorg) | X |
 | `--xpra-xwayland` | `xpra` `weston` `Xwayland` `xdotool` | X | - | - |
 | `--weston-xwayland` | `weston` `Xwayland` | X | X | X |
 | `--kwin-xwayland` | `kwin_wayland` `Xwayland` | X | X | X |
@@ -73,7 +73,7 @@ Experimental code. Please use [master branch](https://github.com/mviereck/x11doc
 | --- | --- | --- |
 | `--clipboard` | `xclip` or `xsel` | - |
 | `--gpu` | - | MESA OpenGL drivers. Debian: `mesa-utils mesa-utils-extra`, CentOS: `glx-utils mesa-dri-drivers`, Arch Linux: `mesa-demos`, Alpine: `mesa-demos mesa-dri-ati mesa-dri-intel mesa-dri-nouveau mesa-dri-swrast` |
-| `--gpu` with NVIDIA | | see x11docker wiki: NVIDIA |
+| `--gpu` with NVIDIA | | see [x11docker wiki: NVIDIA driver](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container) |
 | `--alsa` | - | optional: ALSA client libs. Debian: `libasound2` |
 | `--pulseaudio` | `pulseaudio` | `pulseaudio` client libs. Debian: `libpulse0` |
 | `--printer` | `cups` | CUPS client library. Debian: `libcups2` |
