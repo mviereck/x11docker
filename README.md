@@ -34,11 +34,12 @@ Experimental code. Please use [master branch](https://github.com/mviereck/x11doc
 | --- | --- | :---: | :---: | :---: |
 | recommended base | `xpra` `Xephyr` | X | - | - |
 | recommended with `--gpu` | `xpra` `weston` `Xwayland` `xdotool` | X | X | X |
+| recommended tools | `xauth` `xrandr` `xdpyinfo` | | | |
+| `--hostdisplay` | - | X | - | - |
+| `--xorg` | `Xorg`| (X) | - | X |
 | `--xpra` | `xpra` | X | - | - |
 | `--xephyr` | `Xephyr`| X | - | - |
 | `--nxagent` | `nxagent`| X | - | - |
-| `--hostdisplay` | - | X | - | - |
-| `--xorg` | `Xorg`| (X) | - | X |
 | `--xpra-xwayland` | `xpra` `weston` `Xwayland` `xdotool` | X | - | - |
 | `--weston-xwayland` | `weston` `Xwayland` | X | X | X |
 | `--kwin-xwayland` | `kwin_wayland` `Xwayland` | X | X | X |
@@ -52,11 +53,11 @@ Experimental code. Please use [master branch](https://github.com/mviereck/x11doc
 
 | Option | Supports `--gpu` | Seamless mode | `--desktop` mode | 
 | --- | :---: | :---: | :---: |
+| `--hostdisplay` | X | X | - |
+| `--xorg` | X | - | X |
 | `--xpra` | - | X | X |
 | `--xephyr` | - | - | X |
 | `--nxagent` | - | X | X |
-| `--hostdisplay` | X | X | - |
-| `--xorg` | X | - | X |
 | `--xpra-xwayland` | X | X | X |
 | `--weston-xwayland` | X | - | X |
 | `--kwin-xwayland` | X | - | X |
