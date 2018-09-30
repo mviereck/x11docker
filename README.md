@@ -85,7 +85,8 @@ rm /tmp/x11docker
 # Options
 Description of some commonly used options. Get an [overview of all options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`.
 ## Desktop or seamless mode
-x11docker assumes that you want to run a single application in seamless mode, i.e. a single window on your regular desktop. If you want to run a desktop environment in image, add option `--desktop`. If you don't specify a [desired X server](#choice-of-x-servers-and-wayland-compositors), x11docker chooses the best matching one depending on chosen options and installed dependencies.
+x11docker assumes that you want to run a single application in seamless mode, i.e. a single window on your regular desktop. If you want to run a desktop environment in image, add option `--desktop`. 
+If you don't specify a [desired X server](#choice-of-x-servers-and-wayland-compositors), x11docker chooses the best matching one depending on chosen options and installed dependencies.
   - Seamless mode is supported with options `--xpra` and `--nxagent`. As a fallback insecure option `--hostdisplay` is possible.
     - If neither `xpra` nor `nxagent` are installed, but x11docker finds a desktop capable X server like `Xephyr`, it avoids insecure option `--hostdisplay` and runs Xephyr with a host window manager.
     - You can specify a host window manager with option `--wm WINDOWMANAGER`, for example `--wm openbox`.
@@ -162,54 +163,38 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
    - Most times it makes sense to store the `--verbose`output (or `x11docker.log`) at [pastebin](https://pastebin.com/).
 
 # Dependencies
-x11docker can run with standard system utilities without additional dependencies on host or in image. As a core it only needs an `X` server and, of course, [`docker`](https://www.docker.com/) to run docker images on X.
-
+x11docker can run with standard system utilities without additional dependencies on host or in image. 
+As a core it only needs an `X` server and, of course, [`docker`](https://www.docker.com/) to run docker images on X.
 x11docker checks dependencies for chosen options on startup and shows terminal messages if some are missing. 
 
-_Basics:_
- - If no additional X server is installed, only less isolated option `--hostdisplay` will work out of the box within X, and option `--xorg` from console. (To use `--xorg` within X, look at [setup for option --xorg](#setup-for-option---xorg)).
+## X server dependencies
+All X server options with a description and their dependencies are listed in [wiki: X server and Wayland options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options).
+ - If no additional X server is installed, only less isolated option `--hostdisplay` will work out of the box within X, and option `--xorg` from console. 
+   (To use `--xorg` within X, look at [setup for option --xorg](https://github.com/mviereck/x11docker/wiki/Setup-for-option---xorg)).
  - As a **well working base** for convenience and security, it is recommended to install [`xpra`](http://xpra.org/) (seamless mode) and `Xephyr` (nested desktop mode).
- - Already installed on most systems with an X server: `xrandr`, `xauth` and `xdpyinfo`.
+   - For advanced `--gpu`support also install `weston Xwayland xdotool`.
+ - Useful tools, already installed on most systems with an X server: `xrandr`, `xauth` and `xdpyinfo`.
+ - [Hints to use option `--xorg` within X.](https://github.com/mviereck/x11docker/wiki/Setup-for-option---xorg)
  
-_Advanced usage:_
- - **Clipboard** sharing with option `--clipboard` needs `xclip`. (Not needed for `--xpra`, `--nxagent` and `--hostdisplay`). Image clipboard sharing is possible with `--xpra` and `--hostdisplay`.
- - **Sound**:
-   - Option `--alsa` has no dependencies. 
-     - You can install ALSA libraries in image to support virtual devices (debian images: `libasound2`).
-   - Option `--pulseaudio` needs `pulseaudio` on host _and_ in image. 
- - **Hardware acceleration** with option `--gpu`
-   - Works best with open source drivers on host and OpenGL/Mesa in image. In most cases everything will work out of the box with just setting `--gpu`.
-   - To provide good X isolation: Install `Xwayland` and `weston` for desktop mode, and additionally `xpra` and `xdotool` for seamless mode. Without these, you can still use `--gpu` with `--hostdisplay` and `--xorg`.
-   - Packages for OpenGL/Mesa in image:
-     - debian and Ubuntu images: `mesa-utils mesa-utils-extra`.
-     - CentOS and fedora images: `glx-utils mesa-dri-drivers`
-     - Alpine and NixOS images: `mesa-demos mesa-dri-ati mesa-dri-intel mesa-dri-nouveau mesa-dri-swrast`
-     - Arch Linux images: `mesa-demos`
-   - Proprietary closed source drivers from NVIDIA corporation need some manual setup and have some restrictions. Consider to use free `nouveau` driver instead.
-     - x11docker can automatically install closed source nvidia drivers in container at every container startup. It gives some setup instructions in terminal output.
-     - The image should contain `modprobe` (package `kmod`) and `xz`. x11docker installs them if they are missing, but that slows down container startup.
-     - You need the very same driver version as on host. It must not be a `deb` or `rpm` package but an `NVIDIA_[...].run` file. Store it at one of the following locations:
-       - `~/.local/share/x11docker` (current user only)
-       - `/usr/local/share/x11docker` (system wide)
-     - Look at [NVIDIA driver download page](https://http.download.nvidia.com/) or try the direct download link provided in x11docker terminal output.
-     - Closed source driver installation fails on image systems that are not based on `glibc`. This affects especially [Alpine](https://alpinelinux.org/) based images. 
-       NVIDIA corporation does not provide the source code that would allow you to use your hardware with different systems.
-     - Alternativly, you can install a driver version matching your host setup in image yourself. Note that this image will not be portable anymore.
+***TL;DR:*** Install `xpra Xephyr weston Xwayland xdotool xauth xrandr xdpyinfo`, or leave it as it is.
  
-_Rarer needed dependencies for special options:_
- - `--nxagent` needs `nxagent`. Faster and more flexible than `xpra` and `Xephyr`, but less reliable.
- - `--kwin` and `--kwin-xwayland` need `kwin_wayland`, included in modern `kwin` packages.
- - `--xdummy` needs dummy video driver `xserver-xorg-video-dummy` (debian) or `xorg-x11-drv-dummy` (fedora).
- - `--xvfb` needs `Xvfb`
- - `--xfishtank` needs `xfishtank` to show a fish tank.
- - `--dbus` is needed only for QT5 application in Wayland. It needs `dbus` or `dbus-launch` in image.
- - `--starter` needs `xdg-user-dir` to locate your `Desktop` folder for starter icons.
- - `--install`, `--update` and `--remove` need `wget`, `unzip` and `xdg-icon-resource`.
+## Option dependencies
+| Option | Dependencies on host | Dependencies in image |
+| --- | --- | --- |
+| `--clipboard` | `xclip` or `xsel` | - |
+| `--gpu` | - | MESA OpenGL drivers. Debian: `mesa-utils mesa-utils-extra`, CentOS: `glx-utils mesa-dri-drivers`, Arch Linux: `mesa-demos`, Alpine: `mesa-demos mesa-dri-ati mesa-dri-intel mesa-dri-nouveau mesa-dri-swrast` |
+| `--gpu` with NVIDIA | | see [x11docker wiki: NVIDIA driver](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container) |
+| `--alsa` | - | optional: ALSA client libs. Debian: `libasound2` |
+| `--pulseaudio` | `pulseaudio` | `pulseaudio` client libs. Debian: `libpulse0` |
+| `--printer` | `cups` | CUPS client library. Debian: `libcups2` |
+| `--lang` | - | `locale-gen`. Debian: `locales` |
+| `--xfishtank` | `xfishtank` | - |
+| `--dbus` `--hostdbus` `--dbus-system` | - | `dbus` |
+| `--launcher` | `xdg-utils` | - |
+| `--install` `--update` `--update-master` | `wget` `unzip` | - |
    
-_List of all host packages for all possible x11docker options (debian package names):_
- - `xserver-xephyr xpra weston xwayland nxagent kwin xvfb xserver-xorg-video-dummy xauth xclip xdpyinfo xrandr xfishtank xdg-utils xdotool unzip wget`, further (deeper surgery in system): `pulseaudio xserver-xorg-legacy`.
-
-![x11docker-gui dependencies screenshot](/../screenshots/x11docker-dependencies.png?raw=true)
+## List of all host packages for all possible x11docker options (debian package names):
+`kwin-wayland nxagent unzip weston wget xauth xclip  xdg-utils xdotool xdpyinfo xfishtank xpra xrandr xserver-xephyrxserver-xorg-video-dummy xvfb xwayland`, further (deeper surgery in system): `cups pulseaudio xserver-xorg-legacy`.
 
 # Password prompt
 root permissions are needed only to run docker. X servers run as unprivileged user.
@@ -239,7 +224,8 @@ Core concept is:
      - This restriction can be disabled with x11docker option `--cap-default` or reduced with `--sudouser`.
 
 _Weaknesses:_
- - If docker daemon runs with `--selinux-enabled`, SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. A more restrictive solution is desirable.
+ - If docker daemon runs with `--selinux-enabled`, SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. 
+   A more restrictive solution is desirable.
    Compare: [SELinux and docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
  - User namespace remapping is disabled to allow options `--home` and `--homedir` without file ownership issues. (Though, this is less a problem as x11docker already avoids root in container).
 
@@ -271,8 +257,6 @@ If no X server option is specified, x11docker automatically chooses one dependin
  
  To run an X server entirely in docker, look at [x11docker/xwayland](https://github.com/mviereck/dockerfile-x11docker-xwayland).
  
-![x11docker-gui server screenshot](/../screenshots/x11docker-server.png?raw=true)
-
 ## Wayland
 To run  [Wayland](https://wayland.freedesktop.org/) instead of an X server x11docker provides options `--wayland`, `--weston`, `--kwin` and `--hostwayland`.
  - Option `--wayland` automatically sets up a Wayland environment with some related environment variables.
@@ -280,22 +264,6 @@ To run  [Wayland](https://wayland.freedesktop.org/) instead of an X server x11do
    - For QT5 applications without option `--wayland` you need to manually add options `--dbus`  and `--env QT_QPA_PLATFORM=wayland`.
  - Option `--hostwayland` can run single applications on host Wayland desktops like Gnome 3, KDE 5 and [Sway](https://github.com/swaywm/sway).
  - Example: `xfce4-terminal` on Wayland: `x11docker --wayland x11docker/xfce xfce4-terminal`
-
-## Setup for option --xorg
- - Option `--xorg` runs from console without additional setup. 
- - To run a second core Xorg server from within an already running X session, you have two possibilities:
-   - Run x11docker as root, or
-   - Edit or create file `/etc/X11/Xwrapper.config` and replace line:
-```
-allowed_users=console
-```
-with lines:
-```
-allowed_users=anybody
-needs_root_rights=yes
-```
-On debian 9 and Ubuntu 16.04 you need to install package `xserver-xorg-legacy`. 
-(Depending on your hardware and system setup, you may not need line `needs_root_rights=yes`).
 
 # Init system
 x11docker supports init systems as PID 1 in container. Init in container solves the [zombie reaping issue](https://blog.phusion.nl/2015/01/20/docker-and-the-pid-1-zombie-reaping-problem/).
@@ -389,7 +357,7 @@ Some image examples can be found on docker hub: https://hub.docker.com/u/x11dock
      - LXDE: `x11docker --desktop x11docker/lxde`
      - LXQt: `x11docker --desktop x11docker/lxqt`
      - Xfce: `x11docker --desktop x11docker/xfce`
-     - [CDE Common Desktop Environment](https://en.wikipedia.org/wiki/Common_Desktop_Environment): `x11docker --desktop --systemd x11docker/cde`
+     - [CDE Common Desktop Environment](https://en.wikipedia.org/wiki/Common_Desktop_Environment): `x11docker --desktop --systemd --cap-default x11docker/cde`
      
    - Medium:
      - Mate: `x11docker --desktop x11docker/mate`
