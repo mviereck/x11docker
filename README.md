@@ -17,13 +17,13 @@ System changes in running containers are discarded after use.
 
 [x11docker wiki](https://github.com/mviereck/x11docker/wiki) provides some Howto's for basic setups without x11docker.
 
- - Avoids X security leaks by running [additional X servers](#choice-of-x-servers-and-wayland-compositors).
- - Improves container [security](#security):
+ - Focus on [security](#security):
+   - Avoids X security leaks by running [additional X servers](#choice-of-x-servers-and-wayland-compositors).
    - Restricts container capabilities to bare minimum.
    - Container user is same as host user to avoid root in container.
- - No dependencies inside of docker images.
- - No obliging [dependencies](#dependencies) on host beside X and docker. Recommended: `xpra` and `Xephyr`.
- - [Wayland](#wayland) support.
+ - Low depedencies:
+   - No obliging [dependencies](#dependencies) on host beside X and docker. Recommended: `xpra` and `Xephyr`.
+   - No obliging [dependencies](#option-dependencies) inside of docker images.
  - [Optional features](#options): 
    - [Persistent data storage](#shared-folders-and-home-in-container) with shared host folders and a persistant `HOME` in container.
    - [Sound](#sound) with pulseaudio or ALSA.
@@ -32,9 +32,11 @@ System changes in running containers are discarded after use.
    - [Printing](#printer) through CUPS.
    - [Webcam](#webcam) support.
    - [Language locale](#language-locales) creation.
+ - [Wayland](#wayland) support.
  - Remote access with [SSH](https://github.com/mviereck/x11docker/wiki/Remote-access-with-SSH), [VNC](https://github.com/mviereck/x11docker/wiki/VNC) or [HTML5 in browser](https://github.com/mviereck/x11docker/wiki/Container-applications-running-in-Browser-with-HTML5) possible.
- - Supports [init systems](#init-system) `tini`, `runit`, `openrc`, `SysVinit` and `systemd` in container.
- - Developed on debian 9. Tested on fedora 28, CentOS 7, openSUSE 42.3, Ubuntu 18.04, Manjaro 17, Mageia 6 and Arch Linux. Runs also on MS Windows in [MSYS2, Cygwin and WSL](#msys2-cygwin-and-wsl-on-ms-windows).
+ - Supports [DBus](#dbus) and [init systems](#init-system) `tini`, `runit`, `openrc`, `SysVinit` and `systemd` in container. Supports also `elogind`.
+ - Developed on Debian. Tested on several other Linux distributions. 
+ - Runs also on MS Windows in [MSYS2, Cygwin and WSL](#msys2-cygwin-and-wsl-on-ms-windows).
  - Easy to use. [Examples](#examples): 
    - `x11docker jess/cathode`
    - `x11docker --desktop --size 320x240 x11docker/lxde`
@@ -135,20 +137,6 @@ FROM x11docker/xfce
 RUN apt-get update && apt-get install -y vlc
 ```
 
-# Troubleshooting
-For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. 
- - x11docker shows warnings if something is insecure, missing or going wrong. 
- - Use option `--verbose` to see logfile output, too.
-   - Option `--debug` can provide additional informations.
-   - Use options `--stdout --stderr --silent` to get application output only.
-   - You can find the latest dispatched logfile at `~/.cache/x11docker/x11docker.log`.
- - Make sure your x11docker version is up to date with `x11docker --update` (latest release) or `x11docker --update-master` (latest beta).
- - Some applications need more privileges or capabilities than x11docker provides as default.
-   - Reduce container isolation with options `--hostipc --hostnet --cap-default --sys-admin` and try again. If the application runs, reduce this insecure options to encircle the issue.
-   - You can run container application as root with `--user=root`.
- - Get help in the [issue tracker](https://github.com/mviereck/x11docker/issues). 
-   - Most times it makes sense to store the `--verbose`output (or `x11docker.log`) at [pastebin](https://pastebin.com/).
-
 # Dependencies
 x11docker can run with standard system utilities without additional dependencies on host or in image. 
 As a core it only needs an `X` server and, of course, [`docker`](https://www.docker.com/) to run docker images on X.
@@ -182,19 +170,6 @@ All X server options with a description and their dependencies are listed in [wi
    
 ## List of all host packages for all possible x11docker options (debian package names):
 `kwin-wayland nxagent unzip weston wget xauth xclip  xdg-utils xdotool xdpyinfo xfishtank xpra xrandr xserver-xephyr xserver-xorg-video-dummy xvfb xwayland`, further (deeper surgery in system): `cups pulseaudio xserver-xorg-legacy`.
-
-# Password prompt
-root permissions are needed only to run docker. X servers run as unprivileged user.
-
-_Running x11docker as unprivileged user:_
- - x11docker checks whether docker needs a password to run and whether `su` or `sudo` are needed to get root privileges. A password prompt appears if needed.
- - If that check fails and does not match your setup, use option `--pw FRONTEND`. `FRONTEND` can be one of `su sudo gksu gksudo lxsu lxsudo kdesu kdesudo beesu pkexec` or `none`.
-
-_Running x11docker as root:_
- - Commands other than `docker` are executed as unprivileged user determined with [`logname`](http://pubs.opengroup.org/onlinepubs/9699919799/utilities/logname.html). (You  can specify another host user with `--hostuser USER`).
- - Unfortunately, some systems do not provide `DISPLAY` and `XAUTHORITY` for root, but needed for nested X servers like Xephyr.    
-   - Tools like `gksu` or `gksudo` can help. 
-   - Some `sudo` implementations provide `-E` to keep the user environment: `sudo -E x11docker [...]`.
 
 # Security 
 Scope of x11docker is to run dockered GUI applications while preserving and improving container isolation.
@@ -233,7 +208,21 @@ _Rather special options reducing security, but not needed for regular use:_
   - `--dbus-system`, `--systemd`, `--sysvinit`, `--openrc` and `--runit` allow some container capabilities that x11docker would drop otherwise. `--systemd` also shares access to `/sys/fs/cgroup`.
   - `--hostipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory. Disables IPC namespacing.)
   - `--hostnet` sets docker run option `--net=host`. (Shares host network stack. Disables network namespacing. Container can spy on network traffic.)
-   
+
+# Troubleshooting
+For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. 
+ - x11docker shows warnings if something is insecure, missing or going wrong. 
+ - Use option `--verbose` to see logfile output, too.
+   - Option `--debug` can provide additional informations.
+   - Use options `--stdout --stderr --silent` to get application output only.
+   - You can find the latest dispatched logfile at `~/.cache/x11docker/x11docker.log`.
+ - Make sure your x11docker version is up to date with `x11docker --update` (latest release) or `x11docker --update-master` (latest beta).
+ - Some applications need more privileges or capabilities than x11docker provides as default.
+   - Reduce container isolation with options `--hostipc --hostnet --cap-default --sys-admin` and try again. If the application runs, reduce this insecure options to encircle the issue.
+   - You can run container application as root with `--user=root`.
+ - Get help in the [issue tracker](https://github.com/mviereck/x11docker/issues). 
+   - Most times it makes sense to store the `--verbose`output (or `x11docker.log`) at [pastebin](https://pastebin.com/).
+
 # Choice of X servers and Wayland compositors
 If no X server option is specified, x11docker automatically chooses one depending on installed dependencies and on given or missing options `--desktop`, `--gpu` and `--wayland`. 
  - For single applications, x11docker prefers `--xpra`. Alternativly, it tries `--nxagent`.
@@ -256,7 +245,7 @@ To run  [Wayland](https://wayland.freedesktop.org/) instead of an X server x11do
 # Init system
 x11docker supports several init systems as PID 1 in container. Init in container solves the [zombie reaping issue](https://blog.phusion.nl/2015/01/20/docker-and-the-pid-1-zombie-reaping-problem/).
 As default it uses `tini` in`/usr/bin/docker-init`. 
-See also: [Init systems in docker: tini, systemd, SysVinit, runit, OpenRC and elogind.](https://github.com/mviereck/x11docker/wiki/Init-systems-in-docker:-tini,-systemd,-SysVinit,-runit,-OpenRC-and-elogind)
+See also: [wiki: Init systems in docker: tini, systemd, SysVinit, runit, OpenRC and elogind.](https://github.com/mviereck/x11docker/wiki/Init-systems-in-docker:-tini,-systemd,-SysVinit,-runit,-OpenRC-and-elogind)
 
 ## DBus
 Some desktop environments and applications need a running DBus daemon and/or DBus user session. 
