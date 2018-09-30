@@ -30,8 +30,10 @@ Experimental code. Please use [master branch](https://github.com/mviereck/x11doc
 | `--kwin` | kwin_wayland without X to run pure Wayland applications. Runs in X, in Wayland and from console. |
 | `--hostwayland` | Shares host wayland socket without X to run pure Wayland applications. Needs a running Wayland compositor. |
 
-| Option | Dependencies | Runs on X | Runs on Wayland | Runs on console |
+| Option | Dependencies on host | Runs on X | Runs on Wayland | Runs on console |
 | --- | --- | :---: | :---: | :---: |
+| recommended base | `xpra` `Xephyr` | X | - | - |
+| recommended with `--gpu` | `xpra` `weston` `Xwayland` `xdotool` | X | X | X |
 | `--xpra` | `xpra` | X | - | - |
 | `--xephyr` | `Xephyr`| X | - | - |
 | `--nxagent` | `nxagent`| X | - | - |
@@ -42,7 +44,7 @@ Experimental code. Please use [master branch](https://github.com/mviereck/x11doc
 | `--kwin-xwayland` | `kwin_wayland` `Xwayland` | X | X | X |
 | `--xwayland` | `Xwayland` | - | X | - |
 | `--xvfb` | `Xvfb` | X | X | X |
-| `--xdummy` | dummy video driver | X | X | X |
+| `--xdummy` | dummy video driver. Debian: `xserver-xorg-video-dummy`. Fedora: `xorg-x11-drv-dummy` | X | X | X |
 | `--weston` | `weston` | X | X | X |
 | `--kwin` | `kwin_wayland` | X | X | X |
 | `--hostwayland` | - | - | X | - |
@@ -64,3 +66,18 @@ Experimental code. Please use [master branch](https://github.com/mviereck/x11doc
 | `--weston` | X | - | X |
 | `--kwin` | X | - | X |
 | `--hostwayland` | X | X | - |
+
+
+| Option | Dependencies on host | Dependencies in image |
+| --- | --- | --- |
+| `--clipboard` | `xclip` or `xsel` | - |
+| `--gpu` | - | MESA OpenGL drivers. Debian: `mesa-utils mesa-utils-extra`, CentOS: `glx-utils mesa-dri-drivers`, Arch Linux: `mesa-demos`, Alpine: `mesa-demos mesa-dri-ati mesa-dri-intel mesa-dri-nouveau mesa-dri-swrast` |
+| `--gpu` with NVIDIA | | see x11docker wiki: NVIDIA |
+| `--alsa` | - | optional: ALSA client libs. Debian: `libasound2` |
+| `--pulseaudio` | `pulseaudio` | `pulseaudio` client libs. Debian: `libpulse0` |
+| `--printer` | `cups` | CUPS client library. Debian: `libcups2` |
+| `--lang` | - | `locale-gen`. Debian: `locales` |
+| `--xfishtank` | `xfishtank` | - |
+| `--dbus` `--hostdbus` `--dbus-system` | - | `dbus` |
+| `--launcher` | `xdg-utils` | - |
+| `--install` `--update` `--update-master` | `wget` `unzip` | - |
