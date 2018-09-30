@@ -30,14 +30,14 @@ Experimental code. Please use [master branch](https://github.com/mviereck/x11doc
 | `--kwin` | kwin_wayland without X to run pure Wayland applications. Runs in X, in Wayland and from console. |
 | `--hostwayland` | Shares host wayland socket without X to run pure Wayland applications. Needs a running Wayland compositor. |
 
-| Option | Dependencies on host | Runs on X | Runs on Wayland | Runs on console |
-| --- | --- | :---: | :---: | :---: |
+| X server or Wayland option | Dependencies on host | Runs on X | Runs on Wayland | Runs on console | `--gpu` | Seamless mode | `--desktop` mode | 
+| --- | --- | :---: | :---: | :---: |:---: | :---: | :---: |
 | Minimal base | `Xorg` (probably already installed) | X | - | X |
-| **Recommended base** | `xpra` `Xephyr` | X | - | - |
+| ***Recommended base*** | `xpra` `Xephyr` | X | - | - |
 | Recommended base for `--gpu` | `xpra` `weston` `Xwayland` `xdotool` | X | X | X |
-| **Recommended tools** | `xauth` `xrandr` `xdpyinfo` | | | |
-| `--xpra` | `xpra` | X | - | - |
-| `--xephyr` | `Xephyr`| X | - | - |
+| ***Recommended tools*** | `xauth` `xrandr` `xdpyinfo` | | | |
+| `--xpra` | `xpra` | X | - | - | - | X | X |
+| `--xephyr` | `Xephyr`| X | - | - | - | - | X |
 | `--nxagent` | `nxagent`| X | - | - |
 | `--hostdisplay` | - | X | - | - |
 | `--xorg` | `Xorg`| [(X)](#setup-for-option---xorg) | [(X)](#setup-for-option---xorg) | X |
