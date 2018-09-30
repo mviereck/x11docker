@@ -29,3 +29,20 @@ Experimental code. Please use [master branch](https://github.com/mviereck/x11doc
 | `--weston` | Weston without X to run pure Wayland applications. Runs in X, in Wayland and from console. Scaling and rotation is possible. |
 | `--kwin` | kwin_wayland without X to run pure Wayland applications. Runs in X, in Wayland and from console. |
 | `--hostwayland` | Shares host wayland socket without X to run pure Wayland applications. Needs a running Wayland compositor. |
+
+| Option | Dependencies | Runs on X | Runs on Wayland | Runs on console | Supports `--gpu` | Seamless mode | `--desktop` mode |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `--xpra` | `xpra` | yes | - | - | - | yes | yes |
+| `--xephyr` | `Xephyr`| yes | - | - | - | - | yes |
+| `--nxagent` | `nxagent`| yes | - | - | - | yes | yes |
+| `--hostdisplay` | - | yes | - | - | yes | yes | - |
+| `--xorg` | `Xorg`| (yes) | - | yes | yes | - | yes |
+| `--xpra-xwayland` | `xpra` `weston` `Xwayland` `xdotool` | yes | - | - | yes | yes | yes |
+| `--weston-xwayland` | `weston` `Xwayland` | yes | yes | yes | yes | - | yes |
+| `--kwin-xwayland` | `kwin_wayland` `Xwayland` | yes | yes | yes | yes | - | yes |
+| `--xwayland` | `Xwayland` | - | yes | - | yes | - | yes |
+| `--xvfb` | `Xvfb` | yes | yes | yes | - | - | yes |
+| `--xdummy` | dummy video driver | yes | yes | yes | - | - | yes |
+| `--weston` | `weston` | yes | yes | yes | yes | - | yes |
+| `--kwin` | `kwin_wayland` | yes | yes | yes | yes | - | yes |
+| `--hostwayland` | - | - | yes | - | yes | yes | - |
