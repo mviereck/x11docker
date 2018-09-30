@@ -32,8 +32,8 @@ Experimental code. Please use [master branch](https://github.com/mviereck/x11doc
 
 | Option | Dependencies on host | Runs on X | Runs on Wayland | Runs on console |
 | --- | --- | :---: | :---: | :---: |
-| Minimal base | `Xorg` | X | - | X |
-| **Recommended base** | `Xorg` `xpra` `Xephyr` | X | - | X |
+| Minimal base | `Xorg` (probably already installed) | X | - | X |
+| **Recommended base** | `xpra` `Xephyr` | X | - | - |
 | Recommended base for `--gpu` | `xpra` `weston` `Xwayland` `xdotool` | X | X | X |
 | **Recommended tools** | `xauth` `xrandr` `xdpyinfo` | | | |
 | `--xpra` | `xpra` | X | - | - |
