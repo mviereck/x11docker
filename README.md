@@ -238,9 +238,6 @@ and [WSL (Windows subsystem for Linux)](https://docs.microsoft.com/en-us/windows
  
  
 # Installation
-### Minimal installation
-For a first test, you can run with `bash x11docker` respective `bash x11docker-gui`. 
-For minimal installation, make `x11docker` executable with `chmod +x x11docker` and move it to `/usr/bin`.
 ### Installation options
 As root, you can install, update and remove x11docker on your system:
  - `x11docker --install` : install x11docker and x11docker-gui from current directory. 
@@ -255,6 +252,9 @@ wget https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker -O /t
 sudo bash /tmp/x11docker --update
 rm /tmp/x11docker
 ```
+### Minimal installation
+For a first test, you can run with `bash x11docker` respective `bash x11docker-gui`. 
+For minimal installation, make `x11docker` executable with `chmod +x x11docker` and move it to `/usr/bin`.
 
 
 
@@ -268,55 +268,46 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
  - Make sure your x11docker version is up to date with `x11docker --update` (latest release) or `x11docker --update-master` (latest beta).
  - Some applications need more privileges or capabilities than x11docker provides as default.
    - Reduce container isolation with options `--hostipc --hostnet --cap-default --sys-admin` and try again. If the application runs, reduce these insecure options to encircle the issue.
-   - You can run container application as root with `--user=root`.
+   - You can run container applications as root with `--user=root`.
  - Get help in the [issue tracker](https://github.com/mviereck/x11docker/issues). 
-   - Most times it makes sense to store the `--verbose`output (or `x11docker.log`) at [pastebin](https://pastebin.com/).
+   - Most times it makes sense to store the `--verbose`output (or `x11docker.log`) at [pastebin.com](https://pastebin.com/).
 
    
 
 # Examples
 [Some desktop image examples can be found on docker hub.](https://hub.docker.com/u/x11docker/)
 
- - Single GUI application in container: 
-   - Terminal: `x11docker x11docker/xfce xfce4-terminal`
-   - [Telegram messenger](https://telegram.org/) with persistant `HOME` for configuration storage: 
-     - `x11docker --home xorilog/telegram`
-   - Fractal generator [XaoS](https://github.com/patrick-nw/xaos): `x11docker patricknw/xaos`
-   - GLXgears with hardware acceleration: `x11docker --gpu x11docker/xfce glxgears`
-   - Firefox with shared Download folder: `x11docker --hostipc --sharedir $HOME/Downloads jess/firefox` (Option `--hostipc` avoids tab crashes. Better avoid them in `about:config` setting `browser.tabs.remote.autostart` to `false`).
-   - Chromium browser: `x11docker -- jess/chromium --no-sandbox`
-   - [Tor browser](https://www.torproject.org/projects/torbrowser.html): `x11docker jess/tor-browser`
-   - VLC media player with shared Video folder and pulseaudio sound: 
-     - `x11docker --pulseaudio --sharedir=$HOME/Videos jess/vlc`
-   - [Kodi](https://kodi.tv/): `x11docker --gpu erichough/kodi`. For setup look at [ehough/docker-kodi](https://github.com/ehough/docker-kodi).
-   
- - Desktop in container: 
-   - Minimal images:
-     - FVWM: `x11docker --desktop x11docker/fvwm` (based on [alpine](https://alpinelinux.org/), 22.5 MB)
-     - fluxbox: `x11docker --desktop x11docker/fluxbox` (based on debian, 87 MB)
+| Application | x11docker command |
+| --- | --- |
+| Xfce4 Terminal | `x11docker x11docker/xfce xfce4-terminal` |
+| GLXgears with hardware acceleration | `x11docker --gpu x11docker/xfce glxgears` |
+| [Kodi media center](https://kodi.tv/) with hardware accelerationy <br> Pulseaudio sound and shared `Videos` folder. <br> For setup look at [ehough/docker-kodi](https://github.com/ehough/docker-kodi). | `x11docker --gpu --pulseaudio --sharedir ~/Videos erichough/kodi`. |
+| [XaoS](https://github.com/patrick-nw/xaos) fractal generator | `x11docker patricknw/xaos` |
+| [Telegram messenger](https://telegram.org/) with persistant <br> `HOME` for configuration storage | `x11docker --home xorilog/telegram` |
+| Firefox with shared `Download` folder. <br> (Option `--hostipc` avoids tab crashes. <br> Better avoid them in `about:config` setting <br> `browser.tabs.remote.autostart` to `false`).| `x11docker --hostipc --sharedir $HOME/Downloads jess/firefox` |
+| [Tor browser](https://www.torproject.org/projects/torbrowser.html) | `x11docker jess/tor-browser` |
+| Chromium browser | `x11docker -- jess/chromium --no-sandbox` |
+| VLC media player with shared Video folder <br> and Pulseaudio sound | `x11docker --pulseaudio --sharedir=$HOME/Videos jess/vlc` |
 
-   - Lightweight, small image:
-     - [Lumina](https://lumina-desktop.org): `x11docker --desktop x11docker/lumina` (based on [Void Linux](https://www.voidlinux.org/))
-     - LXDE: `x11docker --desktop x11docker/lxde`
-     - LXQt: `x11docker --desktop x11docker/lxqt`
-     - Xfce: `x11docker --desktop x11docker/xfce`
-     - [CDE Common Desktop Environment](https://en.wikipedia.org/wiki/Common_Desktop_Environment): `x11docker --desktop --systemd --cap-default x11docker/cde`
-     
-   - Medium:
-     - Mate: `x11docker --desktop x11docker/mate`
-     - Enlightenment: `x11docker --desktop --gpu --runit x11docker/enlightenment` (Based on [Void Linux](https://www.voidlinux.org/))
-     - [Trinity](https://www.trinitydesktop.org/) (successor of KDE 3): `x11docker --desktop x11docker/trinity`
-     
-   - Heavy, option `--gpu` recommended:
-     - Cinnamon: `x11docker --desktop --gpu --dbus-system x11docker/cinnamon`
-     - [deepin](https://www.deepin.org/en/dde/): `x11docker --desktop --gpu --systemd x11docker/deepin`
-     - [LiriOS](https://liri.io/): `x11docker --desktop --gpu lirios/unstable` (Needs at least docker 18.06 or this [xcb bugfix](https://github.com/mviereck/x11docker/issues/76).)
-     - KDE Plasma: `x11docker --desktop --gpu x11docker/plasma`
-     - KDE Plasma as nested Wayland compositor: 
-       - `x11docker --hostdisplay --gpu x11docker/plasma startplasmacompositor`
-     
-   - LXDE desktop with wine and a persistent home folder to preserve installed Windows applications, with pulseaudio sound and hardware acceleration: 
-     - `x11docker --desktop --home --pulseaudio --gpu x11docker/lxde-wine`
+
+| Desktop environment | x11docker command |
+| --- | --- |
+| FVWM (based on [alpine](https://alpinelinux.org/), 22.5 MB) | `x11docker --desktop x11docker/fvwm` |
+| fluxbox (based on debian, 87 MB) | `x11docker --desktop x11docker/fluxbox` |
+| [Lumina](https://lumina-desktop.org) (based on [Void Linux](https://www.voidlinux.org/))| `x11docker --desktop x11docker/lumina` |
+| LXDE | `x11docker --desktop x11docker/lxde` |
+| LXQt | `x11docker --desktop x11docker/lxqt` |
+| Xfce | `x11docker --desktop x11docker/xfce` |
+| [CDE Common Desktop Environment](https://en.wikipedia.org/wiki/Common_Desktop_Environment) | `x11docker --desktop --systemd --cap-default x11docker/cde` |
+| Mate | `x11docker --desktop x11docker/mate` |
+| Enlightenment (Based on [Void Linux](https://www.voidlinux.org/)) | `x11docker --desktop --gpu --runit x11docker/enlightenment` |
+| [Trinity](https://www.trinitydesktop.org/) (successor of KDE 3) | `x11docker --desktop x11docker/trinity` |
+| Cinnamon | `x11docker --desktop --gpu --dbus-system x11docker/cinnamon` |
+| [deepin](https://www.deepin.org/en/dde/) | `x11docker --desktop --gpu --systemd x11docker/deepin` |
+| [LiriOS](https://liri.io/) (Needs at least docker 18.06 <br> or this [xcb bugfix](https://github.com/mviereck/x11docker/issues/76).) | `x11docker --desktop --gpu lirios/unstable` |
+| KDE Plasma | `x11docker --desktop --gpu x11docker/plasma` |
+| KDE Plasma as nested Wayland compositor | `x11docker --hostdisplay --gpu x11docker/plasma startplasmacompositor` |
+| LXDE desktop with wine and PlayOnLinux <br> and  a persistent `HOME` folder to preserve <br> installed Windows applications, with <br> Pulseaudio sound and hardware acceleration | `x11docker --desktop --home --pulseaudio --gpu x11docker/lxde-wine` |
    
 ## Adjust images for your needs
 For persistant changes of image system adjust Dockerfile and rebuild. To add custom applications to x11docker example images you can create a new Dockerfile based on them. Example:
