@@ -71,34 +71,14 @@ To run only a new empty X server:
 
 
 
-# Installation
-### Minimal installation
-For a first test, you can run with `bash x11docker` respective `bash x11docker-gui`. 
-For manual installation, make x11docker executable with `chmod +x x11docker` and move it to `/usr/bin`.
-### Installation options
-As root, you can install, update and remove x11docker on your system:
- - `x11docker --install` : install x11docker and x11docker-gui from current directory. 
- - `x11docker --update` : download and install latest [release](https://github.com/mviereck/x11docker/releases) from github.
- - `x11docker --update-master` : download and install latest master version from github.
- - `x11docker --remove` : remove all files installed by x11docker.
- 
-Copies `x11docker` and `x11docker-gui` to `/usr/bin`. Creates an icon in `/usr/share/icons`. Creates `x11docker.desktop` in `/usr/share/applications`. Copies `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
-### Shortest way for first installation:
-```
-wget https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker -O /tmp/x11docker
-sudo bash /tmp/x11docker --update
-rm /tmp/x11docker
-```
-
-
-
 # Options
 Description of some commonly used options. Get an [overview of all options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`.
 
 ## Choice of X servers and Wayland compositors
-If no X server option is specified, x11docker automatically chooses one depending on installed dependencies and on given or missing options `--desktop`, `--gpu` and `--wayland`.
+If no X server option is specified, x11docker automatically chooses one depending on installed [dependencies](#dependencies) and on given or missing options `--desktop`, `--gpu` and `--wayland`.
  - [Overview of all possible X server and Wayland options.](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options)
- 
+ - [Hints to use option `--xorg` within X.](https://github.com/mviereck/x11docker/wiki/Setup-for-option---xorg)
+
 ## Desktop or seamless mode
 x11docker assumes that you want to run a single application in seamless mode, i.e. a single window on your regular desktop. If you want to run a desktop environment in image, add option `--desktop`. 
  - Seamless mode is supported with options `--xpra` and `--nxagent`. As a fallback insecure option `--hostdisplay` is possible.
@@ -141,9 +121,9 @@ x11docker provides option `--lang $LANG` for flexible language locale settings.
  - For support of chinese, japanese and korean characters install a font like `fonts-arphic-uming` in image.
  
 ## Shared folders and HOME in container
-Changes in a running docker image are lost, the created docker container will be discarded. For persistent data storage you can share host directories:
- - Option `--home` creates a host directory in `~/x11docker/IMAGENAME` that is shared with the container and mounted as home directory. Files in container home and configuration changes will persist. 
- - Option `--sharedir DIR` mounts a host directory at the same location in container without setting `HOME`.
+Changes in a running docker container system will be lost, the created docker container will be discarded. For persistent data storage you can share host directories:
+ - Option `--home` creates a host directory in `~/x11docker/IMAGENAME` that is shared with the container and mounted as its `HOME` directory. Files in container home and configuration changes will persist. 
+ - Option `--sharedir DIR` mounts a host directory at the same location in container.
  - Option `--homedir DIR` is similar to `--home` but allows you to specify a custom host directory for data storage.
  - Special cases for `$HOME`:
    - `--homedir $HOME` will use your host home as container home. Discouraged, use with care.
@@ -153,7 +133,7 @@ Changes in a running docker image are lost, the created docker container will be
 To run  [Wayland](https://wayland.freedesktop.org/) instead of an X server x11docker provides options `--wayland`, `--weston`, `--kwin` and `--hostwayland`.
  - Option `--wayland` automatically sets up a Wayland environment with some related environment variables.
  - Options `--kwin` and `--weston` run Wayland compositors `kwin_wayland` or `weston`.
-   - For QT5 applications without option `--wayland` you need to manually add options `--dbus`  and `--env QT_QPA_PLATFORM=wayland`.
+   - For QT5 applications without option `--wayland` add options `--dbus`  and `--env QT_QPA_PLATFORM=wayland`.
  - Option `--hostwayland` can run single applications on host Wayland desktops like Gnome 3, KDE 5 and [Sway](https://github.com/swaywm/sway).
  - Example: `xfce4-terminal` on Wayland: `x11docker --wayland x11docker/xfce xfce4-terminal`
  
@@ -175,6 +155,8 @@ x11docker can run with standard system utilities without additional dependencies
 As a core it only needs an `X` server and, of course, [`docker`](https://www.docker.com/) to run docker images on X.
 x11docker checks dependencies for chosen options on startup and shows terminal messages if some are missing. 
 
+***TL;DR:*** Install `xpra Xephyr weston Xwayland xdotool xauth xclip xrandr xdpyinfo`, or leave it as it is.
+
 ## X server dependencies
 All X server options with a description and their dependencies are listed in [wiki: X server and Wayland options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options).
  - If no additional X server is installed, only less isolated option `--hostdisplay` will work out of the box within X, and option `--xorg` from console. 
@@ -182,10 +164,7 @@ All X server options with a description and their dependencies are listed in [wi
  - As a **well working base** for convenience and security it is recommended to install [`xpra`](http://xpra.org/) (seamless mode) and `Xephyr` (nested desktop mode).
    - For advanced `--gpu` support also install `weston Xwayland xdotool`.
  - Useful tools, already installed on most systems with an X server: `xrandr`, `xauth` and `xdpyinfo`.
- - [Hints to use option `--xorg` within X.](https://github.com/mviereck/x11docker/wiki/Setup-for-option---xorg)
- 
-***TL;DR:*** Install `xpra Xephyr weston Xwayland xdotool xauth xrandr xdpyinfo`, or leave it as it is.
- 
+  
 ## Option dependencies
 | Option | Dependencies on host | Dependencies in image |
 | --- | --- | --- |
@@ -201,30 +180,31 @@ All X server options with a description and their dependencies are listed in [wi
 | `--launcher` | `xdg-utils` | - |
 | `--install` `--update` `--update-master` | `wget` `unzip` | - |
    
-## List of all host packages for all possible x11docker options (debian package names):
-`kwin-wayland nxagent unzip weston wget xauth xclip  xdg-utils xdotool xdpyinfo xfishtank xpra xrandr xserver-xephyr xserver-xorg-video-dummy xvfb xwayland`, further (deeper surgery in system): `cups pulseaudio xserver-xorg-legacy`.
+## List of all host packages for all possible x11docker options
+Debian package names: `kwin-wayland nxagent unzip weston wget xauth xclip  xdg-utils xdotool xdpyinfo xfishtank xpra xrandr xserver-xephyr xserver-xorg-video-dummy xvfb xwayland`, 
+further (deeper surgery in system): `cups pulseaudio xserver-xorg-legacy`.
 
 
 
 # Security 
 Scope of x11docker is to run dockered GUI applications while preserving and improving container isolation.
 Core concept is:
-   - Run a second X server to avoid [X security leaks](http://www.windowsecurity.com/whitepapers/unix_security/Securing_X_Windows.html).
-     - This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control. (x11docker provides this with option `--hostdisplay`).
-     - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.
-   - Create container user similar to host user to [avoid root in container](http://blog.dscpl.com.au/2015/12/don-run-as-root-inside-of-docker.html).
-     - You can also specify another user with `--user=USERNAME` or a non-existing one with `--user=UID:GID`.
-     - If you want root permissions in container, use option `--sudouser` that allows `su` and `sudo` with password `x11docker`. Alternatively, you can run with `--user=root`. 
+ - Run a second X server to avoid [X security leaks](http://www.windowsecurity.com/whitepapers/unix_security/Securing_X_Windows.html).
+   - This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control. (x11docker provides this with option `--hostdisplay`).
+   - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.
+ - Create container user similar to host user to [avoid root in container](http://blog.dscpl.com.au/2015/12/don-run-as-root-inside-of-docker.html).
+   - You can also specify another user with `--user=USERNAME` or a non-existing one with `--user=UID:GID`.
    - Disables possible root password and deletes entries in `/etc/sudoers`.
-   - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
-     - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. 
-     - This restriction can be disabled with x11docker option `--cap-default` or reduced with `--sudouser`.
+     - If you want root permissions in container, use option `--sudouser` that allows `su` and `sudo` with password `x11docker`. Alternatively, you can run with `--user=root`. 
+ - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
+   - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. 
+   - This restriction can be disabled with x11docker option `--cap-default` or reduced with `--sudouser`.
 
 _Weaknesses:_
- - If docker daemon runs with `--selinux-enabled`, SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. 
+ - Possible SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. 
    A more restrictive solution is desirable.
    Compare: [SELinux and docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
- - User namespace remapping is disabled to allow options `--home` and `--homedir` without file ownership issues. (Though, this is less a problem as x11docker already avoids root in container).
+ - User namespace remapping is disabled to allow options `--home` and `--homedir` without file ownership issues. (Though, this is less an issue because x11docker already avoids root in container).
 
 ## Options degrading container isolation
 x11docker shows warning messages in terminal if chosen options degrade container isolation.
@@ -250,22 +230,44 @@ _Rather special options reducing security, but not needed for regular use:_
 x11docker runs on MS Windows in [MSYS2](https://www.msys2.org/), [Cygwin](https://www.cygwin.com/) 
 and [WSL (Windows subsystem for Linux)](https://docs.microsoft.com/en-us/windows/wsl/about).
  - Install X server [`VcXsrv`](https://sourceforge.net/projects/vcxsrv/) on Windows into `C:/Program Files/VcXsrv` (option `--vcxsrv`).
- - Cygwin/X also provides `Xwin` (option `--xwin`). Install `xinit` package in Cygwin.
- - For sound with option `--pulseaudio` install Cygwin in `C:/cygwin64` with package `pulseaudio`. It runs in MSYS2 and WSL, too.
+ - Cygwin/X also provides X server `Xwin` (option `--xwin`). Install `xinit` package in Cygwin.
+ - For sound with option `--pulseaudio` install Cygwin in `C:/cygwin64` with package `pulseaudio`. It works for MSYS2 and WSL, too.
  - Error messages like `./x11docker: line 2: $'\r': command not found` indicate a wrong line ending conversion from git. Run `dos2unix x11docker`.
+ - Not all x11docker options are implemented on MS Windows. E.g. `--webcam` and `--printer` do not work.
  
  
  
+# Installation
+### Minimal installation
+For a first test, you can run with `bash x11docker` respective `bash x11docker-gui`. 
+For minimal installation, make `x11docker` executable with `chmod +x x11docker` and move it to `/usr/bin`.
+### Installation options
+As root, you can install, update and remove x11docker on your system:
+ - `x11docker --install` : install x11docker and x11docker-gui from current directory. 
+ - `x11docker --update` : download and install latest [release](https://github.com/mviereck/x11docker/releases) from github.
+ - `x11docker --update-master` : download and install latest master version from github.
+ - `x11docker --remove` : remove all files installed by x11docker.
+ 
+Copies `x11docker` and `x11docker-gui` to `/usr/bin`. Creates an icon in `/usr/share/icons`. Creates `x11docker.desktop` in `/usr/share/applications`. Copies `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
+### Shortest way for first installation:
+```
+wget https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker -O /tmp/x11docker
+sudo bash /tmp/x11docker --update
+rm /tmp/x11docker
+```
+
+
+
 # Troubleshooting
 For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. 
  - x11docker shows warnings if something is insecure, missing or going wrong. 
- - Use option `--verbose` to see logfile output, too.
-   - Option `--debug` can provide additional informations.
-   - Use options `--stdout --stderr --silent` to get application output only.
+   - Use options `--stdout --stderr` (short `-Q`) to get application output, too.
+   - Use option `--verbose` to see full logfile output.
+     - Option `-D, --debug` gives a less verbose output. `-DQ` is short for `--debug --stdout --stderr`.
    - You can find the latest dispatched logfile at `~/.cache/x11docker/x11docker.log`.
  - Make sure your x11docker version is up to date with `x11docker --update` (latest release) or `x11docker --update-master` (latest beta).
  - Some applications need more privileges or capabilities than x11docker provides as default.
-   - Reduce container isolation with options `--hostipc --hostnet --cap-default --sys-admin` and try again. If the application runs, reduce this insecure options to encircle the issue.
+   - Reduce container isolation with options `--hostipc --hostnet --cap-default --sys-admin` and try again. If the application runs, reduce these insecure options to encircle the issue.
    - You can run container application as root with `--user=root`.
  - Get help in the [issue tracker](https://github.com/mviereck/x11docker/issues). 
    - Most times it makes sense to store the `--verbose`output (or `x11docker.log`) at [pastebin](https://pastebin.com/).
@@ -273,7 +275,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
    
 
 # Examples
-Some image examples can be found on docker hub: https://hub.docker.com/u/x11docker/
+[Some desktop image examples can be found on docker hub.](https://hub.docker.com/u/x11docker/)
 
  - Single GUI application in container: 
    - Terminal: `x11docker x11docker/xfce xfce4-terminal`
@@ -317,7 +319,7 @@ Some image examples can be found on docker hub: https://hub.docker.com/u/x11dock
      - `x11docker --desktop --home --pulseaudio --gpu x11docker/lxde-wine`
    
 ## Adjust images for your needs
-For persistant changes of image system, adjust Dockerfile and rebuild. To add custom applications to x11docker example images, you can create a new Dockerfile based on them. Example:
+For persistant changes of image system adjust Dockerfile and rebuild. To add custom applications to x11docker example images you can create a new Dockerfile based on them. Example:
 ```
 # xfce desktop with VLC media player
 FROM x11docker/xfce
