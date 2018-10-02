@@ -15,18 +15,18 @@ Persistant data and configuration storage is done with shared folders.
 Persistant container system changes can be done in Dockerfile. 
 System changes in running containers are discarded after use.
 
-[x11docker wiki](https://github.com/mviereck/x11docker/wiki) provides some Howto's for basic setups without x11docker.
+[x11docker wiki](https://github.com/mviereck/x11docker/wiki) provides some how-to's for basic setups without x11docker.
 
  - Focus on [security](#security):
    - Avoids X security leaks by running [additional X servers](#choice-of-x-servers-and-wayland-compositors).
    - Restricts container capabilities to bare minimum.
    - Container user is same as host user to avoid root in container.
- - Low depedencies:
-   - No obliging [dependencies](#dependencies) on host beside X and docker. Recommended: `xpra` and `Xephyr`.
-   - No obliging [dependencies](#option-dependencies) inside of docker images.
+ - Low [dependencies](#dependencies):
+   - No obliging dependencies on host beside X and docker. Recommended: `xpra` and `Xephyr`.
+   - No dependencies inside of docker images except for some optional features.
  - [Optional features](#options): 
    - [Persistent data storage](#shared-folders-and-home-in-container) with shared host folders and a persistant `HOME` in container.
-   - [Sound](#sound) with pulseaudio or ALSA.
+   - [Sound](#sound) with Pulseaudio or ALSA.
    - [Hardware acceleration](#hardware-acceleration) for OpenGL.
    - [Clipboard](#clipboard) sharing.
    - [Printing](#printer) through CUPS.
@@ -36,7 +36,7 @@ System changes in running containers are discarded after use.
  - Remote access with [SSH](https://github.com/mviereck/x11docker/wiki/Remote-access-with-SSH), [VNC](https://github.com/mviereck/x11docker/wiki/VNC) or [HTML5 in browser](https://github.com/mviereck/x11docker/wiki/Container-applications-running-in-Browser-with-HTML5) possible.
  - Supports [DBus](#dbus) and [init systems](#init-system) `tini`, `runit`, `openrc`, `SysVinit` and `systemd` in container. Supports also `elogind`.
  - Developed on Debian. Tested on several other Linux distributions. 
- - Runs also on MS Windows in [MSYS2, Cygwin and WSL](#msys2-cygwin-and-wsl-on-ms-windows).
+   - Runs also on MS Windows in [MSYS2, Cygwin and WSL](#msys2-cygwin-and-wsl-on-ms-windows).
  - Easy to use. [Examples](#examples): 
    - `x11docker jess/cathode`
    - `x11docker --desktop --size 320x240 x11docker/lxde`
@@ -144,27 +144,28 @@ See also: [wiki: Init systems in docker: tini, systemd, SysVinit, runit, OpenRC 
 
 ## DBus
 Some desktop environments and applications need a running DBus daemon and/or DBus user session. 
+ - use `--dbus` to run a DBus user session daemon.
  - use `--dbus-system` to run DBus system daemon. This includes option `--dbus`.
- - use `--dbus` to run image command with `dbus-launch` (fallback: `dbus-run-session`) for a DBus user session.
  - use `--hostdbus` to connect to host DBus user session.
 
  
  
 # Dependencies
 x11docker can run with standard system utilities without additional dependencies on host or in image. 
-As a core it only needs an `X` server and, of course, [`docker`](https://www.docker.com/) to run docker images on X.
+As a core it only needs an `X` server and, of course, [`docker`](https://www.docker.com/) to run docker containers on X.
 x11docker checks dependencies for chosen options on startup and shows terminal messages if some are missing. 
 
-***TL;DR:*** Install `xpra Xephyr weston Xwayland xdotool xauth xclip xrandr xdpyinfo`, or leave it as it is.
+***TL;DR:*** Install `xpra Xephyr weston Xwayland xdotool xauth xclip xrandr xdpyinfo` on host, or leave it as it is.
 
 ## X server dependencies
 All X server options with a description and their dependencies are listed in [wiki: X server and Wayland options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options).
- - If no additional X server is installed, only less isolated option `--hostdisplay` will work out of the box within X, and option `--xorg` from console. 
-   (To use `--xorg` within X, look at [setup for option --xorg](https://github.com/mviereck/x11docker/wiki/Setup-for-option---xorg)).
- - As a **well working base** for convenience and security it is recommended to install [`xpra`](http://xpra.org/) (seamless mode) and `Xephyr` (nested desktop mode).
-   - For advanced `--gpu` support also install `weston Xwayland xdotool`.
- - Useful tools, already installed on most systems with an X server: `xrandr`, `xauth` and `xdpyinfo`.
-  
+| | Dependencies | Available options |
+| --- | --- | --- |
+| Minimal base | `Xorg` (probably already installed) | `--hostdisplay` <br> `--xorg` |
+| Recommended base | `xpra` `Xephyr` | `--xpra` <br> `--xephyr` |
+| Recommended base for `--gpu` | `xpra` `weston` `Xwayland` `xdotool` | `--xpra-xwayland` <br> `--weston-xwayland` <br> `--weston` <br> `--xwayland` |
+| Recommended tools | `xauth` `xrandr` `xdpyinfo` | |
+
 ## Option dependencies
 | Option | Dependencies on host | Dependencies in image |
 | --- | --- | --- |
@@ -281,13 +282,13 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
 | --- | --- |
 | Xfce4 Terminal | `x11docker x11docker/xfce xfce4-terminal` |
 | GLXgears with hardware acceleration | `x11docker --gpu x11docker/xfce glxgears` |
-| [Kodi media center](https://kodi.tv/) with hardware accelerationy <br> Pulseaudio sound and shared `Videos` folder. <br> For setup look at [ehough/docker-kodi](https://github.com/ehough/docker-kodi). | `x11docker --gpu --pulseaudio --sharedir ~/Videos erichough/kodi`. |
+| [Kodi media center](https://kodi.tv/) with hardware <br> acceleration, Pulseaudio sound <br> and shared `Videos` folder. <br> For setup look at [ehough/docker-kodi](https://github.com/ehough/docker-kodi). | `x11docker --gpu --pulseaudio --sharedir ~/Videos erichough/kodi`. |
 | [XaoS](https://github.com/patrick-nw/xaos) fractal generator | `x11docker patricknw/xaos` |
 | [Telegram messenger](https://telegram.org/) with persistant <br> `HOME` for configuration storage | `x11docker --home xorilog/telegram` |
 | Firefox with shared `Download` folder. <br> (Option `--hostipc` avoids tab crashes. <br> Better avoid them in `about:config` setting <br> `browser.tabs.remote.autostart` to `false`).| `x11docker --hostipc --sharedir $HOME/Downloads jess/firefox` |
 | [Tor browser](https://www.torproject.org/projects/torbrowser.html) | `x11docker jess/tor-browser` |
 | Chromium browser | `x11docker -- jess/chromium --no-sandbox` |
-| VLC media player with shared Video folder <br> and Pulseaudio sound | `x11docker --pulseaudio --sharedir=$HOME/Videos jess/vlc` |
+| VLC media player with shared `Videos` <br> folder and Pulseaudio sound | `x11docker --pulseaudio --sharedir=$HOME/Videos jess/vlc` |
 
 
 | Desktop environment | x11docker command |
@@ -307,7 +308,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
 | [LiriOS](https://liri.io/) (Needs at least docker 18.06 <br> or this [xcb bugfix](https://github.com/mviereck/x11docker/issues/76).) | `x11docker --desktop --gpu lirios/unstable` |
 | KDE Plasma | `x11docker --desktop --gpu x11docker/plasma` |
 | KDE Plasma as nested Wayland compositor | `x11docker --hostdisplay --gpu x11docker/plasma startplasmacompositor` |
-| LXDE desktop with wine and PlayOnLinux <br> and  a persistent `HOME` folder to preserve <br> installed Windows applications, with <br> Pulseaudio sound and hardware acceleration | `x11docker --desktop --home --pulseaudio --gpu x11docker/lxde-wine` |
+| LXDE with wine and PlayOnLinux <br> and  a persistent `HOME` folder <br> to preserve installed <br> Windows applications, with <br> Pulseaudio and GPU support | `x11docker --desktop --home --pulseaudio --gpu x11docker/lxde-wine` |
    
 ## Adjust images for your needs
 For persistant changes of image system adjust Dockerfile and rebuild. To add custom applications to x11docker example images you can create a new Dockerfile based on them. Example:
@@ -318,7 +319,7 @@ RUN apt-get update && apt-get install -y vlc
 ```
   
 ## Screenshots
-Sample screenshots can be found in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
+Sample screenshots are stored in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
 
 `x11docker --desktop x11docker/lxde-wine`
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxde-wine.png "LXDE desktop in docker")
