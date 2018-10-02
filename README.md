@@ -159,6 +159,7 @@ x11docker checks dependencies for chosen options on startup and shows terminal m
 
 ## X server dependencies
 All X server options with a description and their dependencies are listed in [wiki: X server and Wayland options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options).
+
 | | Dependencies | Available options |
 | --- | --- | --- |
 | Minimal base | `Xorg` (probably already installed) | `--hostdisplay` <br> `--xorg` |
