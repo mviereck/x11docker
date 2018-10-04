@@ -55,7 +55,10 @@ System changes in running containers are discarded after use.
 
 
 # Terminal usage
-Just type `x11docker IMAGENAME [IMAGECOMMAND]`. Get an [overview of options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`. For desktop environments in image add option `--desktop` (or short option `-d`).
+Just type `x11docker IMAGENAME [IMAGECOMMAND]`. 
+ - Get an [overview of options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`. 
+ - For desktop environments in image add option `--desktop` (or short option `-d`).
+ 
 General syntax:
 ```
 To run a docker image with new X server (auto-choosing X server):
@@ -72,7 +75,7 @@ To run only a new empty X server:
 
 
 # Options
-Description of some commonly used options. Get an [overview of all options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`.
+Description of some commonly used [options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview).
 
 ## Choice of X servers and Wayland compositors
 If no X server option is specified, x11docker automatically chooses one depending on installed [dependencies](#dependencies) and on given or missing options `--desktop`, `--gpu` and `--wayland`.
@@ -89,6 +92,7 @@ x11docker assumes that you want to run a single application in seamless mode, i.
 ## Hardware acceleration
 Hardware acceleration for OpenGL is possible with option `--gpu`. 
  - This will work out of the box in most cases with open source drivers on host. Otherwise have a look at [Dependencies](#option-dependencies). 
+ - Closed source [NVIDIA drivers](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container) need some setup.
  - x11docker wiki provides some [background information about hardware acceleration for docker containers.](https://github.com/mviereck/x11docker/wiki/Hardware-acceleration)
  
 ## Clipboard
@@ -98,20 +102,22 @@ Clipboard sharing is possible with option `--clipboard`.
  
 ## Sound
 Sound is possible with options `--pulseaudio` and `--alsa`. 
-(Some background information is given in [x11docker wiki about sound for docker containers.](https://github.com/mviereck/x11docker/wiki/Pulseaudio-sound-over-TCP-or-with-shared-socket))
  - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and in image.
  - For ALSA sound with `--alsa` you can specify the desired sound card with e.g. `--env ALSA_CARD=Generic`. Get a list of available sound cards with `aplay -l`.
+ - Some background information is given in [x11docker wiki about sound for docker containers.](https://github.com/mviereck/x11docker/wiki/Pulseaudio-sound-over-TCP-or-with-shared-socket)
  
 ## Webcam
 Webcams on host can be shared with option `--webcam`.
  - If webcam application in image fails, install `mesa-utils` (debian) or `mesa-demos` (arch) in image. 
  - `cheese` is not recommended. It needs `--systemd` and `--privileged`. Privileged setup is a no-go.
  - `guvcview` needs `--pulseaudio` or `--alsa`.
+ - Some background information is given in [x11docker wiki about webcam for docker containers.](https://github.com/mviereck/x11docker/wiki/Sharing-webcam-with-container)
  
 ## Printer
 Printers on host can be provided to container with option `--printer`. 
  - It needs CUPS on host, the default printer server for most linux distributions. 
  - The container needs package `libcups2` (debian) or `libcups` (arch).
+ - Some background information is given in [x11docker wiki about CUPS printer for docker containers.](https://github.com/mviereck/x11docker/wiki/CUPS-printer-in-container)
  
 ## Language locales
 x11docker provides option `--lang $LANG` for flexible language locale settings. 
@@ -127,7 +133,7 @@ Changes in a running docker container system will be lost, the created docker co
  - Option `--homedir DIR` is similar to `--home` but allows you to specify a custom host directory for data storage.
  - Special cases for `$HOME`:
    - `--homedir $HOME` will use your host home as container home. Discouraged, use with care.
-   - `--sharedir $HOME` will mount your host home as a subfolder of container home. 
+   - `--sharedir $HOME` will symlink your host home as a subfolder of container home. 
    
 ## Wayland
 To run  [Wayland](https://wayland.freedesktop.org/) instead of an X server x11docker provides options `--wayland`, `--weston`, `--kwin` and `--hostwayland`.
@@ -146,7 +152,8 @@ See also: [wiki: Init systems in docker: tini, systemd, SysVinit, runit, OpenRC 
 Some desktop environments and applications need a running DBus daemon and/or DBus user session. 
  - use `--dbus` to run a DBus user session daemon.
  - use `--dbus-system` to run DBus system daemon. This includes option `--dbus`.
- - use `--hostdbus` to connect to host DBus user session.
+ - use `--hostdbus` to connect to [host DBus user session](https://github.com/mviereck/x11docker/wiki/How-to-connect-container-to-DBus-from-host).
+ - use `--sharedir /run/dbus/system_bus_socket` to share host DBus system socket.
 
  
  
@@ -160,7 +167,7 @@ x11docker checks dependencies for chosen options on startup and shows terminal m
 ## X server dependencies
 All X server options with a description and their dependencies are listed in [wiki: X server and Wayland options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options).
 
-| | Dependencies | Available options |
+| Recommendations | Dependencies | Available options |
 | --- | --- | --- |
 | Minimal base | `Xorg` (probably already installed) | `--hostdisplay` <br> `--xorg` |
 | Recommended base | `xpra` `Xephyr` | `--xpra` <br> `--xephyr` |
@@ -171,16 +178,16 @@ All X server options with a description and their dependencies are listed in [wi
 | Option | Dependencies on host | Dependencies in image |
 | --- | --- | --- |
 | `--clipboard` | `xclip` or `xsel` | - |
-| `--gpu` | - | MESA OpenGL drivers. Debian: `mesa-utils mesa-utils-extra`, CentOS: `glx-utils mesa-dri-drivers`, Arch Linux: `mesa-demos`, Alpine: `mesa-demos mesa-dri-ati mesa-dri-intel mesa-dri-nouveau mesa-dri-swrast` |
-| `--gpu` with NVIDIA | | see [x11docker wiki: NVIDIA driver](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container) |
-| `--alsa` | - | optional: ALSA client libs. Debian: `libasound2` |
-| `--pulseaudio` | `pulseaudio` | `pulseaudio` client libs. Debian: `libpulse0` |
-| `--printer` | `cups` | CUPS client library. Debian: `libcups2`, Arch: `libcups` |
-| `--lang` | - | `locales` |
+| `--gpu` | - | MESA OpenGL drivers. <br> Debian: `mesa-utils mesa-utils-extra` <br> CentOS: `glx-utils mesa-dri-drivers` <br> Arch Linux: `mesa-demos` <br> Alpine: `mesa-demos mesa-dri-ati mesa-dri-intel mesa-dri-nouveau mesa-dri-swrast` |
+| `--gpu` with NVIDIA | | look at [x11docker wiki: NVIDIA driver](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container) |
+| `--alsa` | - | optional: ALSA client libs. <br> Debian: `libasound2`, Arch, Alpine: `alsa-lib` |
+| `--pulseaudio` | `pulseaudio` | `pulseaudio` client libs. <br> Debian: `libpulse0`, Arch: `libpulse`, Alpine: `pulseaudio-libs` |
+| `--printer` | `cups` | CUPS client library. <br> Debian: `libcups2`, Arch: `libcups`, Alpine: `cups-libs` |
+| `--lang` | - | Debian: `locales`, Alpine: not supported |
 | `--xfishtank` | `xfishtank` | - |
 | `--dbus` `--hostdbus` `--dbus-system` | - | `dbus` |
 | `--launcher` | `xdg-utils` | - |
-| `--install` `--update` `--update-master` | `wget` `unzip` | - |
+| `--install` `--update` `--update-master` | `wget` or `curl` <br> `unzip` | - |
    
 ## List of all host packages for all possible x11docker options
 Debian package names: `kwin-wayland nxagent unzip weston wget xauth xclip  xdg-utils xdotool xdpyinfo xfishtank xpra xrandr xserver-xephyr xserver-xorg-video-dummy xvfb xwayland`, 
@@ -197,7 +204,7 @@ Core concept is:
  - Create container user similar to host user to [avoid root in container](http://blog.dscpl.com.au/2015/12/don-run-as-root-inside-of-docker.html).
    - You can also specify another user with `--user=USERNAME` or a non-existing one with `--user=UID:GID`.
    - Disables possible root password and deletes entries in `/etc/sudoers`.
-     - If you want root permissions in container, use option `--sudouser` that allows `su` and `sudo` with password `x11docker`. Alternatively, you can run with `--user=root`. 
+     - If you want root permissions in container, use option `--sudouser` that allows `su` and `sudo` with password `x11docker`. Alternatively you can run with `--user=root`. 
  - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
    - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. 
    - This restriction can be disabled with x11docker option `--cap-default` or reduced with `--sudouser`.
