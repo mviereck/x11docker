@@ -93,7 +93,6 @@ x11docker assumes that you want to run a single application in seamless mode, i.
 Hardware acceleration for OpenGL is possible with option `--gpu`. 
  - This will work out of the box in most cases with open source drivers on host. Otherwise have a look at [Dependencies](#option-dependencies). 
  - Closed source [NVIDIA drivers](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container) need some setup.
- - x11docker wiki provides some [background information about hardware acceleration for docker containers.](https://github.com/mviereck/x11docker/wiki/Hardware-acceleration)
  
 ## Clipboard
 Clipboard sharing is possible with option `--clipboard`. 
@@ -104,20 +103,17 @@ Clipboard sharing is possible with option `--clipboard`.
 Sound is possible with options `--pulseaudio` and `--alsa`. 
  - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and in image.
  - For ALSA sound with `--alsa` you can specify the desired sound card with e.g. `--env ALSA_CARD=Generic`. Get a list of available sound cards with `aplay -l`.
- - Some background information is given in [x11docker wiki about sound for docker containers.](https://github.com/mviereck/x11docker/wiki/Pulseaudio-sound-over-TCP-or-with-shared-socket)
  
 ## Webcam
 Webcams on host can be shared with option `--webcam`.
  - If webcam application in image fails, install `mesa-utils` (debian) or `mesa-demos` (arch) in image. 
  - `cheese` is not recommended. It needs `--systemd` and `--privileged`. Privileged setup is a no-go.
  - `guvcview` needs `--pulseaudio` or `--alsa`.
- - Some background information is given in [x11docker wiki about webcam for docker containers.](https://github.com/mviereck/x11docker/wiki/Sharing-webcam-with-container)
  
 ## Printer
 Printers on host can be provided to container with option `--printer`. 
  - It needs CUPS on host, the default printer server for most linux distributions. 
  - The container needs package `libcups2` (debian) or `libcups` (arch).
- - Some background information is given in [x11docker wiki about CUPS printer for docker containers.](https://github.com/mviereck/x11docker/wiki/CUPS-printer-in-container)
  
 ## Language locales
 x11docker provides option `--lang $LANG` for flexible language locale settings. 
@@ -143,6 +139,7 @@ To run  [Wayland](https://wayland.freedesktop.org/) instead of an X server x11do
  - Option `--hostwayland` can run single applications on host Wayland desktops like Gnome 3, KDE 5 and [Sway](https://github.com/swaywm/sway).
  - Example: `xfce4-terminal` on Wayland: `x11docker --wayland x11docker/xfce xfce4-terminal`
  
+ 
 ## Init system
 x11docker supports several init systems as PID 1 in container. Init in container solves the [zombie reaping issue](https://blog.phusion.nl/2015/01/20/docker-and-the-pid-1-zombie-reaping-problem/).
 As default it uses `tini` in`/usr/bin/docker-init`. 
@@ -152,7 +149,7 @@ See also: [wiki: Init systems in docker: tini, systemd, SysVinit, runit, OpenRC 
 Some desktop environments and applications need a running DBus daemon and/or DBus user session. 
  - use `--dbus` to run a DBus user session daemon.
  - use `--dbus-system` to run DBus system daemon. This includes option `--dbus`.
- - use `--hostdbus` to connect to [host DBus user session](https://github.com/mviereck/x11docker/wiki/How-to-connect-container-to-DBus-from-host).
+ - use `--hostdbus` to connect to host DBus user session.
  - use `--sharedir /run/dbus/system_bus_socket` to share host DBus system socket.
 
  
@@ -275,9 +272,15 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
      - Option `-D, --debug` gives a less verbose output. `-DQ` is short for `--debug --stdout --stderr`.
    - You can find the latest dispatched logfile at `~/.cache/x11docker/x11docker.log`.
  - Make sure your x11docker version is up to date with `x11docker --update` (latest release) or `x11docker --update-master` (latest beta).
- - Some applications need more privileges or capabilities than x11docker provides as default.
-   - Reduce container isolation with options `--hostipc --hostnet --cap-default --sys-admin` and try again. If the application runs, reduce these insecure options to encircle the issue.
-   - You can run container applications as root with `--user=root`.
+ - Some applications need more privileges or capabilities than x11docker provides as default. 
+   - Reduce container isolation with e.g.:
+     - x11docker options: `--hostipc --hostnet --cap-default --sys-admin`
+     - docker run options: `--cap-add ALL --security-opt seccomp=unconfined --privileged`
+     - Example: `x11docker --hostipc --hostnet --cap-default --sys-admin -- --cap-add ALL --security-opt seccomp=unconfined --privileged -- imagename`
+     - Try with reduced container isolation. If it works, drop options one by one until the needed one(s) are left.
+     - If `--cap-add ALL` helps, find the [capability](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) you really need and add only that one.
+     - If `--privileged` helps, your application probably needs a device in `/dev`. Find out which one and share it with e.g. `--device /dev/snd`.
+   - You can try to run container applications as root with `--user=root`.
  - Get help in the [issue tracker](https://github.com/mviereck/x11docker/issues). 
    - Most times it makes sense to store the `--verbose`output (or `x11docker.log`) at [pastebin.com](https://pastebin.com/).
 
@@ -293,7 +296,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
 | [Kodi media center](https://kodi.tv/) with hardware <br> acceleration, Pulseaudio sound <br> and shared `Videos` folder. <br> For setup look at [ehough/docker-kodi](https://github.com/ehough/docker-kodi). | `x11docker --gpu --pulseaudio --sharedir ~/Videos erichough/kodi`. |
 | [XaoS](https://github.com/patrick-nw/xaos) fractal generator | `x11docker patricknw/xaos` |
 | [Telegram messenger](https://telegram.org/) with persistant <br> `HOME` for configuration storage | `x11docker --home xorilog/telegram` |
-| Firefox with shared `Download` folder. <br> (Option `--hostipc` avoids tab crashes. <br> Better avoid them in `about:config` setting <br> `browser.tabs.remote.autostart` to `false`).| `x11docker --hostipc --sharedir $HOME/Downloads jess/firefox` |
+| Firefox with shared `Download` folder. | `x11docker --sharedir $HOME/Downloads jess/firefox` |
 | [Tor browser](https://www.torproject.org/projects/torbrowser.html) | `x11docker jess/tor-browser` |
 | Chromium browser | `x11docker -- jess/chromium --no-sandbox` |
 | VLC media player with shared `Videos` <br> folder and Pulseaudio sound | `x11docker --pulseaudio --sharedir=$HOME/Videos jess/vlc` |
@@ -301,8 +304,8 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
 
 | Desktop environment | x11docker command |
 | --- | --- |
-| FVWM (based on [alpine](https://alpinelinux.org/), 22.5 MB) | `x11docker --desktop x11docker/fvwm` |
-| fluxbox (based on debian, 87 MB) | `x11docker --desktop x11docker/fluxbox` |
+| FVWM (based on [Alpine](https://alpinelinux.org/), 22.5 MB) | `x11docker --desktop x11docker/fvwm` |
+| fluxbox (based on Debian, 87 MB) | `x11docker --desktop x11docker/fluxbox` |
 | [Lumina](https://lumina-desktop.org) (based on [Void Linux](https://www.voidlinux.org/))| `x11docker --desktop x11docker/lumina` |
 | LXDE | `x11docker --desktop x11docker/lxde` |
 | LXQt | `x11docker --desktop x11docker/lxqt` |
@@ -313,10 +316,10 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
 | [Trinity](https://www.trinitydesktop.org/) (successor of KDE 3) | `x11docker --desktop x11docker/trinity` |
 | Cinnamon | `x11docker --desktop --gpu --dbus-system x11docker/cinnamon` |
 | [deepin](https://www.deepin.org/en/dde/) | `x11docker --desktop --gpu --systemd x11docker/deepin` |
-| [LiriOS](https://liri.io/) (Needs at least docker 18.06 <br> or this [xcb bugfix](https://github.com/mviereck/x11docker/issues/76).) | `x11docker --desktop --gpu lirios/unstable` |
+| [LiriOS](https://liri.io/) (Needs at least docker 18.06 <br> or this [xcb bugfix](https://github.com/mviereck/x11docker/issues/76).) (based on Fedora) | `x11docker --desktop --gpu lirios/unstable` |
 | KDE Plasma | `x11docker --desktop --gpu x11docker/plasma` |
-| KDE Plasma as nested Wayland compositor | `x11docker --hostdisplay --gpu x11docker/plasma startplasmacompositor` |
-| LXDE with wine and PlayOnLinux <br> and  a persistent `HOME` folder <br> to preserve installed <br> Windows applications, with <br> Pulseaudio and GPU support | `x11docker --desktop --home --pulseaudio --gpu x11docker/lxde-wine` |
+| KDE Plasma as nested Wayland compositor | `x11docker --gpu x11docker/plasma startplasmacompositor` |
+| LXDE with wine and PlayOnLinux <br> and  a persistent `HOME` folder <br> to preserve installed Windows <br> applications, with Pulseaudio sound <br> and GPU hardware acceleration. | `x11docker --desktop --home --pulseaudio --gpu x11docker/lxde-wine` |
    
 ## Adjust images for your needs
 For persistant changes of image system adjust Dockerfile and rebuild. To add custom applications to x11docker example images you can create a new Dockerfile based on them. Example:
