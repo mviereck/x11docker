@@ -210,18 +210,12 @@ X authentication:
                        (Use with care. '--xhost +' allows access for everyone).
  -o, --no-xhost        Disable any access to host X server granted by xhost.
      --no-auth         Allow access to X for everyone. Security risk!
-     --trusted         Use trusted cookies for --hostdisplay
-     --untrusted       Create untrusted cookies. Restricts X access.
-                       Default for --hostdisplay to avoid keylogging and
-                       MIT-SHM errors. If --gpu is set, --trusted is used.
 
 X and Wayland configuration:
      --display N       Use display number N for new X server.
      --vt N            Use vt / tty N (affects --xorg, --xdummy, --xpra).
      --keymap LAYOUT   Set keyboard layout for new X server, e.g. de, us, ru.
                        For possible LAYOUT look at /usr/share/X11/xkb/symbols.
-     --xtest           Enable XTEST. Default for --xvfb, --xdummy, --xpra.
-     --no-xtest        Disable XTEST. Default for most options.
      --westonini FILE  Custom weston.ini for --weston and --weston-xwayland.
 
 User settings:
@@ -271,7 +265,7 @@ Miscellaneous:
      --launcher        Create application launcher on desktop and exit. 
                        You can move the created .desktop file to 
                        ~/.local/share/applications to get a menu entry.
-     --cachebasedir DIR  Custom base folder for cache files.
+     --cachebasedir DIR   Custom base folder for cache files.
      --license         Show license of x11docker (MIT) and exit.
      --ps              Preserve container and cache files on exit.
      --cleanup         Clean up orphaned containers and cache files.
@@ -410,7 +404,7 @@ ${Colredbg}x11docker ERROR:${Colnorm} $Message
   [ -d "$Cachefolder" ] && mkfile "$Cachefolder/error" # also regarded by finish() for exit code
 
   # output to X dialogbox
-  [ "$Silent" = "no" ] && $Terminalxenv alertbox "x11docker ERROR" "$Message"
+  [ "$Silent" = "no" ] && env $Terminalxenv alertbox "x11docker ERROR" "$Message"
 
   finish 1
 }
@@ -672,7 +666,7 @@ watchpidlist() {                # watch list of important pids
   # terminate x11docker if a PID in $Watchpidlist terminates
   # serves mainly watching X server, Wayland compositor, container and hostexe
   # echo PIDs to watch into >&9 (setonwatchpidlist())
-  local Pid= Containername= Line=
+  local Pid= Containername= Line= Watchpidlist=
   while rocknroll ; do
     read -t1 Pid <&9 ||:
     [ "$Pid" ] && {
@@ -2550,35 +2544,22 @@ create_xcommand() {             # create command to start X server and/or Waylan
   esac
 
   # X extension XTEST
-  [ -z "$Xtest" ] && {
-    case $Xserver in
-      --xpra|--xpra-xwayland) Xtest="yes" ;;
-      --xdummy|--xdummy-xwayland|--xvfb)
-        Xtest="yes"
-        note "Enabled X extension XTEST to allow custom access to new X server
-  with Xpra. You can disable XTEST with option --no-xtest."
-      ;;
-      *) Xtest="no" ;;
-    esac
-  }
+  [ "$Xtest" ] || case $Xserver in
+    --xpra|--xpra-xwayland|--xdummy|--xdummy-xwayland|--xvfb) Xtest="yes" ;;
+    *) Xtest="no" ;;
+  esac
   case "$Xtest" in
     yes) Xserveroptions="$Xserveroptions \\
   +extension XTEST"
-      [ -n "$Windowmanager" ] && warning "Did not disable X extension XTEST
+      [ "$Windowmanager" ] && warning "Did not disable X extension XTEST
   for X server $Xserver.
   If your host window manager $Windowmanager can start applications
   on its own (for example with a context menu), container applications
   can abuse this to run and remotely control host applications.
   If you provide content of X server $Xserver over network to others,
-  they may take control over your computer!"
-      ;;
+  they may take control over your host system!" ;;
     no)  Xserveroptions="$Xserveroptions \\
-  -extension XTEST -tst"
-      case $Xserver in
-        --xpra|--xpra-xwayland) warning "You have disabled extension XTEST with --no-xtest.
-  Xpra will not be able to manage keyboard and mouse." ;;
-      esac
-    ;;
+  -extension XTEST -tst" ;;
   esac
 
   # check DPI
@@ -2636,7 +2617,7 @@ create_xcommand() {             # create command to start X server and/or Waylan
   
       # specify unix socket location
       Xpraoptions="$Xpraoptions \\
-  --socket-dir=$Cachefolder"
+  --socket-dirs=$Cachefolder"
 
       # xpra server command
       [ "$Desktopmode" = "yes" ] && Xpraservercommand="xpra start-desktop" || Xpraservercommand="xpra start"
@@ -3115,10 +3096,10 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
           }
 
           [ "$Initsystem" = "systemd" ] || [ "$Dbussystem" = "yes" ] && {
-            echo "note 'Allowing xhost access for $Benutzer on display $Newdisplay"
+            echo "note 'Allowing xhost access for $Containeruser on display $Newdisplay"
             echo "  to avoid service issues with X access. (option --systemd or --dbus-system):"
-            echo "    xhost +SI:localuser:$Benutzer'"
-            echo "xhost +SI:localuser:$Benutzer | rmcr"
+            echo "    xhost +SI:localuser:$Containeruser'"
+            echo "xhost +SI:localuser:$Containeruser | rmcr"
           }
         ;;
       esac
@@ -3189,8 +3170,8 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   Installed version is: $Xpraversion
   Recommended: Downgrade to xpra v2.2.5, upgrade to at least r19606,
   or use another X server option.
-  Fallback: Setting 'xhost +SI:localuser:$Benutzer'"
-        echo "xhost +SI:localuser:$Benutzer | rmcr"
+  Fallback: Setting 'xhost +SI:localuser:$Containeruser'"
+        echo "xhost +SI:localuser:$Containeruser | rmcr"
       } ;;
   esac
   
@@ -3363,45 +3344,36 @@ $Line"
   esac
   return 0
 }
-check_containeruser() {         # check container user and shared home folder (also options --user, --home, --homedir)
+check_containeruser() {         # check container user and shared home folder (also option --user)
   ## check container user
-  [ -z "$Benutzer" ] && Benutzer=$Hostuser                 # default: containeruser = hostuser. can be changed with --user
-  [ -n "$Benutzer" ] && echo $Benutzer | grep -q ':' && {  # option --user can specify a group/gid after :
-    Benutzergid="$(echo $Benutzer | cut -d: -f2)"
-    Benutzer="$(echo $Benutzer | cut -d: -f1)"
+  [ -z "$Containeruser" ] && Containeruser=$Hostuser                 # default: containeruser = hostuser. can be changed with --user
+  [ -n "$Containeruser" ] && echo $Containeruser | grep -q ':' && {  # option --user can specify a group/gid after :
+    Containerusergid="$(echo $Containeruser | cut -d: -f2)"
+    Containeruser="$(echo $Containeruser | cut -d: -f1)"
   }
-  [ -n "$(getent passwd $Benutzer)" ] && {                 # user exists on host
-    Benutzer=$(getent passwd $Benutzer | cut -d: -f1)      # can be name or uid -> now name
-    Benutzeruid=$(getent passwd $Benutzer | cut -d: -f3)
-    [ -z "$Benutzergid" ] && Benutzergid=$(getent passwd $Benutzer | cut -d: -f4)
-    [ "$Benutzerhosthome" = "no" ] && Benutzerhome="/fakehome/Benutzer" || Benutzerhome=$(getent passwd $Benutzer | cut -d: -f6)
+  [ -n "$(getent passwd $Containeruser)" ] && {                 # user exists on host
+    Containeruser=$(getent passwd $Containeruser | cut -d: -f1)      # can be name or uid -> now name
+    Containeruseruid=$(getent passwd $Containeruser | cut -d: -f3)
+    [ -z "$Containerusergid" ] && Containerusergid=$(getent passwd $Containeruser | cut -d: -f4)
+    [ "$Sharehosthome" = "no" ] && Containeruserhome="/fakehome/Containeruser" || Containeruserhome=$(getent passwd $Containeruser | cut -d: -f6)
   } || {                                                   # user does not exist on host
-    [[ $Benutzer =~ ^[0-9]+$ ]] || error "Option --user: Unknown host user or invalid user number '$Benutzer'.
+    [[ $Containeruser =~ ^[0-9]+$ ]] || error "Option --user: Unknown host user or invalid user number '$Containeruser'.
   Non-host users can be specified with an UID only, not with a name."
-    Benutzeruid=$Benutzer
-    Benutzer="unknown$Benutzer"
-    [ -z "$Benutzergid" ] && Benutzergid=100
-    Benutzerhome="/fakehome/$Benutzer"
-    [ -z "$Benutzerhosthomefolder" ] && [ "$Benutzerhosthome" = "yes" ] && {
+    Containeruseruid=$Containeruser
+    Containeruser="unknown$Containeruser"
+    [ -z "$Containerusergid" ] && Containerusergid=100
+    Containeruserhome="/fakehome/$Containeruser"
+    [ -z "$Containeruserhosthome" ] && [ "$Sharehosthome" = "yes" ] && {
       warning "Will not create a persistent home folder on host
   for a non-existing user. (Instead, you can specify --homedir to a location
-  where user '$Benutzer' has write access.)
+  where user '$Containeruser' has write access.)
   Fallback: Disabling option --home, not creating a persistent home folder."
-      Benutzerhosthome="no"
+      Sharehosthome="no"
     }
   }
-  Benutzergruppe="$(getent group $Benutzergid | cut -d: -f1 || echo group_$Benutzer)"
-
-  [ "$Benutzer" = "$Hostuser" ] && Mksubenutzer="$Mksu" || {
-    Mksubenutzer="su $Benutzer -c"
-    [ "$X11dockermode" = "exe" ] && {
-      [ "$Startuser" != "root" ] && error "Must run as root to change user for option --exe"
-      id $Benutzer >/dev/null 2>&1 || error "Option --exe supports real users only.
-  Unknpwn user '$Benutzer' set with --user is not possible on host."
-    }
-  }
+  Containerusergroup="$(getent group $Containerusergid | cut -d: -f1 || echo group_$Containeruser)"
 }
-check_containerhome() {
+check_containerhome() {         # options --home, --homedir, --homebasedir: check HOME of container user.
   ## option '--home':    share folder ~/.local/share/x11docker/imagename with created container as its home directory
   ## option '--homedir': share custom host folder as home
   ## option '--homebasedir': Specify base folder here to store container home folders for --home
@@ -3417,34 +3389,34 @@ check_containerhome() {
     }
   }
   [ "$Homebasefolder" ] || case $Winsubsystem in
-    "") Homebasefolder="$Benutzerhome/.local/share/x11docker" ;;
+    "") Homebasefolder="$Containeruserhome/.local/share/x11docker" ;;
     *)  Homebasefolder="$(convertpath --subsystem "$(cmd.exe /C "echo %userprofile%" | rmcr)")/x11docker/home" ;;
   esac
   
-  [ "$Benutzerhosthome" = "yes" ] && {
+  [ "$Sharehosthome" = "yes" ] && {
     # if no home folder on host is specified (--homedir), create a standard one in ~/.local/share/x11docker
-    [ -z "$Benutzerhosthomefolder" ] && Benutzerhosthomefolder="$Homebasefolder/$Codename"
-    [ -d "$Benutzerhosthomefolder" ] || {
-      [ "$Startuser" = "root" ] && su $Benutzer -c "mkdir -p '$Benutzerhosthomefolder'"
-      [ "$Benutzer" = "$Hostuser" ] && $Mksu "mkdir -p '$Benutzerhosthomefolder'" && {
+    [ -z "$Containeruserhosthome" ] && Containeruserhosthome="$Homebasefolder/$Codename"
+    [ -d "$Containeruserhosthome" ] || {
+      [ "$Startuser" = "root" ] && su $Containeruser -c "mkdir -p '$Containeruserhosthome'"
+      [ "$Containeruser" = "$Hostuser" ] && $Mksu "mkdir -p '$Containeruserhosthome'" && {
         # create symbolic link to ~/x11docker
-        echo "$Benutzerhosthomefolder" | grep -q .local/share/x11docker && [ ! -e "$Benutzerhome/x11docker" ] && $Mksu "ln -s '$Homebasefolder' '$Benutzerhome/x11docker'" ||:
+        echo "$Containeruserhosthome" | grep -q .local/share/x11docker && [ ! -e "$Containeruserhome/x11docker" ] && $Mksu "ln -s '$Homebasefolder' '$Containeruserhome/x11docker'" ||:
       } || {
         # errors can occur if specifying a user with --user different from current user
         error "Can not create persistent home folder for
-  user '$Benutzer' on host (option --home or --homedir).
+  user '$Containeruser' on host (option --home or --homedir).
   Four possibilities to solve issue:
-  1.) Create folder with write access for user '$Benutzer'
-  $Benutzerhosthomefolder
-  2.) Run x11docker one time as user '$Benutzer'.
+  1.) Create folder with write access for user '$Containeruser'
+  $Containeruserhosthome
+  2.) Run x11docker one time as user '$Containeruser'.
   3.) Run x11docker one time as user 'root'.
   4.) Use option --homedir=DIR with DIR pointing to a writeable folder."
       }
     }
-    writeaccess $Benutzeruid "$Benutzerhosthomefolder" || warning "User '$Benutzer' seems to have no write access to
-  $Benutzerhosthomefolder."
-    verbose "Sharing directory $Benutzerhosthomefolder
-  with container as its home directory $Benutzerhome"
+    writeaccess $Containeruseruid "$Containeruserhosthome" || warning "User '$Containeruser' seems to have no write access to
+  $Containeruserhosthome."
+    verbose "Sharing directory $Containeruserhosthome
+  with container as its home directory $Containeruserhome"
   }
   return 0
 }
@@ -3492,7 +3464,7 @@ setup_initsystem() {            # options --tini (default), --systemd,--openrc, 
   It shares access to host cgroups in /sys/fs/cgroup."
   
       Stopsignal="SIGRTMIN+3"
-      Benutzergruppen="$Benutzergruppen systemd-journal"
+      Containerusergroups="$Containerusergroups systemd-journal"
 
       echo "[Unit]
 Description=x11docker target
@@ -3513,9 +3485,9 @@ Wants=x11docker-journal.service
 Wants=dbus.service
 [Service]
 Type=simple
-#User=$Benutzer # disabled because it does not invoke logind
+#User=$Containeruser # disabled because it does not invoke logind
 #ExecStart=/bin/sh $Cshare/container.CMD.sh
-ExecStart=/bin/su - -s /bin/sh $Benutzer $Cshare/container.CMD.sh
+ExecStart=/bin/su - -s /bin/sh $Containeruser $Cshare/container.CMD.sh
 [Install]
 WantedBy=x11docker.target
 WantedBy=multi-user.target
@@ -3570,7 +3542,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(while 
 setup_capabilities() {          # check linux capabilities needed by container
   # compare: man capabilities
 
-  [ "$Benutzeruid" = "0" ]     && Sudouser="yes"
+  [ "$Containeruseruid" = "0" ]     && Sudouser="yes"
   [ "$Sudouser" = "yes" ]      && Adminusercaps="yes"
   [ "$Capdropall" = "no" ]     && Nonewprivileges="no"
   
@@ -3674,8 +3646,8 @@ create_dockercommand() {        # create command to run docker
     none|tini)
       case $Switchcontaineruser in
         no) Dockercommand="$Dockercommand \\
-  --user $Benutzeruid:$Benutzergid \\
-  --env USER=$Benutzer" ;;
+  --user $Containeruseruid:$Containerusergid \\
+  --env USER=$Containeruser" ;;
         yes) Dockercommand="$Dockercommand \\
   --user root \\
   --env USER=root" ;;
@@ -3728,7 +3700,7 @@ create_dockercommand() {        # create command to run docker
   
   # add container groups, mainly video and audio and --group-add
   [ "$Switchcontaineruser" = "no" ] && {
-    for Line in $Benutzergruppen; do          ### FIXME: should compare GIDs from host and container
+    for Line in $Containerusergroups; do          ### FIXME: should compare GIDs from host and container
       getent group ${Line:-nonsense} >/dev/null && Dockercommand="$Dockercommand \\
   --group-add $(getent group $Line | cut -d: -f3)"
     done
@@ -3743,14 +3715,14 @@ create_dockercommand() {        # create command to run docker
   --volume $(convertpath --volume "$Sharefolder:rw" $Cshare)"
   
   # --home, --homedir
-  [ "$Benutzerhosthome" = "yes" ] && [ -n "$Benutzerhosthomefolder" ] && Dockercommand="$Dockercommand \\
-  --volume $(convertpath --volume "$Benutzerhosthomefolder:rw" "$Benutzerhome")"
+  [ "$Sharehosthome" = "yes" ] && [ -n "$Containeruserhosthome" ] && Dockercommand="$Dockercommand \\
+  --volume $(convertpath --volume "$Containeruserhosthome:rw" "$Containeruserhome")"
   
   # --sharedir
   while read -r Line; do
     case "$Line" in
-      "$Benutzerhome")  Dockercommand="$Dockercommand \\
-  --volume $(convertpath --volume "$Benutzerhome" "$Benutzerhome/$(basename $Benutzerhome)")" ;;
+      "$Containeruserhome")  Dockercommand="$Dockercommand \\
+  --volume $(convertpath --volume "$Containeruserhome" "$Containeruserhome/$(basename $Containeruserhome)")" ;;
       *) Dockercommand="$Dockercommand \\
   --volume $(convertpath --volume "$Line")" ;;
     esac
@@ -3833,7 +3805,6 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo ""
   echo "verbose -d 'Running dockerrc'"
   [ "$Debugmode" = "yes" ] && {
-    #echo "PS4='$DebugPS4'"
     echo "PS4='+ dockerrc: \$(date +%S+%3N) '"
     #echo "set -x"
     declare -f traperror | sed 's/Command/dockerrc: Command/'
@@ -3844,7 +3815,14 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo "Imagename=\"$Imagename\""
   echo "Imagecommand=\"$Imagecommand\""
   echo ""
+
+  # transfer DOCKER_* environment variables, e.g. DOCKER_HOST.
+  # can get lost e.g. if using --pw=sudo or --pw=pkexec
+  while read Line; do
+    echo "export '$Line'"
+  done < <(env | grep -e '^DOCKER_')
   
+  # possible Windows pathes to docker.exe
   [ "$Winsubsystem" ] && echo "export PATH=\"$(convertpath --subsystem "C:/Program Files/docker"):$(convertpath --subsystem "C:/Program Files/Docker/Docker/resources/bin"):$PATH\""
 
   echo "# check whether docker daemon is running and refresh images.list for x11docker-gui"
@@ -3981,15 +3959,15 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo   "{"
   echo   "  echo ''"
   echo   "  echo '# x11docker variable settings'"
-  echo   "  echo export USER=\"$Benutzer\""
-  [ "$Benutzerhosthome" = "no" ] && {
-    echo "  echo mkdir -p -v $Benutzerhome"
+  echo   "  echo export USER=\"$Containeruser\""
+  [ "$Sharehosthome" = "no" ] && {
+    echo "  echo mkdir -p -v $Containeruserhome"
     while read -r Line; do
       echo "  echo '# create soft links of shared folders to fake home'"
-      echo "  echo 'ln -s \"$Line\" \"$Benutzerhome\"'"
+      echo "  echo 'ln -s \"$Line\" \"$Containeruserhome\"'"
     done < <(store_runoption dump volume)
   }
-  echo   "  echo 'export HOME=\"$Benutzerhome\"'"
+  echo   "  echo 'export HOME=\"$Containeruserhome\"'"
 
   [ -n "$Newdisplay" ] && {
     echo "  echo 'export DISPLAY=$Newdisplay'"
@@ -4214,32 +4192,32 @@ create_containerrootrc() {      # create container root setup script: This scrip
 
   # create container user
   echo "# create user entry in /etc/passwd (and delete possibly existing same uid)"
-  echo "getent passwd | grep -v \$(getent passwd $Benutzeruid || echo USERNOTFOUND) > /tmp/passwd"
+  echo "getent passwd | grep -v \$(getent passwd $Containeruseruid || echo USERNOTFOUND) > /tmp/passwd"
   echo "# disable possible /etc/shadow passwords for other users"
   echo "sed -i s%:x:%:-:% /tmp/passwd"
-  echo "echo '$Benutzer:x:$Benutzeruid:$Benutzergid:$Benutzer,,,:$Benutzerhome:/bin/sh' >> /tmp/passwd"
+  echo "echo '$Containeruser:x:$Containeruseruid:$Containerusergid:$Containeruser,,,:$Containeruserhome:/bin/sh' >> /tmp/passwd"
   echo "rm /etc/passwd"
   echo "mv /tmp/passwd /etc/passwd || warning 'Unable to change /etc/passwd. That may be a seurity risk.'"
   echo ""
   echo "# create password entry for container user in /etc/shadow"
   echo "rm -v /etc/shadow || warning 'Cannot change /etc/shadow. That may be a security risk.'"
-  echo "echo \"$Benutzer:$Benutzerpasswort:17293:0:99999:7:::\" > /etc/shadow"
+  echo "echo \"$Containeruser:$Containeruserpassword:17293:0:99999:7:::\" > /etc/shadow"
   case $Sudouser in
     no)  echo "echo 'root:*:17219:0:99999:7:::' >> /etc/shadow" ;;
-    yes) echo "echo 'root:$Benutzerpasswort:17219:0:99999:7:::' >> /etc/shadow  # with option --sudouser, set root password 'x11docker'"
+    yes) echo "echo 'root:$Containeruserpassword:17219:0:99999:7:::' >> /etc/shadow  # with option --sudouser, set root password 'x11docker'"
          echo "sed -i s%root:-:%root:x:% /etc/passwd                            # allow password in /etc/shadow"
     ;;
   esac
   echo ""
   
-  for Line in $Benutzergruppen ; do
+  for Line in $Containerusergroups ; do
     echo "Groupname=$(getent group $Line | cut -d: -f1)"
     echo "Groupid=$(getent group $Line | cut -d: -f3)"
     echo "[ \"\$Groupname\" ] || Groupname=\$(getent group $Line | cut -d: -f1)"
     echo "[ \"\$Groupid\" ]   || Groupid=\$(getent group $Line | cut -d: -f3)"
     echo "[ \"\$Groupname\" ] && {"
-    echo "  getent group | sed \"s/^\$Groupname.*/\$Groupname:x:\$Groupid:\$(getent group \$Groupname | cut -d: -f4 ),$Benutzer/\" | sed 's/:,/:/' > /tmp/group"
-    echo "  getent group \$Groupname >/dev/null || echo \$Groupname:x:\$Groupid:$Benutzer >> /tmp/group"
+    echo "  getent group | sed \"s/^\$Groupname.*/\$Groupname:x:\$Groupid:\$(getent group \$Groupname | cut -d: -f4 ),$Containeruser/\" | sed 's/:,/:/' > /tmp/group"
+    echo "  getent group \$Groupname >/dev/null || echo \$Groupname:x:\$Groupid:$Containeruser >> /tmp/group"
     echo "  cp /tmp/group /etc/group"
     echo "}"
     echo ""
@@ -4247,11 +4225,11 @@ create_containerrootrc() {      # create container root setup script: This scrip
   
   echo ""
   echo "# create user group entry (and delete possibly existing same gid)"
-  echo "getent group | grep -v \$(getent group $Benutzergid || echo USERNOTFOUND) > /tmp/group"
-  echo "echo $Benutzergruppe:x:$Benutzergid: >> /tmp/group"
+  echo "getent group | grep -v \$(getent group $Containerusergid || echo USERNOTFOUND) > /tmp/group"
+  echo "echo $Containerusergroup:x:$Containerusergid: >> /tmp/group"
   echo "mv /tmp/group /etc/group"
   echo ""
-  [ "$Benutzerhosthome" = "no" ] && echo "mkdir -v -m 777 /fakehome"
+  [ "$Sharehosthome" = "no" ] && echo "mkdir -v -m 777 /fakehome"
   echo ""
 
   # sudo configuration
@@ -4260,7 +4238,7 @@ create_containerrootrc() {      # create container root setup script: This scrip
   echo "[ -e /etc/sudoers ]   && rm -v /etc/sudoers"
   echo "echo '# /etc/sudoers created by x11docker' > /etc/sudoers"
   echo "echo 'root ALL=(ALL) ALL'                 >> /etc/sudoers"
-  [ "$Sudouser" = "yes" ] && echo "echo '$Benutzer ALL=(ALL) ALL' >> /etc/sudoers"
+  [ "$Sudouser" = "yes" ] && echo "echo '$Containeruser ALL=(ALL) ALL' >> /etc/sudoers"
   echo ""
 
   # disable possible custom PAM setups that could allow root in container
@@ -4353,7 +4331,7 @@ exec 2>&1
 for Service in \$(ls /etc/runit/runsvdir/default/) ; do waitforservice \$Service ;done
 echo \"Current status of runit services:\"
 for Service in \$(ls /etc/runit/runsvdir/default/) ; do sv status      \$Service ;done
-su - --shell=/bin/sh $Benutzer $Cshare/container.CMD.sh
+su - --shell=/bin/sh $Containeruser $Cshare/container.CMD.sh
 runit-init 0
 ' > /etc/sv/x11docker/run"
       echo "chmod +x /etc/sv/x11docker/run"
@@ -4370,7 +4348,7 @@ depend() {
 }
 start() {
   ebegin 'Starting container.CMD.sh'
-  su - -s /bin/sh $Benutzer $Cshare/container.CMD.sh
+  su - -s /bin/sh $Containeruser $Cshare/container.CMD.sh
   openrc shutdown
   halt
   eend \$?
@@ -4386,7 +4364,7 @@ start() {
     sysvinit)
       echo "# add x11docker start command to rc.local"
       echo "sed -i '/exit 0/d' /etc/rc.local"
-      echo "echo 'su - -s /bin/sh $Benutzer $Cshare/container.CMD.sh || echo \"x11docker: Exit code of x11docker.CMD.sh: \$?\"
+      echo "echo 'su - -s /bin/sh $Containeruser $Cshare/container.CMD.sh || echo \"x11docker: Exit code of x11docker.CMD.sh: \$?\"
 echo \"x11docker: rc.local sends shutdown -h now\"
 shutdown -h now
 exit 0' >> /etc/rc.local"
@@ -4582,19 +4560,19 @@ exit 0' >> /etc/rc.local"
   [ "$Switchcontaineruser" = "yes" ] && {   # if "no", container.CMD.sh is executed in command line $Dockercommand
     case $Initsystem in
       none)
-        echo "/bin/su - -s /bin/sh $Benutzer $Cshare/container.CMD.sh"
+        echo "/bin/su - -s /bin/sh $Containeruser $Cshare/container.CMD.sh"
       ;;
       tini)
         echo "Exec=exec"
         [ "$Sharecgroup" = "yes" ] && echo '[ "$Loginservice" ] && Exec='
-        echo "\$Exec /bin/su - -s /bin/sh $Benutzer $Cshare/container.CMD.sh"
+        echo "\$Exec /bin/su - -s /bin/sh $Containeruser $Cshare/container.CMD.sh"
       ;;
       runit|openrc|sysvinit)
         echo "{
   read Dummy <$Cshare/timetosaygoodbye.fifo
   echo timetosaygoodbye >$Cshare/timetosaygoodbye.fifo
-  echo 'x11docker: timetosaygoodbye.watch sends: shutdown -h now'
-  shutdown -h now
+  echo 'x11docker: $Initsystem shutdown now'
+  shutdown now
 } &"
         echo "exec /sbin/init"
       ;;
@@ -4816,9 +4794,9 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
     echo "}"
     [ "$Dbusrunsession" = "yes" ] && command -v dbus-run-session >/dev/null && echo "Dbus=dbus-run-session" || Dbus=
     echo "export $Newxenv"
-    [ "$Benutzerhosthome" = "yes" ] && {
-      echo "export HOME='$Benutzerhosthomefolder'"
-      echo "cd '$Benutzerhosthomefolder'"
+    [ "$Sharehosthome" = "yes" ] && {
+      echo "export HOME='$Containeruserhosthome'"
+      echo "cd '$Containeruserhosthome'"
     }
     [ "$Workdir" = "/tmp" ] || echo "cd '$Workdir'"
     echo "# close additional file descriptors"
@@ -4831,9 +4809,9 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
   nl -ba <$Imagecommandscript >> $Containerlogfile
 
   # run start script
-  $Mksubenutzer "bash $Imagecommandscript"
+  $Mksu "bash $Imagecommandscript"
 
-  # check if startup was successfull
+  # check whether startup was successfull
   sleep 1 # wait for possible startup failure
   Hostexepid=$(grep hostexe <$Bgpidfile | cut -d' ' -f1)
   checkpid $Hostexepid || warning "Application '$Hostexe' terminated fast
@@ -4841,8 +4819,8 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
   Last lines of application output:
 $(tail $Cmdstdoutlogfile $Cmdstderrlogfile)"
 
-  [ "$Showcontainerid" = "yes" ] && echo ""
-  [ "$Showcontainerpid1pid" = "yes" ] && echo $Hostexepid
+  [ "$Showcontainerid" = "yes" ] && echo ""                  # --showid: empty here, no container ID
+  [ "$Showcontainerpid1pid" = "yes" ] && echo $Hostexepid    # --showpid1
   echo $Hostexepid >>$Containerpid1pidfile
   storepid $Hostexepid hostexe
   setonwatchpidlist $Hostexepid hostexe
@@ -5324,15 +5302,10 @@ check_option_interferences() {  # check multiple option interferences, change se
     esac
   }
 
-  # trusted or untrusted cookies. untrusted cookies are default for --hostdisplay
-  [ "$Sharegpu" = "yes" ]          && Forcetrusted="yes"
-  [ "$Xserver" = "--hostdisplay" ] && Trusted="no"
-  [ "$Forcetrusted" = "yes" ]      && Trusted="yes"
-
   # --hostdisplay --gpu
   [ "$Xserver" = "--hostdisplay" ] && [ "$Sharegpu" = "yes" ] && {
     note "To allow GPU acceleration (option --gpu) with --hostdisplay,
-  x11docker will allow trusted cookies (option --trusted)."
+  x11docker will allow trusted cookies."
     Trusted="yes"
   }
 
@@ -5376,7 +5349,7 @@ check_option_interferences() {  # check multiple option interferences, change se
   [ "$Xserver" = "--hostdisplay" ] && [ "$Hostssh" = "yes" ] && {
     [ "$Sharehostipc" = "no" ] || [ "$Trusted" = "no" ] || [ "$Sharehostnet" = "no" ]  && {
       note "For SSH connection with option --hostdisplay
-  x11docker must enable options --hostnet and --trusted.
+  x11docker must enable options --hostnet and allow trusted cookies.
   It is recommended to use other X server options
   like --xpra, --xephyr or --nxagent."
       Sharehostnet="yes"
@@ -5603,8 +5576,6 @@ option_messages() {             # some messages depending on options, but not ch
         warning "Option --hostdisplay with trusted cookies provides
       QUITE BAD CONTAINER ISOLATION !
   Keylogging and controlling host applications is possible!"
-        [ "$Sharehostipc" = "no" ] && [ "$Hostmitshm" = "yes" ] && warning "Using --hostdisplay with --trusted but without
-  insecure option --hostipc can lead to graphical issues and RAM access errors."
       }
       [ "$Desktopmode" = "yes" ] && note "Can not avoid to use host window manager
   along with option --hostdisplay.
@@ -5913,17 +5884,16 @@ declare_variables() {           # declare variables
   Dockerexe="docker"                              # can be docker.exe on Windows
   Bgpidfile=backgroundpids                        # file to store pids and names of background processes that shut be killed on exit
   Timetosaygoodbye=timetosaygoodbye               # file giving term signal to all parties
-  Timetosaygoodbyefifo=timetosaygoodbye.fifo
-  Watchpidfifo=watchpid.fifo
-  Watchpidlist=""
-  Messagefifo=message.fifo
-  Messagelogfile=message.log
-  Logmessages=""
-  Logfile=""
+  Timetosaygoodbyefifo=timetosaygoodbye.fifo      # message channel for --openrc, --runit, --sysvinit to shut down on x11docker signal
+  Watchpidfifo=watchpid.fifo                      # message channel to transfer pids to watchpidlist()
+  Messagefifo=message.fifo                        # message channel for warning/verbose/debugnote/note/error within container, dockerrc, containerrootrc
+  Messagelogfile=message.log                      # logfile for warning/verbose/debugnote/note/error
+  Logmessages=""                                  # stores messages until logfile is available, needed by logentry()
+  Logfile=""                                      # x11docker.log
 
-  Mycookie=$(mcookie | cut -b1-6 || echo $RANDOM)
+  Mycookie=$(mcookie | cut -b1-6 || echo $RANDOM) # random number used for container name and cache folder name
 
-  # terminal colors
+  # terminal colors used for messages and --verbose=c
   Esc="$(printf '\033')"
   Colblue="${Esc}[35m"
   Colyellow="${Esc}[33m"
@@ -5942,28 +5912,28 @@ declare_variables() {           # declare variables
   Hostusergid=""
   Hostuserhome=""
   Homebasefolder=""                               # option --homebasedir: base directory for container home with --home
-  Benutzer=""                                     # option --user: container user. Default: same as $Hostuser.
-  Benutzeruid=""
-  Benutzergid=""
-  Benutzerhome=""
-  Benutzergruppe=""
-  Benutzergruppen="video audio"                   # option --group-add: additional groups for container user
-  Benutzerpasswort="sac19FwGGTx/A"                # encrypted password "x11docker", suits /etc/shadow. Generated with:  perl -e 'print crypt("x11docker", "salt"),"\n"'
-  Mksu=""                                         # prefix to run unprivileged commands (auto or --hostuser)
-  Mksubenutzer=""                                 # prefix to run commands as user defined by --user
+  Containeruser=""                                # option --user: container user. Default: same as $Hostuser.
+  Containeruseruid=""
+  Containerusergid=""
+  Containerusergroup=""
+  Containerusergroups="video audio"               # option --group-add: additional groups for container user
+  Containeruserhome=""                            # HOME path within container
+  Containeruserhosthome=""                        # options --home, --homedir: path to shared host folder used as HOME in container.
+  Containeruserpassword="sac19FwGGTx/A"           # encrypted password "x11docker", suits /etc/shadow. Generated with:  perl -e 'print crypt("x11docker", "salt"),"\n"'
+  Mksu=""                                         # prefix to run unprivileged commands on host (auto or --hostuser)
 
   # Hostsystem
-  Hostsystem=""
-  Hostip=""
-  Hostdisplay=""
-  Hostdisplaynumber=""
+  Hostsystem=""                                   # $ID from /etc/os-release
+  Hostip=""                                       # An IP address to access host
+  Hostdisplay=""                                  # environment variable DISPLAY
+  Hostdisplaynumber=""                            # DISPLAY without :
   Hostxauthority="Xauthority-$Hostdisplaynumber"  # file to store copy of $XAUTHORITY
-  Hostxsocket=""
+  Hostxsocket=""                                  # socket of DISPLAY in /tmp/.X11-unix
   Hostxenv=""                                     # collection of host X environment variables
   Hostmitshm="yes"                                # X on host has extension MIT-SHM enabled? Assume yes, check later
-  Hostlibc=""  
-  Hostlocaltime=""
-  Hostutctime=""
+  Hostlibc=""                                     # glibc or musl
+  Hostlocaltime=""                                # time zone from host, realpath /etc/localtime
+  Hostutctime=""                                  # time zone from host as offset to UTC
   Hostssh=""                                      # x11docker runsover ssh yes/no
   Hosttty=""                                      # x11docker runs on tty yes/no
   
@@ -5991,19 +5961,19 @@ declare_variables() {           # declare variables
   Imagecommand=""                                 # image command [+args]
   Codename=""                                     # image name with : and / replaced by - for use with container name and --home folder
   Hostexe=""                                      # option --exe: contains host executable
-  Customdockeroptions=""                                # custom options for "docker run". Provide after -- and before image name, encapsulated with "" (or without whitespaces)
+  Customdockeroptions=""                          # custom options for "docker run". Provide after -- and before image name, encapsulated with "" (or without whitespaces)
 
   # docker variables
   Containername=""                                # generated container name
-  Nonewprivileges="yes"                           # docker run option --security-opt=no-new-privileges. Default: yes. Disabled by options --cap-default and --sudouser.
+  Nonewprivileges="yes"                           # docker run option --security-opt=no-new-privileges. Default: yes. Disabled by options --cap-default, --sudouser and --user=root.
   Capabilities=""                                 # capabilities to add
-  Stopsignal=""
+  Stopsignal=""                                   # signal to send on 'docker stop'
 
   # docker related files
   Dockerrc=dockerrc                               # generated script to check image, set up host and create $Imagecommandscript
   Containerrootrc=containerrootrc                 # generated script to set up container. runs as root in container.
   Imagecommandscript=container.CMD.sh             # generated script starting image comand in container
-  Containerlogfile=container.log                  # file to log output of container
+  Containerlogfile=container.log                  # file to log output of container other than image command output
   Containerpidfile=container.pid                  # file to store container PID
   Containeridfile=container.id                    # file to store container ID
   Containeripfile=container.ip                    # file to store container IP
@@ -6054,7 +6024,7 @@ declare_variables() {           # declare variables
   Xcomposite="yes"                                # +extension COMPOSITE yes/no
   Xauth="xauth"                                   # either 'xauth' or 'xauth.exe'
 
-  # Main X server options
+  # Main options influencing --auto
   Autochooseserver="yes"                          # option '--auto': automatically choose X server (default)
   Desktopmode="no"                                # option --desktop: image contains a desktop enironment.
   Windowmanager=""                                # option '-w, --wm': window manager to use. If not given but needed, autodetection is used
@@ -6078,7 +6048,7 @@ declare_variables() {           # declare variables
   Outputcount="1"                                 # option --output-count, quantum of virtual screens for Weston and Xephyr
 
   # Wayland and Weston
-  Hostwaylandsocket="$WAYLAND_DISPLAY"            # store host wayland socket name
+  Hostwaylandsocket="${WAYLAND_DISPLAY:-}"        # store host wayland socket name
   Newwaylandsocket=""                             # Wayland socket of $Compositorcommand
   Compositorcommand=""                            # command to start Weston or KWin
   Waylandtoolkitenv="XDG_SESSION_TYPE=wayland GDK_BACKEND=wayland QT_QPA_PLATFORM=wayland CLUTTER_BACKEND=wayland SDL_VIDEODRIVER=wayland ELM_DISPLAY=wl ELM_ACCEL=opengl ECORE_EVAS_ENGINE=wayland_egl"
@@ -6091,12 +6061,11 @@ declare_variables() {           # declare variables
   Passwordterminal=""                             # terminal emulator to use for password prompt (if no terminal emulator is needed, it will be 'bash -c')
   Pullterminal=""                                 # terminal emulator to show progress of 'docker pull'
   Anyterminal=""                                  # terminal emulator for alert()
-  Terminallist=""                                 # list of possible terminal emulators. Only a few work on wayland
+  Terminallist=""                                 # list of possible terminal emulators. Only a few work on Wayland yet.
 
   # regular options
   Sudouser="no"                                   # option --sudouser: Create user and root with sudo permissions with password 'x11docker'
-  Benutzerhosthome="no"                           # option '-m, --home' (or '--homedir'): share a folder ~/.local/share/x11docker/Imagename with created container
-  Benutzerhosthomefolder=""                       #   "        "   : path to shared folder.
+  Sharehosthome="no"                              # option '-m, --home' (or '--homedir'): share a folder ~/.local/share/x11docker/Imagename with created container
   Sharevolumes=""                                 # option --volume: host folders to share, array
   Sharevolumescount="0"                           # counts shared folders in array
   Shareclipboard="no"                             # option '-c, --clipboard' enable clipboard sharing
@@ -6112,8 +6081,8 @@ declare_variables() {           # declare variables
 
   # --pulseaudio
   Pulseaudiomode=""                               # option --pulseaudio: 'tcp', 'socket' or 'auto'
-  Pulseaudioconf=pulseclient.conf
-  Pulseaudioport=""
+  Pulseaudioconf=pulseclient.conf                 # client config in container
+  Pulseaudioport=""                               # TCP port for --pulseaudio=tcp
 
   # verbosity options
   Verbose="no"                                    # option '-v, --verbose': if "yes", be verbose
@@ -6125,7 +6094,6 @@ declare_variables() {           # declare variables
   Showcontainerpid1pid="no"                       # option --showpid1: output of host PID of container PID 1
   Verbosecolors="no"                              # colored output for --verbose and delete some systemd error messages.
   Debugmode="no"                                  # option --debug: Throw it all out
-  DebugPS4='+ \033[32m${LINENO}:${FUNCNAME[0]:+${FUNCNAME[0]}(): }\033[0m'
 
   # advanced options
   Containerenvironment=""                         # option '--env': set custom environment variables
@@ -6153,9 +6121,8 @@ declare_variables() {           # declare variables
   # X authentication
   Xauthentication="yes"                           # option '--no-auth' use cookie authentication yes/no
   Trusted="yes"                                   # Create trusted or untrusted cookies,  --hostdisplay uses untrusted cookies
-  Forcetrusted="no"                               # option --trusted: enforce trusted cookies for --hostdisplay
   Noxhost="no"                                    # option '--no-xhost': if yes, disable all X server access granted by xhost
-  Xhost=""                                        # option '--xhost': xhost + on new X server
+  Xhost=""                                        # option '--xhost': custom xhost setting on new X server
 
   # special options not starting X or docker
   Checkorphaned="no"                              # option '--cleanup': check for non-removed containers and maybe root-owned files in cache
@@ -6213,16 +6180,16 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,weston,hostwayland,kwin,kwin-xwayland,xdummy,xvfb,nothing,vcxsrv,xwin"                         # more X/Wayland servers
   Longoptions="$Longoptions,wm:,desktop,exe,xonly"
   Longoptions="$Longoptions,fullscreen,size:,scale:,rotate:,dpi:,output-count:,gpu,xfishtank"                              # X appearance options
-  Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,xtest,no-xtest,env:,showenv,showid,showpid1"                       # X and environment options
+  Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,env:,showenv,showid,showpid1"                                      # X and environment options
   Longoptions="$Longoptions,home,clipboard,pulseaudio::,alsa,lang:,printer,webcam"                                         # comfort options
-  Longoptions="$Longoptions,no-xhost,trusted,untrusted,dbus,dbus-system,hostdbus,pw:,no-internet,workdir:,sharessh"        # advanced options
+  Longoptions="$Longoptions,no-xhost,dbus,dbus-system,hostdbus,pw:,no-internet,workdir:,sharessh"                          # advanced options
   Longoptions="$Longoptions,homedir:,sharedir:,cachebasedir:,homebasedir:"                                                 # host folders
   Longoptions="$Longoptions,tini,no-init,systemd,runit,openrc,sysvinit,sys-admin,sharecgroup"                              # init system options
   Longoptions="$Longoptions,launcher,cleanup,license,licence,help,version,install,update,update-master,remove,wmlist"      # special options without starting X or container
   Longoptions="$Longoptions,verbose::,silent,debug,stdout,stderr,stdin"                                                    # verbose options
   Longoptions="$Longoptions,hostipc,hostnet,ps,cache,cap-default,sudouser,hostuser:,user:,group-add:,name:"                # capabilities, users
   Longoptions="$Longoptions,keymap:,name:,no-entrypoint,runfromhost:,runasroot:,westonini:"                                # developer options
-  Longoptions="$Longoptions,cachedir:,starter"                                                                             # deprecated
+  Longoptions="$Longoptions,cachedir:,starter,trusted,untrusted,xtest,no-xtest"                                            # deprecated
   
   Parsedoptions="$(getopt --options $Shortoptions --longoptions $Longoptions --name "$0" -- "$@" 2>/tmp/x11docker_parsererror)"
   [ -e /tmp/x11docker_parsererror ] && Parsererror=$(cat /tmp/x11docker_parsererror) && rm /tmp/x11docker_parsererror
@@ -6246,14 +6213,17 @@ parse_options() {               # parse cli options
                             Xserver="--xpra" ;            Autochooseserver="no"  ;; # use xpra on host
       -y|--xephyr)          Xserver="--xephyr" ;          Autochooseserver="no"  ;; # use Xephyr
       -x|--xorg|--x11)      Xserver="--xorg" ;            Autochooseserver="no"  ;; # use core Xorg
-      -h|--hostdisplay)     Xserver="--hostdisplay" ;     Autochooseserver="no"  ;; # use host display :0 with shared X socket
+      -h|--hostdisplay)     Xserver="--hostdisplay" ;     Autochooseserver="no"     # use host display :0 with shared X socket
+                            Trusted="no" ;; 
       -X|--xwayland)        Xserver="--xwayland" ;        Autochooseserver="no"  ;; # Xwayland needs already running Wayland
       -A|--xpra-xwayland)   Xserver="--xpra-xwayland" ;   Autochooseserver="no"  ;; # Xpra with Xwayland
       -Y|--weston-xwayland) Xserver="--weston-xwayland" ; Autochooseserver="no"  ;; # Weston-Xwayland as Wayland compositor with Xwayland, runs in X or standalone from console
-         --xdummy)          [ "$Xserver" = "--xpra" ] && Xpravfb="Xdummy" || { 
-                            Xserver="--xdummy" ;          Autochooseserver="no" ; Showdisplayenvironment="yes" ; } ;;  # use Xdummy. Invisible on host. For custom network setups with VNC or xpra
-         --xvfb)            [ "$Xserver" = "--xpra" ] && Xpravfb="Xvfb" || { 
-                            Xserver="--xvfb" ;            Autochooseserver="no" ; Showdisplayenvironment="yes" ; } ;;  # use Xvfb. Invisible on host. For custom network setups with VNC or xpra
+         --xdummy)          [ "$Xserver" = "--xpra" ] && Xpravfb="Xdummy" || {      # use Xdummy. Invisible on host. For custom network setups with VNC or xpra
+                            Xserver="--xdummy" ;          Autochooseserver="no" 
+                            Showdisplayenvironment="yes" ; } ;;  
+         --xvfb)            [ "$Xserver" = "--xpra" ] && Xpravfb="Xvfb" || {        # use Xvfb. Invisible on host. For custom network setups with VNC or xpra
+                            Xserver="--xvfb" ;            Autochooseserver="no" 
+                            Showdisplayenvironment="yes" ; } ;;  
       -N|--nothing)         Xserver="--nothing" ;         Autochooseserver="no"  ;; # Do not provide any X nor Wayland
       -T|--weston)          Xserver="--weston" ;          Autochooseserver="no"  ;; # Wayland in Weston only, no X
       -H|--hostwayland)     [ "$Xserver" = "--hostdisplay" ] || Xserver="--hostwayland" # share host wayland. Allow coexistence with option --hostdisplay
@@ -6288,7 +6258,6 @@ parse_options() {               # parse cli options
          --xfishtank)   Xfishtank="yes" ;;                 # Run xfishtank on new X server
 
      #### Options
-      -m|--home)       Benutzerhosthome="yes" ;;           # share folder ~/x11docker/Imagename with container
       -c|--clipboard)  Shareclipboard="yes"  ;;            # share host clipboard with dockered applications (xpra only)
          --alsa)       Sharealsa="yes" ;;                  # enable ALSA sound (shares /dev/snd)
       -p)              Pulseaudiomode="auto" ;;            # enable pulseaudio sound
@@ -6326,10 +6295,10 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
                          store_runoption env "SSH_AUTH_SOCK=$(escapestring "${SSH_AUTH_SOCK:-}")"
                        } || warning "Option --sharessh: environment variable \$SSH_AUTH_SOCK not set:" ; ;;
        ## User settings
-         --user)       Benutzer="${2:-}"  ; shift ;;       # set container user instead of host user
+         --user)       Containeruser="${2:-}"  ; shift ;;       # set container user instead of host user
          --hostuser)   Hostuser="${2:-}" ; shift ;;        # set host user different from logged in user
          --sudouser)   Sudouser="yes" ;;                   # give container user sudo without password
-         --group-add)  Benutzergruppen="$Benutzergruppen ${2:-}" ; shift ;; # additional groups for user
+         --group-add)  Containerusergroups="$Containerusergroups ${2:-}" ; shift ;; # additional groups for user
 
        ## init system
          --no-init)    Initsystem="none" ;;                # no init, image command is PID 1
@@ -6354,27 +6323,24 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
          --display)    Newdisplaynumber=${2:-}             # display number to use
                        [ "$(echo $Newdisplaynumber | cut -c1)" = ":" ] && Newdisplaynumber="$(echo $Newdisplaynumber | cut -c2-)"
                        shift ;;
-         --xtest)      Xtest="yes" ;;                      # allow extension XTEST. default for xvfb, xdummy and xpra
-         --no-xtest)   Xtest="no" ;;                       # disable extension XTEST. default for most X server options
          --keymap)     Xkblayout="${2:-}" ; shift ;;       # keymap layout for xkbcomp. Compare /usr/share/X11/xkb/symbols
 
        ## X Authentication
          --xhost)      Xhost="$2" ; shift ;;               # custom xhost setting on new X server
          --no-auth)    Xauthentication="no" ;;             # disable cookie authentication
       -o|--no-xhost)   Noxhost="yes"  ;;                   # disable any access granted by xhost
-         --trusted)    Forcetrusted="yes"  ;;              # force trusted cookies for --hostdisplay
-      -t|--untrusted)  Trusted="no"  ;;                    # create untrusted cookies
-
 
        ## host folders
-         --homedir)    Benutzerhosthomefolder="${2:-}" ; Benutzerhosthome="yes" ; shift ;; # set host folder to share as home folder instead of ~/x11docker/NAME
+      -m|--home)         Sharehosthome="yes" ;;            # share folder ~/x11docker/Imagename with container
+         --homedir)      Sharehosthome="yes"               # set host folder to share as home folder instead of ~/x11docker/NAME
+                         Containeruserhosthome="${2:-}" ; shift ;;
          --homebasedir)  Homebasefolder="${2:-}" ; shift ;;
          --cachebasedir) Cachebasefolder="${2:-}" ; shift ;; # set cache folder instead of default $Cachebasefolder
          --cachedir)     Cachebasefolder="${2:-}" ; shift 
                          note "Option --cachedir is deprecated.
   Please use instead: --cachebasedir" ;;
-         --sharedir)   store_runoption volume "${2:-}"          # share host directory
-                       shift ;;
+         --sharedir)     store_runoption volume "${2:-}"   # share host directory
+                         shift ;;
 
        ## docker options
          --hostipc)    Sharehostipc="yes" ;;               # docker run option --ipc=host
@@ -6391,6 +6357,18 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
       --cleanup)       Checkorphaned="yes"  ;;             # check for orphaned containers and files owned by root, created by docker)
       --install|--update|--update-master|--remove) Installermode="${1:-}" ;;   # installer
       --wmlist)        echo $Wm_all ; exit 0 ;;            # special option for x11docker-gui to retrieve list of window managers
+      
+     #### deprecated
+         --trusted)    Shareclipboard="yes" 
+                       warning "Option --trusted is deprecated.
+  To allow trusted cookies for --hostdisplay use option --clipboard.
+  Fallback: enabling option --clipboard." ;;
+      -t|--untrusted)  warning "Option --untrusted is deprecated."
+                       Trusted="no"  ;;                    # create untrusted cookies
+         --xtest)      warning "Option --xtest is deprecated."
+                       Xtest="yes" ;;                      # allow extension XTEST. default for xvfb, xdummy and xpra
+         --no-xtest)   warning "Option --no-xtest is deprecated."
+                       Xtest="no" ;;                       # disable extension XTEST. default for most X server options
 
      ##### custom docker options / image name + image command
       --) shift
@@ -6492,7 +6470,7 @@ Parsed options:    $Parsedoptions"
   verbose -d "Users and terminal:
   x11docker was started by:                       $Startuser
   As host user serves (running X, storing cache): $Hostuser
-  Container user will be:                         $Benutzer
+  Container user will be:                         $Containeruser
   Container user password:                        x11docker
   Getting permission to run docker with:          $Passwordcommand $Sudo
   Running X and other user commands with:         $Mksu
@@ -6572,6 +6550,8 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
+# BUG sudo x11docker --xpra fails
+
 # further checks of pam.d
 
 # --xonly: not default for empty x11docker image name?
@@ -6604,7 +6584,7 @@ todo() {
 # BUG?: x11docker/xwayland nested: where is the X socket ??
 
 # --weston/x: allow tty switch/option --vt if running as root?
-# --systemd: try to avoid xhost +SI:localuser:$Benutzer, needed by deepin, it does not recognize XAUTHORITY
+# --systemd: try to avoid xhost +SI:localuser:$Containeruser, needed by deepin, it does not recognize XAUTHORITY
 # --no-init no-new-privileges switchuser: exec fails, but why?
 # check out capsh. replace su with capsh? (missing in alpine) But how to trigger login?
 # check echo especially in sh scripts, replace with printf if needed (#25)

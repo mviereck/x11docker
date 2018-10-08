@@ -16,6 +16,10 @@ Project website: https://github.com/mviereck/x11docker
    If not specified: defaults to Xvfb, fallback to Xdummy.
 ### Deprecated
  - `--starter`: Use `--launcher` instead.
+ - `--trusted`: Use `--clipboard` instead.
+ - `--untrusted`: No replacement.
+ - `--xtest`: No replacement.
+ - `--no-xtest`: No replacement.
 ### Fixed
  - `--weston*`, `--kwin*`: Did not terminate due to DBus issue.
  - `--xdummy`, `--xvfb`: avoid X message boxes if there is no host X.
@@ -23,6 +27,8 @@ Project website: https://github.com/mviereck/x11docker
    [(#77)](https://github.com/mviereck/x11docker/issues/77)
  - `--pw`: regression fix, did not prompt for password in terminal window.
  - `/etc/pam.d/su`: allow additional default configs.
+ - Export environment variables `DOCKER_*` in dockerrc if some exist.
+   [(#79)](https://github.com/mviereck/x11docker/issues/79)   
 
 ## [5.2.0](https://github.com/mviereck/x11docker/releases/tag/v5.2.0) - 2018-09-17
 ### Added
