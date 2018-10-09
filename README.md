@@ -32,9 +32,9 @@ System changes in running containers are discarded after use.
    - [Printing](#printer) through CUPS.
    - [Webcam](#webcam) support.
    - [Language locale](#language-locales) creation.
- - [Wayland](#wayland) support.
+   - [Wayland](#wayland) support.
+   - Supports [DBus](#dbus) and [init systems](#init-system) `tini`, `runit`, `OpenRC`, `SysVinit` and `systemd` in container. Supports also `elogind`.
  - Remote access with [SSH](https://github.com/mviereck/x11docker/wiki/Remote-access-with-SSH), [VNC](https://github.com/mviereck/x11docker/wiki/VNC) or [HTML5 in browser](https://github.com/mviereck/x11docker/wiki/Container-applications-running-in-Browser-with-HTML5) possible.
- - Supports [DBus](#dbus) and [init systems](#init-system) `tini`, `runit`, `openrc`, `SysVinit` and `systemd` in container. Supports also `elogind`.
  - Developed on Debian. Tested on several other Linux distributions. 
    - Runs also on MS Windows in [MSYS2, Cygwin and WSL](#msys2-cygwin-and-wsl-on-ms-windows).
  - Easy to use. [Examples](#examples): 
@@ -251,7 +251,8 @@ As root, you can install, update and remove x11docker on your system:
  - `x11docker --update-master` : download and install latest master version from github.
  - `x11docker --remove` : remove all files installed by x11docker.
  
-Copies `x11docker` and `x11docker-gui` to `/usr/bin`. Creates an icon in `/usr/share/icons`. Creates `x11docker.desktop` in `/usr/share/applications`. Copies `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
+Copies `x11docker` and `x11docker-gui` to `/usr/bin`. Creates an icon in `/usr/share/icons`. 
+Creates `x11docker.desktop` in `/usr/share/applications`. Copies `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
 ### Shortest way for first installation:
 ```
 wget https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker -O /tmp/x11docker
@@ -270,17 +271,19 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
    - Use options `--stdout --stderr` (short `-Q`) to get application output, too.
    - Use option `--verbose` to see full logfile output.
      - Option `-D, --debug` gives a less verbose output. `-DQ` is short for `--debug --stdout --stderr`.
-   - You can find the latest dispatched logfile at `~/.cache/x11docker/x11docker.log`.
+     - You can find the latest dispatched logfile at `~/.cache/x11docker/x11docker.log`.
  - Make sure your x11docker version is up to date with `x11docker --update` (latest release) or `x11docker --update-master` (latest beta).
  - Some applications need more privileges or capabilities than x11docker provides as default. 
    - Reduce container isolation with e.g.:
-     - x11docker options: `--hostipc --hostnet --cap-default --sys-admin`
+     - x11docker options: `--cap-default --hostipc --hostnet --sys-admin`
      - docker run options: `--cap-add ALL --security-opt seccomp=unconfined --privileged`
-     - Example: `x11docker --hostipc --hostnet --cap-default --sys-admin -- --cap-add ALL --security-opt seccomp=unconfined --privileged -- imagename`
+     - Example: `x11docker --cap-default --hostipc --hostnet --sys-admin -- --cap-add ALL --security-opt seccomp=unconfined --privileged -- imagename`
      - Try with reduced container isolation. If it works, drop options one by one until the needed one(s) are left.
      - If `--cap-add ALL` helps, find the [capability](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) you really need and add only that one.
      - If `--privileged` helps, your application probably needs a device in `/dev`. Find out which one and share it with e.g. `--device /dev/snd`.
-   - You can try to run container applications as root with `--user=root`.
+   - You can run container applications as root with `--user=root`.
+ - A few applications need DBus. Install `dbus` in image and try option `--dbus`. If that does not help, try option `--dbus-system`.
+ - A few applications need systemd. Install `systemd` in image and try option `--systemd`.
  - Get help in the [issue tracker](https://github.com/mviereck/x11docker/issues). 
    - Most times it makes sense to store the `--verbose`output (or `x11docker.log`) at [pastebin.com](https://pastebin.com/).
 
@@ -305,7 +308,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
 | Desktop environment | x11docker command |
 | --- | --- |
 | FVWM (based on [Alpine](https://alpinelinux.org/), 22.5 MB) | `x11docker --desktop x11docker/fvwm` |
-| fluxbox (based on Debian, 87 MB) | `x11docker --desktop x11docker/fluxbox` |
+| Fluxbox (based on Debian, 87 MB) | `x11docker --desktop x11docker/fluxbox` |
 | [Lumina](https://lumina-desktop.org) (based on [Void Linux](https://www.voidlinux.org/))| `x11docker --desktop x11docker/lumina` |
 | LXDE | `x11docker --desktop x11docker/lxde` |
 | LXQt | `x11docker --desktop x11docker/lxqt` |
@@ -319,7 +322,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
 | [LiriOS](https://liri.io/) (Needs at least docker 18.06 <br> or this [xcb bugfix](https://github.com/mviereck/x11docker/issues/76).) (based on Fedora) | `x11docker --desktop --gpu lirios/unstable` |
 | KDE Plasma | `x11docker --desktop --gpu x11docker/plasma` |
 | KDE Plasma as nested Wayland compositor | `x11docker --gpu x11docker/plasma startplasmacompositor` |
-| LXDE with wine and PlayOnLinux <br> and  a persistent `HOME` folder <br> to preserve installed Windows <br> applications, with Pulseaudio sound <br> and GPU hardware acceleration. | `x11docker --desktop --home --pulseaudio --gpu x11docker/lxde-wine` |
+| LXDE with wine and PlayOnLinux and a <br> persistent `HOME` folder to preserve <br> installed Windows applications, <br> and with Pulseaudio sound. | `x11docker --desktop --home --pulseaudio x11docker/lxde-wine` |
    
 ## Adjust images for your needs
 For persistant changes of image system adjust Dockerfile and rebuild. To add custom applications to x11docker example images you can create a new Dockerfile based on them. Example:
