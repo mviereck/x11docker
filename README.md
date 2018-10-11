@@ -196,7 +196,8 @@ further (deeper surgery in system): `cups pulseaudio xserver-xorg-legacy`.
 Scope of x11docker is to run dockered GUI applications while preserving and improving container isolation.
 Core concept is:
  - Run a second X server to avoid [X security leaks](http://www.windowsecurity.com/whitepapers/unix_security/Securing_X_Windows.html).
-   - This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control. (x11docker provides this with option `--hostdisplay`).
+   - This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control. 
+     (However, x11docker provides this with option `--hostdisplay`).
    - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.
  - Create container user similar to host user to [avoid root in container](http://blog.dscpl.com.au/2015/12/don-run-as-root-inside-of-docker.html).
    - You can also specify another user with `--user=USERNAME` or a non-existing one with `--user=UID:GID`.
@@ -315,14 +316,14 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
 | Xfce | `x11docker --desktop x11docker/xfce` |
 | [CDE Common Desktop Environment](https://en.wikipedia.org/wiki/Common_Desktop_Environment) | `x11docker --desktop --systemd --cap-default x11docker/cde` |
 | Mate | `x11docker --desktop x11docker/mate` |
-| Enlightenment (Based on [Void Linux](https://www.voidlinux.org/)) | `x11docker --desktop --gpu --runit x11docker/enlightenment` |
+| Enlightenment (based on [Void Linux](https://www.voidlinux.org/)) | `x11docker --desktop --gpu --runit x11docker/enlightenment` |
 | [Trinity](https://www.trinitydesktop.org/) (successor of KDE 3) | `x11docker --desktop x11docker/trinity` |
 | Cinnamon | `x11docker --desktop --gpu --dbus-system x11docker/cinnamon` |
 | [deepin](https://www.deepin.org/en/dde/) | `x11docker --desktop --gpu --systemd x11docker/deepin` |
-| [LiriOS](https://liri.io/) (Needs at least docker 18.06 <br> or this [xcb bugfix](https://github.com/mviereck/x11docker/issues/76).) (based on Fedora) | `x11docker --desktop --gpu lirios/unstable` |
+| [LiriOS](https://liri.io/) (needs at least docker 18.06 <br> or this [xcb bugfix](https://github.com/mviereck/x11docker/issues/76).) (based on Fedora) | `x11docker --desktop --gpu lirios/unstable` |
 | KDE Plasma | `x11docker --desktop --gpu x11docker/plasma` |
 | KDE Plasma as nested Wayland compositor | `x11docker --gpu x11docker/plasma startplasmacompositor` |
-| LXDE with wine and PlayOnLinux and a <br> persistent `HOME` folder to preserve <br> installed Windows applications, <br> and with Pulseaudio sound. | `x11docker --desktop --home --pulseaudio x11docker/lxde-wine` |
+| LXDE with wine and PlayOnLinux and <br> a persistent `HOME` folder to preserve <br> installed Windows applications, <br> and with Pulseaudio sound. | `x11docker --desktop --home --pulseaudio x11docker/lxde-wine` |
    
 ## Adjust images for your needs
 For persistant changes of image system adjust Dockerfile and rebuild. To add custom applications to x11docker example images you can create a new Dockerfile based on them. Example:
