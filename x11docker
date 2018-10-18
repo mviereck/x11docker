@@ -11,7 +11,7 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="5.3.0"
+Version="5.3.1-beta"
 
 usage() {                       # --help: show usage information
   echo "
@@ -65,7 +65,7 @@ Dependencies in image:
    --gpu:  OpenGL packages, often already installed as package dependencies.
    --pulseaudio: sound with pulseaudio needs pulseaudio on host and in image.
    --lang: localedef to create missing language locales.
-   --dbus, --dbus-system: needs dbus in image.
+   --dbus, --dbus-system, --hostdbus: needs dbus in image.
    --systemd, --runit,--openrc, --sysvinit: init systems need to be installed.
 
 Options:
@@ -205,13 +205,11 @@ X and Wayland appearance options:
      --output-count N  Multiple outputs for Weston, KWin or Xephyr.
      --xfishtank       Show fish tank on new X server (needs 'xfishtank').
 
-X authentication:
+X and Wayland configuration:
      --xhost STR       Set \"xhost STR\" on new X server (see 'man xhost').
                        (Use with care. '--xhost +' allows access for everyone).
  -o, --no-xhost        Disable any access to host X server granted by xhost.
      --no-auth         Allow access to X for everyone. Security risk!
-
-X and Wayland configuration:
      --display N       Use display number N for new X server.
      --vt N            Use vt / tty N (affects --xorg, --xdummy, --xpra).
      --keymap LAYOUT   Set keyboard layout for new X server, e.g. de, us, ru.
@@ -3008,9 +3006,11 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
     --nothing) echo "unset DISPLAY XAUTHORITY WAYLAND_DISPLAY" ;;
     *) # here something for real X servers
       echo "# background color"
-      echo "xsetroot -solid '#7F7F7F'"
-      [ "$Xserver" = "--nxagent" ] && echo "sleep 2 && xsetroot -solid '#7F7F7F' &"
-
+      case $Xserver in
+        --hostdisplay) ;;
+        --nxagent) echo "sleep 2 && xsetroot -solid '#7F7F7F' &" ;;
+        *) echo "xsetroot -solid '#7F7F7F'" ;;
+      esac
 
       [ "$Xauthentication" = "yes" ] && {
         echo "# create new XAUTHORITY cookies"
@@ -3019,6 +3019,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
           echo "cp $Xclientcookie $Xclientcookie.bak   # nxagent workaround cookie was created before starting xinit"
           echo "export XAUTHORITY=$Xclientcookie.bak"
         }
+
         [ "$Trusted" = "yes" ] && Trusted="trusted" || Trusted="untrusted"
         echo     ":> $Xclientcookie"
         [ "$Xserver" = "--hostdisplay" ] && {
@@ -3045,9 +3046,9 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
         echo     "  [ '$Trusted' = 'untrusted' ] && note 'Could not create untrusted cookie. "
         echo     "  Maybe your X server misses extension SECURITY.'"
         [ "$Xserver" = "--hostdisplay" ] && {
-          [ "$Sharehostipc" = "no" ] && {
-            echo "  warning 'Memory access failures and rendering glitches may occur "
-            echo "  due to unrestricted cookie."
+          [ "$Sharehostipc" = "no" ] && [ "$Hostssh" = "no" ] && {
+            echo "  warning 'Memory access failures and rendering glitches"
+            echo "  may occure due to unrestricted cookie."
             echo "  Avoid them with isolation breaking option --hostipc,"
             echo "  or use another X server option like --xpra or --nxagent.'"
           }
@@ -3103,6 +3104,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
           }
         ;;
       esac
+      
       case $Xserver in
         --hostdisplay|--vcxsrv|--xwin|--nxagent) ;;
         *)
@@ -3355,7 +3357,7 @@ check_containeruser() {         # check container user and shared home folder (a
     Containeruser=$(getent passwd $Containeruser | cut -d: -f1)      # can be name or uid -> now name
     Containeruseruid=$(getent passwd $Containeruser | cut -d: -f3)
     [ -z "$Containerusergid" ] && Containerusergid=$(getent passwd $Containeruser | cut -d: -f4)
-    [ "$Sharehosthome" = "no" ] && Containeruserhome="/fakehome/Containeruser" || Containeruserhome=$(getent passwd $Containeruser | cut -d: -f6)
+    [ "$Sharehosthome" = "no" ] && Containeruserhome="/fakehome/$Containeruser" || Containeruserhome=$(getent passwd $Containeruser | cut -d: -f6)
   } || {                                                   # user does not exist on host
     [[ $Containeruser =~ ^[0-9]+$ ]] || error "Option --user: Unknown host user or invalid user number '$Containeruser'.
   Non-host users can be specified with an UID only, not with a name."
@@ -3747,7 +3749,7 @@ create_dockercommand() {        # create command to run docker
   [ "$Sharehostipc" = "yes" ]      && Dockercommand="$Dockercommand \\
   --ipc host"
   [ "$Sharehostnet" = "yes" ]      && Dockercommand="$Dockercommand \\
-  --net host"
+  --network host"
   ## option --no-internet
   [ "$Internetaccess" = "no" ]     && Dockercommand="$Dockercommand \\
   --net none"
@@ -3970,12 +3972,8 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   }
   echo   "  echo 'export HOME=\"$Containeruserhome\"'"
 
-  [ -n "$Newdisplay" ] && {
-    echo "  echo 'export DISPLAY=$Newdisplay'"
-    # already done in setup script as needed at least by x11docker/deepin, but repeated here as some init systems clean up /tmp
-    echo "  echo '[ -e /tmp/.X11-unix/X$Newdisplaynumber ] || ln -s /X$Newdisplaynumber /tmp/.X11-unix'"
-  }
-  [ "$Xauthentication" = "yes" ] && echo "  echo 'export XAUTHORITY=$Cshare/Xclientcookie'"
+  [ -n "$Newdisplay" ] && echo "  echo '[ -e /tmp/.X11-unix/X$Newdisplaynumber ] || ln -s /X$Newdisplaynumber /tmp/.X11-unix'"
+  
   [ "$Xserver" = "--nothing" ]   && echo "  echo 'unset DISPLAY WAYLAND_DISPLAY XAUTHORITY'"
   [ "$Dbusrunsession" = "yes" ]      && echo "  echo 'command -v dbus-run-session >/dev/null && Dbus=dbus-run-session || note \"Option --dbus: dbus seems to be not installed in image\"'"
   echo   "  echo 'export NO_AT_BRIDGE=1'"
@@ -4026,6 +4024,8 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
     echo "  echo 'export \"$Line\"'"
   done < <(store_runoption dump env)
   echo   "  echo ''"
+
+  [ "$Xauthentication" = "yes" ] || echo "  echo 'unset XAUTHORITY'"
 
   echo   "  echo 'env >> $Cshare/environment'"
   echo   "  echo 'sed -i \"/\(PWD=\|_=\)/d\" $Cshare/environment'"
@@ -4164,7 +4164,7 @@ create_containerrootrc() {      # create container root setup script: This scrip
   echo "chmod -c 1777 /tmp/.ICE-unix /tmp/.X11-unix /tmp/.font-unix"
   echo "export DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie"
   [ "$Xserver" != "--vcxsrv" ] && {
-    echo "ln -s /X$Newdisplaynumber $Newxsocket" # done again in container.CMD.sh. At least x11docker/deepin needs it here already.
+    echo "[ -e /X$Newdisplaynumber ] && ln -s /X$Newdisplaynumber $Newxsocket" # done again in container.CMD.sh. At least x11docker/deepin needs it here already.
     echo "ls -l /X$Newdisplaynumber"
     echo "ls -l $Newxsocket"
   }
@@ -5048,6 +5048,8 @@ check_hostxenv() {              # check environment variables for host X display
   }
   
   # get cookie from host display
+  [ -z "${XAUTHORITY:-}" ] && [ -e "$Hostuserhome/.Xauthority" ] && export XAUTHORITY="$Hostuserhome/.Xauthority"
+  [ "$Hostssh" = "yes" ]   && [ -e "$Hostuserhome/.Xauthority" ] && export XAUTHORITY="$Hostuserhome/.Xauthority"
   [ "${XAUTHORITY:-}" ] && {
     $Mksu "$Xauthexe -i -f ${XAUTHORITY:-} nlist $Hostdisplay 2>/dev/null | rmcr | $Xauthexe -f $Hostxauthority nmerge - 2>/dev/null"
     chown $Hostuser $Hostxauthority
@@ -5346,9 +5348,9 @@ check_option_interferences() {  # check multiple option interferences, change se
 
   # --hostdisplay with SSH
   [ "$Xserver" = "--hostdisplay" ] && [ "$Hostssh" = "yes" ] && {
-    [ "$Sharehostipc" = "no" ] || [ "$Trusted" = "no" ] || [ "$Sharehostnet" = "no" ]  && {
+    [ "$Trusted" = "no" ] || [ "$Sharehostnet" = "no" ]  && {
       note "For SSH connection with option --hostdisplay
-  x11docker must enable options --hostnet and allow trusted cookies.
+  x11docker must enable option --hostnet and allow trusted cookies.
   It is recommended to use other X server options
   like --xpra, --xephyr or --nxagent."
       Sharehostnet="yes"
@@ -5356,7 +5358,7 @@ check_option_interferences() {  # check multiple option interferences, change se
     }
   }
 
-  [ "$Xserver" = "--hostdisplay" ] && [ "$Trusted" = "yes" ] && [ "$Hostmitshm" = "yes" ] && [ "$Sharehostipc" = "no" ] && {
+  [ "$Xserver" = "--hostdisplay" ] && [ "$Trusted" = "yes" ] && [ "$Hostmitshm" = "yes" ] && [ "$Sharehostipc" = "no" ] && [ "$Hostssh" = "no" ] && {
     note "To allow --hostdisplay with trusted cookies,
   x11docker must share host IPC namespace with container (option --hostipc)
   to allow shared memory for X extension MIT-SHM."
@@ -6553,6 +6555,7 @@ todo() {
 # further checks of pam.d
 # --internet to allow internet access, otherwise --net=none?
 # --group-add: further checks? mismatch messagebus-101-systemd-journal
+# option --pull to force 'docker pull'? Keeps image up to date with docker hub.
 
 # MSYS2/Cygwin/WSL:
 #       needs test:
