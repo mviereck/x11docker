@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Fixed
+ - `--hostdisplay`: Fixed `XAUTHORITY` issue if running over `ssh -X`.
+   [(#81)](https://github.com/mviereck/x11docker/issues/81)
+
 ## [5.3.0](https://github.com/mviereck/x11docker/releases/tag/v5.3.0) - 2018-10-11
 ### Added
  - `--launcher`: Replaces `--starter`, creates an application launcher.
