@@ -39,7 +39,7 @@ System changes in running containers are discarded after use.
    - Runs also on MS Windows in [MSYS2, Cygwin and WSL](#msys2-cygwin-and-wsl-on-ms-windows).
  - Easy to use. [Examples](#examples): 
    - `x11docker jess/cathode`
-   - `x11docker --desktop --size 320x240 x11docker/lxde`
+   - `x11docker --desktop --size 320x240 x11docker/lxde` (needs nested X server `Xephyr`)
  
 ![x11docker-gui screenshot](/../screenshots/screenshot-retroterm.png?raw=true "Cathode retro term in docker") ![LXDE in xpra](/../screenshots/screenshot-lxde-small.png?raw=true "LXDE desktop in docker")
 
