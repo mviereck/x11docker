@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Fixed
+ - Watch container pid 1 instead of container pid itself. Avoids issue on NixOS
+   where users cannot see processes of other users, root or docker in this case.
+   [(#83)](https://github.com/mviereck/x11docker/issues/83)
+
 ## [5.3.1](https://github.com/mviereck/x11docker/releases/tag/v5.3.1) - 2018-10-22
 ### Fixed
  - `--hostdisplay`: Fixed `XAUTHORITY` issue if running over `ssh -X`.

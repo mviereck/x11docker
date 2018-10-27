@@ -488,15 +488,10 @@ finish_sigint() {               # trap SIGINT to activate debug mode on finish()
   finish
 }
 finish() {                      # trap EXIT routine to clean up background processes and cache
-  local Pid= Name= Zeit= Catlogfilepid= Exitcode= Pid1pid= Containerpid=
+  local Pid= Name= Zeit= Catlogfilepid= Exitcode= Pid1pid=
   trap - EXIT
 
-  Pid1pid=$(cat $Containerpid1pidfile 2>/dev/null)
-
   verbose -d "Terminating x11docker."
-  [ -z "$Winsubsystem" ] && checkpid $Pid1pid && verbose -d "Process tree of container:
-$(pstree -p $Pid1pid 2>&1 ||:)"
-
   debugnote "List of stored background processes:
 $(cat $Bgpidfile 2>/dev/null)"
 
@@ -524,8 +519,8 @@ $(cat $Bgpidfile 2>/dev/null)"
           catstdin)               killpid $Pid $Name ;;
           hostexe|shareclipboard) killpid $Pid $Name bash ;;
           xfishtank)              killpid $Pid $Name xfishtank ;;
-          container)
-            Containerpid=$Pid
+          containerpid1)
+            Pid1pid=$Pid
             Pid=
             # Send TERM to PID1 of container
             checkpid  $Pid1pid 2>&1 && {
@@ -544,7 +539,7 @@ $(cat $Bgpidfile 2>/dev/null)"
               esac
             }
             # Try 'docker stop' if TERM failed
-            checkpid $Containerpid && {
+            checkpid $Pid1pid && {
               verbose -d "Container still running. Executing 'docker stop'."
               $Sudo $Dockerexe stop $Containername >>$Containerlogfile 2>&1 || verbose -d "docker stop failed"
             }
@@ -570,18 +565,18 @@ $(ps -p $Pid)"
 
   # Check if container is still running.
   # if kill of PID 1 failed in loop above, most times terminating X server will already have stopped GUI applications.
-  checkpid $Containerpid && {
+  checkpid $Pid1pid && {
     $Sudo $Dockerexe stop $Containername >>$Containerlogfile 2>&1 || {
       note "Found remaining container process. Most probably the X session was
   interrupted. Can not stop container because x11docker does not run as root.
   Will wait up to 10 seconds for docker to finish."
       Zeit=$(date +%s)
-      while checkpid $Containerpid ; do
+      while checkpid $Pid1pid ; do
         note "Waiting for container to terminate ..."
         sleep 1
         [ 10 -lt $(($(date +%s) - $Zeit)) ] && break
       done
-      if checkpid $Containerpid ; then
+      if checkpid $Pid1pid ; then
         note "Container did not terminate as it should.
   Will not clean cache to avoid file permission issues.
   You can remove the new container with command:
@@ -596,7 +591,7 @@ $(ps -p $Pid)"
       fi
     }
   }
-  # different stop behaviour on Windows because $Pid1pid and $Containerpid are not in ps.
+  # different stop behaviour on Windows because $Pid1pid is not in ps.
   [ "$Winsubsystem" ] && [ "$Pid1pid" ] && [ "$Containername" ] && {
     verbose -d "Stopping container $Containername"
     $Sudo $Dockerexe stop $Containername >/dev/null 2>&1 || {
@@ -4735,7 +4730,7 @@ $(tail $Xpraserverlogfile)"
   esac
   return 0
 }
-start_docker() {                # start docker
+start_docker() {                # start docker container
   local Containerpid= Containerid= Containerpid1=
   
   # start docker in xtermrc
@@ -4753,7 +4748,6 @@ start_docker() {                # start docker
   esac
   waitforfilecreation $Cachefolder/xtermready infinity
 
-  Containerpid=$(cat $Containerpidfile)
   Containerid=$(cat $Containeridfile)
   Containerip=$(cat $Containeripfile)         # used by start_pulseaudiotcp()
   Containerpid1=$(cat $Containerpid1pidfile)
@@ -4761,9 +4755,9 @@ start_docker() {                # start docker
   # watch container
   case $Winsubsystem in
     "")
-      [ "$Containerpid" ] && {
-        storepid $Containerpid container
-        setonwatchpidlist $Containerpid container
+      [ "$Containerpid1" ] && {
+        storepid $Containerpid1 containerpid1
+        setonwatchpidlist $Containerpid1 containerpid1
       } || error "Container startup seems to have failed.
   Last lines of log:
 $(tail $Containerlogfile)"
@@ -4832,7 +4826,7 @@ start_pulseaudiotcp() {         # option --pulseaudio=tcp: load Pulseaudio TCP m
   esac
   return 0
 }
-start_compositor() {            # start Compositor Weston or KWin
+start_compositor() {            # start Wayland compositor Weston or KWin
   local Compositorkeyword= Dbuslaunch=
   
   command -v dbus-launch >/dev/null && Dbuslaunch=dbus-launch
@@ -4901,7 +4895,7 @@ $(tail $Compositorlogfile)")"
 }
 
 #### main init routines
-check_host() {
+check_host() {                  # check host environment
   Hostsystem="$(source /etc/os-release 2>/dev/null; echo $ID)"
 
   # Check libc from host. If same as in container, it is possible to share timezone file
@@ -5093,7 +5087,7 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   $Mksu "mkdir -p $Cachebasefolder"         || error "Could not create cache folder
   $Cachebasefolder"
   writeaccess $Hostuseruid $Cachebasefolder || error "User $Hostuser does not have write access to
-  cache folder $Cachebasefolder"  # can happen with --cachedir
+  cache folder $Cachebasefolder"  # can happen with --cachebasedir
   Logbackup="$Cachebasefolder/x11docker.log"       # afterward copy of $Logfile in $Cachebasefolder
 
   [ "$Cachebasefolder" != "$(echo $Cachebasefolder | sed -e 's/ *//g')" ] && error "Cache root folder must not contain whitespaces.
@@ -6430,7 +6424,7 @@ Parsed options:    $Parsedoptions"
   
   # Special x11docker jobs
   [ "$Createlauncher" = "yes" ] && { create_launcher ; exit ; }                 # --launcher: Create application launcher icon on desktop
-  [ "$Cleanup" = "yes" ]  && { cleanup ; exit ; }                               # --cleanup: Clean up cache and orphaned x11docker containers
+  [ "$Cleanup" = "yes" ]        && { cleanup ;         exit ; }                 # --cleanup: Clean up cache and orphaned x11docker containers
   [ "$Installermode" ]          && {                                            # --install, --update, --update-master, --remove
     [ "$Startuser" = "root" ] || [ "$Winsubsystem" ] || error "Must run as root to install, update or remove x11docker."
     installer $Installermode
