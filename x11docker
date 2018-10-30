@@ -3418,6 +3418,7 @@ check_containerhome() {         # options --home, --homedir, --homebasedir: chec
   return 0
 }
 setup_initsystem() {            # options --tini (default), --systemd,--openrc, --sysvinit: set up capabilities, check or create files
+  local Message=
 
   store_runoption env "container=docker"   # At least OpenRC and systemd regard this hint
   
@@ -3583,6 +3584,30 @@ setup_capabilities() {          # check linux capabilities needed by container
   [ "$Switchcontainerusercaps" = "yes" ] && store_runoption cap "SETUID SETGID DAC_OVERRIDE AUDIT_WRITE"
   
   [ "$Sharegpu" = "yes" ] && [ "$Nvidiadriver" ] && store_runoption cap "SETUID SETGID DAC_OVERRIDE CHOWN FOWNER"
+  
+  # Issues with hidepid=2 seen on NixOS (issue #83)
+  { [ "$Switchcontaineruser" = "yes" ] || [ "$Containeruser" != "$Hostuser" ] ; } && {
+    [ "$Hostcanwatchroot" = "no" ] && {
+      [ "$Hosthidepid" = "yes" ]            && Message="/proc is mounted with hidepid=2." || Message="Cannot watch processes of other users for unknown reasons."
+      Message="$Message
+  x11docker cannot watch processes of root
+  or other users different from $Hostuser."
+      [ "$Hostuser" != "$Containeruser" ]   && Message="$Message
+  Container user $Containeruser is different from host user $Hostuser."
+      [ "$Switchcontaineruser" = "yes" ]    && Message="$Message
+  Container PID 1 will run as root."
+      Message="$Message
+  Therefore x11docker cannot watch container processes
+  for a clean termination of X and x11docker itself.
+  Four possible solutions:
+    1. Run x11docker as root.
+    2. Don't use options like --user or --systemd that change container user.
+    3. Add user $Hostuser to group 'proc'.
+    4. Change /proc mount option hidepid=2 to hidepid=1."
+      error "$Message"
+    }
+  }
+  
   return 0
 }
 setup_hostdbus() {              # option --hostdbus: connect to host DBus session daemon.
@@ -4957,6 +4982,20 @@ check_host() {                  # check host environment
   [ "$Winsubsystem"   ] && Hosttty="no"
   XDG_VTNR=${XDG_VTNR:-}
   
+  # Check whether ps can watch processes of other users
+  mount | grep "^proc" | grep -q "hidepid=2" && {
+    Hosthidepid="yes"
+    verbose -d "/proc is mounted with hidepid=2."
+  } || {
+    Hosthidepid="no"
+  }
+  ps aux | cut -d' ' -f1 | grep -q root && {
+    Hostcanwatchroot="yes" 
+  } || {
+    Hostcanwatchroot="no"
+    verbose -d "ps can not watch root processes."
+  }
+  
   return 0
 }
 check_hostuser() {              # check for unprivileged host user
@@ -5934,6 +5973,8 @@ declare_variables() {           # declare global variables
   Hostutctime=""                                  # time zone from host as offset to UTC
   Hostssh=""                                      # x11docker runsover ssh yes/no
   Hosttty=""                                      # x11docker runs on tty yes/no
+  Hosthidepid=""                                  # /proc is mounted with hidepid=2 yes/no
+  Hostcanwatchroot=""                             # x11docker can watch root processes yes/no
   
   Winsubsystem=""                                 # Windows subsystem WSL, MSYS2 or CYGWIN
   Winsubmount=""                                  # path within subsystem to mounted Windows drives

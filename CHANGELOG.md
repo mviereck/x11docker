@@ -12,6 +12,7 @@ Project website: https://github.com/mviereck/x11docker
    [(#84)](https://github.com/mviereck/x11docker/issues/84)
  - Watch container pid 1 instead of container pid itself. Avoids issue on NixOS
    where users cannot see processes of other users, root or docker in this case.
+   Throw error if x11docker cannot watch container pid 1 due to `hidepid=2`.
    [(#83)](https://github.com/mviereck/x11docker/issues/83)
 
 ## [5.3.1](https://github.com/mviereck/x11docker/releases/tag/v5.3.1) - 2018-10-22
