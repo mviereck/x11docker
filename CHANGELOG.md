@@ -8,6 +8,8 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Fixed
+ - `gnome-terminal` did not appear for password prompt or `docker pull`.
+   [(#84)](https://github.com/mviereck/x11docker/issues/84)
  - Watch container pid 1 instead of container pid itself. Avoids issue on NixOS
    where users cannot see processes of other users, root or docker in this case.
    [(#83)](https://github.com/mviereck/x11docker/issues/83)
