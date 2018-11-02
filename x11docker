@@ -220,6 +220,7 @@ User settings:
      --user N          Create container user N (N=name or N=uid). Default:
                        same as host user. N can also be an unknown user id.
                        You can specify a group id with N being 'user:gid'.
+                       Special case: --user=RETAIN keeps image user settings.
      --hostuser USER   Run X (and container user) as user USER. Default is
                        result of \$(logname). (x11docker must run as root).
      --group-add GROUP Additional group GROUP for container user.
@@ -1478,10 +1479,13 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
   warning "Option --pulseaudio allows container applications
   to catch your audio output and microphone input."
   
-  [ "$Pulseaudiomode" = "auto" ] && case "$Winsubsystem" in
-    "") Pulseaudiomode="socket" ;;
-    *)  Pulseaudiomode="tcp" ;;
-  esac
+  [ "$Pulseaudiomode" = "auto" ] && {
+    case "$Winsubsystem" in
+      "") Pulseaudiomode="socket" ;;
+      *)  Pulseaudiomode="tcp" ;;
+    esac
+    [ "$Containeruser" = "$Hostuser" ] || Pulseaudiomode="tcp"
+  }
   
   case $Pulseaudiomode in
     socket)
@@ -3659,27 +3663,40 @@ create_dockercommand() {        # create command to run docker
   Dockercommand="$Dockercommand \\
   --name $Containername"
 
-  # Disable user namespacing to avoid file permission issues with --home or --sharedir. Files need same UID/GID.
-  Dockercommand="$Dockercommand \\
+  case $Createcontaineruser in
+    yes)
+      # Disable user namespacing to avoid file permission issues with --home or --sharedir. Files need same UID/GID.
+      Dockercommand="$Dockercommand \\
   --userns host"
   
-  # container user. init systems switch later.
-  case $Initsystem in
-    none|tini)
-      case $Switchcontaineruser in
-        no) Dockercommand="$Dockercommand \\
+      # container user. init systems switch later.
+      case $Initsystem in
+        none|tini)
+          case $Switchcontaineruser in
+            no) Dockercommand="$Dockercommand \\
   --user $Containeruseruid:$Containerusergid \\
   --env USER=$Containeruser" ;;
-        yes) Dockercommand="$Dockercommand \\
+            yes) Dockercommand="$Dockercommand \\
   --user root \\
   --env USER=root" ;;
-      esac
-    ;;
-    systemd|runit|openrc|sysvinit)
-      Dockercommand="$Dockercommand \\
+          esac
+        ;;
+        systemd|runit|openrc|sysvinit)
+          Dockercommand="$Dockercommand \\
   --user root" ;;
+      esac
+       
+      # add container user groups, mainly video and audio and --group-add
+      [ "$Switchcontaineruser" = "no" ] && {
+        for Line in $Containerusergroups; do          ### FIXME: should compare GIDs from host and container
+          getent group ${Line:-nonsense} >/dev/null && Dockercommand="$Dockercommand \\
+  --group-add $(getent group $Line | cut -d: -f3)"
+        done
+      }
+    ;;
+    no) ;;
   esac
-
+  
   # capabilities
   [ "$Capdropall" = "yes" ] && Dockercommand="$Dockercommand \\
   --cap-drop ALL"
@@ -3719,14 +3736,6 @@ create_dockercommand() {        # create command to run docker
   # option --sharecgroup
   [ "$Sharecgroup" = "yes" ] && Dockercommand="$Dockercommand \\
   --volume /sys/fs/cgroup:/sys/fs/cgroup:ro"
-  
-  # add container groups, mainly video and audio and --group-add
-  [ "$Switchcontaineruser" = "no" ] && {
-    for Line in $Containerusergroups; do          ### FIXME: should compare GIDs from host and container
-      getent group ${Line:-nonsense} >/dev/null && Dockercommand="$Dockercommand \\
-  --group-add $(getent group $Line | cut -d: -f3)"
-    done
-  }
 
   # Needed especially for --systemd and --dbus-daemon
   Dockercommand="$Dockercommand \\
@@ -3982,7 +3991,10 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo   "{"
   echo   "  echo ''"
   echo   "  echo '# x11docker variable settings'"
-  echo   "  echo export USER=\"$Containeruser\""
+  [ "$Createcontaineruser" = "yes" ] && {
+    echo   "  echo export USER=\"$Containeruser\""
+    echo   "  echo 'export HOME=\"$Containeruserhome\"'"
+  }
   [ "$Sharehosthome" = "no" ] && {
     echo "  echo mkdir -p -v $Containeruserhome"
     while read -r Line; do
@@ -3990,7 +4002,6 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
       echo "  echo 'ln -s \"$Line\" \"$Containeruserhome\"'"
     done < <(store_runoption dump volume)
   }
-  echo   "  echo 'export HOME=\"$Containeruserhome\"'"
 
   [ -n "$Newdisplay" ] && echo "  echo '[ -e /tmp/.X11-unix/X$Newdisplaynumber ] || ln -s /X$Newdisplaynumber /tmp/.X11-unix'"
   
@@ -4191,6 +4202,7 @@ create_containerrootrc() {      # create container root setup script: This scrip
   }
   echo ""
 
+  # time zone
   [ "$Hostlocaltime" ] && {
     echo '[ ! -d /usr/share/zoneinfo ] && [ "$Containerlibc" = "'$Hostlibc'" ] && {'
     echo "  mkdir -p $(dirname $Hostlocaltime)"
@@ -4210,67 +4222,71 @@ create_containerrootrc() {      # create container root setup script: This scrip
   done < <(store_runoption dump env)
   echo ""
 
-  # create container user
-  echo "# create user entry in /etc/passwd (and delete possibly existing same uid)"
-  echo "getent passwd | grep -v \$(getent passwd $Containeruseruid || echo USERNOTFOUND) > /tmp/passwd"
-  echo "# disable possible /etc/shadow passwords for other users"
-  echo "sed -i s%:x:%:-:% /tmp/passwd"
-  echo "echo '$Containeruser:x:$Containeruseruid:$Containerusergid:$Containeruser,,,:$Containeruserhome:/bin/sh' >> /tmp/passwd"
-  echo "rm /etc/passwd"
-  echo "mv /tmp/passwd /etc/passwd || warning 'Unable to change /etc/passwd. That may be a seurity risk.'"
-  echo ""
-  echo "# create password entry for container user in /etc/shadow"
-  echo "rm -v /etc/shadow || warning 'Cannot change /etc/shadow. That may be a security risk.'"
-  echo "echo \"$Containeruser:$Containeruserpassword:17293:0:99999:7:::\" > /etc/shadow"
-  case $Sudouser in
-    no)  echo "echo 'root:*:17219:0:99999:7:::' >> /etc/shadow" ;;
-    yes) echo "echo 'root:$Containeruserpassword:17219:0:99999:7:::' >> /etc/shadow  # with option --sudouser, set root password 'x11docker'"
-         echo "sed -i s%root:-:%root:x:% /etc/passwd                            # allow password in /etc/shadow"
+  case $Createcontaineruser in
+    yes)
+      # create container user
+      echo "# create user entry in /etc/passwd (and delete possibly existing same uid)"
+      echo "getent passwd | grep -v \$(getent passwd $Containeruseruid || echo USERNOTFOUND) > /tmp/passwd"
+      echo "# disable possible /etc/shadow passwords for other users"
+      echo "sed -i s%:x:%:-:% /tmp/passwd"
+      echo "echo '$Containeruser:x:$Containeruseruid:$Containerusergid:$Containeruser,,,:$Containeruserhome:/bin/sh' >> /tmp/passwd"
+      echo "rm /etc/passwd"
+      echo "mv /tmp/passwd /etc/passwd || warning 'Unable to change /etc/passwd. That may be a seurity risk.'"
+      echo ""
+      echo "# create password entry for container user in /etc/shadow"
+      echo "rm -v /etc/shadow || warning 'Cannot change /etc/shadow. That may be a security risk.'"
+      echo "echo \"$Containeruser:$Containeruserpassword:17293:0:99999:7:::\" > /etc/shadow"
+      case $Sudouser in
+        no)  echo "echo 'root:*:17219:0:99999:7:::' >> /etc/shadow" ;;
+        yes) echo "echo 'root:$Containeruserpassword:17219:0:99999:7:::' >> /etc/shadow  # with option --sudouser, set root password 'x11docker'"
+             echo "sed -i s%root:-:%root:x:% /etc/passwd                            # allow password in /etc/shadow"
+        ;;
+      esac
+      echo ""
+  
+      for Line in $Containerusergroups ; do
+        echo "Groupname=$(getent group $Line | cut -d: -f1)"
+        echo "Groupid=$(getent group $Line | cut -d: -f3)"
+        echo "[ \"\$Groupname\" ] || Groupname=\$(getent group $Line | cut -d: -f1)"
+        echo "[ \"\$Groupid\" ]   || Groupid=\$(getent group $Line | cut -d: -f3)"
+        echo "[ \"\$Groupname\" ] && {"
+        echo "  getent group | sed \"s/^\$Groupname.*/\$Groupname:x:\$Groupid:\$(getent group \$Groupname | cut -d: -f4 ),$Containeruser/\" | sed 's/:,/:/' > /tmp/group"
+        echo "  getent group \$Groupname >/dev/null || echo \$Groupname:x:\$Groupid:$Containeruser >> /tmp/group"
+        echo "  cp /tmp/group /etc/group"
+        echo "}"
+        echo ""
+      done
+  
+      echo ""
+      echo "# create user group entry (and delete possibly existing same gid)"
+      echo "getent group | grep -v \$(getent group $Containerusergid || echo USERNOTFOUND) > /tmp/group"
+      echo "echo $Containerusergroup:x:$Containerusergid: >> /tmp/group"
+      echo "mv /tmp/group /etc/group"
+      echo ""
+      [ "$Sharehosthome" = "no" ] && echo "mkdir -v -m 777 /fakehome"
+      echo ""
+
+      # sudo configuration
+      echo "# create /etc/sudoers, delete /etc/sudoers.d. Overwrite possible sudo setups in image."
+      echo "[ -e /etc/sudoers.d ] && rm -v -R /etc/sudoers.d"
+      echo "[ -e /etc/sudoers ]   && rm -v /etc/sudoers"
+      echo "echo '# /etc/sudoers created by x11docker' > /etc/sudoers"
+      echo "echo 'root ALL=(ALL) ALL'                 >> /etc/sudoers"
+      [ "$Sudouser" = "yes" ] && echo "echo '$Containeruser ALL=(ALL) ALL' >> /etc/sudoers"
+      echo ""
+
+      # disable possible custom PAM setups that could allow root in container
+      [ "$Sudouser" = "no" ] && {
+        echo "# restrict PAM configuration of su and sudo"
+        echo "echo 'auth sufficient pam_rootok.so' > /etc/pam.d/su  # allow root to switch user without a password"
+        echo "echo '@include common-auth'    >> /etc/pam.d/su"
+        echo "echo '@include common-account' >> /etc/pam.d/su"
+        echo "echo '@include common-session' >> /etc/pam.d/su"
+        echo "[ -e /etc/pam.d/sudo ] &&   rm -v /etc/pam.d/sudo"
+        echo ""
+      }
     ;;
   esac
-  echo ""
-  
-  for Line in $Containerusergroups ; do
-    echo "Groupname=$(getent group $Line | cut -d: -f1)"
-    echo "Groupid=$(getent group $Line | cut -d: -f3)"
-    echo "[ \"\$Groupname\" ] || Groupname=\$(getent group $Line | cut -d: -f1)"
-    echo "[ \"\$Groupid\" ]   || Groupid=\$(getent group $Line | cut -d: -f3)"
-    echo "[ \"\$Groupname\" ] && {"
-    echo "  getent group | sed \"s/^\$Groupname.*/\$Groupname:x:\$Groupid:\$(getent group \$Groupname | cut -d: -f4 ),$Containeruser/\" | sed 's/:,/:/' > /tmp/group"
-    echo "  getent group \$Groupname >/dev/null || echo \$Groupname:x:\$Groupid:$Containeruser >> /tmp/group"
-    echo "  cp /tmp/group /etc/group"
-    echo "}"
-    echo ""
-  done
-  
-  echo ""
-  echo "# create user group entry (and delete possibly existing same gid)"
-  echo "getent group | grep -v \$(getent group $Containerusergid || echo USERNOTFOUND) > /tmp/group"
-  echo "echo $Containerusergroup:x:$Containerusergid: >> /tmp/group"
-  echo "mv /tmp/group /etc/group"
-  echo ""
-  [ "$Sharehosthome" = "no" ] && echo "mkdir -v -m 777 /fakehome"
-  echo ""
-
-  # sudo configuration
-  echo "# create /etc/sudoers, delete /etc/sudoers.d. Overwrite possible sudo setups in image."
-  echo "[ -e /etc/sudoers.d ] && rm -v -R /etc/sudoers.d"
-  echo "[ -e /etc/sudoers ]   && rm -v /etc/sudoers"
-  echo "echo '# /etc/sudoers created by x11docker' > /etc/sudoers"
-  echo "echo 'root ALL=(ALL) ALL'                 >> /etc/sudoers"
-  [ "$Sudouser" = "yes" ] && echo "echo '$Containeruser ALL=(ALL) ALL' >> /etc/sudoers"
-  echo ""
-
-  # disable possible custom PAM setups that could allow root in container
-  [ "$Sudouser" = "no" ] && {
-    echo "# restrict PAM configuration of su and sudo"
-    echo "echo 'auth sufficient pam_rootok.so' > /etc/pam.d/su  # allow root to switch user without a password"
-    echo "echo '@include common-auth' >> /etc/pam.d/su"
-    echo "echo '@include common-account' >> /etc/pam.d/su"
-    echo "echo '@include common-session' >> /etc/pam.d/su"
-    echo "[ -e /etc/pam.d/sudo ] && rm -v /etc/pam.d/sudo"
-    echo ""
-  }
 
   # --gpu with closed source nvidia driver
   [ "$Nvidiadriver" ] && {
@@ -5587,6 +5603,30 @@ check_option_interferences() {  # check multiple option interferences, change se
   $Customwestonini"
     Customwestonini=""
   }
+  
+  # --user=RETAIN / keep container defined in image
+  case $Createcontaineruser in
+    no)
+      [ "$Sharehosthome" = "yes" ] && {
+        note "Options --home and --homedir are not supported with --user=RETAIN.
+  Fallback: Disabling option --home."
+        Sharehosthome="no"
+      }
+      [ "$Sudouser" = "yes" ] && {
+        note "Option --sudouser is not supported with --user=RETAIN.
+  Fallback: Disabling option --sudouser."
+        Sudouser="no"
+      }
+      case $Initsystem in
+        systemd|sysvinit|openrc|runit)
+          note "Option --$Initsystem is not supported with --user=RETAIN.
+  Fallback: Disabling --$Initsystem."
+          Initsystem="tini"
+        ;;
+      esac
+    ;;
+  esac
+  
   return 0
 }
 option_messages() {             # some messages depending on options, but not changing settings
@@ -5949,6 +5989,7 @@ declare_variables() {           # declare global variables
   Hostusergid=""
   Hostuserhome=""
   Homebasefolder=""                               # option --homebasedir: base directory for container home with --home
+  Createcontaineruser="yes"
   Containeruser=""                                # option --user: container user. Default: same as $Hostuser.
   Containeruseruid=""
   Containerusergid=""
@@ -6334,7 +6375,9 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
                          store_runoption env "SSH_AUTH_SOCK=$(escapestring "${SSH_AUTH_SOCK:-}")"
                        } || warning "Option --sharessh: environment variable \$SSH_AUTH_SOCK not set:" ; ;;
        ## User settings
-         --user)       Containeruser="${2:-}"  ; shift ;;       # set container user instead of host user
+         --user)       Containeruser="${2:-}"  ; shift     # set container user instead of host user
+                       [ "$Containeruser" = "RETAIN" ] && Createcontaineruser="no" ;;
+               
          --hostuser)   Hostuser="${2:-}" ; shift ;;        # set host user different from logged in user
          --sudouser)   Sudouser="yes" ;;                   # give container user sudo without password
          --group-add)  Containerusergroups="$Containerusergroups ${2:-}" ; shift ;; # additional groups for user
@@ -6477,13 +6520,16 @@ Parsed options:    $Parsedoptions"
   check_xserver                 # check chosen X server or auto-choose one
   check_option_interferences    # check multiple options, change settings if needed
   option_messages               # some messages depending on options, but not changing anything
+ 
+  # container user
+  [ "$Createcontaineruser" = "yes" ] && {
+    check_containeruser           # unprivileged user in container                # --user
+    check_containerhome           # create persistant container home on host      # --home, --homedir, --homebasedir
+  }
   
   # some checks and setup
   setup_verbosity               # create summary logfile, start verbose output  # --verbose, --stdout, --stderr
-  check_containeruser           # unprivileged user in container                # --user
-  check_containerhome           # create persistant container home on host      # --home, --homedir, --homebasedir
   setup_fifo                    # open message channels for container, dockerrc, xinitrc and watchpidlist()
-  
   check_screensize              # size of host X and of new X server            # --size
   check_windowmanager           # WM for single apps in e.g. Xephyr             # --wm  
   [ "$Sharegpu" = "yes" ]       && setup_gpu                                    # --gpu
@@ -6509,8 +6555,8 @@ Parsed options:    $Parsedoptions"
   verbose -d "Users and terminal:
   x11docker was started by:                       $Startuser
   As host user serves (running X, storing cache): $Hostuser
-  Container user will be:                         $Containeruser
-  Container user password:                        x11docker
+  Container user will be:                         $( [ "$Createcontaineruser" = "yes" ] && echo $Containeruser || echo "(retaining USER of image)")
+  Container user password:                        $( [ "$Createcontaineruser" = "yes" ] && echo x11docker      || echo "(unknown)")
   Getting permission to run docker with:          $Passwordcommand $Sudo
   Running X and other user commands with:         $Mksu
   Terminal for password frontend:                 $Passwordterminal
