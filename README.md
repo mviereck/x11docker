@@ -58,6 +58,7 @@ System changes in running containers are discarded after use.
 Just type `x11docker IMAGENAME [IMAGECOMMAND]`. 
  - Get an [overview of options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`. 
  - For desktop environments in image add option `--desktop` (or short option `-d`).
+ - If startup fails, look at chapter [Troubleshooting](#troubleshooting).
  
 General syntax:
 ```
@@ -203,6 +204,9 @@ Core concept is:
    - You can also specify another user with `--user=USERNAME` or a non-existing one with `--user=UID:GID`.
    - Disables possible root password and deletes entries in `/etc/sudoers`.
      - If you want root permissions in container, use option `--sudouser` that allows `su` and `sudo` with password `x11docker`. Alternatively you can run with `--user=root`. 
+   - If you want to use `USER` specified in image instead, set option `--user=RETAIN`. x11docker won't change `etc/passwd` or `/etc/sudoers` in that case. 
+     - Option `--sudouser` will only set needed capabilities for container user. 
+     - Option `--home` and some init system options won't be available.
  - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
    - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. 
    - This restriction can be disabled with x11docker option `--cap-default` or reduced with `--sudouser`.
