@@ -3463,7 +3463,8 @@ setup_initsystem() {            # options --tini (default), --systemd,--openrc, 
     systemd)
       warning "Option --systemd degrades container isolation.
   It allows some docker container capabilities (nearly like --cap-default).
-  It shares access to host cgroups in /sys/fs/cgroup."
+  It shares access to host cgroups in /sys/fs/cgroup.
+  systemd services started as root might try to abuse their privileges."
   
       Stopsignal="SIGRTMIN+3"
       Containerusergroups="$Containerusergroups systemd-journal"
@@ -3487,9 +3488,10 @@ Wants=x11docker-journal.service
 Wants=dbus.service
 [Service]
 Type=simple
-#User=$Containeruser # disabled because it does not invoke logind
+#CONTAINERUSER will be replaced in dockerrc
+#User=CONTAINERUSER # disabled because it does not invoke logind
 #ExecStart=/bin/sh $Cshare/container.CMD.sh
-ExecStart=/bin/su - -s /bin/sh $Containeruser $Cshare/container.CMD.sh
+ExecStart=/bin/su - -s /bin/sh CONTAINERUSER $Cshare/container.CMD.sh
 [Install]
 WantedBy=x11docker.target
 WantedBy=multi-user.target
@@ -3521,7 +3523,8 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(while 
     runit)
       warning "Option --runit slightly degrades container isolation.
   Beside some user switching capabilities x11docker would disable otherwise
-  it adds capability SYS_BOOT."
+  it adds capability SYS_BOOT.
+  runit services started as root might try to abuse their privileges."
       Stopsignal="HUP"
       store_runoption env "VIRTUALIZATION=docker"
     ;;
@@ -3529,13 +3532,15 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(while 
     openrc)
       warning "Option --openrc slightly degrades container isolation.
   Beside some user switching capabilities x11docker would disable otherwise
-  it adds capability SYS_BOOT."
+  it adds capability SYS_BOOT.
+  OpenRC services started as root might try to abuse their privileges."
     ;;
 
     sysvinit)
       warning "Option --sysvinit slightly degrades container isolation.
   Beside some user switching capabilities x11docker would disable otherwise
-  it adds capability SYS_BOOT."
+  it adds capability SYS_BOOT.
+  SysVinit services started as root might try to abuse their privileges."
       Stopsignal="INT"
     ;;
   esac
@@ -3663,31 +3668,30 @@ create_dockercommand() {        # create command to run docker
   Dockercommand="$Dockercommand \\
   --name $Containername"
 
-  case $Createcontaineruser in
-    yes)
-      # Disable user namespacing to avoid file permission issues with --home or --sharedir. Files need same UID/GID.
-      Dockercommand="$Dockercommand \\
-  --userns host"
-  
-      # container user. init systems switch later.
-      case $Initsystem in
-        none|tini)
-          case $Switchcontaineruser in
-            no) Dockercommand="$Dockercommand \\
+  # container user. init systems switch later.
+  case $Initsystem in
+    none|tini)
+      case $Switchcontaineruser in
+        no) 
+          [ "$Createcontaineruser" = "yes" ] && Dockercommand="$Dockercommand \\
   --user $Containeruseruid:$Containerusergid \\
-  --env USER=$Containeruser" ;;
-            yes) Dockercommand="$Dockercommand \\
+  --env USER=$Containeruser" 
+        ;;
+        yes) Dockercommand="$Dockercommand \\
   --user root \\
   --env USER=root" ;;
-          esac
-        ;;
-        systemd|runit|openrc|sysvinit)
-          Dockercommand="$Dockercommand \\
-  --user root" ;;
       esac
     ;;
-    no) ;;
+    systemd|runit|openrc|sysvinit)
+      Dockercommand="$Dockercommand \\
+  --user root" ;;
   esac
+  
+  [ "$Createcontaineruser" = "yes" ] && {
+    # Disable user namespacing to avoid file permission issues with --home or --sharedir. Files need same UID/GID.
+    Dockercommand="$Dockercommand \\
+  --userns host"
+  }
   
   # add container user groups, mainly video and audio and --group-add
   [ "$Switchcontaineruser" = "no" ] && {
@@ -3885,6 +3889,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo "    exit 1"
   echo "  }"
   echo "}"
+  
   echo "# check CMD"
   echo "[ -z \"\$Imagecommand\" ] && {"
   echo "  # extract image command from image if not given on cli"
@@ -3893,7 +3898,23 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo "  Imagecommand=\"\${Imagecommand%]}\""
   echo "  Imagecommand=\"\${Imagecommand#/bin/sh -c }\""
   echo "}"
-
+  
+  echo "# check USER"
+  echo "Imageuser=\$(docker inspect --format '{{.Config.User}}' $Imagename | rmcr)"
+  case $Createcontaineruser in
+    yes)
+      echo "[ \"\$Imageuser\" ] && note \"Found 'USER \$Imageuser' in image."
+      echo "  If you want to run with user \$Imageuser instead of host user $Containeruser,"
+      echo "  than run with --user=RETAIN.\""
+      echo "echo $Containeruser >> $Containeruserfile"
+      echo "sed -i \"s/CONTAINERUSER/$Containeruser/\"  $Systemdstartcmd"
+    ;;
+    no)
+      echo "echo \${Imageuser:-root} >> $Containeruserfile"
+      echo "sed -i \"s/CONTAINERUSER/\${Imageuser:-root}/\"  $Systemdstartcmd"
+    ;;
+  esac
+  
   [ "$Tinibinary" ] && echo "Tini=\"$Cshare/tini --\"" || echo "Tini="
   echo "Exec=exec"
   case $Noentrypoint in
@@ -4169,12 +4190,14 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
 } >> $Dockerrc
 create_containerrootrc() {      # create container root setup script: This script runs as root in container
   local Line=
-  
+
   echo "#! /bin/sh"
   echo "# set up docker container as root before ongoing in unprivileged container.CMD.sh"
   echo "# commands in this script are executed as root in container"
   
-  #[ "$Debugmode" = "yes" ] && echo "set -x"
+  echo "id"
+  
+  [ "$Debugmode" = "yes" ] && echo "set -x"
   
   echo "$Messagefifofuncs"
   echo "Messagefile=$Cshare/message.fifo"
@@ -4182,14 +4205,14 @@ create_containerrootrc() {      # create container root setup script: This scrip
 
   echo "verbose -d 'Running setup as root in container'"
 
-  # check type of libc
+  echo "# check type of libc"
   echo "ldd --version 2>&1 | grep -q 'musl libc' && Containerlibc='musl'"
   echo "ldd --version 2>&1 | grep -q -E 'GLIBC|GNU libc'  && Containerlibc='glibc'"
 
   echo 'verbose -d "Container libc: $Containerlibc"'
   echo ""
 
-  # prepare X environment
+  echo "# prepare X environment"
   echo "# create some system dirs with needed permissions"
   echo "mkdir -v -p /var/lib/dbus /var/run/dbus"
   echo "mkdir -v -p -m 1777 /tmp/.ICE-unix /tmp/.X11-unix /tmp/.font-unix"
@@ -4202,7 +4225,7 @@ create_containerrootrc() {      # create container root setup script: This scrip
   }
   echo ""
 
-  # time zone
+  echo "# time zone"
   [ "$Hostlocaltime" ] && {
     echo '[ ! -d /usr/share/zoneinfo ] && [ "$Containerlibc" = "'$Hostlibc'" ] && {'
     echo "  mkdir -p $(dirname $Hostlocaltime)"
@@ -4216,17 +4239,21 @@ create_containerrootrc() {      # create container root setup script: This scrip
   echo "verbose \"Container system ID: \$Containersystem\""
   echo ""
 
-  # custom environment variables
+  echo "# environment variables"
   while read -r Line; do
     echo "export '$Line'"
   done < <(store_runoption dump env)
   echo ""
 
+  echo "# Check container user"
+  echo "Containeruser=\$(cat $Cshare/container.user)"
+  echo ""
+  
   case $Createcontaineruser in
     yes)
       # create container user
       echo "# create user entry in /etc/passwd (and delete possibly existing same uid)"
-      echo "getent passwd | grep -v \$(getent passwd $Containeruseruid || echo USERNOTFOUND) > /tmp/passwd"
+      echo "getent passwd | grep -v \"\$(getent passwd $Containeruseruid || echo USERNOTFOUND)\" > /tmp/passwd"
       echo "# disable possible /etc/shadow passwords for other users"
       echo "sed -i s%:x:%:-:% /tmp/passwd"
       echo "echo '$Containeruser:x:$Containeruseruid:$Containerusergid:$Containeruser,,,:$Containeruserhome:/bin/sh' >> /tmp/passwd"
@@ -4243,19 +4270,6 @@ create_containerrootrc() {      # create container root setup script: This scrip
         ;;
       esac
       echo ""
-  
-      for Line in $Containerusergroups ; do
-        echo "Groupname=$(getent group $Line | cut -d: -f1)"
-        echo "Groupid=$(getent group $Line | cut -d: -f3)"
-        echo "[ \"\$Groupname\" ] || Groupname=\$(getent group $Line | cut -d: -f1)"
-        echo "[ \"\$Groupid\" ]   || Groupid=\$(getent group $Line | cut -d: -f3)"
-        echo "[ \"\$Groupname\" ] && {"
-        echo "  getent group | sed \"s/^\$Groupname.*/\$Groupname:x:\$Groupid:\$(getent group \$Groupname | cut -d: -f4 ),$Containeruser/\" | sed 's/:,/:/' > /tmp/group"
-        echo "  getent group \$Groupname >/dev/null || echo \$Groupname:x:\$Groupid:$Containeruser >> /tmp/group"
-        echo "  cp /tmp/group /etc/group"
-        echo "}"
-        echo ""
-      done
   
       echo ""
       echo "# create user group entry (and delete possibly existing same gid)"
@@ -4286,7 +4300,31 @@ create_containerrootrc() {      # create container root setup script: This scrip
         echo ""
       }
     ;;
+    no)
+      # check container user home. Can miss with --user=RETAIN
+      echo "Containeruserhome=\$(getent passwd \$Containeruser | cut -d: -f6)"
+      echo "Containeruserhome=\${Containeruserhome:-/tmp/\$Containeruser}"
+      echo "mkdir -p \$Containeruserhome"
+      echo "chown \$Containeruser \$Containeruserhome"
+      echo ""
+      echo "note \"User in container: \$(id \$Containeruser)
+\$(getent passwd \$Containeruser)\""
+    ;;
   esac
+  
+  echo "# Set up container user groups"
+  for Line in $Containerusergroups ; do
+    echo "Groupname=$(getent group $Line | cut -d: -f1)"
+    echo "Groupid=$(getent group $Line | cut -d: -f3)"
+    echo "[ \"\$Groupname\" ] || Groupname=\$(getent group $Line | cut -d: -f1)"
+    echo "[ \"\$Groupid\" ]   || Groupid=\$(getent group $Line | cut -d: -f3)"
+    echo "[ \"\$Groupname\" ] && {"
+    echo "  getent group | sed \"s/^\$Groupname.*/\$Groupname:x:\$Groupid:\$(getent group \$Groupname | cut -d: -f4 ),\$Containeruser/\" | sed 's/:,/:/' > /tmp/group"
+    echo "  getent group \$Groupname >/dev/null || echo \$Groupname:x:\$Groupid:\$Containeruser >> /tmp/group"
+    echo "  cp /tmp/group /etc/group"
+    echo "}"
+    echo ""
+  done
 
   # --gpu with closed source nvidia driver
   [ "$Nvidiadriver" ] && {
@@ -4351,25 +4389,26 @@ Fallback: Skipping installation of nvidia driver'"
     runit)
       echo "# create and enable x11docker service containing image command"
       echo "mkdir -p /etc/sv/x11docker"
-      echo "printf '#! /bin/sh
+      echo "echo \"#! /bin/sh
 waitforservice() {
-  Service=\$1
-  [ \"\$(sv check \$Service | cut -d: -f1)\" = \"ok\" ] && {
+  Service=\\\$1
+  [ \\\"\\\$(sv check \\\$Service | cut -d: -f1)\\\" = 'ok' ] && {
     echo \"x11docker: waiting for service \$Service ...\"
     for Count in $(seq -s' ' 20); do
-      [ \"\$(sv status \$Service | cut -d: -f1)\" = \"down\" ] && sleep 0.2 || break
+      [ \\\"\\\$(sv status \\\$Service | cut -d: -f1)\\\" = 'down' ] && sleep 0.2 || break
     done
   }
 }
 # make stderr visible
 exec 2>&1
 # wait for all other services
-for Service in \$(ls /etc/runit/runsvdir/default/) ; do waitforservice \$Service ;done
-echo \"Current status of runit services:\"
-for Service in \$(ls /etc/runit/runsvdir/default/) ; do sv status      \$Service ;done
-su - --shell=/bin/sh $Containeruser $Cshare/container.CMD.sh
+for Service in \\\$(ls /etc/runit/runsvdir/default/) ; do waitforservice \\\$Service ;done
+echo 'Current status of runit services:'
+for Service in \\\$(ls /etc/runit/runsvdir/default/) ; do sv status      \\\$Service ;done
+su - --shell=/bin/sh \$Containeruser $Cshare/container.CMD.sh
 runit-init 0
-' > /etc/sv/x11docker/run"
+\" > /etc/sv/x11docker/run"
+echo "cat /etc/sv/x11docker/run"
       echo "chmod +x /etc/sv/x11docker/run"
       echo "ln -s /etc/sv/x11docker /etc/runit/runsvdir/default"
       echo "verbose 'DBus: enabling dbus service'"
@@ -4384,7 +4423,7 @@ depend() {
 }
 start() {
   ebegin 'Starting container.CMD.sh'
-  su - -s /bin/sh $Containeruser $Cshare/container.CMD.sh
+  su - -s /bin/sh \$Containeruser $Cshare/container.CMD.sh
   openrc shutdown
   halt
   eend \$?
@@ -4400,7 +4439,7 @@ start() {
     sysvinit)
       echo "# add x11docker start command to rc.local"
       echo "sed -i '/exit 0/d' /etc/rc.local"
-      echo "echo 'su - -s /bin/sh $Containeruser $Cshare/container.CMD.sh || echo \"x11docker: Exit code of x11docker.CMD.sh: \$?\"
+      echo "echo 'su - -s /bin/sh \$Containeruser $Cshare/container.CMD.sh || echo \"x11docker: Exit code of x11docker.CMD.sh: \$?\"
 echo \"x11docker: rc.local sends shutdown -h now\"
 shutdown -h now
 exit 0' >> /etc/rc.local"
@@ -4413,10 +4452,6 @@ exit 0' >> /etc/rc.local"
   # start dbus daemon and dbus services
   case $Dbussystem in
     yes)
-      echo 'warning "Will run DBus system services as root in container.
-  If the image contains malicious applications started by DBus service files,
-  they may abuse their root privileges and may try to break out of container."'
-      echo '[ "$Containersystem" = "arch" ] && warning "Option --dbus-system can be quite slow in arch linux containers. Rather install systemd in arch image and run with --systemd."'
       echo "verbose 'DBus: removing failing or useless services.'"
       echo "for Line in \$(find /usr/share/dbus-1/system-services /usr/share/dbus-1/services -type f); do"
       echo '  Name="$(cat $Line | grep Name= | cut -d= -f2)"'
@@ -4476,8 +4511,16 @@ exit 0' >> /etc/rc.local"
       echo "done"
     ;;
   esac
-  [ "$Initsystem" = "systemd" ] || case $Dbussystem in
-    yes)
+
+  [ "$Dbussystem" = "yes" ] && case $Initsystem in
+    tini|none)
+      echo 'warning "Will run DBus system services as root in container.
+  If the image contains malicious applications started by DBus service files,
+  they might abuse their root privileges and may try to break out of container."'
+      echo 'note "Option --dbus-system can have a long 90s delay in some setups.
+  In that case install systemd in image and run with --systemd.
+  (Also --runit, --openrc or --sysvinit can be set up and used)."'  ### FIXME
+
       echo "echo 'x11docker: DBus: starting dbus system daemon'"
       echo "dbus-daemon --system --fork"
       echo "for Count in 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0; do"
@@ -4588,7 +4631,7 @@ exit 0' >> /etc/rc.local"
     echo "# custom setup root command added with option --runasroot"
     echo "$Runasroot"
   }
-
+  
   # message to container.CMD.sh
   echo "echo 'x11docker: Container root setup is ready'"
   echo ":> /x11docker.setupready"
@@ -4596,12 +4639,12 @@ exit 0' >> /etc/rc.local"
   [ "$Switchcontaineruser" = "yes" ] && {   # if "no", container.CMD.sh is executed in command line $Dockercommand
     case $Initsystem in
       none)
-        echo "/bin/su - -s /bin/sh $Containeruser $Cshare/container.CMD.sh"
+        echo "/bin/su - -s /bin/sh \$Containeruser $Cshare/container.CMD.sh"
       ;;
       tini)
         echo "Exec=exec"
         [ "$Sharecgroup" = "yes" ] && echo '[ "$Loginservice" ] && Exec='
-        echo "\$Exec /bin/su - -s /bin/sh $Containeruser $Cshare/container.CMD.sh"
+        echo "\$Exec /bin/su - -s /bin/sh \$Containeruser $Cshare/container.CMD.sh"
       ;;
       runit|openrc|sysvinit)
         echo "{
@@ -5175,6 +5218,7 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Containerpidfile="$Cachefolder/$Containerpidfile"                 && mkfile $Containerpidfile
   Containeridfile="$Cachefolder/$Containeridfile"                   && mkfile $Containeridfile
   Containerpid1pidfile="$Cachefolder/$Containerpid1pidfile"         && mkfile $Containerpid1pidfile
+  Containeruserfile="$Sharefolder/$Containeruserfile"               && mkfile $Containeruserfile
   Dockerrc="$Cachefolder/$Dockerrc"                                 && mkfile $Dockerrc
   Containerrootrc="$Sharefolder/$Containerrootrc"                   && mkfile $Containerrootrc
   Containeripfile="$Cachefolder/$Containeripfile"                   && mkfile $Containeripfile
@@ -5194,14 +5238,12 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Xorgwrapper="$Cachefolder/$Xorgwrapper"                           && mkfile $Xorgwrapper
   Xkbkeymapfile="$Cachefolder/$Xkbkeymapfile"                       && mkfile $Xkbkeymapfile
   
-  [ "$Initsystem" = "systemd" ] && {
-    Systemdtarget=$Cachefolder/x11docker.target                       && mkfile $Systemdtarget
-    Systemdstartcmd=$Cachefolder/x11docker-startcmd.service           && mkfile $Systemdstartcmd
-    Systemdwatch=$Cachefolder/x11docker-watch.service                 && mkfile $Systemdwatch
-    Systemdjournal=$Cachefolder/x11docker-journal.service             && mkfile $Systemdjournal
-    Journallogfile=$Sharefolder/journalctl.log                        && mkfile $Journallogfile
-    Systemdenvironment=$Cachefolder/systemd.env.conf                  && mkfile $Systemdenvironment
-  }
+  Systemdtarget=$Cachefolder/x11docker.target                       && mkfile $Systemdtarget
+  Systemdstartcmd=$Cachefolder/x11docker-startcmd.service           && mkfile $Systemdstartcmd
+  Systemdwatch=$Cachefolder/x11docker-watch.service                 && mkfile $Systemdwatch
+  Systemdjournal=$Cachefolder/x11docker-journal.service             && mkfile $Systemdjournal
+  Journallogfile=$Sharefolder/journalctl.log                        && mkfile $Journallogfile
+  Systemdenvironment=$Cachefolder/systemd.env.conf                  && mkfile $Systemdenvironment
 
   # Cache folder for x11docker-gui. Created here to store image list in dockerrc for x11docker-gui
   mkdir -p $Cachebasefolder/x11docker-gui && chown $Hostuser $Cachebasefolder/x11docker-gui
@@ -5608,29 +5650,17 @@ check_option_interferences() {  # check multiple option interferences, change se
   case $Createcontaineruser in
     no)
       [ "$Sharehosthome" = "yes" ] && {
-        note "Option --home is not supported with option --user=RETAIN.
+        warning "Option --home is not supported with option --user=RETAIN.
+  You can use option --sharedir to share host directories.
+  To use option --home, you can check uid and gid of container user
+  and run x11docker with --user=uid:gid instead of --user=RETAIN.
   Fallback: Disabling option --home."
         Sharehosthome="no"
       }
-      [ "$Sudouser" = "yes" ] && {
-        note "Option --sudouser has limited support with --user=RETAIN.
+      [ "$Sudouser" = "yes" ] && note "Option --sudouser has limited support with --user=RETAIN.
   x11docker will only set needed capabilities. 
   User setup and /etc/sudoers won't be touched.
   Option --group-add=sudo might be useful."
-      }
-      [ "$Dbussystem" = "yes" ] && {
-        note "Option --dbus-system is not supported with --user=RETAIN.
-  Fallback: Disabling option --dbus-system, enabling --dbus."
-        Dbussystem="no"
-        Dbusrunsession="yes"
-      }
-      case $Initsystem in
-        systemd|sysvinit|openrc|runit)
-          note "Option --$Initsystem is not supported with --user=RETAIN.
-  Fallback: Disabling option --$Initsystem."
-          Initsystem="tini"
-        ;;
-      esac
     ;;
   esac
   
@@ -5998,6 +6028,7 @@ declare_variables() {           # declare global variables
   Homebasefolder=""                               # option --homebasedir: base directory for container home with --home
   Createcontaineruser="yes"
   Containeruser=""                                # option --user: container user. Default: same as $Hostuser.
+  Imageuser=""                                    # option --user=RETAIN: possible USER in image
   Containeruseruid=""
   Containerusergid=""
   Containerusergroup=""
@@ -6065,6 +6096,7 @@ declare_variables() {           # declare global variables
   Containeridfile=container.id                    # file to store container ID
   Containeripfile=container.ip                    # file to store container IP
   Containerpid1pidfile=container.pid1pid          # file to store host PID of container PID 1
+  Containeruserfile=container.user
 
   # X server config files, log files and such stuff
   Xinitrc=xinitrc                                 # generated xinitrc script
@@ -6642,6 +6674,8 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
+  # --dbus-system: slow startup e.g. in arch and with --user=RETAIN for unknown reasons. Due to exec? Avoid it for --openrc, --runit, --sysvinit, check/create service instead
+
   # further checks of pam.d
   # --internet to allow internet access, otherwise --net=none?
   # --group-add: further checks? mismatch messagebus-101-systemd-journal, works nonetheless.
