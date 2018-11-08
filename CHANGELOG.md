@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [5.3.2](https://github.com/mviereck/x11docker/releases/tag/v5.3.2) - 2018-11-08
 ### Added
  - `--user=RETAIN`: Keep user settings of image instead of creating a new one.
    [(#85)](https://github.com/mviereck/x11docker/issues/85)

@@ -150,6 +150,7 @@ See also: [wiki: Init systems in docker: tini, systemd, SysVinit, runit, OpenRC 
 Some desktop environments and applications need a running DBus daemon and/or DBus user session. 
  - use `--dbus` to run a DBus user session daemon.
  - use `--dbus-system` to run DBus system daemon. This includes option `--dbus`.
+   - If startup fails or takes about 90s, install an init system and use that one to run DBus. E.g. install `systemd` in image and run with `--systemd`.
  - use `--hostdbus` to connect to host DBus user session.
  - use `--sharedir /run/dbus/system_bus_socket` to share host DBus system socket.
 
@@ -204,9 +205,7 @@ Core concept is:
    - You can also specify another user with `--user=USERNAME` or a non-existing one with `--user=UID:GID`.
    - Disables possible root password and deletes entries in `/etc/sudoers`.
      - If you want root permissions in container, use option `--sudouser` that allows `su` and `sudo` with password `x11docker`. Alternatively you can run with `--user=root`. 
-   - If you want to use `USER` specified in image instead, set option `--user=RETAIN`. x11docker won't change `etc/passwd` or `/etc/sudoers` in that case. 
-     - Option `--sudouser` will only set needed capabilities for container user. 
-     - Option `--home` and some init system options won't be available.
+   - If you want to use `USER` specified in image instead, set option `--user=RETAIN`. x11docker won't change `etc/passwd` or `/etc/sudoers` in that case. Option `--home` won't be available.
  - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
    - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. 
    - This restriction can be disabled with x11docker option `--cap-default` or reduced with `--sudouser`.
@@ -215,7 +214,8 @@ _Weaknesses:_
  - Possible SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. 
    A more restrictive solution is desirable.
    Compare: [SELinux and docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
- - User namespace remapping is disabled to allow options `--home` and `--homedir` without file ownership issues. (Though, this is less an issue because x11docker already avoids root in container).
+ - User namespace remapping is disabled to allow options `--home` and `--homedir` without file ownership issues. (Though, this is less an issue because x11docker already avoids root in container). 
+   Exception: User namespace remapping is not disabled for `--user=RETAIN`.
 
 ## Options degrading container isolation
 x11docker shows warning messages in terminal if chosen options degrade container isolation.
@@ -224,7 +224,7 @@ _Most important:_
   - `--hostdisplay` shares host X socket of display :0 instead of running a second X server. 
     - Danger of abuse is reduced providing so-called untrusted cookies, but do not rely on this. 
     - If additionally using `--gpu` or `--clipboard`, option `--hostipc` and trusted cookies are enabled and no protection against X security leaks is left. 
-    - If you don't care about container isolation, `x11docker --hostdisplay --gpu` is an insecure, but quite fast setup without any overhead.
+    - If you don't care about container isolation, `x11docker --hostdisplay --gpu` is an insecure but quite fast setup without any overhead.
   - `--gpu` allows access to GPU hardware. This can be abused to get window content from host ([palinopsia bug](https://hsmr.cc/palinopsia/)) and makes [GPU rootkits](https://github.com/x0r1/jellyfish) possible.
   - `--pulseaudio` and `--alsa` allow catching audio output and microphone input from host.
   
@@ -277,6 +277,8 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
    - Use option `--verbose` to see full logfile output.
      - Option `-D, --debug` gives a less verbose output. `-DQ` is short for `--debug --stdout --stderr`.
      - You can find the latest dispatched logfile at `~/.cache/x11docker/x11docker.log`.
+ - Some applications fail with fallback option `--hostdisplay`. Add `--clipboard` to disable some security restrictions.
+   If that does not help, install [additional X servers](#dependencies).
  - Make sure your x11docker version is up to date with `x11docker --update` (latest release) or `x11docker --update-master` (latest beta).
  - Some applications need more privileges or capabilities than x11docker provides as default. 
    - Reduce container isolation with e.g.:
@@ -287,7 +289,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
      - If `--cap-add ALL` helps, find the [capability](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) you really need and add only that one.
      - If `--privileged` helps, your application probably needs a device in `/dev`. Find out which one and share it with e.g. `--device /dev/snd`.
    - You can run container applications as root with `--user=root`.
- - A few applications need DBus. Install `dbus` in image and try option `--dbus`. If that does not help, try option `--dbus-system`.
+ - A few applications need [DBus](#dbus). Install `dbus` in image and try option `--dbus`. If that does not help, try option `--dbus-system`.
  - A few applications need systemd. Install `systemd` in image and try option `--systemd`.
  - Get help in the [issue tracker](https://github.com/mviereck/x11docker/issues). 
    - Most times it makes sense to store the `--verbose`output (or `x11docker.log`) at [pastebin.com](https://pastebin.com/).
