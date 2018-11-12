@@ -108,8 +108,8 @@ Sound is possible with options `--pulseaudio` and `--alsa`.
 ## Webcam
 Webcams on host can be shared with option `--webcam`.
  - If webcam application in image fails, install `mesa-utils` (debian) or `mesa-demos` (arch) in image. 
- - `cheese` is not recommended. It needs `--systemd` and `--privileged`. Privileged setup is a no-go.
  - `guvcview` needs `--pulseaudio` or `--alsa`.
+ - `cheese` and [`Ring`](https://ring.cx/) need `--systemd` or `--dbus-system`.
  
 ## Printer
 Printers on host can be provided to container with option `--printer`. 

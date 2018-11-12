@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Fixed
+ - `--webcam`: Share `/run/udev/data` to provide device informations for 
+   `cheese` and `gnome-ring`.
+   [(#86)](https://github.com/mviereck/x11docker/issues/86)
+   [(#75)](https://github.com/mviereck/x11docker/issues/75)
+
 ## [5.3.2](https://github.com/mviereck/x11docker/releases/tag/v5.3.2) - 2018-11-08
 ### Added
  - `--user=RETAIN`: Keep user settings of image instead of creating a new one.
