@@ -113,6 +113,7 @@ Clipboard, sound, printer, language:
 Special options:
      --env VAR=value   Set custom environment variable VAR=value
                        Special use case for user shell: '--env SHELL=/bin/sh'
+     --interactive     Run with an interactive tty to allow shell commands.
      --name NAME       Specify container name NAME.
      --no-internet     Disable internet access for container.
      --no-entrypoint   Disable ENTRYPOINT in image to allow other commands, too
@@ -3663,8 +3664,12 @@ setup_hostdbus() {              # option --hostdbus: connect to host DBus sessio
 create_dockercommand() {        # create command to run docker
   local Line=
   
-  Dockercommand="$Dockerexe run --detach --tty"
+  Dockercommand="$Dockerexe run --tty"
   [ "$Preservecachefiles" = "no" ] && Dockercommand="$Dockercommand --rm"
+  case $Interactive in
+    yes) Dockercommand="$Dockercommand --interactive" ;;
+    no)  Dockercommand="$Dockercommand --detach" ;;
+  esac
 
   [ -z "$Containername" ] && Containername="x11docker_X${Newdisplaynumber}_${Mycookie}_$Codename"
   Dockercommand="$Dockercommand \\
@@ -4100,10 +4105,16 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo   '  [ "$Workdir" ] && echo "[ -d \"$Workdir\" ] && cd \"$Workdir\"   # WORKDIR in image"'
   [ "$Workdir" = "/tmp" ] || echo "  echo 'cd $Workdir'"                             # x11docker option --workdir
   echo   "  echo ''"
-
-  echo   "  echo verbose -d \"Running image command: \$Tini \\\$Dbus \$Entrypoint \$Imagecommand\""
-  echo   "  echo \"\$Exec \$Tini \\\$Dbus \$Entrypoint \$Imagecommand $( [ "$Forwardstdin" = "yes" ] && echo "<$Cshare/stdin") >>$Cshare/stdout 2>>$Cshare/stderr\""
-
+  
+  case $Interactive in
+    no)
+      echo   "  echo verbose -d \"Running image command: \$Tini \\\$Dbus \$Entrypoint \$Imagecommand\""
+      echo   "  echo \"\$Exec \$Tini \\\$Dbus \$Entrypoint \$Imagecommand $( [ "$Forwardstdin" = "yes" ] && echo "<$Cshare/stdin") >>$Cshare/stdout 2>>$Cshare/stderr\""
+    ;;
+    yes)
+      echo   "  echo \"\$Exec \$Tini \\\$Dbus \$Entrypoint \$Imagecommand\""
+    ;;
+  esac
   echo   "  echo '# Ready for docker run'"
   echo   "} >> $Imagecommandscript"
   #### End of container.CMD.sh ####
@@ -4150,7 +4161,15 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
 
   #### run docker image ####
   [ "$Winsubsystem" = "MSYS2" ] && echo "export MSYS2_ARG_CONV_EXCL='*'"
-  echo "read Containerid < <($Dockercommand 2>>$Containerlogfile | rmcr)"
+  case $Interactive in
+    no)  
+      echo "read Containerid < <($Dockercommand 2>>$Containerlogfile | rmcr)" 
+    ;;
+    yes)
+      echo "$Dockercommand <&0 &"
+      echo "Containerid=$Containername"
+    ;;
+  esac
   ##########################
 
   echo ""
@@ -6001,7 +6020,7 @@ setup_fifo() {                  # set up fifo channels (also option --stdin)
 #### main
 declare_variables() {           # declare global variables
   export IFS=$' \n\t'                             # set IFS to default
-
+  
   export PATH="$PATH:/usr/games:/usr/local/bin"   # can miss for root, but might be needed for --exe and --xfishtank
   export PATH="$PATH:/usr/sbin:/sbin"             # can miss for unprivileged users, but might be needed for `ip`
 
@@ -6227,6 +6246,7 @@ declare_variables() {           # declare global variables
   # advanced options
   Containerenvironment=""                         # option '--env': set custom environment variables
   Containerenvironmentcount="0"
+  Interactive="no"                                # option --interactive: Run docker with interactive tty yes/no
   Capdropall="yes"                                # option --cap-default: (don't) drop all container capabilities
   Adminusercaps="no"                              # options --sudouser, --systemd: add capabilities for general sys administration
   Switchcontaineruser="no"                        # options for init systems: user switching to toggle login daemons
@@ -6317,7 +6337,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,launcher,cleanup,license,licence,help,version,install,update,update-master,remove,wmlist"      # special options without starting X or container
   Longoptions="$Longoptions,verbose::,silent,debug,stdout,stderr,stdin"                                                    # verbose options
   Longoptions="$Longoptions,hostipc,hostnet,ps,cache,cap-default,sudouser,hostuser:,user:,group-add:,name:"                # capabilities, users
-  Longoptions="$Longoptions,keymap:,name:,no-entrypoint,runfromhost:,runasroot:,westonini:"                                # developer options
+  Longoptions="$Longoptions,keymap:,name:,no-entrypoint,runfromhost:,runasroot:,westonini:,interactive"                    # developer options
   Longoptions="$Longoptions,cachedir:,starter,trusted,untrusted,xtest,no-xtest"                                            # deprecated
   
   Parsedoptions="$(getopt --options $Shortoptions --longoptions $Longoptions --name "$0" -- "$@" 2>/tmp/x11docker_parsererror)"
@@ -6397,6 +6417,7 @@ parse_options() {               # parse cli options
          --webcam)     Sharewebcam="yes" ;;                # share webcam
 
      #### Advanced options
+         --interactive) Interactive="yes" ;;               # run with interactive tty
          --no-entrypoint) Noentrypoint="yes" ;;            # don't use ENTRYPOINT of image
          --no-internet)Internetaccess="no" ;;              # disallow internet access
          --workdir)    Workdir="${2:-}" ; shift ;;         # set working directory
@@ -6672,7 +6693,7 @@ $(nl -ba <$Westonini)"
     
     debugnote "Process tree of x11docker:
   $(pstree -p $$ 2>&1 ||:)"
-  } & storepid $! containershell
+  } <&0 & storepid $! containershell
   
   #### Start X server [and/or Wayland compositor]
   [ "$Compositorcommand" ] && start_compositor

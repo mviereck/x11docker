@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
+### Added
+ - `--interactive`: New option to run with an interactive TTY.
+   [(#87)](https://github.com/mviereck/x11docker/issues/86)
 ### Fixed
  - `--webcam`: Share `/run/udev/data` to provide device informations for 
    `cheese` and `gnome-ring`.
