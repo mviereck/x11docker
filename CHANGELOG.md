@@ -6,15 +6,25 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [5.3.3](https://github.com/mviereck/x11docker/releases/tag/v5.3.3) - 2018-11-17
 ### Added
- - `--interactive`: New option to run with an interactive TTY.
+ - `-i, --interactive`: New option to run with an interactive TTY.
    [(#87)](https://github.com/mviereck/x11docker/issues/86)
+ - `-t, --tty`: Replaces `--nothing`. Run no X server, TTY only.
+   Allows `-ti` similar to often used `docker run -ti`. 
+ - `-q, --quiet`: Replaces `--silent`. Suppress x11docker messages.
+### Deprecated
+ - `--silent`: Use `--quiet` instead.
+ - `--nothing`: Use `--tty` instead.
+ - `--stdout`: stdout is always displayed now.
+ - `--stderr`: stderr is always displayed now.
+ - `-Q`: stdout and stderr are always displayed now.
 ### Fixed
- - `--webcam`: Share `/run/udev/data` to provide device informations for 
+ - `--webcam`: Share `/run/udev/data` to provide device information for 
    `cheese` and `gnome-ring`.
    [(#86)](https://github.com/mviereck/x11docker/issues/86)
    [(#75)](https://github.com/mviereck/x11docker/issues/75)
+ - `--sysvinit`: fixed startup failure due to missing container user name.
 
 ## [5.3.2](https://github.com/mviereck/x11docker/releases/tag/v5.3.2) - 2018-11-08
 ### Added

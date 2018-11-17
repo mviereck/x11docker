@@ -57,7 +57,9 @@ System changes in running containers are discarded after use.
 # Terminal usage
 Just type `x11docker IMAGENAME [IMAGECOMMAND]`. 
  - Get an [overview of options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`. 
- - For desktop environments in image add option `--desktop` (or short option `-d`).
+ - For desktop environments in image add option `-d, --desktop`.
+   - To run without X at all use option `-t, --tty`.
+   - Get an interactive TTY with option `-i, --interactive`.
  - If startup fails, look at chapter [Troubleshooting](#troubleshooting).
  
 General syntax:
@@ -109,7 +111,7 @@ Sound is possible with options `--pulseaudio` and `--alsa`.
 Webcams on host can be shared with option `--webcam`.
  - If webcam application in image fails, install `mesa-utils` (debian) or `mesa-demos` (arch) in image. 
  - `guvcview` needs `--pulseaudio` or `--alsa`.
- - `cheese` and [`Ring`](https://ring.cx/) need `--systemd` or `--dbus-system`.
+ - `cheese` and [`gnome-ring`](https://ring.cx/) need `--systemd` or `--dbus-system`.
  
 ## Printer
 Printers on host can be provided to container with option `--printer`. 
@@ -250,7 +252,7 @@ and [WSL (Windows subsystem for Linux)](https://docs.microsoft.com/en-us/windows
  
 # Installation
 ### Installation options
-As root, you can install, update and remove x11docker on your system:
+As root you can install, update and remove x11docker on your system:
  - `x11docker --install` : install x11docker and x11docker-gui from current directory. 
  - `x11docker --update` : download and install latest [release](https://github.com/mviereck/x11docker/releases) from github.
  - `x11docker --update-master` : download and install latest master version from github.
@@ -266,16 +268,15 @@ rm /tmp/x11docker
 ```
 ### Minimal installation
 For a first test, you can run with `bash x11docker` respective `bash x11docker-gui`. 
-For minimal installation, make `x11docker` executable with `chmod +x x11docker` and move it to `/usr/bin`.
+For minimal installation make `x11docker` executable with `chmod +x x11docker` and move it to `/usr/bin`.
 
 
 
 # Troubleshooting
 For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. 
  - x11docker shows warnings if something is insecure, missing or going wrong. 
-   - Use options `--stdout --stderr` (short `-Q`) to get application output, too.
    - Use option `--verbose` to see full logfile output.
-     - Option `-D, --debug` gives a less verbose output. `-DQ` is short for `--debug --stdout --stderr`.
+     - Option `-D, --debug` gives a less verbose output.
      - You can find the latest dispatched logfile at `~/.cache/x11docker/x11docker.log`.
  - Some applications fail with fallback option `--hostdisplay`. Add `--clipboard` to disable some security restrictions.
    If that does not help, install [additional X servers](#dependencies).
@@ -287,7 +288,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
      - Example: `x11docker --cap-default --hostipc --hostnet --sys-admin -- --cap-add ALL --security-opt seccomp=unconfined --privileged -- imagename`
      - Try with reduced container isolation. If it works, drop options one by one until the needed one(s) are left.
      - If `--cap-add ALL` helps, find the [capability](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) you really need and add only that one.
-     - If `--privileged` helps, your application probably needs a device in `/dev`. Find out which one and share it with e.g. `--device /dev/snd`.
+     - If `--privileged` helps, your application probably needs a device in `/dev`. Find out which one and share it with e.g. `--device /dev/snd`. Try also `--sharedir /dev/udev/data:ro`.
    - You can run container applications as root with `--user=root`.
  - A few applications need [DBus](#dbus). Install `dbus` in image and try option `--dbus`. If that does not help, try option `--dbus-system`.
  - A few applications need systemd. Install `systemd` in image and try option `--systemd`.
@@ -297,7 +298,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
    
 
 # Examples
-[Some desktop image examples can be found on docker hub.](https://hub.docker.com/u/x11docker/)
+[Desktop image examples can be found on docker hub.](https://hub.docker.com/u/x11docker/)
 
 | Application | x11docker command |
 | --- | --- |
