@@ -57,7 +57,7 @@ System changes in running containers are discarded after use.
 # Terminal usage
 Just type `x11docker IMAGENAME [IMAGECOMMAND]`. 
  - Get an [overview of options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`. 
- - For desktop environments in image add option `-d, --desktop`.
+   - For desktop environments in image add option `-d, --desktop`.
    - To run without X at all use option `-t, --tty`.
    - Get an interactive TTY with option `-i, --interactive`.
  - If startup fails, look at chapter [Troubleshooting](#troubleshooting).
@@ -84,6 +84,7 @@ Description of some commonly used [options](https://github.com/mviereck/x11docke
 If no X server option is specified, x11docker automatically chooses one depending on installed [dependencies](#dependencies) and on given or missing options `--desktop`, `--gpu` and `--wayland`.
  - [Overview of all possible X server and Wayland options.](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options)
  - [Hints to use option `--xorg` within X.](https://github.com/mviereck/x11docker/wiki/Setup-for-option---xorg)
+ - Use option `-t, --tty` to run without X at all.
 
 ## Desktop or seamless mode
 x11docker assumes that you want to run a single application in seamless mode, i.e. a single window on your regular desktop. If you want to run a desktop environment in image, add option `--desktop`. 
@@ -128,7 +129,7 @@ x11docker provides option `--lang $LANG` for flexible language locale settings.
 ## Shared folders and HOME in container
 Changes in a running docker container system will be lost, the created docker container will be discarded. For persistent data storage you can share host directories:
  - Option `--home` creates a host directory in `~/x11docker/IMAGENAME` that is shared with the container and mounted as its `HOME` directory. Files in container home and configuration changes will persist. 
- - Option `--sharedir DIR` mounts a host directory at the same location in container.
+ - Option `--sharedir DIR` mounts a host directory at the same location in container. `--sharedir DIR:ro` restricts to read-only access.
  - Option `--homedir DIR` is similar to `--home` but allows you to specify a custom host directory for data storage.
  - Special cases for `$HOME`:
    - `--homedir $HOME` will use your host home as container home. Discouraged, use with care.
@@ -199,17 +200,17 @@ further (deeper surgery in system): `cups pulseaudio xserver-xorg-legacy`.
 # Security 
 Scope of x11docker is to run dockered GUI applications while preserving and improving container isolation.
 Core concept is:
- - Run a second X server to avoid [X security leaks](http://www.windowsecurity.com/whitepapers/unix_security/Securing_X_Windows.html).
+ - Runs a second X server to avoid [X security leaks](http://www.windowsecurity.com/whitepapers/unix_security/Securing_X_Windows.html).
    - This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control. 
-     (However, x11docker provides this with option `--hostdisplay`).
+     (However, x11docker provides this with fallback option `--hostdisplay`).
    - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.
- - Create container user similar to host user to [avoid root in container](http://blog.dscpl.com.au/2015/12/don-run-as-root-inside-of-docker.html).
+ - Creates container user similar to host user to [avoid root in container](http://blog.dscpl.com.au/2015/12/don-run-as-root-inside-of-docker.html).
    - You can also specify another user with `--user=USERNAME` or a non-existing one with `--user=UID:GID`.
    - Disables possible root password and deletes entries in `/etc/sudoers`.
      - If you want root permissions in container, use option `--sudouser` that allows `su` and `sudo` with password `x11docker`. Alternatively you can run with `--user=root`. 
    - If you want to use `USER` specified in image instead, set option `--user=RETAIN`. x11docker won't change `etc/passwd` or `/etc/sudoers` in that case. Option `--home` won't be available.
- - Reduce [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
-   - Uses docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. 
+ - Reduces [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
+   - Sets docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. 
    - This restriction can be disabled with x11docker option `--cap-default` or reduced with `--sudouser`.
 
 _Weaknesses:_
@@ -218,6 +219,7 @@ _Weaknesses:_
    Compare: [SELinux and docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
  - User namespace remapping is disabled to allow options `--home` and `--homedir` without file ownership issues. (Though, this is less an issue because x11docker already avoids root in container). 
    Exception: User namespace remapping is not disabled for `--user=RETAIN`.
+ - x11docker provides several different X server options. Each X server involved might have its individual vulnerabilities. x11docker only covers well-known X security leaks that result from X11 protocol.
 
 ## Options degrading container isolation
 x11docker shows warning messages in terminal if chosen options degrade container isolation.
@@ -231,9 +233,10 @@ _Most important:_
   - `--pulseaudio` and `--alsa` allow catching audio output and microphone input from host.
   
 _Rather special options reducing security, but not needed for regular use:_
-  - `--sudouser` allows `su` and `sudo` with password `x11docker`for container user. If an application breaks out of container, it can do anything. Allows many container capabilties that x11docker would drop otherwise.
+  - `--sudouser` allows `su` and `sudo` with password `x11docker`for container user. If an application breaks out of container somehow, it can harm your host system. Allows many container capabilties that x11docker would drop otherwise.
   - `--cap-default` disables x11docker's container security hardening and falls back to default docker container capabilities.
-  - `--dbus-system`, `--systemd`, `--sysvinit`, `--openrc` and `--runit` allow some container capabilities that x11docker would drop otherwise. `--systemd` also shares access to `/sys/fs/cgroup`.
+  - `--dbus-system`, `--systemd`, `--sysvinit`, `--openrc` and `--runit` allow some container capabilities that x11docker would drop otherwise. 
+    `--systemd` also shares access to `/sys/fs/cgroup`. Some processes will run as root in container.
   - `--hostipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory. Disables IPC namespacing.)
   - `--hostnet` sets docker run option `--net=host`. (Shares host network stack. Disables network namespacing. Container can spy on network traffic.)
 
@@ -350,7 +353,7 @@ Sample screenshots are stored in [screenshot branch](https://github.com/mviereck
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-plasma.png "KDE plasma desktop in docker")
 
 `x11docker --desktop x11docker/lxqt`
-![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxqt.png "LXQT desktop in docker"))
+![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxqt.png "LXQT desktop in docker")
 
 `x11docker --desktop --systemd --gpu x11docker/deepin`
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-deepin.png "deepin desktop in docker")
