@@ -9,7 +9,7 @@ Project website: https://github.com/mviereck/x11docker
 ## [5.3.3](https://github.com/mviereck/x11docker/releases/tag/v5.3.3) - 2018-11-17
 ### Added
  - `-i, --interactive`: New option to run with an interactive TTY.
-   [(#87)](https://github.com/mviereck/x11docker/issues/86)
+   [(#87)](https://github.com/mviereck/x11docker/issues/87)
  - `-t, --tty`: Replaces `--nothing`. Run no X server, TTY only.
    Allows `-ti` similar to often used `docker run -ti`. 
  - `-q, --quiet`: Replaces `--silent`. Suppress x11docker messages.
