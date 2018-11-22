@@ -93,6 +93,15 @@ x11docker assumes that you want to run a single application in seamless mode, i.
      - You can specify a host window manager with option `--wm WINDOWMANAGER`, for example `--wm openbox`.
  - Desktop mode with `--desktop` is supported with all X server options except `--hostdisplay`. If available, x11docker prefers `--xephyr` and `--nxagent`.
  
+## Shared folders and HOME in container
+Changes in a running docker container system will be lost, the created docker container will be discarded. For persistent data storage you can share host directories:
+ - Option `-m, --home` creates a host directory in `~/x11docker/IMAGENAME` that is shared with the container and mounted as its `HOME` directory. Files in container home and configuration changes will persist. 
+ - Option `--sharedir DIR` mounts a host directory at the same location in container. `--sharedir DIR:ro` restricts to read-only access.
+ - Option `--homedir DIR` is similar to `--home` but allows you to specify a custom host directory for data storage.
+ - Special cases for `$HOME`:
+   - `--homedir $HOME` will use your host home as container home. Discouraged, use with care.
+   - `--sharedir $HOME` will symlink your host home as a subfolder of container home. 
+ 
 ## Hardware acceleration
 Hardware acceleration for OpenGL is possible with option `-g, --gpu`. 
  - This will work out of the box in most cases with open source drivers on host. Otherwise have a look at [Dependencies](#option-dependencies). 
@@ -125,15 +134,6 @@ x11docker provides option `--lang $LANG` for flexible language locale settings.
  - If x11docker does not find the locale, it creates it on container startup. (Needs package `locales` in image.) 
  - Examples: `--lang de` for German, `--lang zh_CN` for Chinese, `--lang ru` for Russian, `--lang $LANG` for your host locale.
  - For support of chinese, japanese and korean characters install a font like `fonts-arphic-uming` in image.
- 
-## Shared folders and HOME in container
-Changes in a running docker container system will be lost, the created docker container will be discarded. For persistent data storage you can share host directories:
- - Option `-m, --home` creates a host directory in `~/x11docker/IMAGENAME` that is shared with the container and mounted as its `HOME` directory. Files in container home and configuration changes will persist. 
- - Option `--sharedir DIR` mounts a host directory at the same location in container. `--sharedir DIR:ro` restricts to read-only access.
- - Option `--homedir DIR` is similar to `--home` but allows you to specify a custom host directory for data storage.
- - Special cases for `$HOME`:
-   - `--homedir $HOME` will use your host home as container home. Discouraged, use with care.
-   - `--sharedir $HOME` will symlink your host home as a subfolder of container home. 
    
 ## Wayland
 To run  [Wayland](https://wayland.freedesktop.org/) instead of an X server x11docker provides options `--wayland`, `--weston`, `--kwin` and `--hostwayland`. 
