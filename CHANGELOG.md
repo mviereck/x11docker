@@ -6,12 +6,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Changed
+ - Changed shebang `#! /bin/bash` to `#! /usr/bin/env bash` for portability.
+   [(#83)](https://github.com/mviereck/x11docker/issues/83)
+
 ## [5.3.3](https://github.com/mviereck/x11docker/releases/tag/v5.3.3) - 2018-11-17
 ### Added
  - `-i, --interactive`: New option to run with an interactive TTY.
    [(#87)](https://github.com/mviereck/x11docker/issues/87)
- - `-t, --tty`: Replaces `--nothing`. Run no X server, TTY only.
-   Allows `-ti` similar to often used `docker run -ti`. 
+ - `-t, --tty`: Replaces `--nothing`. Runs no X server, uses terminal only.
+   Allows `x11docker -ti` similar to often used `docker run -ti`. 
  - `-q, --quiet`: Replaces `--silent`. Suppress x11docker messages.
 ### Deprecated
  - `--silent`: Use `--quiet` instead.
