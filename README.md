@@ -300,6 +300,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
  - A few applications need systemd. Install `systemd` in image and try option `--systemd`.
  - Get help in the [issue tracker](https://github.com/mviereck/x11docker/issues). 
    - Most times it makes sense to store the `--verbose`output (or `x11docker.log`) at [pastebin.com](https://pastebin.com/).
+   - Don't hesitate to ask.
 
    
 
