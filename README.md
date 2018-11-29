@@ -287,6 +287,10 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
  - Some applications fail with fallback option `--hostdisplay`. Add `--clipboard` to disable some security restrictions.
    If that does not help, install [additional X servers](#dependencies).
  - Make sure your x11docker version is up to date with `x11docker --update` (latest release) or `x11docker --update-master` (latest beta).
+ - The image may have a `USER` specification and be designed for this user. 
+   x11docker sets up a container user that can mismatch this user setup. 
+   - Check for a `USER` specification in image with `docker inspect --format '{{.Config.User}}' IMAGENAME`.
+   - If yes, try with `--user=RETAIN` to run with `USER` specified in image.
  - Some applications need more privileges or capabilities than x11docker provides as default. 
    - Reduce container isolation with e.g.:
      - x11docker options: `--cap-default --hostipc --hostnet --sys-admin`
@@ -299,7 +303,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
  - A few applications need [DBus](#dbus). Install `dbus` in image and try option `--dbus`. If that does not help, try option `--dbus-system`.
  - A few applications need systemd. Install `systemd` in image and try option `--systemd`.
  - Get help in the [issue tracker](https://github.com/mviereck/x11docker/issues). 
-   - Most times it makes sense to store the `--verbose`output (or `x11docker.log`) at [pastebin.com](https://pastebin.com/).
+   - Most times it makes sense to store the `--verbose` output (or `x11docker.log`) at [pastebin.com](https://pastebin.com/).
    - Don't hesitate to ask.
 
    
