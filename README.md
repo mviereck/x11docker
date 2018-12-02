@@ -293,9 +293,9 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
    - If yes, try with `--user=RETAIN` to run with `USER` specified in image.
  - Some applications need more privileges or capabilities than x11docker provides as default. 
    - Reduce container isolation with e.g.:
-     - x11docker options: `--cap-default --hostipc --hostnet --sys-admin`
+     - x11docker options: `--cap-default --hostipc --hostnet --sys-admin`. (Try `--cap-default` first).
      - docker run options: `--cap-add ALL --security-opt seccomp=unconfined --privileged`
-     - Example: `x11docker --cap-default --hostipc --hostnet --sys-admin -- --cap-add ALL --security-opt seccomp=unconfined --privileged -- imagename`
+     - Example: `x11docker --cap-default --hostipc --hostnet --sys-admin -- --cap-add ALL --security-opt seccomp=unconfined --privileged -- IMAGENAME`
      - Try with reduced container isolation. If it works, drop options one by one until the needed one(s) are left.
      - If `--cap-add ALL` helps, find the [capability](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) you really need and add only that one.
      - If `--privileged` helps, your application probably needs a device in `/dev`. Find out which one and share it with e.g. `--device /dev/snd`. Try also `--sharedir /dev/udev/data:ro`.

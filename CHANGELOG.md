@@ -10,6 +10,8 @@ Project website: https://github.com/mviereck/x11docker
 ### Changed
  - Changed shebang `#! /bin/bash` to `#! /usr/bin/env bash` for portability.
    [(#83)](https://github.com/mviereck/x11docker/issues/83)
+### Fixed
+ - `-t, --tty`: Long option was not parsed.
 
 ## [5.3.3](https://github.com/mviereck/x11docker/releases/tag/v5.3.3) - 2018-11-17
 ### Added
