@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
+### Added
+ - `--border`: New option to draw a colored border into `--xpra` windows.
+   Helps to distinguish between host and container applications.
+   [(#91)](https://github.com/mviereck/x11docker/issues/83)
 ### Changed
  - Changed shebang `#! /bin/bash` to `#! /usr/bin/env bash` for portability.
    [(#83)](https://github.com/mviereck/x11docker/issues/83)
