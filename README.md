@@ -1,19 +1,25 @@
 # x11docker: ![x11docker logo](x11docker.png) Run GUI applications in docker
 ## Avoid X security leaks and increase container security
 
+x11docker allows to run graphical applications in docker linux containers.
+ - docker allows to run applications in an isolated environment based on linux kernel namespace technologies.
+ - docker does not provide an X server option that would allow to run graphical applications.
+ - x11docker fills the gap. It runs a graphical X server on the host system and provides it to docker containers.
+ - Additionally x11docker does some security setup to enhance container isolation and to avoid X security leaks.
+
+This can help to run or deploy software that is difficult to install on several systems due to dependency issues.
+It is possible to run outdated versions or latest development versions side by side.
+Software can be installed in a deployable docker image with a rudimentary linux system inside.
+x11docker only supports linux containers. It is possible to run linux containers on a Windows host, too.
+
 Graphical applications and desktops in docker are similar in usage to a Virtual
-Machine. They are isolated from host in several ways. 
-It is possible to run applications that would not run on host due to missing 
-dependencies. 
-For example, you can run latest development versions or outdated 
-versions of applications, or even multiple versions at the same time.
+Machine. They are isolated from host in several ways.
 
 Practical differences to a VM: 
 Docker containers need much less resources. 
 x11docker discardes containers after use. 
 Persistant data and configuration storage is done with shared folders. 
 Persistant container system changes can be done in Dockerfile. 
-System changes in running containers are discarded after use.
 
 [x11docker wiki](https://github.com/mviereck/x11docker/wiki) provides some how-to's for basic setups without x11docker.
 
