@@ -1,25 +1,19 @@
 # x11docker: ![x11docker logo](x11docker.png) Run GUI applications in docker
 ## Avoid X security leaks and increase container security
 
-x11docker allows to run graphical applications in docker linux containers.
- - docker allows to run applications in an isolated environment based on linux kernel namespace technologies.
- - docker does not provide an X server option that would allow to run graphical applications.
- - x11docker fills the gap. It runs a graphical X server on the host system and provides it to docker containers.
- - Additionally x11docker does some security setup to enhance container isolation and to avoid X security leaks.
+x11docker allows to run graphical applications in docker Linux containers.
+ - [docker](https://en.wikipedia.org/wiki/Docker_(software)) allows to run applications in an isolated [container](https://en.wikipedia.org/wiki/Operating-system-level_virtualization) environment. 
+   The result is similar to a [virtual machine](https://en.wikipedia.org/wiki/Virtual_machine), but needs less resources.
+ - docker does not provide a [display server](https://en.wikipedia.org/wiki/Display_server) that would allow to run applications with a [graphical user interface](https://en.wikipedia.org/wiki/Graphical_user_interface).
+ - x11docker fills the gap. It runs an [X display server](https://en.wikipedia.org/wiki/X_Window_System) on the host system and provides it to docker containers.
+ - Additionally x11docker does some [security setup](https://github.com/mviereck/x11docker#security) to enhance container isolation and to avoid X security leaks. 
+   This allows a [sandbox](https://en.wikipedia.org/wiki/Sandbox_(computer_security)) environment that protects the host system from possibly malicious or buggy software.
 
-This can help to run or deploy software that is difficult to install on several systems due to dependency issues.
-It is possible to run outdated versions or latest development versions side by side.
-Software can be installed in a deployable docker image with a rudimentary linux system inside.
-x11docker only supports linux containers. It is possible to run linux containers on a Windows host, too.
+Software can be installed in a deployable docker image with a rudimentary Linux system inside. 
+This can help to run or deploy software that is difficult to install on several systems due to dependency issues. It is possible to run outdated versions or latest development versions side by side. 
+Files to work on can be shared between host and container.
 
-Graphical applications and desktops in docker are similar in usage to a Virtual
-Machine. They are isolated from host in several ways.
-
-Practical differences to a VM: 
-Docker containers need much less resources. 
-x11docker discardes containers after use. 
-Persistant data and configuration storage is done with shared folders. 
-Persistant container system changes can be done in Dockerfile. 
+x11docker runs on Linux and (with some setup) on [Windows]([MSYS2, Cygwin and WSL](#msys2-cygwin-and-wsl-on-ms-windows)). x11docker does not run on macOS.
 
 [x11docker wiki](https://github.com/mviereck/x11docker/wiki) provides some how-to's for basic setups without x11docker.
 
@@ -40,9 +34,8 @@ Persistant container system changes can be done in Dockerfile.
    - [Language locale](#language-locales) creation.
    - [Wayland](#wayland) support.
    - Supports [DBus](#dbus) and [init systems](#init-system) `tini`, `runit`, `OpenRC`, `SysVinit` and `systemd` in container. Supports also `elogind`.
- - Remote access with [SSH](https://github.com/mviereck/x11docker/wiki/Remote-access-with-SSH), [VNC](https://github.com/mviereck/x11docker/wiki/VNC) or [HTML5 in browser](https://github.com/mviereck/x11docker/wiki/Container-applications-running-in-Browser-with-HTML5) possible.
- - Developed on Debian. Tested on several other Linux distributions. 
-   - Runs also on MS Windows in [MSYS2, Cygwin and WSL](#msys2-cygwin-and-wsl-on-ms-windows).
+ - Remote access with [SSH](https://github.com/mviereck/x11docker/wiki/Remote-access-with-SSH), [VNC](https://github.com/mviereck/x11docker/wiki/VNC) 
+   or [HTML5 in browser](https://github.com/mviereck/x11docker/wiki/Container-applications-running-in-Browser-with-HTML5) possible.
  - Easy to use. [Examples](#examples): 
    - `x11docker jess/cathode`
    - `x11docker --desktop --size 320x240 x11docker/lxde` (needs nested X server `Xephyr`)
