@@ -1,6 +1,6 @@
 # x11docker: ![x11docker logo](x11docker.png) Run GUI applications in docker
-## Avoid X security leaks and increase container security
-
+## Avoid X security leaks and enhance container security
+### Introduction
 x11docker allows to run graphical applications in docker Linux containers.
  - [docker](https://en.wikipedia.org/wiki/Docker_(software)) allows to run applications in an isolated [container](https://en.wikipedia.org/wiki/Operating-system-level_virtualization) environment. 
    The result is similar to a [virtual machine](https://en.wikipedia.org/wiki/Virtual_machine), but needs less resources.
@@ -17,6 +17,7 @@ x11docker runs on Linux and (with some setup) on [Windows](#msys2-cygwin-and-wsl
 
 [x11docker wiki](https://github.com/mviereck/x11docker/wiki) provides some how-to's for basic setups without x11docker.
 
+### Features
  - Focus on [security](#security):
    - Avoids X security leaks by running [additional X servers](#choice-of-x-servers-and-wayland-compositors).
    - Restricts container capabilities to bare minimum.
@@ -35,7 +36,7 @@ x11docker runs on Linux and (with some setup) on [Windows](#msys2-cygwin-and-wsl
    - [Wayland](#wayland) support.
    - Supports [DBus](#dbus) and [init systems](#init-system) `tini`, `runit`, `OpenRC`, `SysVinit` and `systemd` in container. Supports also `elogind`.
  - Remote access with [SSH](https://github.com/mviereck/x11docker/wiki/Remote-access-with-SSH), [VNC](https://github.com/mviereck/x11docker/wiki/VNC) 
-   or [HTML5 in browser](https://github.com/mviereck/x11docker/wiki/Container-applications-running-in-Browser-with-HTML5) possible.
+   or [HTML5](https://github.com/mviereck/x11docker/wiki/Container-applications-running-in-Browser-with-HTML5) possible.
  - Easy to use. [Examples](#examples): 
    - `x11docker jess/cathode`
    - `x11docker --desktop --size 320x240 x11docker/lxde` (needs nested X server `Xephyr`)
@@ -44,7 +45,7 @@ x11docker runs on Linux and (with some setup) on [Windows](#msys2-cygwin-and-wsl
 
 
 
-# GUI for x11docker
+## GUI for x11docker
 `x11docker-gui` is an optional graphical frontend for `x11docker`. It runs from console, too.
  - `x11docker-gui` needs package `kaptain`. If your distribution misses it, look at [kaptain repository](https://github.com/mviereck/kaptain). 
  - If `kaptain` is not installed on your system, `x11docker-gui` uses image [`x11docker/kaptain`](https://hub.docker.com/r/x11docker/kaptain/). 
@@ -53,7 +54,7 @@ x11docker runs on Linux and (with some setup) on [Windows](#msys2-cygwin-and-wsl
 
 
 
-# Terminal usage
+## Terminal usage
 Just type `x11docker IMAGENAME [COMMAND]`. 
  - Get an [overview of options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`. 
    - For desktop environments in image add option `-d, --desktop`.
@@ -76,23 +77,23 @@ To run only a new empty X server:
 
 
 
-# Options
+## Options
 Description of some commonly used [options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview).
 
-## Choice of X servers and Wayland compositors
+### Choice of X servers and Wayland compositors
 If no X server option is specified, x11docker automatically chooses one depending on installed [dependencies](#dependencies) and on given or missing options `--desktop`, `--gpu` and `--wayland`.
  - [Overview of all possible X server and Wayland options.](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options)
    - [Hints to use option `--xorg` within X.](https://github.com/mviereck/x11docker/wiki/Setup-for-option---xorg)
    - Use option `-t, --tty` to run without X at all.
 
-## Desktop or seamless mode
+### Desktop or seamless mode
 x11docker assumes that you want to run a single application in seamless mode, i.e. a single window on your regular desktop. If you want to run a desktop environment in image, add option `--desktop`. 
  - Seamless mode is supported with options `--xpra` and `--nxagent`. As a fallback insecure option `--hostdisplay` is possible.
    - If neither `xpra` nor `nxagent` are installed, but x11docker finds a desktop capable X server like `Xephyr`, it avoids insecure option `--hostdisplay` and runs Xephyr with a host window manager.
      - You can specify a host window manager with option `--wm WINDOWMANAGER`, for example `--wm openbox`.
  - Desktop mode with `--desktop` is supported with all X server options except `--hostdisplay`. If available, x11docker prefers `--xephyr` and `--nxagent`.
  
-## Shared folders and HOME in container
+### Shared folders and HOME in container
 Changes in a running docker container system will be lost, the created docker container will be discarded. For persistent data storage you can share host directories:
  - Option `-m, --home` creates a host directory in `~/x11docker/IMAGENAME` that is shared with the container and mounted as its `HOME` directory. Files in container home and configuration changes will persist. 
  - Option `--sharedir DIR` mounts a host directory at the same location in container. `--sharedir DIR:ro` restricts to read-only access.
@@ -101,40 +102,40 @@ Changes in a running docker container system will be lost, the created docker co
    - `--homedir $HOME` will use your host home as container home. Discouraged, use with care.
    - `--sharedir $HOME` will symlink your host home as a subfolder of container home. 
  
-## Hardware acceleration
+### Hardware acceleration
 Hardware acceleration for OpenGL is possible with option `-g, --gpu`. 
  - This will work out of the box in most cases with open source drivers on host. Otherwise have a look at [Dependencies](#option-dependencies). 
  - Closed source [NVIDIA drivers](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container) need some setup.
  
-## Clipboard
+### Clipboard
 Clipboard sharing is possible with option `-c, --clipboard`. 
  - Image clips are possible with `--xpra` and `--hostdisplay`. 
  - Some X server options need package `xclip` on host.
  
-## Sound
+### Sound
 Sound is possible with options `-p, --pulseaudio` and `--alsa`. 
  - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and in image.
  - For ALSA sound with `--alsa` you might need to specify a sound card with e.g. `--env ALSA_CARD=Generic`. Get a list of available sound cards with `aplay -l`.
  
-## Webcam
+### Webcam
 Webcams on host can be shared with option `--webcam`.
  - If webcam application in image fails, install `mesa-utils` (debian) or `mesa-demos` (arch) in image. 
  - `guvcview` needs `--pulseaudio` or `--alsa`.
  - `cheese` and [`gnome-ring`](https://ring.cx/) need `--systemd` or `--dbus-system`.
  
-## Printer
+### Printer
 Printers on host can be provided to container with option `--printer`. 
  - It needs CUPS on host, the default printer server for most linux distributions. 
  - The container needs package `libcups2` (debian) or `libcups` (arch).
  
-## Language locales
+### Language locales
 x11docker provides option `--lang $LANG` for flexible language locale settings. 
  - x11docker will check on container startup if the desired locale is already present in image and enable it. 
  - If x11docker does not find the locale, it creates it on container startup. (Needs package `locales` in image.) 
  - Examples: `--lang de` for German, `--lang zh_CN` for Chinese, `--lang ru` for Russian, `--lang $LANG` for your host locale.
  - For support of chinese, japanese and korean characters install a font like `fonts-arphic-uming` in image.
    
-## Wayland
+### Wayland
 To run  [Wayland](https://wayland.freedesktop.org/) instead of an X server x11docker provides options `--wayland`, `--weston`, `--kwin` and `--hostwayland`. 
 For further description loot at [Overview of all possible X server and Wayland options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options).
  - Option `--wayland` automatically sets up a Wayland environment with some related environment variables.
@@ -144,12 +145,12 @@ For further description loot at [Overview of all possible X server and Wayland o
  - Example: `xfce4-terminal` on Wayland: `x11docker --wayland x11docker/xfce xfce4-terminal`
  
  
-## Init system
+### Init system
 x11docker supports several init systems as PID 1 in container. Init in container solves the [zombie reaping issue](https://blog.phusion.nl/2015/01/20/docker-and-the-pid-1-zombie-reaping-problem/).
 As default it uses `tini` in`/usr/bin/docker-init`. 
 Look at [x11docker wiki: Init systems in docker: tini, systemd, SysVinit, runit, OpenRC and elogind.](https://github.com/mviereck/x11docker/wiki/Init-systems-in-docker:-tini,-systemd,-SysVinit,-runit,-OpenRC-and-elogind)
 
-## DBus
+### DBus
 Some desktop environments and applications need a running DBus daemon and/or DBus user session. 
  - use `--dbus` to run a DBus user session daemon.
  - use `--dbus-system` to run DBus system daemon. This includes option `--dbus`.
@@ -160,14 +161,14 @@ Some desktop environments and applications need a running DBus daemon and/or DBu
 
  
  
-# Dependencies
+## Dependencies
 x11docker can run with standard system utilities without additional dependencies on host or in image. 
 As a core it only needs an `X` server and, of course, [`docker`](https://www.docker.com/) to run docker containers on X.
 x11docker checks dependencies for chosen options on startup and shows terminal messages if some are missing. 
 
 ***TL;DR:*** Install `xpra Xephyr weston Xwayland xdotool xauth xclip xrandr xdpyinfo` on host, or leave it as it is.
 
-## X server dependencies
+### X server dependencies
 All X server options with a description and their dependencies are listed in [wiki: X server and Wayland options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options).
 
 | Recommendations | Dependencies | Available options |
@@ -177,7 +178,7 @@ All X server options with a description and their dependencies are listed in [wi
 | Recommended base for `--gpu` | `xpra` `weston` `Xwayland` `xdotool` | `--xpra-xwayland` <br> `--weston-xwayland` <br> `--weston` <br> `--xwayland` <br> `--wayland` |
 | Recommended tools | `xauth` `xrandr` `xdpyinfo` | |
 
-## Option dependencies
+### Option dependencies
 | Option | Dependencies on host | Dependencies in image |
 | --- | --- | --- |
 | `--clipboard` | `xclip` or `xsel` | - |
@@ -192,13 +193,13 @@ All X server options with a description and their dependencies are listed in [wi
 | `--launcher` | `xdg-utils` | - |
 | `--install` `--update` `--update-master` | `wget` or `curl` <br> `unzip` | - |
    
-## List of all host packages for all possible x11docker options
+### List of all host packages for all possible x11docker options
 Debian package names: `kwin-wayland nxagent unzip weston wget xauth xclip  xdg-utils xdotool xdpyinfo xfishtank xpra xrandr xserver-xephyr xserver-xorg-video-dummy xvfb xwayland`, 
 further (deeper surgery in system): `cups pulseaudio xserver-xorg-legacy`.
 
 
 
-# Security 
+## Security 
 Scope of x11docker is to run dockered GUI applications while preserving and improving container isolation.
 Core concept is:
  - Runs a second X server to avoid [X security leaks](http://www.windowsecurity.com/whitepapers/unix_security/Securing_X_Windows.html).
@@ -222,7 +223,7 @@ _Weaknesses:_
    Exception: User namespace remapping is not disabled for `--user=RETAIN`.
  - x11docker provides several different X server options. Each X server involved might have its individual vulnerabilities. x11docker only covers well-known X security leaks that result from X11 protocol.
 
-## Options degrading container isolation
+### Options degrading container isolation
 x11docker shows warning messages in terminal if chosen options degrade container isolation.
 
 _Most important:_
@@ -244,7 +245,7 @@ _Rather special options reducing security, but not needed for regular use:_
 
   
   
-# MSYS2, Cygwin and WSL on MS Windows
+## MSYS2, Cygwin and WSL on MS Windows
 x11docker runs on MS Windows in [MSYS2](https://www.msys2.org/), [Cygwin](https://www.cygwin.com/) 
 and [WSL (Windows subsystem for Linux)](https://docs.microsoft.com/en-us/windows/wsl/about).
  - Install X server [`VcXsrv`](https://sourceforge.net/projects/vcxsrv/) on Windows into `C:/Program Files/VcXsrv` (option `--vcxsrv`).
@@ -255,7 +256,7 @@ and [WSL (Windows subsystem for Linux)](https://docs.microsoft.com/en-us/windows
  
  
  
-# Installation
+## Installation
 ### Installation options
 As root you can install, update and remove x11docker on your system:
  - `x11docker --install` : install x11docker and x11docker-gui from current directory. 
@@ -277,7 +278,7 @@ For minimal installation make `x11docker` executable with `chmod +x x11docker` a
 
 
 
-# Troubleshooting
+## Troubleshooting
 For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. 
  - x11docker shows warnings if something is insecure, missing or going wrong. 
    - Use option `-v, --verbose` to see full logfile output.
@@ -307,7 +308,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
 
    
 
-# Examples
+## Examples
 [Desktop image examples can be found on docker hub.](https://hub.docker.com/u/x11docker/)
 
 | Application | x11docker command |
@@ -342,7 +343,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
 | KDE Plasma as nested Wayland compositor | `x11docker --gpu x11docker/plasma startplasmacompositor` |
 | LXDE with wine and PlayOnLinux and <br> a persistent `HOME` folder to preserve <br> installed Windows applications, <br> and with Pulseaudio sound. | `x11docker --desktop --home --pulseaudio x11docker/lxde-wine` |
    
-## Adjust images for your needs
+### Adjust images for your needs
 For persistant changes of image system adjust Dockerfile and rebuild. To add custom applications to x11docker example images you can create a new Dockerfile based on them. Example:
 ```
 # xfce desktop with VLC media player
@@ -350,7 +351,7 @@ FROM x11docker/xfce
 RUN apt-get update && apt-get install -y vlc
 ```
   
-## Screenshots
+### Screenshots
 Sample screenshots are stored in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
 
 `x11docker --desktop x11docker/lxde-wine`
