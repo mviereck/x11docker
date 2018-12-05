@@ -1,15 +1,15 @@
-# x11docker: ![x11docker logo](x11docker.png) Run GUI applications in docker
+# x11docker: ![x11docker logo](x11docker.png) Run GUI applications in Docker
 ## Avoid X security leaks and enhance container security
 ### Introduction
-x11docker allows to run graphical applications in docker Linux containers.
- - [docker](https://en.wikipedia.org/wiki/Docker_(software)) allows to run applications in an isolated [container](https://en.wikipedia.org/wiki/Operating-system-level_virtualization) environment. 
+x11docker allows to run graphical applications in Docker Linux containers.
+ - [Docker](https://en.wikipedia.org/wiki/Docker_(software)) allows to run applications in an isolated [container](https://en.wikipedia.org/wiki/Operating-system-level_virtualization) environment. 
    The result is similar to a [virtual machine](https://en.wikipedia.org/wiki/Virtual_machine), but needs less resources.
- - docker does not provide a [display server](https://en.wikipedia.org/wiki/Display_server) that would allow to run applications with a [graphical user interface](https://en.wikipedia.org/wiki/Graphical_user_interface).
- - x11docker fills the gap. It runs an [X display server](https://en.wikipedia.org/wiki/X_Window_System) on the host system and provides it to docker containers.
+ - Docker does not provide a [display server](https://en.wikipedia.org/wiki/Display_server) that would allow to run applications with a [graphical user interface](https://en.wikipedia.org/wiki/Graphical_user_interface).
+ - x11docker fills the gap. It runs an [X display server](https://en.wikipedia.org/wiki/X_Window_System) on the host system and provides it to Docker containers.
  - Additionally x11docker does some [security setup](https://github.com/mviereck/x11docker#security) to enhance container isolation and to avoid X security leaks. 
-   This allows a [sandbox](https://en.wikipedia.org/wiki/Sandbox_(computer_security)) environment that fairly well protects the host system from possibly malicious or buggy software.
+   This allows a [sandbox](#sandbox) environment that fairly well protects the host system from possibly malicious or buggy software.
 
-Software can be installed in a deployable docker image with a rudimentary Linux system inside. 
+Software can be installed in a deployable Docker image with a rudimentary Linux system inside. 
 This can help to run or deploy software that is difficult to install on several systems due to dependency issues. It is possible to run outdated versions or latest development versions side by side. 
 Files to work on can be shared between host and container.
 
@@ -23,8 +23,8 @@ x11docker runs on Linux and (with some setup) on [Windows](#msys2-cygwin-and-wsl
    - Restricts container capabilities to bare minimum.
    - Container user is same as host user to avoid root in container.
  - Low [dependencies](#dependencies):
-   - No obliging dependencies on host beside X and docker. Recommended: `xpra` and `Xephyr`.
-   - No dependencies inside of docker images except for some optional features.
+   - No obliging dependencies on host beside X and Docker. Recommended: `xpra` and `Xephyr`.
+   - No dependencies inside of Docker images except for some optional features.
  - [Optional features](#options): 
    - [Persistent data storage](#shared-folders-and-home-in-container) with shared host folders and a persistant `HOME` in container.
    - [Sound](#sound) with Pulseaudio or ALSA.
@@ -64,7 +64,7 @@ Just type `x11docker IMAGENAME [COMMAND]`.
  
 General syntax:
 ```
-To run a docker image with new X server:
+To run a Docker image with new X server:
   x11docker [OPTIONS] IMAGE [COMMAND]
   x11docker [OPTIONS] -- IMAGE [COMMAND [ARG1 ARG2 ...]]
   x11docker [OPTIONS] -- DOCKER_RUN_OPTIONS -- IMAGE [COMMAND [ARG1 ARG2 ...]]
@@ -94,7 +94,7 @@ x11docker assumes that you want to run a single application in seamless mode, i.
  - Desktop mode with `--desktop` is supported with all X server options except `--hostdisplay`. If available, x11docker prefers `--xephyr` and `--nxagent`.
  
 ### Shared folders and HOME in container
-Changes in a running docker container system will be lost, the created docker container will be discarded. For persistent data storage you can share host directories:
+Changes in a running Docker container system will be lost, the created Docker container will be discarded. For persistent data storage you can share host directories:
  - Option `-m, --home` creates a host directory in `~/x11docker/IMAGENAME` that is shared with the container and mounted as its `HOME` directory. Files in container home and configuration changes will persist. 
  - Option `--sharedir DIR` mounts a host directory at the same location in container. `--sharedir DIR:ro` restricts to read-only access.
  - Option `--homedir DIR` is similar to `--home` but allows you to specify a custom host directory for data storage.
@@ -148,7 +148,7 @@ For further description loot at [Overview of all possible X server and Wayland o
 ### Init system
 x11docker supports several init systems as PID 1 in container. Init in container solves the [zombie reaping issue](https://blog.phusion.nl/2015/01/20/docker-and-the-pid-1-zombie-reaping-problem/).
 As default it uses `tini` in`/usr/bin/docker-init`. 
-Look at [x11docker wiki: Init systems in docker: tini, systemd, SysVinit, runit, OpenRC and elogind.](https://github.com/mviereck/x11docker/wiki/Init-systems-in-docker:-tini,-systemd,-SysVinit,-runit,-OpenRC-and-elogind)
+Look at [x11docker wiki: Init systems in Docker: tini, systemd, SysVinit, runit, OpenRC and elogind.](https://github.com/mviereck/x11docker/wiki/Init-systems-in-docker:-tini,-systemd,-SysVinit,-runit,-OpenRC-and-elogind)
 
 ### DBus
 Some desktop environments and applications need a running DBus daemon and/or DBus user session. 
@@ -163,7 +163,7 @@ Some desktop environments and applications need a running DBus daemon and/or DBu
  
 ## Dependencies
 x11docker can run with standard system utilities without additional dependencies on host or in image. 
-As a core it only needs an `X` server and, of course, [`docker`](https://www.docker.com/) to run docker containers on X.
+As a core it only needs an `X` server and, of course, [`Docker`](https://www.docker.com/) to run Docker containers on X.
 x11docker checks dependencies for chosen options on startup and shows terminal messages if some are missing. 
 
 ***TL;DR:*** Install `xpra Xephyr weston Xwayland xdotool xauth xclip xrandr xdpyinfo` on host, or leave it as it is.
@@ -200,7 +200,7 @@ further (deeper surgery in system): `cups pulseaudio xserver-xorg-legacy`.
 
 
 ## Security 
-Scope of x11docker is to run dockered GUI applications while preserving and improving container isolation.
+Scope of x11docker is to run containerized GUI applications while preserving and improving container isolation.
 Core concept is:
  - Runs a second X server to avoid [X security leaks](http://www.windowsecurity.com/whitepapers/unix_security/Securing_X_Windows.html).
    - This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control. 
@@ -218,7 +218,7 @@ Core concept is:
 _Weaknesses:_
  - Possible SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. 
    A more restrictive solution is desirable.
-   Compare: [SELinux and docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
+   Compare: [SELinux and Docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
  - User namespace remapping is disabled to allow options `--home` and `--homedir` without file ownership issues. (Though, this is less an issue because x11docker already avoids root in container). 
    Exception: User namespace remapping is not disabled for `--user=RETAIN`.
  - x11docker provides several different X server options. Each X server involved might have its individual vulnerabilities. x11docker only covers well-known X security leaks that result from X11 protocol.
@@ -237,12 +237,22 @@ _Most important:_
 _Rather special options reducing security, but not needed for regular use:_
   - `--sudouser` allows `su` and `sudo` with password `x11docker`for container user. 
     If an application somehow breaks out of container, it can harm your host system. Allows many container capabilties that x11docker would drop otherwise.
-  - `--cap-default` disables x11docker's container security hardening and falls back to default docker container capabilities.
+  - `--cap-default` disables x11docker's container security hardening and falls back to default Docker container capabilities.
   - `--dbus-system`, `--systemd`, `--sysvinit`, `--openrc` and `--runit` allow some container capabilities that x11docker would drop otherwise. 
     `--systemd` also shares access to `/sys/fs/cgroup`. Some processes will run as root in container.
   - `--hostipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory. Disables IPC namespacing.)
   - `--hostnet` sets docker run option `--net=host`. (Shares host network stack. Disables network namespacing. Container can spy on network traffic.)
 
+### Sandbox
+Container isolation enhanced with x11docker allows to use containers as a [sandbox](https://en.wikipedia.org/wiki/Sandbox_(computer_security)) that fairly well protects the host system from possibly malicious or buggy software.
+Though, no sandbox solution in the wild can provide a perfect secure protection, and Docker even with enhanced security settings from x11docker is no exception.
+
+x11docker already restricts process capabilities. You can additionally restrict access to CPU and RAM with option `--limit`. 
+As default `--limit` restricts to 50% of available CPUs and currently free RAM. Another amount can be specified with `--limit=FACTOR` with a `FACTOR` greater than zero and less than or equal 1.
+
+For more custom fine tuning have a look at [Docker documentation: Limit a container's resources](https://docs.docker.com/config/containers/resource_constraints).
+
+**WARNING**: There is no restriction that can prevent the container from flooding the hard disk in Docker's container partition or in shared folders.
   
   
 ## MSYS2, Cygwin and WSL on MS Windows

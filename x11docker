@@ -253,6 +253,8 @@ Init system and DBus daemon:
 
 Container capabilities:
   Custom capabilities can be added with --cap-add=CAP after  --
+     --cap-default     Allow default docker container capabilities and
+                       disable container security hardening of x11docker.
      --hostipc         Sets docker option --ipc=host, disables IPC namespacing.
                        Severe reduction of container isolation! Shares
                        host interprocess communication and shared memory.
@@ -260,8 +262,10 @@ Container capabilities:
      --hostnet         Set docker run option --net=host, disables network
                        namespacing. Severe reduction of container isolation!
                        Shares host network stack.
-     --cap-default     Allow default docker container capabilities and
-                       disable container security hardening of x11docker.
+     --limit[=FACTOR]  Limit CPU and RAM usage of container to 
+                       currently free RAM x FACTOR and available CPUs x FACTOR.
+                       Allowed range is 0 < FACTOR <= 1. 
+                       Default without argument FACTOR is 0.5
      --sys-admin       Add capability SYS_ADMIN. Please avoid that.
 
 Miscellaneous:
@@ -2639,6 +2643,7 @@ create_xcommand() {             # create command to start X server and/or Waylan
 
       # xpra client command
       Xpraclientcommand="xpra attach $Newdisplay $Xpraoptions \\
+  --title='@title@ [in container]' \\
   -z0 --quality 100 \\
   --no-speaker --no-pulseaudio \\
   --notifications=no"
@@ -3687,7 +3692,7 @@ setup_hostdbus() {              # option --hostdbus: connect to host DBus sessio
   return 0
 }
 create_dockercommand() {        # create command to run docker
-  local Line=
+  local Line= Memory
   
   Dockercommand="$Dockerexe run --tty"
   [ "$Preservecachefiles" = "no" ] && Dockercommand="$Dockercommand --rm"
@@ -3699,6 +3704,14 @@ create_dockercommand() {        # create command to run docker
   [ -z "$Containername" ] && Containername="x11docker_X${Newdisplaynumber}_${Mycookie}_$Codename"
   Dockercommand="$Dockercommand \\
   --name $Containername"
+  
+  [ "$Limitresources" ] && {
+    Memory="$(awk "BEGIN {print int($(free -b | grep 'Mem:' | awk '{print $7}') * $Limitresources)}")"
+    Dockercommand="$Dockercommand \\
+  --cpus=$(awk "BEGIN {print $(nproc) * $Limitresources}") \\
+  --memory=$Memory \\
+  --kernel-memory=$Memory"
+  }
 
   # container user. init systems switch later.
   case $Initsystem in
@@ -5745,6 +5758,7 @@ check_option_interferences() {  # check multiple option interferences, change se
     ;;
   esac
   
+  # --interactive
   case $Interactive in
     yes)
       [ "$Forwardstdin" = "yes" ] && {
@@ -5752,8 +5766,8 @@ check_option_interferences() {  # check multiple option interferences, change se
   Fallback: Disabling option --stdin."
         Forwardstdin="no"
       }
-      [ "$Showstdout" = "yes" ] && Showstdout="no"
-      [ "$Showstderr" = "yes" ] && Showstderr="no"
+      Showstdout="no"
+      Showstderr="no"
       case $Initsystem in
         systemd|openrc|runit|sysvinit)  note "Interactive mode (--interactive) with option --$Initsystem
   is not well integrated yet. Shells do not have job control, 
@@ -5761,6 +5775,19 @@ check_option_interferences() {  # check multiple option interferences, change se
       esac
     ;;
   esac
+  
+  # --limit N
+  [ "Limitresources" ] && {
+    [ "1" = "$(awk -v a=$Limitresources "BEGIN {print (a <= 1)}")" ] && [ "1" = "$(awk -v a=$Limitresources "BEGIN {print (a > 0)}")" ] || {
+      warning "Option --limit: Specified value $Limitresources is out of range.
+  Allowed is a factor greater than 0 and less than or equal to 1.  0<FACTOR<=1
+  Fallback: Setting limit factor to --limit=0.5"
+      Limitresources="0.5"
+    }
+    note "Option --limit does not avoid possibly flooding the hard disk
+  in docker's container partition or in shared folders.
+  It only restricts memory and CPU usage."
+  }
   
   return 0
 }
@@ -6330,6 +6357,7 @@ declare_variables() {           # declare global variables
   Runfromhost=""                                  # option --runfromhost: add host command to xinitrc
   Runasroot=""                                    # option --runasroot: add command running as root to container setup script
   Workdir="/tmp"                                  # option --workdir: set working directory
+  Limitresources=""                               # option --limit: Limit access to CPU and RAM, 0.1 ... 1.0
 
   # init and dbus
   Initsystem="tini"                               # options --systemd --openrc --runit --sysvinit --tini --no-init:Init system in container
@@ -6403,7 +6431,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,fullscreen,size:,scale:,rotate:,dpi:,output-count:,gpu,xfishtank,border::"                     # X appearance options
   Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,env:,showenv,showid,showpid1"                                      # X and environment options
   Longoptions="$Longoptions,home,clipboard,pulseaudio::,alsa,lang:,printer,webcam"                                         # comfort options
-  Longoptions="$Longoptions,no-xhost,dbus,dbus-system,hostdbus,pw:,no-internet,workdir:,sharessh"                          # advanced options
+  Longoptions="$Longoptions,no-xhost,dbus,dbus-system,hostdbus,pw:,no-internet,workdir:,sharessh,limit::"                  # advanced options
   Longoptions="$Longoptions,homedir:,sharedir:,cachebasedir:,homebasedir:"                                                 # host folders
   Longoptions="$Longoptions,tini,no-init,systemd,runit,openrc,sysvinit,sys-admin,sharecgroup"                              # init system options
   Longoptions="$Longoptions,launcher,cleanup,license,licence,help,version,install,update,update-master,remove,wmlist"      # special options without starting X or container
@@ -6491,6 +6519,7 @@ parse_options() {               # parse cli options
 
      #### Advanced options
       -i|--interactive) Interactive="yes" ;;               # run with interactive tty
+         --limit)      Limitresources="${2:-0.5}" ; shift ;; # run with limited CPU and RAM access
          --no-entrypoint) Noentrypoint="yes" ;;            # don't use ENTRYPOINT of image
          --no-internet)Internetaccess="no" ;;              # disallow internet access
          --workdir)    Workdir="${2:-}" ; shift ;;         # set working directory
