@@ -13,7 +13,7 @@ Software can be installed in a deployable Docker image with a rudimentary Linux 
 This can help to run or deploy software that is difficult to install on several systems due to dependency issues. It is possible to run outdated versions or latest development versions side by side. 
 Files to work on can be shared between host and container.
 
-x11docker runs on Linux and (with some setup) on [Windows](#msys2-cygwin-and-wsl-on-ms-windows). x11docker is not adapted to run on macOS.
+x11docker runs on Linux and (with some setup) on [MS Windows](#msys2-cygwin-and-wsl-on-ms-windows). x11docker is not adapted to run on macOS.
 
 [x11docker wiki](https://github.com/mviereck/x11docker/wiki) provides some how-to's for basic setups without x11docker.
 
@@ -247,8 +247,13 @@ _Rather special options reducing security, but not needed for regular use:_
 Container isolation enhanced with x11docker allows to use containers as a [sandbox](https://en.wikipedia.org/wiki/Sandbox_(computer_security)) that fairly well protects the host system from possibly malicious or buggy software.
 Though, no sandbox solution in the wild can provide a perfect secure protection, and Docker even with enhanced security settings from x11docker is no exception.
 
+Using Docker with x11docker as a sandbox is not intended to run obviously evil software. Rather use it as:
+ - Development environment to collect libraries, compiler and so on to keep the host clean.
+ - Development environment to mitigate damage caused by unexpected/buggy behaviour.
+ - Security layer for software that may be malicious in worst case. Examples: Internet browser with Javascript enabled, or wine with Windows applications.
+
 x11docker already restricts process capabilities. You can additionally restrict access to CPU and RAM with option `--limit`. 
-As default `--limit` restricts to 50% of available CPUs and currently free RAM. Another amount can be specified with `--limit=FACTOR` with a `FACTOR` greater than zero and less than or equal 1.
+As default `--limit` restricts to 50% of available CPUs and 50% of currently free RAM. Another amount can be specified with `--limit=FACTOR` with a `FACTOR` greater than zero and less than or equal 1.
 
 For more custom fine tuning have a look at [Docker documentation: Limit a container's resources](https://docs.docker.com/config/containers/resource_constraints).
 
@@ -334,7 +339,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
 | VLC media player with shared `Videos` <br> folder and Pulseaudio sound | `x11docker --pulseaudio --sharedir=$HOME/Videos jess/vlc` |
 
 
-| Desktop environment <br> (mostly based on Debian)| x11docker command |
+| Desktop environment <br> (most based on Debian)| x11docker command |
 | --- | --- |
 | FVWM (based on [Alpine](https://alpinelinux.org/), 22.5 MB) | `x11docker --desktop x11docker/fvwm` |
 | Fluxbox (based on Debian, 87 MB) | `x11docker --desktop x11docker/fluxbox` |
