@@ -15,6 +15,7 @@ Project website: https://github.com/mviereck/x11docker
 ### Changed
  - Changed shebang `#! /bin/bash` to `#! /usr/bin/env bash` for portability.
    [(#83)](https://github.com/mviereck/x11docker/issues/83)
+ - Add `-nolisten local` to X commands to forbid abstract socket connections.
 ### Fixed
  - `-t, --tty`: Long option was not parsed.
 
