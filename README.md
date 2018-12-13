@@ -202,7 +202,7 @@ further (deeper surgery in system): `cups pulseaudio xserver-xorg-legacy`.
 ## Security 
 Scope of x11docker is to run containerized GUI applications while preserving and improving container isolation.
 Core concept is:
- - Runs a second X server to avoid [X security leaks](http://www.windowsecurity.com/whitepapers/unix_security/Securing_X_Windows.html).
+ - Runs a second X server to avoid [X security leaks](http://tutorials.section6.net/home/basics-of-securing-x11).
    - This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control. 
      (However, x11docker provides this with fallback option `--hostdisplay`).
    - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.
@@ -248,6 +248,7 @@ Container isolation enhanced with x11docker allows to use containers as a [sandb
 Though, no sandbox solution in the wild can provide a perfect secure protection, and Docker even with enhanced security settings from x11docker is no exception.
 
 Using Docker with x11docker as a sandbox is not intended to run obviously evil software. Rather use it as:
+ - Compatibility environment to run software that is hard or impossible to install on host due to dependency issues.
  - Development environment to collect libraries, compiler and so on to keep the host clean.
  - Development environment to mitigate damage caused by unexpected/buggy behaviour.
  - Security layer for software that may be malicious in worst case. Examples: Internet browser with Javascript enabled, or wine with Windows applications.
@@ -256,6 +257,8 @@ x11docker already restricts process capabilities. You can additionally restrict 
 As default `--limit` restricts to 50% of available CPUs and 50% of currently free RAM. Another amount can be specified with `--limit=FACTOR` with a `FACTOR` greater than zero and less than or equal 1.
 
 For more custom fine tuning have a look at [Docker documentation: Limit a container's resources](https://docs.docker.com/config/containers/resource_constraints).
+
+Currently internet access is allowed per default. That will change in future versions of x11docker. Meanwhile you can disable internet access with `--no-internet`.
 
 **WARNING**: There is no restriction that can prevent the container from flooding the hard disk in Docker's container partition or in shared folders.
   

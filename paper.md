@@ -18,7 +18,7 @@ date: 13 December 2018
    The result is similar to a [virtual machine](https://en.wikipedia.org/wiki/Virtual_machine), but needs less resources.
  - Docker does not provide a [display server](https://en.wikipedia.org/wiki/Display_server) that would allow to run applications with a [graphical user interface](https://en.wikipedia.org/wiki/Graphical_user_interface).
  - x11docker fills the gap. It runs an [X display server](https://en.wikipedia.org/wiki/X_Window_System) on the host system and provides it to Docker containers.
- - Additionally x11docker does some [security setup](https://github.com/mviereck/x11docker#security) to enhance container isolation and to avoid X security leaks. 
+ - Additionally x11docker does some [security setup](https://github.com/mviereck/x11docker#security) to enhance container isolation and to avoid [X security leaks](http://tutorials.section6.net/home/basics-of-securing-x11). 
    This allows a [sandbox](https://en.wikipedia.org/wiki/Sandbox_(computer_security)) environment that fairly well protects the host system from possibly malicious or buggy software.
 
 Software can be installed in a deployable Docker image with a rudimentary Linux system inside. 
