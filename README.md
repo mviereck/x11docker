@@ -101,6 +101,7 @@ Changes in a running Docker container system will be lost, the created Docker co
  - Special cases for `$HOME`:
    - `--homedir $HOME` will use your host home as container home. Discouraged, use with care.
    - `--sharedir $HOME` will symlink your host home as a subfolder of container home. 
+   
 Note that x11docker copies files from `/etc/skel` in container to `HOME` if `HOME` is empty. That allows to provide customized user settings.
  
 ### Hardware acceleration
