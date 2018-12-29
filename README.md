@@ -26,7 +26,7 @@ x11docker runs on Linux and (with some setup) on [MS Windows](#msys2-cygwin-and-
    - No obliging dependencies on host beside X and Docker. Recommended: `xpra` and `Xephyr`.
    - No dependencies inside of Docker images except for some optional features.
  - [Optional features](#options): 
-   - [Persistent data storage](#shared-folders-and-home-in-container) with shared host folders and a persistant `HOME` in container.
+   - [Persistent data storage](#shared-folders-and-home-in-container) with shared host folders and a persistent `HOME` in container.
    - [Sound](#sound) with Pulseaudio or ALSA.
    - [Hardware acceleration](#hardware-acceleration) for OpenGL.
    - [Clipboard](#clipboard) sharing.
@@ -101,6 +101,7 @@ Changes in a running Docker container system will be lost, the created Docker co
  - Special cases for `$HOME`:
    - `--homedir $HOME` will use your host home as container home. Discouraged, use with care.
    - `--sharedir $HOME` will symlink your host home as a subfolder of container home. 
+Note that x11docker copies files from `/etc/skel` in container to `HOME` if `HOME` is empty. That allows to provide customized user settings.
  
 ### Hardware acceleration
 Hardware acceleration for OpenGL is possible with option `-g, --gpu`. 
@@ -163,7 +164,7 @@ Some desktop environments and applications need a running DBus daemon and/or DBu
  
 ## Dependencies
 x11docker can run with standard system utilities without additional dependencies on host or in image. 
-As a core it only needs an `X` server and, of course, [`Docker`](https://www.docker.com/) to run Docker containers on X.
+As a core it only needs an `X` server and, of course, [`docker`](https://www.docker.com/) to run Docker containers on X.
 x11docker checks dependencies for chosen options on startup and shows terminal messages if some are missing. 
 
 ***TL;DR:*** Install `xpra Xephyr weston Xwayland xdotool xauth xclip xrandr xdpyinfo` on host, or leave it as it is.
@@ -291,8 +292,9 @@ sudo bash /tmp/x11docker --update
 rm /tmp/x11docker
 ```
 ### Minimal installation
-For a first test, you can run with `bash x11docker` respective `bash x11docker-gui`. 
-For minimal installation make `x11docker` executable with `chmod +x x11docker` and move it to `/usr/bin`.
+For a first test you can run with `bash x11docker` respective `bash x11docker-gui`. 
+For minimal installation make `x11docker` executable with `chmod +x x11docker` and move it to `/usr/bin` (or another location in `PATH`).
+Other files than `x11docker` script itself are not essential.
 
 
 
@@ -317,6 +319,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
      - Try with reduced container isolation. If it works, drop options one by one until the needed one(s) are left.
      - If `--cap-add ALL` helps, find the [capability](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) you really need and add only that one.
      - If `--privileged` helps, your application probably needs a device in `/dev`. Find out which one and share it with e.g. `--device /dev/snd`. Try also `--sharedir /dev/udev/data:ro`.
+       - Please, don't use `--privileged` as a solution. It allows too much access to host and fatally breaks container isolation. Investigate the permissions your container needs indeed.
    - You can run container applications as root with `--user=root`.
  - A few applications need [DBus](#dbus). Install `dbus` in image and try option `--dbus`. If that does not help, try option `--dbus-system`.
  - A few applications need systemd. Install `systemd` in image and try option `--systemd`.
@@ -335,7 +338,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
 | GLXgears with hardware acceleration | `x11docker --gpu x11docker/xfce glxgears` |
 | [Kodi media center](https://kodi.tv/) with hardware <br> acceleration, Pulseaudio sound <br> and shared `Videos` folder. <br> For setup look at [ehough/docker-kodi](https://github.com/ehough/docker-kodi). | `x11docker --gpu --pulseaudio --sharedir ~/Videos erichough/kodi`. |
 | [XaoS](https://github.com/patrick-nw/xaos) fractal generator | `x11docker patricknw/xaos` |
-| [Telegram messenger](https://telegram.org/) with persistant <br> `HOME` for configuration storage | `x11docker --home xorilog/telegram` |
+| [Telegram messenger](https://telegram.org/) with persistent <br> `HOME` for configuration storage | `x11docker --home xorilog/telegram` |
 | Firefox with shared `Download` folder. | `x11docker --sharedir $HOME/Downloads jess/firefox` |
 | [Tor browser](https://www.torproject.org/projects/torbrowser.html) | `x11docker jess/tor-browser` |
 | Chromium browser | `x11docker -- jess/chromium --no-sandbox` |
@@ -362,7 +365,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
 | LXDE with wine and PlayOnLinux and <br> a persistent `HOME` folder to preserve <br> installed Windows applications, <br> and with Pulseaudio sound. | `x11docker --desktop --home --pulseaudio x11docker/lxde-wine` |
    
 ### Adjust images for your needs
-For persistant changes of image system adjust Dockerfile and rebuild. To add custom applications to x11docker example images you can create a new Dockerfile based on them. Example:
+For persistent changes of image system adjust Dockerfile and rebuild. To add custom applications to x11docker example images you can create a new Dockerfile based on them. Example:
 ```
 # xfce desktop with VLC media player
 FROM x11docker/xfce
