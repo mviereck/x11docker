@@ -20,7 +20,6 @@ bibliography: paper.bib
 
 [`x11docker`](https://github.com/mviereck/x11docker) allows to run graphical applications in a [Linux container](https://en.wikipedia.org/wiki/Operating-system-level_virtualization) using [Docker](https://en.wikipedia.org/wiki/Docker_(software)).
 Containerisation has proven as a useful technology for packaging applications and their dependencies for deployment in cloud-based infrastructures.
-A container is similar to a [virtual machine](https://en.wikipedia.org/wiki/Virtual_machine), but needs less resources.
 The properties of containers such as portability, dependency packaging, reduced requirements of the system environment (i.e. only the container runtime), isolation, and version management of complete application stacks make it a promising candidate to increase computational reproducibility and reusability of research analyses [].
 Their use has been demonstrated in various disciplines, such as software engineering research [@cito_using_2016], bioinformatics [@hosny_algorun_2016], and archeology [@marwick_computational_2017], and their preservation is an active field of research [@Kratzke_Heuveline_2017,@emsley_framework_2018].
 The most popular Linux container frontend, Docker, does not provide a [display server](https://en.wikipedia.org/wiki/Display_server) that would allow to run applications with  [graphical user interface](https://en.wikipedia.org/wiki/Graphical_user_interface) (GUI), because Docker it is originally built for server software.
