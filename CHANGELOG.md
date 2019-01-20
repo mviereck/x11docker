@@ -19,6 +19,9 @@ Project website: https://github.com/mviereck/x11docker
  - Add `-nolisten local` to X commands to forbid abstract socket connections.
 ### Fixed
  - `-t, --tty`: Long option was not parsed.
+ - Fixed IP check on MS Windows
+   [(#102)](https://github.com/mviereck/x11docker/issues/102)
+
 
 ## [5.3.3](https://github.com/mviereck/x11docker/releases/tag/v5.3.3) - 2018-11-17
 ### Added
