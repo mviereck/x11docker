@@ -23,6 +23,8 @@ Project website: https://github.com/mviereck/x11docker
    [(#102)](https://github.com/mviereck/x11docker/issues/102)
  - docker-for-win: Make sure container is terminated.
    [(#106)](https://github.com/mviereck/x11docker/issues/106)
+ - `--interactive`: Use `winpty` for support on docker-for-win.
+   [(#87)](https://github.com/mviereck/x11docker/issues/87)
 
 ## [5.3.3](https://github.com/mviereck/x11docker/releases/tag/v5.3.3) - 2018-11-17
 ### Added
