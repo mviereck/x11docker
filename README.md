@@ -274,6 +274,8 @@ and [WSL (Windows subsystem for Linux)](https://docs.microsoft.com/en-us/windows
  - For sound with option `--pulseaudio` install Cygwin in `C:/cygwin64` with package `pulseaudio`. It works for MSYS2 and WSL, too.
  - Error messages like `./x11docker: line 2: $'\r': command not found` indicate a wrong line ending conversion from git. Run `dos2unix x11docker`.
  - Not all x11docker options are implemented on MS Windows. E.g. `--webcam` and `--printer` do not work.
+ - Firewall settings in Windows can cause issues for container applications accessing the X server. 
+   If everything starts up without an obvious error, but no application window appears, look at issue [(#108)](https://github.com/mviereck/x11docker/issues/108).
  
  
  
