@@ -17,13 +17,14 @@ Project website: https://github.com/mviereck/x11docker
  - Changed shebang `#! /bin/bash` to `#! /usr/bin/env bash` for portability.
    [(#83)](https://github.com/mviereck/x11docker/issues/83)
  - Add `-nolisten local` to X commands to forbid abstract socket connections.
+ - Pull missing docker images without prompting the user first.
 ### Fixed
  - `-t, --tty`: Long option was not parsed.
- - Fixed IP check on MS Windows
+ - docker-for-win: Fixed IP check
    [(#102)](https://github.com/mviereck/x11docker/issues/102)
  - docker-for-win: Make sure container is terminated.
    [(#106)](https://github.com/mviereck/x11docker/issues/106)
- - `--interactive`: Use `winpty` for support on docker-for-win.
+ - docker-for-win: `--interactive`: Use `winpty` wrapper.
    [(#87)](https://github.com/mviereck/x11docker/issues/87)
 
 ## [5.3.3](https://github.com/mviereck/x11docker/releases/tag/v5.3.3) - 2018-11-17

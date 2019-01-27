@@ -359,7 +359,7 @@ $Message" | gxmessage -file - -default okay ||:
       xterm -title "$Title" -e "echo '$(echo "$Message" | sed "s/'/\"/g")' ; read -n1" ||:
     }
   } || {
-    [ -n "$Anyterminal" ] && [ -e "$Cachefolder" ] && [ "$Xserver" != "--tty" ] && {
+    [ -n "$Passwordterminal" ] && [ -e "$Cachefolder" ] && [ "$Xserver" != "--tty" ] && {
       mkfile $Cachefolder/message
       echo "#! /usr/bin/env bash
 echo '$Title
@@ -368,7 +368,7 @@ $Message
 (Press any key to close window)'
 read -n1
 " >> $Cachefolder/message
-      $Anyterminal /usr/bin/env bash $Cachefolder/message
+      $Passwordterminal /usr/bin/env bash $Cachefolder/message
       :
     }
   } || {
@@ -3924,18 +3924,11 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo "done < <(sort < $Cachefolder/images.list)"
   echo ""
 
-  echo "# check whether image is available locally"
-  echo "$Dockerexe inspect --type=image $Imagename >/dev/null 2>&1 || {"
-  [ "$Pullterminal" = "$Passwordterminal" ] && [ "$Passwordneeded" = "yes" ] && Pullterminal=""
-  echo "  env $Terminalxenv $Pullterminal /usr/bin/env bash $Pullrc"
-  echo "  waitforfilecreation $Cachefolder/pullterminalready 5 && {"
-  echo "    rm $Cachefolder/pullterminalready"
-  echo "    waitforfilecreation $Cachefolder/pullready infinity ||:"
-  echo "  } || {"
-  echo "    note 'Interactive terminal to ask for and show \"docker pull\"
-  has failed. Will run \"docker pull $Imagename\" nonetheless.'"
-  echo "    $Dockerexe pull $Imagename 2>> $Containerlogfile"
-  echo "  }"
+  echo "# check whether image is available locally, otherwise pull from docker hub"
+  echo "$Dockerexe inspect --type=image $Imagename >>$Containerlogfile 2>&1 || {"
+  echo "  note 'Image $Imagename not found locally. Will try to pull from docker hub.'"
+  echo "  notify-send 'x11docker: Image $Imagename not found locally. Will try to pull from docker hub.' 2>/dev/null"
+  echo "  docker pull $Imagename 1>&2"
   echo "  $Dockerexe inspect --type=image $Imagename >>$Containerlogfile 2>&1 || {"
   echo "    error \"Image '$Imagename' not found locally
   and not pulled from docker hub. Last lines of log:
@@ -4776,27 +4769,6 @@ exit 0\" >> /etc/rc.local"
   }
   return 0
 } >> $Containerrootrc
-create_pullrc() {               # create pullrc: interactive script to pull image from docker hub
-  echo "#! /usr/bin/env bash"
-  #[ "$Debugmode" = "yes" ] && echo "set -x"
-  declare -f rmcr
-  echo "touchpullready() {"
-  echo "  trap - EXIT"
-  echo "  $Mksu 'touch $Cachefolder/pullready'"
-  echo "  exit"
-  echo "}"
-  echo "trap touchpullready EXIT"
-  echo ":>$Cachefolder/pullterminalready"
-  echo "echo ''"
-  [ "$Winsubsystem" ] && echo "export PATH=\"$(convertpath --subsystem "C:/Program Files/docker"):$(convertpath --subsystem "C:/Program Files/Docker/Docker/resources/bin"):\$PATH\""
-  echo "read -n1 -e -p \"Image '$Imagename' not found locally. "
-  echo "Do you want to pull it from docker hub? [Y|n]\" Choice"
-  echo "[[ \"\$Choice\" == [YyJj]* ]] || [ -z \"\$Choice\" ] && $Sudo $Dockerexe pull $Imagename 2>> $Containerlogfile"
-  echo "rmcr $Containerlogfile"
-  echo "sleep 2"
-  echo "exit"
-  return 0
-} >> $Pullrc
 create_xtermrc() {              # create xtermrc: script to prompt for password and to run dockerrc
   echo "#! /usr/bin/env bash"
   #[ "$Debugmode" = "yes" ] && echo "set -x"
@@ -6039,9 +6011,8 @@ check_passwordfrontend() {      # check password prompt frontend (pkexec, su, su
   }
   return 0
 }
-check_terminalemulator() {      # check terminal for password prompt of su or sudo and for 'docker pull'
+check_terminalemulator() {      # check terminal for password prompt of su or sudo
   # $Passwordterminal:  To prompt for su or sudo password
-  # $Pullterminal:      To show output of "docker pull"
 
   # Not working: pangoterm lilyterm fbterm
   # Makes problems if X and Wayland are independently available at same time: xfce4-terminal
@@ -6059,33 +6030,31 @@ check_terminalemulator() {      # check terminal for password prompt of su or su
   [ "$Interactive" = "yes" ] && Terminallist="bash NOLUCK"
   [ "$Xserver" = "--tty" ]   && Terminallist="bash NOLUCK"
 
-  for Pullterminal in $Terminallist ; do command -v $Pullterminal >/dev/null && break ; done
-  [ "$Pullterminal" = "NOLUCK" ] && warning "Can not find a terminal emulator that works for
+  for Passwordterminal in $Terminallist ; do command -v $Passwordterminal >/dev/null && break ; done
+  [ "$Passwordterminal" = "NOLUCK" ] && warning "Can not find a terminal emulator that works for
   option $Xserver. Please install one of:
   ${Terminallist%"NOLUCK"}"
 
   [ -z "$Hostdisplay" ] && [ "$Sharewayland" = "yes" ] && {
-    case $Pullterminal in
-      qterminal) Pullterminal="env QT_QPA_PLATFORM=wayland $Pullterminal -e" ;;
-      konsole) Pullterminal="env QT_QPA_PLATFORM=wayland dbus-run-session $Pullterminal --nofork -e" ;;
+    case $Passwordterminal in
+      qterminal) Passwordterminal="env QT_QPA_PLATFORM=wayland $Passwordterminal -e" ;;
+      konsole) Passwordterminal="env QT_QPA_PLATFORM=wayland dbus-run-session $Passwordterminal --nofork -e" ;;
     esac
   }
-  case $Pullterminal in
-    xfce4-terminal) Pullterminal="$Pullterminal --disable-server -x" ;;
-    mate-terminal)  Pullterminal="dbus-run-session $Pullterminal -x" ;;
-    gnome-terminal) Pullterminal="dbus-launch $Pullterminal --" ;;
-    terminator)     Pullterminal="dbus-run-session $Pullterminal --no-dbus -x" ;;
-    konsole)        Pullterminal="dbus-run-session $Pullterminal --nofork -e" ;;
-    bash)           Pullterminal="bash -c" ;;
-    *)              Pullterminal="$Pullterminal -e" ;;
+  case $Passwordterminal in
+    xfce4-terminal) Passwordterminal="$Passwordterminal --disable-server -x" ;;
+    mate-terminal)  Passwordterminal="dbus-run-session $Passwordterminal -x" ;;
+    gnome-terminal) Passwordterminal="dbus-launch $Passwordterminal --" ;;
+    terminator)     Passwordterminal="dbus-run-session $Passwordterminal --no-dbus -x" ;;
+    konsole)        Passwordterminal="dbus-run-session $Passwordterminal --nofork -e" ;;
+    bash)           Passwordterminal="bash -c" ;;
+    *)              Passwordterminal="$Passwordterminal -e" ;;
   esac
-  [ -z "$Passwordterminal" ] && Passwordterminal="$Pullterminal"
-  Anyterminal="$Pullterminal"
 
   [ -z "$Hostdisplay$Newdisplay" ] && {
     case $Xserver in
       --weston|--kwin|--hostwayland) ;;
-      *) Passwordterminal="bash -c" ; Pullterminal="" ;;
+      *) Passwordterminal="bash -c";;
     esac
   }
   return 0
@@ -6336,8 +6305,6 @@ declare_variables() {           # declare global variables
 
   # Available terminal emulators
   Passwordterminal=""                             # terminal emulator to use for password prompt (if no terminal emulator is needed, it will be 'bash -c')
-  Pullterminal=""                                 # terminal emulator to show progress of 'docker pull'
-  Anyterminal=""                                  # terminal emulator for alert()
   Terminallist=""                                 # list of possible terminal emulators. Only a few work on Wayland yet.
 
   # regular options
@@ -6768,7 +6735,6 @@ Parsed options:    $Parsedoptions"
   Getting permission to run docker with:          $Passwordcommand $Sudo
   Running X and other user commands with:         $Mksu
   Terminal for password frontend:                 $Passwordterminal
-  Terminal to show docker pull progress:          $Pullterminal
   Running on console:                             $Hosttty
   Running over SSH:                               $Hostssh"
   [ "$Winsubsystem" ] && verbose -d "Running on Windows subsystem: $Winsubsystem
@@ -6798,7 +6764,6 @@ $(nl -ba <$Dockerrc)"
     create_containerrootrc
     verbose "Generated containerrootrc:
 $(nl -ba <$Containerrootrc)"
-    create_pullrc               # pullrc to interactively ask for and show 'docker pull' if image is missing.
     create_xtermrc              # xtermrc to prompt for password if needed.
   }
   
@@ -6844,24 +6809,25 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
-  # BUG --tty: env output on image download in dockerrc
-
-  # ISSUE x11docker/lxde-wine: PlayOnLinux does not create some windows accordingly but as a small black box in the top left.
-  # BUG --dbus-system: slow startup (90s timeout) e.g. in arch and debian buster for unknown reasons.
+  # BUG --dbus-system: slow startup (90s timeout) e.g. in arch and debian buster containers for unknown reasons.
   # BUG --interactive with --systemd, --runit, --openrc, --sysvinit: no job control in shell
   
   # BUG x11docker/deepin: new builds have strange issues
   # BUG x11docker/fluxbox on arch host: background missing, sometimes no context menu. where is the difference?
 
   # BUG error message window in wayland fails: xterm: no display. should use konsole
-  # x11docker-gui: menu entry management? persistant command storage?
+  # BUG: x11docker/xwayland in a nested setup: where is the X socket ??
+  
+  # Enhancement:
   # --update: regard possible location in /opt?
-  # BUG?: x11docker/xwayland nested: where is the X socket ??
+  # --alsa: Check for ALSA_CARD on host? Allow --alsa=CARD?
+  # -I, --internet to allow internet access, otherwise --net=none?
 
-  # further checks of pam.d
-  # --internet to allow internet access, otherwise --net=none?
+  # x11docker-gui: menu entry management? persistant command storage?
   # --group-add: further checks? mismatch messagebus-101-systemd-journal, works nonetheless.
   # new options --wind and --xwind for Wayland+Xwayland in container?
+
+  # further checks of pam.d
   # check multimonitor behaviour
 
   # MSYS2/Cygwin/WSL:
