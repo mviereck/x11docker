@@ -11,13 +11,17 @@ Project website: https://github.com/mviereck/x11docker
  - `--limit[=FACTOR]`: New option to restrict RAM and CPU usage.
  - `--border`: New option to draw a colored border into `--xpra` windows.
    Helps to distinguish between host and container applications.
-   [(#91)](https://github.com/mviereck/x11docker/issues/83)
+   [(#91)](https://github.com/mviereck/x11docker/issues/91)
 ### Changed
  - Copy `/etc/skel/.` to `HOME` if `HOME` is empty.
  - Changed shebang `#! /bin/bash` to `#! /usr/bin/env bash` for portability.
    [(#83)](https://github.com/mviereck/x11docker/issues/83)
  - Add `-nolisten local` to X commands to forbid abstract socket connections.
- - Pull missing docker images without prompting the user first.
+ - Allow interactive `docker pull` in terminal only. Do not start additional 
+   X terminal. [(#109)](https://github.com/mviereck/x11docker/issues/109)
+ - Prefer starting terminal to ask for root password. Use additional X terminal
+   only as a fallback. 
+   [(#109)](https://github.com/mviereck/x11docker/issues/109)
 ### Fixed
  - `-t, --tty`: Long option was not parsed.
  - docker-for-win: Fixed IP check
