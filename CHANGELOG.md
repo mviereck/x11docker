@@ -8,6 +8,8 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
+ - `--pull [=ask|yes|no|always]`: New option to allow/deny `docker pull`.
+   [(#109)](https://github.com/mviereck/x11docker/issues/109)
  - `--limit[=FACTOR]`: New option to restrict RAM and CPU usage.
  - `--border`: New option to draw a colored border into `--xpra` windows.
    Helps to distinguish between host and container applications.

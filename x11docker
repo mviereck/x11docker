@@ -118,6 +118,12 @@ Special options:
      --name NAME       Specify container name NAME.
      --no-internet     Disable internet access for container.
      --no-entrypoint   Disable ENTRYPOINT in image to allow other commands, too
+     --pull [=ask|yes|no|always]  Behaviour if image is missing on host.
+                       ask: Ask in terminal, timeout after 60s (default).
+                       yes: Allow docker pull (default for --pull).
+                       no: Do not run 'docker pull'
+                       always: Always run 'docker pull'. Download only if
+                       newer image is available. Allows sort of auto-update.
      --pw FRONTEND     Choose frontend for password prompt. Possible FRONTEND:
                          su sudo gksu gksudo lxsu lxsudo kdesu kdesudo
                          pkexec beesu none
@@ -3930,22 +3936,37 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo '  grep -q "<none>" <<<$Line || echo $Line >> '$Cachebasefolder/x11docker-gui/images.list
   echo "done < <(sort < $Cachefolder/images.list)"
   echo ""
-
-  [ "$Runsinterminal" = "yes" ] && {
-    echo "$Dockerexe inspect --type=image $Imagename >>$Containerlogfile 2>&1 || {"
-    echo "  read -t60 -n1 -e -p \"Image '$Imagename' not found locally. "
-    echo "Do you want to pull it from docker hub? [Y|n]"
-    echo "(Will wait up to 60s for a response, otherwise assuming no)\" Choice"
-    echo "  [ \"\$?\" = '0' ] && {"
-    echo "    [[ \"\$Choice\" == [YyJj]* ]] || [ -z \"\$Choice\" ] && $Sudo $Dockerexe pull $Imagename 1>&2"
-    echo "  }"
-    echo "}"
-  }
+  
+  echo "Dockerpull=no"
+  case $Pullimage in
+    no) ;;
+    always) echo "Dockerpull=yes" ;;
+    yes) echo "$Dockerexe inspect --type=image $Imagename >>$Containerlogfile 2>&1 || Dockerpull=yes" ;;
+    ask)
+      [ "$Runsinterminal" = "yes" ] && {
+        echo "$Dockerexe inspect --type=image $Imagename >>$Containerlogfile 2>&1 || {"
+        echo "  read -t60 -n1 -e -p \"Image '$Imagename' not found locally. "
+        echo "Do you want to pull it from docker hub? [Y|n]"
+        echo "(Will wait up to 60s for a response, otherwise assuming no)\" Choice"
+        echo "  [ \"\$?\" = '0' ] && {"
+        echo "    [[ \"\$Choice\" == [YyJj]* ]] || [ -z \"\$Choice\" ] && Dockerpull=yes"
+        echo "  }"
+        echo "}"
+      }
+    ;;
+  esac
+  echo "[ \"\$Dockerpull\" = 'yes' ] && {"
+  echo "  note 'Pulling image $Imagename from docker hub'"
+  echo "  notify-send 'x11docker: Pulling image $Imagename from docker hub'"
+  echo "  $Sudo $Dockerexe pull $Imagename 1>&2"
+  echo "}"
   echo "$Dockerexe inspect --type=image $Imagename >>$Containerlogfile 2>&1 || {"
   echo "  error 'Did not find image $Imagename.
   Please build image first or pull it from docker hub with:
   
-      docker pull $Imagename'"
+      docker pull $Imagename
+      
+  or run x11docker with option --pull=yes'"
   echo "}"
   
   echo "# check CMD"
@@ -5460,7 +5481,7 @@ check_option_interferences() {  # check multiple option interferences, change se
   esac
 
   # check xauth
-  [ "$Xauthentication" = "yes" ] && {
+  [ "$Xserver" != "--tty" ] && [ "$Xauthentication" = "yes" ] && {
     command -v xauth.exe >/dev/null && Xauthexe="xauth.exe"
     command -v xauth     >/dev/null && Xauthexe="xauth"
     command -v $Xauthexe    >/dev/null || {
@@ -5497,7 +5518,7 @@ check_option_interferences() {  # check multiple option interferences, change se
 
   # --hostdisplay --gpu
   [ "$Xserver" = "--hostdisplay" ] && [ "$Sharegpu" = "yes" ] && {
-    note "To allow GPU acceleration (option --gpu) with --hostdisplay,
+    note "Option --gpu: To allow GPU acceleration with --hostdisplay,
   x11docker will allow trusted cookies. That enables option --clipboard, too."
     Trusted="yes"
   }
@@ -5524,10 +5545,10 @@ check_option_interferences() {  # check multiple option interferences, change se
       --hostwayland) note "Sharing clipboard may or may not work.
   Cannot enable or disable it, it depends on your Wayland compositor." ;;
       --hostdisplay)
-        warning "To allow clipboard sharing with option --hostdisplay,
-  trusted cookies will be enabled.
+        warning "Option --clipboard: To allow clipboard sharing with
+  option --hostdisplay, trusted cookies will be enabled.
   No protection against X security leaks is left!
-  Please consider to use another X server option."
+  Consider to use another X server option."
         Trusted="yes"
       ;;
     esac
@@ -5551,7 +5572,7 @@ check_option_interferences() {  # check multiple option interferences, change se
   }
 
   [ "$Xserver" = "--hostdisplay" ] && [ "$Trusted" = "yes" ] && [ "$Hostmitshm" = "yes" ] && [ "$Sharehostipc" = "no" ] && [ "$Hostssh" = "no" ] && {
-    note "To allow --hostdisplay with trusted cookies,
+    note "Option --hostdisplay: To allow --hostdisplay with trusted cookies,
   x11docker must share host IPC namespace with container (option --hostipc)
   to allow shared memory for X extension MIT-SHM."
     Sharehostipc="yes"
@@ -5807,6 +5828,12 @@ check_option_interferences() {  # check multiple option interferences, change se
   in docker's container partition or in shared folders.
   It only restricts memory and CPU usage."
   }
+  
+  case "$Pullimage" in
+    yes|no|always|ask) ;;
+    *) note "Option --pull: Invalid argument $Pullimage
+  Fallback: Setting --pull=ask" ;;
+  esac
   
   return 0
 }
@@ -6243,6 +6270,7 @@ declare_variables() {           # declare global variables
   Nonewprivileges="yes"                           # docker run option --security-opt=no-new-privileges. Default: yes. Disabled by options --cap-default, --sudouser and --user=root.
   Capabilities=""                                 # capabilities to add
   Stopsignal=""                                   # signal to send on 'docker stop'
+  Pullimage="ask"                                 # option --pull: allow 'docker pull' yes|no|always|ask
 
   # docker related files
   Dockerrc=dockerrc                               # generated script to check image, set up host and create $Imagecommandscript
@@ -6460,12 +6488,12 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,fullscreen,size:,scale:,rotate:,dpi:,output-count:,gpu,xfishtank,border::"                     # X appearance options
   Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,env:,showenv,showid,showpid1"                                      # X and environment options
   Longoptions="$Longoptions,home,clipboard,pulseaudio::,alsa,lang:,printer,webcam"                                         # comfort options
-  Longoptions="$Longoptions,no-xhost,dbus,dbus-system,hostdbus,pw:,no-internet,workdir:,sharessh,limit::"                  # advanced options
+  Longoptions="$Longoptions,no-xhost,dbus,dbus-system,hostdbus,pw:,no-internet,workdir:,sharessh,limit::,pull::"           # advanced options
   Longoptions="$Longoptions,homedir:,sharedir:,cachebasedir:,homebasedir:"                                                 # host folders
   Longoptions="$Longoptions,tini,no-init,systemd,runit,openrc,sysvinit,sys-admin,sharecgroup"                              # init system options
   Longoptions="$Longoptions,launcher,cleanup,license,licence,help,version,install,update,update-master,remove,wmlist"      # special options without starting X or container
   Longoptions="$Longoptions,verbose::,quiet,debug,stdin"                                                                   # verbose options
-  Longoptions="$Longoptions,hostipc,hostnet,ps,cache,cap-default,sudouser,hostuser:,user:,group-add:,name:"                # capabilities, users
+  Longoptions="$Longoptions,hostipc,hostnet,ps,cap-default,sudouser,hostuser:,user:,group-add:,name:"                      # capabilities, users
   Longoptions="$Longoptions,keymap:,name:,no-entrypoint,runfromhost:,runasroot:,westonini:,interactive"                    # developer options
   Longoptions="$Longoptions,cachedir:,starter,trusted,untrusted,xtest,no-xtest,stdout,stderr,silent,nothing"               # deprecated
   
@@ -6557,7 +6585,8 @@ parse_options() {               # parse cli options
 ${2:-}"                ; shift ;;                          # add custom host command in xinitrc
          --runasroot)  Runasroot="$Runasroot
 ${2:-}"                ; shift ;;        # add custom root command in container setup script
-         --stdin)      Forwardstdin="yes" ;;                # forward stdin to image command
+         --stdin)      Forwardstdin="yes" ;;               # forward stdin to image command
+         --pull)       Pullimage="${2:-yes}" ; shift ;;    # allow 'docker pull'
 
 
      #### Verbose options
