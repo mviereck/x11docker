@@ -43,6 +43,10 @@ Focus on security:
   * Avoids X security leaks using additional X servers.
   * Container user is same as host user to avoid root in container.
   * Restricts container capabilities to bare minimum.
+  
+Note that some applications might behave different than with a regular
+docker run command due to security restrictions set by x11docker.
+Unrestricted setup is possible with: --user=root --cap-default --clipboard
 
 Dependencies on host:
   Depending on chosen options, x11docker needs some packages to be installed.
@@ -556,8 +560,8 @@ $(cat $Bgpidfile 2>/dev/null)"
             }
           ;;
           *) # should never happen (tm)
-            note "Found remaining background process $Line
-$(ps -p $Pid)"
+            note "Found remaining background process $Line ($Pid)
+$(pspid $Pid)"
             killpid $Pid $Name
           ;;
         esac
@@ -756,15 +760,18 @@ $Watchoutput"
 $(sh -c "${1:-}" 2>&1)"
 }
 checkpid() {                    # check if PID $1 is active
-  ps -p ${1:-} >/dev/null 2>&1
+  #ps -p ${1:-} >/dev/null 2>&1
+  [ -e "/proc/${1:-NONSENSE}" ]
 }
 pspid() {                       # ps -p $1 --no-headers
   # On some systems ps does not have option --no-headers.
-  ps -p ${1:-} | tail -n+2
+  # On some systems (busybox) ps -p is not supported
+  ps -p ${1:-} 2>/dev/null || echo "ps -p not supported" | tail -n+2
 }
 killpid() {                     # kill PID $1 with codename $2 [and process name $3]
   verbose -d "Terminating ${1:-} (${2:-}) ${3:-}: $(pspid ${1:-})"
-  ps -p ${1:-} >/dev/null && kill ${1:-} 2>/dev/null
+#  ps -p ${1:-} >/dev/null && kill ${1:-} 2>/dev/null
+  checkpid "${1:-}" && kill ${1:-} 2>/dev/null
 }
 
 #### more or less general routines
@@ -3404,7 +3411,10 @@ check_containeruser() {         # check container user and shared home folder (a
     Containerusergid="0"
     Containerusergroup="root"
     Containeruserhome="/root"
+    Sudouser="yes" && warning "Option --user=root: Adding some capabilities to allow
+  some root privileges in container that x11docker would drop otherwise."
   }
+  return 0
 }
 check_containerhome() {         # options --home, --homedir, --homebasedir: check HOME of container user.
   ## option '--home':    share folder ~/.local/share/x11docker/imagename with created container as its home directory
@@ -3597,9 +3607,8 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(while 
 setup_capabilities() {          # check linux capabilities needed by container
   # compare: man capabilities
 
-  [ "$Containeruseruid" = "0" ]     && Sudouser="yes"
-  [ "$Sudouser" = "yes" ]      && Adminusercaps="yes"
-  [ "$Capdropall" = "no" ]     && Nonewprivileges="no"
+  [ "$Sudouser" = "yes" ]       && Adminusercaps="yes"
+  [ "$Capdropall" = "no" ]      && Nonewprivileges="no"
   
   # enable dbus
   case $Initsystem in
@@ -5143,11 +5152,11 @@ check_host() {                  # check host environment
   export -f rmcr
   
   # Check whether x11docker runs over SSH
-  command -v pstree >/dev/null && {
-    pstree -ps $$ | grep -q sshd && Hostssh="yes" || Hostssh="no"
-  } || {
-    check_parent_sshd "$$"       && Hostssh="yes" || Hostssh="no"
-  }
+  #command -v pstree >/dev/null && {
+  #  pstree -ps $$ | grep -q sshd && Hostssh="yes" || Hostssh="no"
+  #} || {
+  check_parent_sshd "$$"       && Hostssh="yes" || Hostssh="no"
+  #}
   
   # Check whether x11docker runs on X or on tty
   tty | grep -q tty     && Hosttty="yes" || Hosttty="no"
@@ -5155,7 +5164,7 @@ check_host() {                  # check host environment
   XDG_VTNR=${XDG_VTNR:-}
   
   # Check whether x11docker runs in an interactive terminal
-  tty -s && Runsinterminal="yes" || Runsinterminal="no"
+  tty >/dev/null 2>&1 && Runsinterminal="yes" || Runsinterminal="no"
   
   # Check whether ps can watch processes of other users
   mount | grep "^proc" | grep -q "hidepid=2" && {
@@ -6187,7 +6196,7 @@ declare_variables() {           # declare global variables
   Logmessages=""                                  # stores messages until logfile is available, needed by logentry()
   Logfile=""                                      # x11docker.log
 
-  Mycookie=$(mcookie | cut -b1-6 || echo $RANDOM) # random number used for container name and cache folder name
+  Mycookie=$(mcookie 2>/dev/null | cut -b1-6 || echo $RANDOM) # random number used for container name and cache folder name
 
   # terminal colors used for messages and --verbose=c
   Esc="$(printf '\033')"
@@ -6873,6 +6882,7 @@ main "$@"
 #### ToDo notes for development
 todo() {
   # notify-send in dockerrc does not show up
+  # BUG mywatch "ps -p $Xpraserverpid will fail on busybox systems
 
   # BUG --dbus-system: slow startup (90s timeout) e.g. in arch and debian buster containers for unknown reasons.
   # BUG --interactive with --systemd, --runit, --openrc, --sysvinit: no job control in shell
