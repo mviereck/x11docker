@@ -14,6 +14,10 @@ Project website: https://github.com/mviereck/x11docker
  - `--border`: New option to draw a colored border into `--xpra` windows.
    Helps to distinguish between host and container applications.
    [(#91)](https://github.com/mviereck/x11docker/issues/91)
+ - `--xtest`: Enable X extension XTEST. (Experimental, might be removed again)
+   [(#117)](https://github.com/mviereck/x11docker/issues/117)
+ - `--xcomposite`: Enable X extension COMPOSITE. (Experimental, might be removed again)
+   [(#117)](https://github.com/mviereck/x11docker/issues/117)
 ### Changed
  - Copy `/etc/skel/.` to `HOME` if `HOME` is empty.
  - Changed shebang `#! /bin/bash` to `#! /usr/bin/env bash` for portability.
@@ -32,6 +36,8 @@ Project website: https://github.com/mviereck/x11docker
    [(#106)](https://github.com/mviereck/x11docker/issues/106)
  - docker-for-win: `--interactive`: Use `winpty` wrapper.
    [(#87)](https://github.com/mviereck/x11docker/issues/87)
+ - `--xvfb` in Cygwin: Removed `-nolisten local` in X command.
+   [(#123)](https://github.com/mviereck/x11docker/issues/123)
 
 ## [5.3.3](https://github.com/mviereck/x11docker/releases/tag/v5.3.3) - 2018-11-17
 ### Added
@@ -141,7 +147,7 @@ Project website: https://github.com/mviereck/x11docker
 ```
    x11docker [OPTIONS] --  DOCKER_RUN_OPTIONS -- IMAGE [COMMAND [ARG1 ARG2 ...]]
 ```
-   Previous, still valid:
+   Previous syntax, still valid, but deprecated:
 ```
    x11docker [OPTIONS] -- "DOCKER_RUN_OPTIONS"   IMAGE [COMMAND [ARG1 ARG2 ...]]
    x11docker [OPTIONS] -- IMAGE COMMAND ARG1 -- ARG2
