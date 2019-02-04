@@ -38,6 +38,8 @@ Project website: https://github.com/mviereck/x11docker
    [(#87)](https://github.com/mviereck/x11docker/issues/87)
  - `--xvfb` in Cygwin: Removed `-nolisten local` in X command.
    [(#123)](https://github.com/mviereck/x11docker/issues/123)
+ - MSYS2/Cygwin: Always use X over IP to serve e.g. `Xvfb.exe`, too.
+   [(#123)](https://github.com/mviereck/x11docker/issues/123)
 
 ## [5.3.3](https://github.com/mviereck/x11docker/releases/tag/v5.3.3) - 2018-11-17
 ### Added
