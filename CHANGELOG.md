@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [5.4.0]
+## [5.4.0](https://github.com/mviereck/x11docker/releases/tag/v5.4.0) - 2018-11-17
 ### Added
  - `--pull [=ask|yes|no|always]`: New option to allow/deny `docker pull`.
    [(#109)](https://github.com/mviereck/x11docker/issues/109)
@@ -28,9 +28,9 @@ Project website: https://github.com/mviereck/x11docker
    [(#109)](https://github.com/mviereck/x11docker/issues/109)
 ### Fixed
  - **API FIX**: Preserve quoting in image command correctly. 
-   Image commands like `sh -c 'ls && pwd` previously failed.
+   Image commands like `sh -c 'ls && pwd'` previously failed.
    Instead `'ls && pwd'` sort of worked although it is weird.
-   Now `sh -c 'ls && pwd` works as intended and `'ls && pwd'` fails.
+   Now `sh -c 'ls && pwd'` works as intended and `'ls && pwd'` fails.
    [(#112)](https://github.com/mviereck/x11docker/issues/112)
  - `-t, --tty`: Long option was not parsed.
  - docker-for-win: Fixed IP check
