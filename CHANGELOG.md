@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [5.4.1](https://github.com/mviereck/x11docker/releases/tag/v5.4.1) - 2018-11-17
+### Fixed
+ - `--update`: Remove debug output of `set -x`.
+
 ## [5.4.0](https://github.com/mviereck/x11docker/releases/tag/v5.4.0) - 2018-11-17
 ### Added
  - `--pull [=ask|yes|no|always]`: New option to allow/deny `docker pull`.
