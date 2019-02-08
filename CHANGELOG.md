@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [5.4.0]
 ### Added
  - `--pull [=ask|yes|no|always]`: New option to allow/deny `docker pull`.
    [(#109)](https://github.com/mviereck/x11docker/issues/109)
@@ -14,21 +14,24 @@ Project website: https://github.com/mviereck/x11docker
  - `--border`: New option to draw a colored border into `--xpra` windows.
    Helps to distinguish between host and container applications.
    [(#91)](https://github.com/mviereck/x11docker/issues/91)
- - `--xtest`: Enable X extension XTEST. (Experimental, might be removed again)
-   [(#117)](https://github.com/mviereck/x11docker/issues/117)
- - `--xcomposite`: Enable X extension COMPOSITE. (Experimental, might be removed again)
+ - `--xtest`, `--xcomposite`: Experimental options to enable X extensions
+   `XTEST` and `COMPOSITE`. Might be removed in later releases.
    [(#117)](https://github.com/mviereck/x11docker/issues/117)
 ### Changed
- - Copy `/etc/skel/.` to `HOME` if `HOME` is empty.
+ - Copy `/etc/skel/.` in container to `HOME` if `HOME` is empty.
  - Changed shebang `#! /bin/bash` to `#! /usr/bin/env bash` for portability.
    [(#83)](https://github.com/mviereck/x11docker/issues/83)
- - Add `-nolisten local` to X commands to forbid abstract socket connections.
  - Allow interactive `docker pull` in terminal only. Do not start additional 
    X terminal. [(#109)](https://github.com/mviereck/x11docker/issues/109)
  - Prefer starting terminal to ask for root password. Use additional X terminal
    only as a fallback. 
    [(#109)](https://github.com/mviereck/x11docker/issues/109)
 ### Fixed
+ - **API FIX**: Preserve quoting in image command correctly. 
+   Image commands like `sh -c 'ls && pwd` previously failed.
+   Instead `'ls && pwd'` sort of worked although it is weird.
+   Now `sh -c 'ls && pwd` works as intended and `'ls && pwd'` fails.
+   [(#112)](https://github.com/mviereck/x11docker/issues/112)
  - `-t, --tty`: Long option was not parsed.
  - docker-for-win: Fixed IP check
    [(#102)](https://github.com/mviereck/x11docker/issues/102)
@@ -36,10 +39,9 @@ Project website: https://github.com/mviereck/x11docker
    [(#106)](https://github.com/mviereck/x11docker/issues/106)
  - docker-for-win: `--interactive`: Use `winpty` wrapper.
    [(#87)](https://github.com/mviereck/x11docker/issues/87)
- - `--xvfb` in Cygwin: Removed `-nolisten local` in X command.
-   [(#123)](https://github.com/mviereck/x11docker/issues/123)
  - MSYS2/Cygwin: Always use X over IP to serve e.g. `Xvfb.exe`, too.
    [(#123)](https://github.com/mviereck/x11docker/issues/123)
+ - `--update`: Fixed `sed` parsing error for excerpt of `CHANGELOG.md`.
 
 ## [5.3.3](https://github.com/mviereck/x11docker/releases/tag/v5.3.3) - 2018-11-17
 ### Added

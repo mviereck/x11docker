@@ -13,7 +13,7 @@ Software can be installed in a deployable Docker image with a rudimentary Linux 
 This can help to run or deploy software that is difficult to install on several systems due to dependency issues. It is possible to run outdated versions or latest development versions side by side. 
 Files to work on can be shared between host and container.
 
-x11docker runs on Linux and (with some setup) on [MS Windows](#msys2-cygwin-and-wsl-on-ms-windows). x11docker is not adapted to run on macOS.
+x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#msys2-cygwin-and-wsl-on-ms-windows). x11docker is not adapted to run on macOS except in a Linux VM.
 
 [x11docker wiki](https://github.com/mviereck/x11docker/wiki) provides some how-to's for basic setups without x11docker.
 
@@ -74,7 +74,7 @@ To run a host application on a new X server:
 To run only a new empty X server:
   x11docker [OPTIONS]
 ```
-
+`DOCKER_RUN_OPTIONS` are just added to `docker run` command without a check by x11docker.
 
 
 ## Options
@@ -227,7 +227,7 @@ _Weaknesses:_
  - x11docker provides several different X server options. Each X server involved might have its individual vulnerabilities. x11docker only covers well-known X security leaks that result from X11 protocol.
 
 ### Options degrading container isolation
-x11docker shows warning messages in terminal if chosen options degrade container isolation.
+x11docker shows warning messages in terminal if chosen options degrade container isolation. Note that x11docker does not check custom `DOCKER_RUN_OPTIONS`.
 
 _Most important:_
   - `--hostdisplay` shares host X socket of display :0 instead of running a second X server. 
@@ -261,7 +261,7 @@ As default `--limit` restricts to 50% of available CPUs and 50% of currently fre
 
 For more custom fine tuning have a look at [Docker documentation: Limit a container's resources](https://docs.docker.com/config/containers/resource_constraints).
 
-Currently internet access is allowed per default. That will change in future versions of x11docker. Meanwhile you can disable internet access with `--no-internet`.
+**NOTE**: Internet access is allowed per default. You can disable internet access with `--no-internet`.
 
 **WARNING**: There is no restriction that can prevent the container from flooding the hard disk in Docker's container partition or in shared folders.
   
@@ -269,17 +269,21 @@ Currently internet access is allowed per default. That will change in future ver
 ## MSYS2, Cygwin and WSL on MS Windows
 x11docker runs on MS Windows in [MSYS2](https://www.msys2.org/), [Cygwin](https://www.cygwin.com/) 
 and [WSL (Windows subsystem for Linux)](https://docs.microsoft.com/en-us/windows/wsl/about).
+Although it basically works, it misses some features available on Linux and cannot be guaranteed to be as reliable as on Linux.
+However, running in a Linux VM instead of running natively on Windows is fully supported.
+Setup:
  - Install X server [`VcXsrv`](https://sourceforge.net/projects/vcxsrv/) on Windows into `C:/Program Files/VcXsrv` (option `--vcxsrv`).
- - Cygwin/X also provides X server `Xwin` (option `--xwin`). Install `xinit` package in Cygwin.
+  - Alternative: Cygwin provides X server `Xwin` (option `--xwin`). Install `xinit` package in Cygwin. Can be used in Cygwin only.
  - For sound with option `--pulseaudio` install Cygwin in `C:/cygwin64` with package `pulseaudio`. It works for MSYS2 and WSL, too.
  - Error messages like `./x11docker: line 2: $'\r': command not found` indicate a wrong line ending conversion from git. Run `dos2unix x11docker`.
  - Not all x11docker options are implemented on MS Windows. E.g. `--webcam` and `--printer` do not work.
  - Firewall settings in Windows can cause issues for container applications accessing the X server. 
-   If everything starts up without an obvious error, but no application window appears, look at issue [(#108)](https://github.com/mviereck/x11docker/issues/108).
+   If everything starts up without an obvious error, but no application window appears, look at issue [#108](https://github.com/mviereck/x11docker/issues/108).
  
  
  
 ## Installation
+Note that x11docker is just a **bash script** without library dependencies.
 ### Installation options
 As root you can install, update and remove x11docker on your system:
  - `x11docker --install` : install x11docker and x11docker-gui from current directory. 
@@ -290,10 +294,9 @@ As root you can install, update and remove x11docker on your system:
 Copies `x11docker` and `x11docker-gui` to `/usr/bin`. Creates an icon in `/usr/share/icons`. 
 Creates `x11docker.desktop` in `/usr/share/applications`. Copies `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
 ### Shortest way for first installation:
+Remove `sudo` and run as root if your system does not use sudo.
 ```
-wget https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker -O /tmp/x11docker
-sudo bash /tmp/x11docker --update
-rm /tmp/x11docker
+curl -fsSL https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker | sudo bash -s -- --update
 ```
 ### Minimal installation
 For a first test you can run with `bash x11docker` respective `bash x11docker-gui`. 
