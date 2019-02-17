@@ -108,7 +108,7 @@ Note that x11docker copies files from `/etc/skel` in container to `HOME` if `HOM
 ### Hardware acceleration
 Hardware acceleration for OpenGL is possible with option `-g, --gpu`. 
  - This will work out of the box in most cases with open source drivers on host. Otherwise have a look at [Dependencies](#option-dependencies). 
- - Closed source [NVIDIA drivers](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container) need some setup and support less [x11docker X server options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options).
+ - Closed source [NVIDIA drivers](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container) need some setup and support less [x11docker X server options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options#attributes-of-x-server-and-wayland-options).
  
 ### Clipboard
 Clipboard sharing is possible with option `-c, --clipboard`. 
