@@ -108,7 +108,7 @@ Note that x11docker copies files from `/etc/skel` in container to `HOME` if `HOM
 ### Hardware acceleration
 Hardware acceleration for OpenGL is possible with option `-g, --gpu`. 
  - This will work out of the box in most cases with open source drivers on host. Otherwise have a look at [Dependencies](#option-dependencies). 
- - Closed source [NVIDIA drivers](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container) need some setup.
+ - Closed source [NVIDIA drivers](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container) need some setup and support less [x11docker X server options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options).
  
 ### Clipboard
 Clipboard sharing is possible with option `-c, --clipboard`. 
@@ -180,6 +180,8 @@ All X server options with a description and their dependencies are listed in [wi
 | Recommended base | `xpra` `Xephyr` | `--xpra` <br> `--xephyr` |
 | Recommended base for `--gpu` | `xpra` `weston` `Xwayland` `xdotool` | `--xpra-xwayland` <br> `--weston-xwayland` <br> `--weston` <br> `--xwayland` <br> `--wayland` |
 | Recommended tools | `xauth` `xrandr` `xdpyinfo` | |
+
+Note that [`--gpu` support with proprietary NVIDIA drivers](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container) is possible only for options `--hostdisplay` and `--xorg`.
 
 ### Option dependencies
 | Option | Dependencies on host | Dependencies in image |
