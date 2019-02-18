@@ -6,9 +6,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [5.4.2](https://github.com/mviereck/x11docker/releases/tag/v5.4.2) - 2019-02-18
 ### Fixed
- - `--gpu`: Fixes for automatical NVIDIA driver installation.
+ - `--gpu`: Fixes for automated NVIDIA driver installation.
    [(#127)](https://github.com/mviereck/x11docker/issues/127)
 
 ## [5.4.1](https://github.com/mviereck/x11docker/releases/tag/v5.4.1) - 2019-02-08
