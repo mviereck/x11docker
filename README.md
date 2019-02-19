@@ -118,7 +118,8 @@ Clipboard sharing is possible with option `-c, --clipboard`.
 ### Sound
 Sound is possible with options `-p, --pulseaudio` and `--alsa`. 
  - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and in image.
- - For ALSA sound with `--alsa` you might need to specify a sound card with e.g. `--env ALSA_CARD=Generic`. Get a list of available sound cards with `aplay -l`.
+ - For ALSA sound with `--alsa` you might need to specify a sound card with e.g. `--alsa=Generic`. Get a list of available sound cards with `aplay -l`.
+   To support virtual ALSA devices like `dmix`, too, the image needs ALSA libraries, e.g. `libasound2` in debian images.
  
 ### Webcam
 Webcams on host can be shared with option `--webcam`.
