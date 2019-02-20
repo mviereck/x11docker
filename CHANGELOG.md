@@ -6,10 +6,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Fixed
+ - `--gpu`: NVIDIA driver installation: Avoid `--install-libglvnd` and
+   `--no-nvidia-modprobe` for installer versions that do not support it.
+
 ## [5.4.3](https://github.com/mviereck/x11docker/releases/tag/v5.4.2) - 2019-02-19
 ### Changed
  - `--alsa[=CARDNAME]`: Accepts a sound card name as optional argument.
- - `--gpu`: NVIDIA driver installation: Avoid dependencies on `kmod` an `xz`.
+ - `--gpu`: NVIDIA driver installation: Avoid dependencies on `kmod` and `xz`.
 ### Fixed
  - `--gpu`: NVIDIA driver installation: Old versions need `--install-libglvnd`.
 
