@@ -1373,13 +1373,10 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
   done < <(find /dev/dri /dev/nvidia* /dev/vga_arbiter -maxdepth 0 2>/dev/null ||:)
 
   # check for closed source nvidia driver on host, provide automated installation, warn about disadvantages
-  #Hostnvidia=yes
-  [ "$Hostnvidia" = "yes" ] && {
-    Nvidiaversion=$(head -n1 </proc/driver/nvidia/version | awk '{ print $8 }')
-    #Nvidiaversion="304.30"
+  [ "$Nvidiaversion" ] && {
     verbose -d "Detected NVIDIA driver version $Nvidiaversion on host."
     Nvidiadriver=$(find /usr/local/share/x11docker/NVIDIA*$Nvidiaversion*.run $Hostuserhome/.local/share/x11docker/NVIDIA*$Nvidiaversion*.run 2>/dev/null | head -n1 )
-    Nvidiadriver="$(realpath "$Nvidiadriver")"
+    Nvidiadriver="$(realpath "$Nvidiadriver" 2>/dev/null)"
 
     [ -e "$Nvidiadriver" ] && {
       verbose -d "Found proprietary closed source NVIDIA driver installer
@@ -1392,7 +1389,7 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
 
     } || {
       Nvidiadriver=""
-      warning "You are using proprietary closed source NVIDIA driver.
+      note "You are using proprietary closed source NVIDIA driver.
   GPU acceleration will only work if you have installed the very same driver
   version in image. That makes images less portable.
   It is recommended to use free open source nouveau driver on host instead.
@@ -1795,7 +1792,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
     ;;
   esac
 
-  [ "$Hostnvidia" = "yes" ] && [ "$Sharegpu" = "yes" ] && case $Xserver in
+  [ "$Nvidiaversion" ] && [ "$Sharegpu" = "yes" ] && case $Xserver in
     --xpra-xwayland|--weston-xwayland|--xwayland|--weston|--kwin|--kwin-xwayland|--xdummy-xwayland|--hostwayland)
       note "Your system uses closed source NVIDIA driver.
   GPU support will work only with options --hostdisplay and --xorg.
@@ -1907,7 +1904,7 @@ check_xdepends() {              # check dependencies on host for X server option
       }
     ;;
   esac
-  [ "$Hostnvidia" = "yes" ] && case ${1:-} in
+  [ "$Nvidiaversion" ] && case ${1:-} in
     --xpra-xwayland|--weston-xwayland|--xwayland|--weston|--kwin|--kwin-xwayland|--xdummy-xwayland|--hostwayland)
       $Message "${1:-}: Closed source NVIDIA driver does not support Wayland."
       Return=1
@@ -4478,15 +4475,20 @@ create_containerrootrc() {      # create container root setup script: This scrip
     echo "    [ \"\$Installationwillsucceed\" = \"maybe\" ] && {"
     echo "      note 'Installing NVIDIA driver $Nvidiaversion in container.'"
     echo "      mkdir -m 1777 /tmp2"
+    echo "      # provide fake tools to fool installer dependency check"
     echo "      ln -s /bin/true /tmp2/modprobe"
     echo "      ln -s /bin/true /tmp2/depmod"
     echo "      ln -s /bin/true /tmp2/lsmod"
     echo "      ln -s /bin/true /tmp2/rmmod"
+    echo "      ln -s /bin/true /tmp2/ld"
+    echo "      ln -s /bin/true /tmp2/objcopy"
+    echo "      ln -s /bin/true /tmp2/insmod"
     echo "      env TMPDIR=/tmp2 PATH=/tmp2:\$PATH sh $Cshare/NVIDIA-$Nvidiaversion.run -A | grep -q 'install-libglvnd' && Libglvnd='--install-libglvnd'"
     echo "      env TMPDIR=/tmp2 PATH=/tmp2:\$PATH sh $Cshare/NVIDIA-$Nvidiaversion.run -A | grep -q 'no-nvidia-modprobe' && Nvidiamodprobe='--no-nvidia-modprobe'"
     echo "      env TMPDIR=/tmp2 PATH=/tmp2:\$PATH sh $Cshare/NVIDIA-$Nvidiaversion.run --tmpdir /tmp2 \$Libglvnd \
                                   --accept-license --no-runlevel-check --no-questions --no-backup --ui=none \
-                                  --no-kernel-module --no-kernel-module-source --no-nouveau-check \$Nvidiamodprobe"
+                                  --no-kernel-module --no-kernel-module-source --no-nouveau-check \$Nvidiamodprobe || note 'ERROR: Installation of NVIDIA driver failed."
+    echo "  Run with option --verbose to see installer output.'"
     echo "      rm -R /tmp2 && unset TMPDIR"
     echo "    } || note 'Skipping installation of $Cshare/NVIDIA-$Nvidiaversion.run'"
     echo "  ;;"
@@ -5184,8 +5186,8 @@ check_host() {                  # check host environment
   }
   
   # Check if host uses proprietary NVIDIA driver
-  [ -e "/proc/driver/nvidia" ] && Hostnvidia="yes" || Hostnvidia="no"
-  
+  Nvidiaversion=$(head -n1 2>/dev/null </proc/driver/nvidia/version | awk '{ print $8 }')
+
   return 0
 }
 check_hostuser() {              # check for unprivileged host user
@@ -5957,7 +5959,7 @@ option_messages() {             # some messages depending on options, but not ch
   esac
   
   # NVIDIA without --gpu
-  [ "$Hostnvidia" = "yes" ] && [ "$Sharegpu" = "no" ] && case $Xserver in
+  [ "$Nvidiaversion" ] && [ "$Sharegpu" = "no" ] && case $Xserver in
     --hostdisplay|--xorg) note "Option $Xserver may fail with proprietary NVIDIA driver
   on host. In that case try other X server options like --xpra or --xephyr." ;;
   esac
@@ -6244,7 +6246,8 @@ declare_variables() {           # declare global variables
   Hostssh=""                                      # x11docker runsover ssh yes/no
   Hosttty=""                                      # x11docker runs on tty yes/no
   Hosthidepid=""                                  # /proc is mounted with hidepid=2 yes/no
-  Hostnvidia=""                                   # proprietary nvidia driver on host yes/no
+  Nvidiaversion=""                                # option --gpu: proprietary nvidia driver version on host
+  Nvidiadriver=""                                 # option '--gpu': nvidia driver installer for container in [...]local/share/x11docker
   Hostcanwatchroot=""                             # x11docker can watch root processes yes/no
   Runsinterminal=""                               # x11docker runs in a terminal yes/no
   
@@ -6346,10 +6349,6 @@ declare_variables() {           # declare global variables
   Desktopmode="no"                                # option --desktop: image contains a desktop enironment.
   Windowmanager=""                                # option '-w, --wm': window manager to use. If not given but needed, autodetection is used
   Sharegpu="no"                                   # option '--gpu': Use hardware accelerated OpenGL, share files in /dev/dri
-
-  # --gpu: nvidia
-  Nvidiadriver=""                                 # option '--gpu': nvidia driver installer for container in [...]local/share/x11docker
-  Nvidiaversion=""                                #   "        "    nvidia driver version on host
 
   # Screensize and related X server adjustments
   Screensize=""                                   # option --size XxY

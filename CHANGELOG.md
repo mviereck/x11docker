@@ -10,6 +10,7 @@ Project website: https://github.com/mviereck/x11docker
 ### Fixed
  - `--gpu`: NVIDIA driver installation: Avoid `--install-libglvnd` and
    `--no-nvidia-modprobe` for installer versions that do not support it.
+   Fool dependency check for `binutils` for old installer versions.
 
 ## [5.4.3](https://github.com/mviereck/x11docker/releases/tag/v5.4.2) - 2019-02-19
 ### Changed
