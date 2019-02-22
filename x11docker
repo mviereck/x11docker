@@ -776,6 +776,14 @@ killpid() {                     # kill PID $1 with codename $2 [and process name
 }
 
 #### more or less general routines
+askyesno() {
+  # Ask Yes/no question. Default yes for ENTER, timeout with no after 60s
+  read -t60 -n1 -e -p "(timeout after 60s assuming no) [Y|n]" Choice
+  [ "$?" = '0' ] && {
+    [[ "$Choice" == [YyJj]* ]] || [ -z "$Choice" ] && return 0
+  }
+  return 1
+}
 verlte() {                      # version number check $1 less than or equal $2
   [  "${1:-}" = "$(echo -e "${1:-}\n${2:-}" | sort -V | head -n1)" ] && return 0 || return 1
 }
@@ -1378,45 +1386,51 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
     Nvidiadriver=$(find /usr/local/share/x11docker/NVIDIA*$Nvidiaversion*.run $Hostuserhome/.local/share/x11docker/NVIDIA*$Nvidiaversion*.run 2>/dev/null | head -n1 )
     Nvidiadriver="$(realpath "$Nvidiadriver" 2>/dev/null)"
 
-    [ -e "$Nvidiadriver" ] && {
-      verbose -d "Found proprietary closed source NVIDIA driver installer
+    grep -q -- "--runtime.nvidia" <<< "$Customdockeroptions" && Nvidiaruntime="yes"
+    
+    case "$Nvidiaruntime" in
+      yes) 
+        debugnote "NVIDIA runtime detected. Not installing driver."
+        Nvidiadriver="" 
+      ;;
+      no)
+        [ -e "$Nvidiadriver" ] && {
+        verbose -d "Found proprietary closed source NVIDIA driver installer
   $Nvidiadriver"
 
-      [ "$Capdropall" = "yes" ] && warning "To install proprietary closed source NVIDIA driver,
+          [ "$Capdropall" = "yes" ] && warning "To install proprietary closed source NVIDIA driver,
   x11docker must give some capabilities to container that would be dropped
   otherwise for security reasons. Container security is reduced now.
   You would not have this issue with free nouveau driver on host."
 
-    } || {
-      Nvidiadriver=""
-      note "You are using proprietary closed source NVIDIA driver.
+        } || {
+          Nvidiadriver=""
+          note "You are using proprietary closed source NVIDIA driver.
   GPU acceleration will only work if you have installed the very same driver
   version in image. That makes images less portable.
   It is recommended to use free open source nouveau driver on host instead.
   Ask NVIDIA corporation to at least publish their closed source API,
   or even better to actively support open source driver nouveau."
 
-      note "x11docker can try to automatically install NVIDIA driver
+          note "x11docker can try to automatically install NVIDIA driver
   version $Nvidiaversion in container on every container startup.
   Drawbacks: Container startup is a bit slower and its security will be reduced.
 
   You can look here for a driver installer:
     https://www.nvidia.com/Download/index.aspx
     https://http.download.nvidia.com/
-  A direct download URL may be:
-   https://http.download.nvidia.com/XFree86/Linux-x86_64/$Nvidiaversion/NVIDIA-Linux-x86_64-$Nvidiaversion.run
+  A direct download URL is probably:
+    https://http.download.nvidia.com/XFree86/Linux-x86_64/$Nvidiaversion/NVIDIA-Linux-x86_64-$Nvidiaversion.run
   If you got a driver, store it at one of the following locations:
     $Hostuserhome/.local/share/x11docker/
     /usr/local/share/x11docker/
 
   Be aware that the version number must match exactly the version on host.
   The file name must begin with 'NVIDIA', contain the version number $Nvidiaversion
-  and end with suffix '.run'.
-
-  Automated installation fails on image systems not using glibc like Alpine
-  and fails on openSUSE images with a self-extraction error.
-  These issues cannot be fixed due to closed source policy of NVIDIA corporation."
-    }
+  and end with suffix '.run'."
+        }
+      ;;
+    esac
   }
   return 0
 }
@@ -3904,6 +3918,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   declare -f mkfile
   declare -f rocknroll
   declare -f waitforfilecreation
+  declare -f askyesno
   declare -f escapestring rmcr
   echo "Hostuser=$Hostuser"
   echo "Hostusergid=$Hostusergid"
@@ -3958,12 +3973,9 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
     ask)
       [ "$Runsinterminal" = "yes" ] && {
         echo "$Dockerexe inspect --type=image $Imagename >>$Containerlogfile 2>&1 || {"
-        echo "  read -t60 -n1 -e -p \"Image '$Imagename' not found locally. "
-        echo "Do you want to pull it from docker hub? [Y|n]"
-        echo "(Will wait up to 60s for a response, otherwise assuming no)\" Choice"
-        echo "  [ \"\$?\" = '0' ] && {"
-        echo "    [[ \"\$Choice\" == [YyJj]* ]] || [ -z \"\$Choice\" ] && Dockerpull=yes"
-        echo "  }"
+        echo "  echo 'Image $Imagename not found locally.'"
+        echo "  echo 'Do you want to pull it from docker hub?'"
+        echo "  askyesno && Dockerpull=yes"
         echo "}"
       }
     ;;
@@ -4382,7 +4394,7 @@ create_containerrootrc() {      # create container root setup script: This scrip
       case $Sudouser in
         no)  echo "echo 'root:*:17219:0:99999:7:::' >> /etc/shadow" ;;
         yes) echo "echo 'root:$Containeruserpassword:17219:0:99999:7:::' >> /etc/shadow  # with option --sudouser, set root password 'x11docker'"
-             echo "sed -i s%root:-:%root:x:% /etc/passwd                            # allow password in /etc/shadow"
+             echo "sed -i s%root:-:%root:x:% /etc/passwd                                 # allow password in /etc/shadow"
         ;;
       esac
       echo ""
@@ -4483,11 +4495,11 @@ create_containerrootrc() {      # create container root setup script: This scrip
     echo "      ln -s /bin/true /tmp2/ld"
     echo "      ln -s /bin/true /tmp2/objcopy"
     echo "      ln -s /bin/true /tmp2/insmod"
-    echo "      env TMPDIR=/tmp2 PATH=/tmp2:\$PATH sh $Cshare/NVIDIA-$Nvidiaversion.run -A | grep -q 'install-libglvnd' && Libglvnd='--install-libglvnd'"
-    echo "      env TMPDIR=/tmp2 PATH=/tmp2:\$PATH sh $Cshare/NVIDIA-$Nvidiaversion.run -A | grep -q 'no-nvidia-modprobe' && Nvidiamodprobe='--no-nvidia-modprobe'"
-    echo "      env TMPDIR=/tmp2 PATH=/tmp2:\$PATH sh $Cshare/NVIDIA-$Nvidiaversion.run --tmpdir /tmp2 \$Libglvnd \
-                                  --accept-license --no-runlevel-check --no-questions --no-backup --ui=none \
-                                  --no-kernel-module --no-kernel-module-source --no-nouveau-check \$Nvidiamodprobe || note 'ERROR: Installation of NVIDIA driver failed."
+    echo "      Nvidiaoptions='--accept-license --no-runlevel-check --no-questions --no-backup --ui=none --no-kernel-module --no-nouveau-check'"
+    echo "      env TMPDIR=/tmp2 PATH=/tmp2:\$PATH sh $Cshare/NVIDIA-$Nvidiaversion.run -A | grep -q -- '--install-libglvnd'        && Nvidiaoptions=\"\$Nvidiaoptions --install-libglvnd\""
+    echo "      env TMPDIR=/tmp2 PATH=/tmp2:\$PATH sh $Cshare/NVIDIA-$Nvidiaversion.run -A | grep -q -- '--no-nvidia-modprobe'      && Nvidiaoptions=\"\$Nvidiaoptions --no-nvidia-modprobe\""
+    echo "      env TMPDIR=/tmp2 PATH=/tmp2:\$PATH sh $Cshare/NVIDIA-$Nvidiaversion.run -A | grep -q -- '--no-kernel-module-source' && Nvidiaoptions=\"\$Nvidiaoptions --no-kernel-module-source\""
+    echo "      env TMPDIR=/tmp2 PATH=/tmp2:\$PATH sh $Cshare/NVIDIA-$Nvidiaversion.run --tmpdir /tmp2 \$Nvidiaoptions || note 'ERROR: Installation of NVIDIA driver failed."
     echo "  Run with option --verbose to see installer output.'"
     echo "      rm -R /tmp2 && unset TMPDIR"
     echo "    } || note 'Skipping installation of $Cshare/NVIDIA-$Nvidiaversion.run'"
@@ -5187,7 +5199,7 @@ check_host() {                  # check host environment
   
   # Check if host uses proprietary NVIDIA driver
   Nvidiaversion=$(head -n1 2>/dev/null </proc/driver/nvidia/version | awk '{ print $8 }')
-
+  
   return 0
 }
 check_hostuser() {              # check for unprivileged host user
@@ -6247,6 +6259,7 @@ declare_variables() {           # declare global variables
   Hosttty=""                                      # x11docker runs on tty yes/no
   Hosthidepid=""                                  # /proc is mounted with hidepid=2 yes/no
   Nvidiaversion=""                                # option --gpu: proprietary nvidia driver version on host
+  Nvidiaruntime="no"                              # --runtime=nvidia in docker run options
   Nvidiadriver=""                                 # option '--gpu': nvidia driver installer for container in [...]local/share/x11docker
   Hostcanwatchroot=""                             # x11docker can watch root processes yes/no
   Runsinterminal=""                               # x11docker runs in a terminal yes/no
