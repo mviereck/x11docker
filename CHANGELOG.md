@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Changed
+ - `--wm[=COMMAND]`: Argument `COMMAND` is optional now.
+
 ## [5.4.4](https://github.com/mviereck/x11docker/releases/tag/v5.4.4) - 2019-02-24
 ### Fixed
  - `--gpu`: NVIDIA driver installation: Avoid `--install-libglvnd` and
