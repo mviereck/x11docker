@@ -9,6 +9,12 @@ Project website: https://github.com/mviereck/x11docker
 ## [Unreleased]
 ### Changed
  - `--wm[=COMMAND]`: Argument `COMMAND` is optional now.
+### Fixed
+ - Execute `containerrootrc` in `/tmp` of container to circumvent possible
+   issues with access `700` of `~/.cache` on host.
+   [(#131)](https://github.com/mviereck/x11docker/issues/131)
+ - Check repeatly for PID1 of container to avoid race condition on slow systems.
+   [(#133)](https://github.com/mviereck/x11docker/issues/133)
 
 ## [5.4.4](https://github.com/mviereck/x11docker/releases/tag/v5.4.4) - 2019-02-24
 ### Fixed
