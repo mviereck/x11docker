@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [5.5.0](https://github.com/mviereck/x11docker/releases/tag/v5.5.0) - 2019-03-06
 ### Added
  - `--init=tini|systemd|sysvinit|openrc|runit|none`: New option to specify
    or disable init system / PID 1 in container. Replaces singular options.

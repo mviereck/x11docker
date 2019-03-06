@@ -125,7 +125,7 @@ Sound is possible with options `-p, --pulseaudio` and `--alsa`.
 Webcams on host can be shared with option `--webcam`.
  - If webcam application in image fails, install `mesa-utils` (debian) or `mesa-demos` (arch) in image. 
  - `guvcview` needs `--pulseaudio` or `--alsa`.
- - `cheese` and [`gnome-ring`](https://ring.cx/) need `--systemd` or `--dbus-system`.
+ - `cheese` and [`gnome-ring`](https://ring.cx/) need `--init=systemd` or `--dbus-system`.
  
 ### Printer
 Printers on host can be provided to container with option `--printer`. 
@@ -158,10 +158,10 @@ Look at [x11docker wiki: Init systems in Docker: tini, systemd, SysVinit, runit,
 Some desktop environments and applications need a running DBus daemon and/or DBus user session. 
  - use `--dbus` to run a DBus user session daemon.
  - use `--dbus-system` to run DBus system daemon. This includes option `--dbus`.
-   - If startup fails or takes about 90s, install an init system and use that one to run DBus. E.g. install `systemd` in image and run with `--systemd`.
+   - If startup fails or takes about 90s, install an init system and use that one to run DBus. E.g. install `systemd` in image and run with `--init=systemd`.
  - use `--hostdbus` to connect to host DBus user session.
  - use `--sharedir /run/dbus/system_bus_socket` to share host DBus system socket.
- - DBus will be started automatically with [init](#Init-system) options `--systemd`, `--openrc`, `--runit` and `--sysvinit`.
+ - DBus will be started automatically with [init systems](#Init-system) `systemd`, `openrc`, `runit` and `sysvinit` (option `--init`).
 
  
  
@@ -244,8 +244,8 @@ _Rather special options reducing security, but not needed for regular use:_
   - `--sudouser` allows `su` and `sudo` with password `x11docker`for container user. 
     If an application somehow breaks out of container, it can harm your host system. Allows many container capabilties that x11docker would drop otherwise.
   - `--cap-default` disables x11docker's container security hardening and falls back to default Docker container capabilities.
-  - `--dbus-system`, `--systemd`, `--sysvinit`, `--openrc` and `--runit` allow some container capabilities that x11docker would drop otherwise. 
-    `--systemd` also shares access to `/sys/fs/cgroup`. Some processes will run as root in container.
+  - `--dbus-system`, `--init=systemd|sysvinit|openrc|runit` allow some container capabilities that x11docker would drop otherwise. 
+    `--init=systemd` also shares access to `/sys/fs/cgroup`. Some processes will run as root in container.
   - `--hostipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory. Disables IPC namespacing.)
   - `--hostnet` sets docker run option `--net=host`. (Shares host network stack. Disables network namespacing. Container can spy on network traffic.)
 
@@ -332,7 +332,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
        - Please, don't use `--privileged` as a solution. It allows too much access to host and fatally breaks container isolation. Investigate the permissions your container needs indeed.
    - You can run container applications as root with `--user=root`.
  - A few applications need [DBus](#dbus). Install `dbus` in image and try option `--dbus`. If that does not help, try option `--dbus-system`.
- - A few applications need systemd. Install `systemd` in image and try option `--systemd`.
+ - A few applications need systemd. Install `systemd` in image and try option `--init=systemd`.
  - Get help in the [issue tracker](https://github.com/mviereck/x11docker/issues). 
    - Most times it makes sense to store the `--verbose` output (or `x11docker.log`) at [pastebin.com](https://pastebin.com/).
    - Don't hesitate to ask.
@@ -363,12 +363,12 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
 | LXDE | `x11docker --desktop x11docker/lxde` |
 | LXQt | `x11docker --desktop x11docker/lxqt` |
 | Xfce | `x11docker --desktop x11docker/xfce` |
-| [CDE Common Desktop Environment](https://en.wikipedia.org/wiki/Common_Desktop_Environment) | `x11docker --desktop --systemd --cap-default x11docker/cde` |
+| [CDE Common Desktop Environment](https://en.wikipedia.org/wiki/Common_Desktop_Environment) | `x11docker --desktop --init=systemd --cap-default x11docker/cde` |
 | Mate | `x11docker --desktop x11docker/mate` |
 | Enlightenment (based on [Void Linux](https://www.voidlinux.org/)) | `x11docker --desktop --gpu --runit x11docker/enlightenment` |
 | [Trinity](https://www.trinitydesktop.org/) (successor of KDE 3) | `x11docker --desktop x11docker/trinity` |
 | Cinnamon | `x11docker --desktop --gpu --dbus-system x11docker/cinnamon` |
-| [deepin](https://www.deepin.org/en/dde/) (3D desktop from China) | `x11docker --desktop --gpu --systemd x11docker/deepin` |
+| [deepin](https://www.deepin.org/en/dde/) (3D desktop from China) | `x11docker --desktop --gpu --init=systemd x11docker/deepin` |
 | [LiriOS](https://liri.io/) (needs at least docker 18.06 <br> or this [xcb bugfix](https://github.com/mviereck/x11docker/issues/76).) (based on Fedora) | `x11docker --desktop --gpu lirios/unstable` |
 | KDE Plasma | `x11docker --desktop --gpu x11docker/plasma` |
 | KDE Plasma as nested Wayland compositor | `x11docker --gpu x11docker/plasma startplasmacompositor` |
@@ -394,5 +394,5 @@ Sample screenshots are stored in [screenshot branch](https://github.com/mviereck
 `x11docker --desktop x11docker/lxqt`
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxqt.png "LXQT desktop in docker")
 
-`x11docker --desktop --systemd --gpu x11docker/deepin`
+`x11docker --desktop --init=systemd --gpu x11docker/deepin`
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-deepin.png "deepin desktop in docker")
