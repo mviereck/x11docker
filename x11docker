@@ -11,7 +11,7 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="5.4.5-beta"
+Version="5.5.0-beta"
 
 usage() {                       # --help: show usage information
   echo "
@@ -45,8 +45,8 @@ Focus on security:
   * Restricts container capabilities to bare minimum.
   
 Note that some applications might behave different than with a regular
-docker run command due to security restrictions set by x11docker.
-Unrestricted container setup is possible with: --user=root --cap-default
+'docker run' command due to security restrictions set by x11docker.
+Unrestricted container setup is possible with: --cap-default --user=root
 
 Dependencies on host:
   Depending on chosen options, x11docker needs some packages to be installed.
@@ -70,8 +70,8 @@ Dependencies in image:
    --pulseaudio: sound with pulseaudio needs pulseaudio on host and in image.
    --lang: localedef to create missing language locales.
    --dbus, --dbus-system, --hostdbus: needs dbus in image.
-   --systemd, --runit,--openrc, --sysvinit: init systems need to be installed.
-
+   --init=systemd|openrc|runit|sysvinit: needs according init system in image.
+   
 Options:
      --help            display this message and exit.
  -e, --exe             execute host application on new X server (no docker).
@@ -242,25 +242,26 @@ User settings:
      --group-add GROUP Additional group GROUP for container user.
 
 Init system and DBus daemon:
-     --tini            Default: init system tini (built-in of docker).
-     --no-init         No init system in container. Image command is PID 1.
-     --runit           Init system runit. Degrades container isolation.
-                       Needs 'runit' installed in image. 'dbus' is recommended.
-     --openrc          Init system OpenRC. Degrades container isolation a bit,
-                       but needs less capabilities than --runit and --systemd.
-                       Needs 'openrc' installed in image. 'dbus' recommended.
-     --sysvinit        Init system SysVinit. Degrades container isolation a bit,
-                       but needs less capabilities than  others.
-                       Needs 'sysvinit' installed in image. 'dbus' recommended.
-     --systemd         Init system systemd. Degrades container isolation.
-                       For faster startup mask services that fail in container.
-                       Needs 'systemd' installed in image.
-                       Old systemd versions in image need --sys-admin, too.
+     --init[=INITSYSTEM]  Run an init system as PID 1 in container. Solves the
+                       zombie reaping issue. Allows some more complex setups.
+                       Without '--init' x11docker uses tini from 'docker-init'.
+                       INITSYSTEM can be:
+                         tini: Default. Mostly present as docker-init on host.
+                         systemd:  Needs 'systemd' installed in image.
+                         sysvinit: Needs 'sysvinit' installed in image.
+                           Old systemd versions in image need --sys-admin, too.
+                         runit:    Needs 'runit' installed in image.
+                         openrc:   Needs 'openrc' installed in image.
+                         none:     No init system, image command will be PID 1.
+                       Init systems systemd, openrc, runit and sysvinit degrade
+                       container isolation a bit, at most the case with systemd.
+                       With init systems systemd, openrc, runit and sysvinit
+                       DBus in image is started, too, if available.
      --sharecgroup     Share /sys/fs/cgroup. Allows elogind in container if
                        used with --dbus-system or init options.
  -b, --dbus            Run DBus user session daemon for image command.
      --dbus-system     Run DBus system daemon in container (includes --dbus).
-                       Default for --wayland and for init options except --tini.
+                       Rather use one of --init=systemd|openrc|sysvinit|runit
      --hostdbus        Connect to DBus session from host.
 
 Container capabilities:
@@ -3124,7 +3125,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
 
           [ "$Initsystem" = "systemd" ] || [ "$Dbussystem" = "yes" ] && {
             echo "note 'Allowing xhost access for $Containeruser on display $Newdisplay"
-            echo "  to avoid service issues with X access. (option --systemd or --dbus-system):"
+            echo "  to avoid service issues with X access. (option --init=systemd or --dbus-system):"
             echo "    xhost +SI:localuser:$Containeruser'"
             echo "xhost +SI:localuser:$Containeruser | rmcr"
           }
@@ -3457,11 +3458,19 @@ check_containerhome() {         # options --home, --homedir, --homebasedir: chec
   }
   return 0
 }
-setup_initsystem() {            # options --tini (default), --systemd,--openrc, --sysvinit: set up capabilities, check or create files
+setup_initsystem() {            # option init: set up capabilities, check or create files
   # some init system setup also in containerrootrc
   local Message=
 
   store_runoption env "container=docker"   # At least OpenRC and systemd regard this hint
+  
+  case $Initsystem in
+    tini|systemd|sysvinit|openrc|runit|none) ;;
+    *) 
+      note "Option --init: Unknown init system $Initsystem
+  Fallback: Using --init=tini instead."
+      Initsystem="tini" ;;
+  esac
   
   case $Initsystem in
     none) ;;
@@ -3498,7 +3507,7 @@ setup_initsystem() {            # options --tini (default), --systemd,--openrc, 
     ;;
 
     systemd)
-      warning "Option --systemd degrades container isolation.
+      warning "Option --init=systemd degrades container isolation.
   It allows some docker container capabilities (nearly like --cap-default).
   It shares access to host cgroups in /sys/fs/cgroup.
   systemd services started as root might try to abuse their privileges."
@@ -3573,7 +3582,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(while 
     ;;
 
     runit)
-      warning "Option --runit slightly degrades container isolation.
+      warning "Option --init=runit slightly degrades container isolation.
   Beside some user switching capabilities x11docker would disable otherwise
   it adds capability SYS_BOOT.
   runit services started as root might try to abuse their privileges."
@@ -3582,14 +3591,14 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(while 
     ;;
 
     openrc)
-      warning "Option --openrc slightly degrades container isolation.
+      warning "Option --init=openrc slightly degrades container isolation.
   Beside some user switching capabilities x11docker would disable otherwise
   it adds capability SYS_BOOT.
   OpenRC services started as root might try to abuse their privileges."
     ;;
 
     sysvinit)
-      warning "Option --sysvinit slightly degrades container isolation.
+      warning "Option --init=sysvinit slightly degrades container isolation.
   Beside some user switching capabilities x11docker would disable otherwise
   it adds capability SYS_BOOT.
   SysVinit services started as root might try to abuse their privileges."
@@ -3667,7 +3676,7 @@ setup_capabilities() {          # check linux capabilities needed by container
   for a clean termination of X and x11docker itself.
   Four possible solutions:
     1. Run x11docker as root.
-    2. Don't use options like --user or --systemd that change container user.
+    2. Don't use options like --user or --init=systemd that change container user.
     3. Add user $Hostuser to group 'proc'.
     4. Change /proc mount option hidepid=2 to hidepid=1."
       error "$Message"
@@ -3810,7 +3819,7 @@ create_dockercommand() {        # create command to run docker
   [ "$Sharecgroup" = "yes" ] && Dockercommand="$Dockercommand \\
   --volume /sys/fs/cgroup:/sys/fs/cgroup:ro"
 
-  # Needed especially for --systemd and --dbus-daemon
+  # Needed especially for --init=systemd and --dbus-daemon
   Dockercommand="$Dockercommand \\
   --tmpfs /run --tmpfs /run/lock"
 
@@ -3902,7 +3911,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo "#! /usr/bin/env bash"
 
   declare -f mkfile
-  declare -f rocknroll
+  declare -f rocknroll checkpid
   declare -f waitforfilecreation
   declare -f askyesno
   declare -f escapestring rmcr
@@ -4118,7 +4127,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   [ "$Sharehosthome" = "no" ] && echo   "  echo 'mkdir -p \$Containeruserhome'"
   echo     "  echo '# Copy files from /etc/skel into empty HOME'"
   echo     "  echo '[ -d /etc/skel ] && {'"
-  echo     "  echo '  [ \"\$(find \$Containeruserhome -mindepth 1 -print)\" ] || cp -R /etc/skel/. \$Containeruserhome'"
+  echo     "  echo '  [ \"\$(ls -la | tail -n3)\" ] || cp -R /etc/skel/. \$Containeruserhome'"
   echo     "  echo '}'"
   [ "$Sharehosthome" = "no" ] && {
     while read -r Line; do
@@ -4281,7 +4290,8 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   
   echo "for ((Count=1 ; Count<=10 ; Count++)); do"
   echo "  Pid1pid=\$($Dockerexe inspect --format '{{.State.Pid}}' $Containername 2>>$Containerlogfile | rmcr)"
-  echo '  [ "$Pid1pid" ] && break'
+  echo "  verbose -d \"\$Count. check for PID 1: \$Pid1pid\""
+  echo '  checkpid "$Pid1pid" && break'
   echo "  sleep 0.2"
   echo "done"
   echo "echo \$Pid1pid >> $Containerpid1pidfile"
@@ -4609,7 +4619,7 @@ exit 0\" >> /etc/rc.local"
   case $Dbussystem in
     yes)
       echo "verbose 'DBus: removing failing or useless services.'"
-      echo "for Line in \$(find /usr/share/dbus-1/system-services /usr/share/dbus-1/services -type f); do"
+      echo "for Line in \$(ls /usr/share/dbus-1/system-services /usr/share/dbus-1/services); do" # find is not available on fedora
       echo '  Name="$(cat $Line | grep Name= | cut -d= -f2)"'
       echo '  Command="$(cat $Line | grep Exec= | cut -d= -f2)"'
       echo '  debugnote "Checking $Name: $Command"'
@@ -4674,8 +4684,8 @@ exit 0\" >> /etc/rc.local"
   If the image contains malicious applications started by DBus service files,
   they might abuse their root privileges and may try to break out of container."
       note "Option --dbus-system can have a long 90s delay in some setups.
-  In that case install systemd in image and run with --systemd.
-  (Also --runit, --openrc or --sysvinit can be set up and used)."  ### FIXME
+  In that case install systemd in image and run with --init=systemd.
+  (Also --init=runit|openrc|sysvinit can be set up and used)."  ### FIXME
 
       echo "echo 'x11docker: DBus: starting dbus system daemon'"
       echo "dbus-daemon --system --fork"
@@ -4716,7 +4726,7 @@ exit 0\" >> /etc/rc.local"
         echo "  waitforservice org.freedesktop.Accounts"
         echo "}"
         echo "# start all other dbus system services"
-        echo "for Line in \$(find /usr/share/dbus-1/system-services -type f); do"
+        echo "for Line in \$(ls /usr/share/dbus-1/system-services); do"
         echo "  Name=\"\$(cat \$Line | grep Name= | cut -d= -f2)\""
         echo "  Command=\"\$(cat \$Line | grep Exec= | cut -d= -f2)\""
         echo "  case \$Name in"
@@ -4820,7 +4830,7 @@ exit 0\" >> /etc/rc.local"
         echo '  command -v systemctl && {'
         echo '    warning "Executeable for systemd not found. Will try /sbin/init"'
         echo '    Systemd=/sbin/init'
-        echo '  } || error "systemd not found in image (option --systemd)."'
+        echo '  } || error "systemd not found in image (option --init=systemd)."'
         echo '}'
         echo 'exec $Systemd'
       ;;
@@ -5762,9 +5772,9 @@ check_option_interferences() {  # check multiple option interferences, change se
   Same issue can occur with option '--home'. 
   Use option '--homebasedir D:/some/home/folder' in that case."
     [ "$Initsystem" = "systemd" ] && {
-      note "Option --systemd is not possible on MSYS2/Cygwin/WSL.
+      note "Option --init=systemd is not possible on MSYS2/Cygwin/WSL.
   systemd needs a running linux kernel with cgroup support.
-  Fallback: Disabling option --systemd, enabling option --dbus-system"
+  Fallback: Disabling option --init=systemd, enabling option --dbus-system"
       Initsystem="tini"
       Dbussystem="yes"
     } 
@@ -6020,7 +6030,7 @@ option_messages() {             # some messages depending on options, but not ch
   # --sys-admin
   [ "$Capsysadmin" = "yes" ] && warning "Option --sys-admin may be dangerous.
   It adds insecure capability SYS_ADMIN to container.
-  It is needed to run debian 9 images with option --systemd.
+  It is needed to run debian 9 images with option --init=systemd.
   Debian 10 images run well without --sys-admin."
   
   # --webcam
@@ -6200,7 +6210,7 @@ declare_variables() {           # declare global variables
   Dockerexe="docker"                              # can be docker.exe on Windows
   Bgpidfile=backgroundpids                        # file to store pids and names of background processes that shut be killed on exit
   Timetosaygoodbye=timetosaygoodbye               # file giving term signal to all parties
-  Timetosaygoodbyefifo=timetosaygoodbye.fifo      # message channel for --openrc, --runit, --sysvinit to shut down on x11docker signal
+  Timetosaygoodbyefifo=timetosaygoodbye.fifo      # message channel for --init=openrc|runit|sysvinit to shut down on x11docker signal
   Watchpidfifo=watchpid.fifo                      # message channel to transfer pids to watchpidlist()
   Messagefifo=message.fifo                        # message channel for warning/verbose/debugnote/note/error within container, dockerrc, containerrootrc
   Messagelogfile=message.log                      # logfile for warning/verbose/debugnote/note/error
@@ -6425,7 +6435,7 @@ declare_variables() {           # declare global variables
   Containerenvironmentcount="0"
   Interactive="no"                                # option --interactive: Run docker with interactive tty yes/no
   Capdropall="yes"                                # option --cap-default: (don't) drop all container capabilities
-  Adminusercaps="no"                              # options --sudouser, --systemd: add capabilities for general sys administration
+  Adminusercaps="no"                              # options --sudouser, --init=systemd: add capabilities for general sys administration
   Switchcontaineruser="no"                        # options for init systems: user switching to toggle login daemons
   Switchcontainerusercaps="no"                    # options --dbus, --sudouser and initsystems: add capabilities for su/sudo user switching
   Sharehostipc="no"                               # option --hostipc, set --ipc=host.
@@ -6438,8 +6448,8 @@ declare_variables() {           # declare global variables
   Limitresources=""                               # option --limit: Limit access to CPU and RAM, 0.1 ... 1.0
 
   # init and dbus
-  Initsystem="tini"                               # options --systemd --openrc --runit --sysvinit --tini --no-init:Init system in container
-  Sharecgroup="no"                                # options --systemd, --cgroup: share /sys/fs/cgroup
+  Initsystem="tini"                               # option --init: Init system in container
+  Sharecgroup="no"                                # options --init=systemd, --sharecgroup: share /sys/fs/cgroup
   Dbusrunsession="no"                             # option '--dbus': run image command with dbus-run-session / user session
   Dbussystem="no"                                 # option '--dbus-system': set up dbus system daemon in container
   Sharehostdbus="no"                              # option '--hostdbus'
@@ -6509,14 +6519,15 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,fullscreen,size:,scale:,rotate:,dpi:,output-count:,gpu,xfishtank,border::"                     # X appearance options
   Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,env:,showenv,showid,showpid1"                                      # X and environment options
   Longoptions="$Longoptions,home,clipboard,pulseaudio::,alsa::,lang:,printer,webcam"                                       # comfort options
-  Longoptions="$Longoptions,no-xhost,dbus,dbus-system,hostdbus,pw:,no-internet,workdir:,sharessh,limit::,pull::"           # advanced options
+  Longoptions="$Longoptions,no-xhost,pw:,no-internet,workdir:,sharessh,limit::,pull::"                                     # advanced options
+  Longoptions="$Longoptions,init::,sys-admin,sharecgroup,dbus,dbus-system,hostdbus"                                        # advanced options
   Longoptions="$Longoptions,homedir:,sharedir:,cachebasedir:,homebasedir:"                                                 # host folders
-  Longoptions="$Longoptions,tini,no-init,systemd,runit,openrc,sysvinit,sys-admin,sharecgroup"                              # init system options
   Longoptions="$Longoptions,launcher,cleanup,license,licence,help,version,install,update,update-master,remove,wmlist"      # special options without starting X or container
   Longoptions="$Longoptions,verbose::,quiet,debug,stdin"                                                                   # verbose options
   Longoptions="$Longoptions,hostipc,hostnet,ps,cap-default,sudouser,hostuser:,user:,group-add:,name:"                      # capabilities, users
   Longoptions="$Longoptions,keymap:,name:,no-entrypoint,runfromhost:,runasroot:,westonini:,interactive"                    # developer options
   Longoptions="$Longoptions,cachedir:,starter,trusted,untrusted,xtest,no-xtest,stdout,stderr,silent,nothing"               # deprecated
+  Longoptions="$Longoptions,tini,no-init,systemd,runit,openrc,sysvinit"                                                    # deprecated
   Longoptions="$Longoptions,xtest,xcomposite"                                                                              # experimental
   
   Parsedoptions="$(getopt --options $Shortoptions --longoptions $Longoptions --name "$0" -- "$@" 2>/tmp/x11docker_parsererror)"
@@ -6632,13 +6643,27 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
          --group-add)  Containerusergroups="$Containerusergroups ${2:-}" ; shift ;; # additional groups for user
 
        ## init system
-         --no-init)    Initsystem="none" ;;                # no init, image command is PID 1
-         --tini)       Initsystem="tini" ;;                # default init system tini (run option --init)
-         --runit)      Initsystem="runit" ;;               # run runit as init system and image command as a service
-         --openrc)     Initsystem="openrc" ;;
-         --systemd)    Initsystem="systemd" ;;             # run systemd as init system and image command as a service
-         --sysvinit)   Initsystem="sysvinit" ;;
-         --sharecgroup)Sharecgroup="yes" ;;                # share /sys/fs/cgroup. default for --systemd, possible use with --openrc
+         --init)       Initsystem="${2:-tini}" ; shift ;;  # init in container
+         --no-init)    Initsystem="none"                   # no init, image command is PID 1
+                       note "Option --no-init is deprecated.
+  Please use --init=none instead." ;;
+         --tini)       Initsystem="tini"                   # default init system tini (run option --init)
+                       note "Option --tini is deprecated.
+  Please use --init=tini instead.
+  However, --init=tini is x11docker default already." ;;
+         --runit)      Initsystem="runit"                  # run runit as init system and image command as a service
+                       note "Option --runit is deprecated.
+  Please use --init=runit instead." ;;
+         --openrc)     Initsystem="openrc" 
+                       note "Option --openrc is deprecated.
+  Please use --init=openrc instead." ;;
+         --systemd)    Initsystem="systemd"                # run systemd as init system and image command as a service
+                       note "Option --systemd is deprecated.
+  Please use --init=systemd instead." ;;
+         --sysvinit)   Initsystem="sysvinit" 
+                       note "Option --sysvinit is deprecated.
+  Please use --init=sysvinit instead." ;;
+         --sharecgroup)Sharecgroup="yes" ;;                # share /sys/fs/cgroup. default for --init=systemd, possible use with --init=openrc
          --sys-admin)  Capsysadmin="yes" ;;                # add capability SYS_ADMIN for older systemd versions in image (i.e. debian 9 needs it, debian 10 runs well)
          --dbus-system) Dbussystem="yes" ;;                # set up dbus system daemon
       -b|--dbus)       Dbusrunsession="yes" ;;                 # run image command with dbus-launch or dbus-run-session
@@ -6832,7 +6857,7 @@ Parsed options:    $Parsedoptions"
   #### Create docker command
   [ "$X11dockermode" = "run" ] && {
     # core setup of docker command
-    setup_initsystem            # init in container. Default: tini              # --tini, --systemd, --openrc, --sysvinit, --no-init
+    setup_initsystem            # init in container. Default: tini              # --init
     setup_capabilities          # add linux capabilities if needed for some options. Default: --cap-drop=ALL
     [ "$Sharehostdbus" = "yes" ] && setup_hostdbus                              # --hostdbus
     create_dockercommand        # create 'docker run' command
@@ -6899,7 +6924,7 @@ main "$@"
 todo() {
   # BUG --xpra-xwayland/py3 fails with tor-browser, but not with wine pcmanfm
   # BUG --dbus-system: slow startup (90s timeout) e.g. in arch and debian buster containers for unknown reasons.
-  # BUG --interactive with --systemd, --runit, --openrc, --sysvinit: no job control in shell
+  # BUG --interactive with --init=systemd|runit|openrc|sysvinit: no job control in shell
   # BUG x11docker/deepin: new builds have strange issues
   # BUG x11docker/fluxbox on arch host: background missing, sometimes no context menu. where is the difference?
   # BUG error message window in wayland fails: xterm: no display. should use konsole
@@ -6921,14 +6946,14 @@ todo() {
   #       impossible:
   #          --alsa
   #          --webcam
-  #          --systemd, --sharecgroup, elogind
+  #          --init, --sharecgroup, elogind
   #          --hostuser
   #       useless:
   #          --showpid1 (shows pid in docker VM)
 
   # check xhost +localhost
   # --weston/x: allow tty switch/option --vt if running as root?
-  # --systemd: try to avoid xhost +SI:localuser:$Containeruser, needed by deepin, it does not recognize XAUTHORITY
+  # --init=systemd: try to avoid xhost +SI:localuser:$Containeruser, needed by deepin, it does not recognize XAUTHORITY
   # --no-init no-new-privileges switchuser: exec fails, but why?
   # check out capsh. replace su with capsh? (missing in alpine) But how to trigger login?
   # check echo especially in sh scripts, replace with printf if needed (#25)

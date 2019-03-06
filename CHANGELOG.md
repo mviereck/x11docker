@@ -7,8 +7,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
+### Added
+ - `--init=tini|systemd|sysvinit|openrc|runit|none`: New option to specify
+   or disable init system / PID 1 in container. Replaces singular options.
+### Deprecated
+ - `--tini`: Use `--init=tini` instead.
+ - `--systemd`: Use `--init=systemd` instead.
+ - `--sysvinit`: Use `--init=sysvinit` instead.
+ - `--openrc`: Use `--init=openrc` instead.
+ - `--runit`: Use `--init=runit` instead.
+ - `--no-init`: Use `--init=none` instead.
 ### Changed
- - `--wm[=COMMAND]`: Argument `COMMAND` is optional now.
+ - `--wm[=COMMAND]`: Argument `COMMAND` is optional now. Note that `=` is 
+   mandatory now. Use `--wm=openbox` instead of `--wm openbox`.
+   `--wm` without an option autodetects a host window manager.
 ### Fixed
  - Execute `containerrootrc` in `/tmp` of container to circumvent possible
    issues with access `700` of `~/.cache` on host.
