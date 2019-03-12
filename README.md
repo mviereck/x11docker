@@ -75,6 +75,30 @@ To run only a new empty X server:
   x11docker [OPTIONS] --xonly
 ```
 `DOCKER_RUN_OPTIONS` are just added to `docker run` command without a check by x11docker.
+ 
+ 
+ 
+## Installation
+Note that x11docker is just a **bash script** without library dependencies.
+### Installation options
+As root you can install, update and remove x11docker on your system:
+ - `x11docker --install` : install x11docker and x11docker-gui from current directory. 
+ - `x11docker --update` : download and install latest [release](https://github.com/mviereck/x11docker/releases) from github.
+ - `x11docker --update-master` : download and install latest master version from github.
+ - `x11docker --remove` : remove all files installed by x11docker.
+ 
+Copies `x11docker` and `x11docker-gui` to `/usr/bin`. Creates an icon in `/usr/share/icons`. 
+Creates `x11docker.desktop` in `/usr/share/applications`. Copies `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
+### Shortest way for first installation:
+Remove `sudo` and run as root if your system does not use sudo.
+```
+curl -fsSL https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker | sudo bash -s -- --update
+```
+### Minimal installation
+For a first test you can run with `bash x11docker` respective `bash x11docker-gui`. 
+For minimal installation make `x11docker` executable with `chmod +x x11docker` and move it to `/usr/bin` (or another location in `PATH`).
+Other files than `x11docker` script itself are not essential.
+
 
 
 ## Options
@@ -133,10 +157,11 @@ Printers on host can be provided to container with option `--printer`.
  - The container needs package `libcups2` (debian) or `libcups` (arch).
  
 ### Language locales
-x11docker provides option `--lang $LANG` for flexible language locale settings. 
+x11docker provides option `--lang` for flexible language locale settings. 
+ - `--lang` without an argument sets `LANG` in container to same as on host. Same as `--lang=$LANG`
  - x11docker will check on container startup if the desired locale is already present in image and enable it. 
  - If x11docker does not find the locale, it creates it on container startup. (Needs package `locales` in image.) 
- - Examples: `--lang de` for German, `--lang zh_CN` for Chinese, `--lang ru` for Russian, `--lang $LANG` for your host locale.
+ - Examples: `--lang=de` for German, `--lang=zh_CN` for Chinese, `--lang=ru` for Russian, `--lang=$LANG` for your host locale.
  - For support of chinese, japanese and korean characters install a font like `fonts-arphic-uming` in image.
    
 ### Wayland
@@ -150,7 +175,7 @@ For further description loot at [Overview of all possible X server and Wayland o
  
  
 ### Init system
-x11docker supports several init systems as PID 1 in container. Init in container solves the [zombie reaping issue](https://blog.phusion.nl/2015/01/20/docker-and-the-pid-1-zombie-reaping-problem/).
+x11docker supports several init systems as PID 1 in container with option `--init`. Init in container solves the [zombie reaping issue](https://blog.phusion.nl/2015/01/20/docker-and-the-pid-1-zombie-reaping-problem/).
 As default it uses `tini` in`/usr/bin/docker-init`. 
 Look at [x11docker wiki: Init systems in Docker: tini, systemd, SysVinit, runit, OpenRC and elogind.](https://github.com/mviereck/x11docker/wiki/Init-systems-in-docker:-tini,-systemd,-SysVinit,-runit,-OpenRC-and-elogind)
 
@@ -282,29 +307,6 @@ Setup:
  - Not all x11docker options are implemented on MS Windows. E.g. `--webcam` and `--printer` do not work.
  - Firewall settings in Windows can cause issues for container applications accessing the X server. 
    If everything starts up without an obvious error, but no application window appears, look at issue [#108](https://github.com/mviereck/x11docker/issues/108).
- 
- 
- 
-## Installation
-Note that x11docker is just a **bash script** without library dependencies.
-### Installation options
-As root you can install, update and remove x11docker on your system:
- - `x11docker --install` : install x11docker and x11docker-gui from current directory. 
- - `x11docker --update` : download and install latest [release](https://github.com/mviereck/x11docker/releases) from github.
- - `x11docker --update-master` : download and install latest master version from github.
- - `x11docker --remove` : remove all files installed by x11docker.
- 
-Copies `x11docker` and `x11docker-gui` to `/usr/bin`. Creates an icon in `/usr/share/icons`. 
-Creates `x11docker.desktop` in `/usr/share/applications`. Copies `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
-### Shortest way for first installation:
-Remove `sudo` and run as root if your system does not use sudo.
-```
-curl -fsSL https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker | sudo bash -s -- --update
-```
-### Minimal installation
-For a first test you can run with `bash x11docker` respective `bash x11docker-gui`. 
-For minimal installation make `x11docker` executable with `chmod +x x11docker` and move it to `/usr/bin` (or another location in `PATH`).
-Other files than `x11docker` script itself are not essential.
 
 
 
