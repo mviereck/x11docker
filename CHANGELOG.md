@@ -9,10 +9,12 @@ Project website: https://github.com/mviereck/x11docker
 ## [Unreleased]
 ### Deprecated
  - `--ps`: Preserved cache and container. No replacement.
-### [Changed]
+### Changed
  - `--lang[=LOCALE]`: Argument LOCALE is optional now. Note that `=` is 
    mandatory now. Use `--lang=ru` instead of `--lang ru`.
    `--lang` without an argument sets `$LANG` from host.
+### Fixed
+ - Fix for host user check after multiple `su`.
 
 ## [5.5.0](https://github.com/mviereck/x11docker/releases/tag/v5.5.0) - 2019-03-06
 ### Added
