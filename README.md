@@ -79,7 +79,7 @@ To run only a new empty X server:
  
  
 ## Installation
-Note that x11docker is just a **bash script** without library dependencies.
+Note that x11docker is just a **bash script** without library dependencies. Basically it is a wrapper for X servers and Docker. To allow advanced usage of x11docker abilities look at chapter [Dependencies](#dependencies).
 ### Installation options
 As root you can install, update and remove x11docker on your system:
  - `x11docker --install` : install x11docker and x11docker-gui from current directory. 
@@ -241,10 +241,11 @@ Core concept is:
    - You can also specify another user with `--user=USERNAME` or a non-existing one with `--user=UID:GID`.
    - Disables possible root password and deletes entries in `/etc/sudoers`.
      - If you want root permissions in container, use option `--sudouser` that allows `su` and `sudo` with password `x11docker`. Alternatively you can run with `--user=root`. 
-   - If you want to use `USER` specified in image instead, set option `--user=RETAIN`. x11docker won't change `etc/passwd` or `/etc/sudoers` in that case. Option `--home` won't be available.
+   - If you want to use `USER` specified in image instead, set option `--user=RETAIN`. x11docker won't change container's `/etc/passwd` or `/etc/sudoers` in that case. Option `--home` won't be available.
  - Reduces [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
-   - Sets docker run options `--cap-drop=ALL --security-opt=no-new-privileges`. 
-   - This restriction can be disabled with x11docker option `--cap-default` or reduced with `--sudouser`.
+   - Sets docker run option `--cap-drop=ALL` to drop all capabilities. Most applications don't need them.
+   - Sets docker run option [`--security-opt=no-new-privileges`](https://www.projectatomic.io/blog/2016/03/no-new-privs-docker/).
+   - These restrictions can be disabled with x11docker option `--cap-default` or reduced with `--sudouser` or `--user=root`.
 
 _Weaknesses:_
  - Possible SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. 
@@ -269,7 +270,7 @@ _Rather special options reducing security, but not needed for regular use:_
   - `--sudouser` allows `su` and `sudo` with password `x11docker`for container user. 
     If an application somehow breaks out of container, it can harm your host system. Allows many container capabilties that x11docker would drop otherwise.
   - `--cap-default` disables x11docker's container security hardening and falls back to default Docker container capabilities.
-  - `--dbus-system`, `--init=systemd|sysvinit|openrc|runit` allow some container capabilities that x11docker would drop otherwise. 
+  - `--dbus-system` and `--init=systemd|sysvinit|openrc|runit` allow some container capabilities that x11docker would drop otherwise. 
     `--init=systemd` also shares access to `/sys/fs/cgroup`. Some processes will run as root in container.
   - `--hostipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory. Disables IPC namespacing.)
   - `--hostnet` sets docker run option `--net=host`. (Shares host network stack. Disables network namespacing. Container can spy on network traffic.)
@@ -301,7 +302,7 @@ Although it basically works, it misses some features available on Linux and cann
 However, running in a Linux VM instead of running natively on Windows is fully supported.
 Setup:
  - Install X server [`VcXsrv`](https://sourceforge.net/projects/vcxsrv/) on Windows into `C:/Program Files/VcXsrv` (option `--vcxsrv`).
-  - Alternative: Cygwin provides X server `Xwin` (option `--xwin`). Install `xinit` package in Cygwin. Can be used in Cygwin only.
+   - Alternative: Cygwin provides X server `Xwin` (option `--xwin`). Install `xinit` package in Cygwin. Can be used in Cygwin only.
  - For sound with option `--pulseaudio` install Cygwin in `C:/cygwin64` with package `pulseaudio`. It works for MSYS2 and WSL, too.
  - Error messages like `./x11docker: line 2: $'\r': command not found` indicate a wrong line ending conversion from git. Run `dos2unix x11docker`.
  - Not all x11docker options are implemented on MS Windows. E.g. `--webcam` and `--printer` do not work.
@@ -320,9 +321,9 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
    If that does not help, install [additional X servers](#dependencies).
  - Make sure your x11docker version is up to date with `x11docker --update` (latest release) or `x11docker --update-master` (latest beta).
  - The image may have a `USER` specification and be designed for this user. 
-   x11docker sets up a container user that can mismatch this user setup. 
+   x11docker sets up a container user that can mismatch this container user setup. 
    - Check for a `USER` specification in image with `docker inspect --format '{{.Config.User}}' IMAGENAME`.
-   - If yes, try with `--user=RETAIN` to run with `USER` specified in image.
+   - If yes, try with `--user=RETAIN` to run with the `USER` specified in image.
  - Some applications need more privileges or capabilities than x11docker provides as default. 
    - Reduce container isolation with e.g.:
      - x11docker options: `--cap-default --hostipc --hostnet --sys-admin`. (Try `--cap-default` first).
@@ -330,7 +331,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
      - Example: `x11docker --cap-default --hostipc --hostnet --sys-admin -- --cap-add ALL --security-opt seccomp=unconfined --privileged -- IMAGENAME`
      - Try with reduced container isolation. If it works, drop options one by one until the needed one(s) are left.
      - If `--cap-add ALL` helps, find the [capability](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) you really need and add only that one.
-     - If `--privileged` helps, your application probably needs a device in `/dev`. Find out which one and share it with e.g. `--device /dev/snd`. Try also `--sharedir /dev/udev/data:ro`.
+     - If `--privileged` helps, your application probably needs a device in `/dev`. Find out which one and share it with e.g. `--device /dev/vboxdrv`. Try also `--sharedir /dev/udev/data:ro`.
        - Please, don't use `--privileged` as a solution. It allows too much access to host and fatally breaks container isolation. Investigate the permissions your container needs indeed.
    - You can run container applications as root with `--user=root`.
  - A few applications need [DBus](#dbus). Install `dbus` in image and try option `--dbus`. If that does not help, try option `--dbus-system`.

@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [5.5.1](https://github.com/mviereck/x11docker/releases/tag/v5.5.1) - 2019-03-18
 ### Deprecated
  - `--ps`: Preserved cache and container. No replacement.
 ### Changed
@@ -15,6 +15,8 @@ Project website: https://github.com/mviereck/x11docker
    `--lang` without an argument sets `$LANG` from host.
 ### Fixed
  - Fix for host user check after multiple `su`.
+ - `--entrypoint env` instead of `--entrypoint /usr/bin/env`.
+   Some systems have `/bin/env` instead.
 
 ## [5.5.0](https://github.com/mviereck/x11docker/releases/tag/v5.5.0) - 2019-03-06
 ### Added
