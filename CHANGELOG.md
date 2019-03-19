@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Added
+ - `--init=s6-overlay`: Support of init system s6 as given by s6-overlay.
+   [(#136)](https://github.com/mviereck/x11docker/issues/136)
+
 ## [5.5.1](https://github.com/mviereck/x11docker/releases/tag/v5.5.1) - 2019-03-18
 ### Deprecated
  - `--ps`: Preserved cache and container. No replacement.

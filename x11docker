@@ -3577,7 +3577,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(while 
       warning "Option --init=runit slightly degrades container isolation.
   Beside some user switching capabilities x11docker would disable otherwise
   it adds capability SYS_BOOT.
-  runit services started as root might try to abuse their privileges."
+  Services started as root might try to abuse their privileges."
       Stopsignal="HUP"
       store_runoption env "VIRTUALIZATION=docker"
     ;;
@@ -3586,19 +3586,20 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(while 
       warning "Option --init=openrc slightly degrades container isolation.
   Beside some user switching capabilities x11docker would disable otherwise
   it adds capability SYS_BOOT.
-  OpenRC services started as root might try to abuse their privileges."
+  Services started as root might try to abuse their privileges."
     ;;
 
     sysvinit)
       warning "Option --init=sysvinit slightly degrades container isolation.
   Beside some user switching capabilities x11docker would disable otherwise
   it adds capability SYS_BOOT.
-  SysVinit services started as root might try to abuse their privileges."
+  Services started as root might try to abuse their privileges."
       Stopsignal="INT"
     ;;
     
-    s6-overlay)      
-      warning "Option --init=s6-overlay:
+    s6-overlay)
+      warning "Option --init=s6-overlay slightly degrades container isolation.
+  It adds some user switching capabilities x11docker would disable otherwise.
   Services started as root might try to abuse their privileges."
     ;;
   esac
@@ -3642,6 +3643,10 @@ setup_capabilities() {          # check linux capabilities needed by container
     runit|openrc|sysvinit)
       Switchcontaineruser="yes"
       store_runoption cap "SYS_BOOT KILL"
+    ;;
+    s6-overlay)
+      Switchcontaineruser="yes"
+      store_runoption cap "CHOWN KILL"
     ;;
   esac 
 
@@ -4022,13 +4027,19 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
       echo "Entrypoint=\${Entrypoint#/bin/sh -c }"
       echo "Entrypoint=\${Entrypoint%]}"
       case $Initsystem in
-        systemd|sysvinit|runit|openrc|s6-overlay)
+        systemd|sysvinit|runit|openrc)
           echo "echo \"\$Entrypoint\" | grep -qE '/init|/systemd' && {"
           echo "  note \"There seems to be an init system in ENTRYPOINT of image:
     \$Entrypoint
   Will disable it as x11docker already runs an init with option --$Initsystem.
   To allow this ENTRYPOINT, run x11docker with option --no-init.\""
           echo "  Entrypoint="
+          echo "}"
+        ;;
+        s6-overlay)
+          echo "[ \"\$Entrypoint\" = '/init' ] && {"
+          echo "  Entrypoint="
+          echo "  [ \"\$Imagecommand\" ] || Imagecommand=\"sh -c 'while :; do sleep 10; done'\""
           echo "}"
         ;;
         tini)
@@ -4424,6 +4435,7 @@ create_containerrootrc() {      # create container root setup script: This scrip
       # disable possible custom PAM setups that could allow root in container
       [ "$Sudouser" = "no" ] && {
         echo "# restrict PAM configuration of su and sudo"
+        echo "mkdir -p /etc/pam.d"
         echo "echo 'auth sufficient pam_rootok.so' > /etc/pam.d/su  # allow root to switch user without a password"
         echo "echo '@include common-auth'    >> /etc/pam.d/su"
         echo "echo '@include common-account' >> /etc/pam.d/su"
@@ -4520,6 +4532,7 @@ create_containerrootrc() {      # create container root setup script: This scrip
   }
   
   [ "$Switchcontaineruser" = "yes" ] && {
+    echo "mkdir -p /usr/local/bin"
     echo "echo \"#! /bin/sh
 # Need user switch from root to unprivileged user.
 # Additionally, su triggers logind and elogind.
@@ -4810,7 +4823,7 @@ exit 0\" >> /etc/rc.local"
   [ "$Switchcontaineruser" = "yes" ] && {   # if "no", container.CMD.sh is executed in command line $Dockercommand
     case $Initsystem in
       none)
-        echo "/bin/su - -s /bin/sh \$Containeruser $Cshare/container.CMD.sh"
+        echo "exec /usr/local/bin/x11docker-login"
       ;;
       tini)
         echo "Exec=exec"
@@ -4828,8 +4841,7 @@ exit 0\" >> /etc/rc.local"
         echo "exec /sbin/init"
       ;;
       s6-overlay)
-#        echo "exec /etc/s6/init/init-stage1 /bin/su - -s /bin/sh \$Containeruser $Cshare/container.CMD.sh"
-        echo "exec /init /bin/su - -s /bin/sh \$Containeruser $Cshare/container.CMD.sh"
+        echo "exec /init /usr/local/bin/x11docker-login"
       ;;
       systemd)
         echo 'Systemd=/lib/systemd/systemd'
@@ -6953,6 +6965,16 @@ todo() {
   # BUG x11docker/fluxbox on arch host: background missing, sometimes no context menu. where is the difference?
   # BUG error message window in wayland fails: xterm: no display. should use konsole
   # BUG: x11docker/xwayland in a nested setup: where is the X socket ??
+  
+  
+  # --init
+  # autodetect init system if possible, give a note.
+  # openrc, runit: make independant from /sbin/init ?
+  # s6 support ?
+  # s6-overlay:
+  #  - find better solution then sleep loop for empty CMD
+  #  - check possible shutdown routine for timetosaygoodbye
+  #  - closer check of needed capabilities
   
   # Enhancement:
   # --update: regard possible location in /opt
