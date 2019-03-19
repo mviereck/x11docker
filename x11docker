@@ -11,7 +11,7 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="5.5.1"
+Version="5.5.2-beta"
 
 usage() {                       # --help: show usage information
   echo "
@@ -248,12 +248,13 @@ Init system and DBus daemon:
                        Without '--init' x11docker uses tini from 'docker-init'.
                        INITSYSTEM can be:
                          tini: Default. Mostly present as docker-init on host.
-                         systemd:  Needs 'systemd' installed in image.
-                         sysvinit: Needs 'sysvinit' installed in image.
+                         systemd:    Needs 'systemd' installed in image.
+                         sysvinit:   Needs 'sysvinit' installed in image.
                            Old systemd versions in image need --sys-admin, too.
-                         runit:    Needs 'runit' installed in image.
-                         openrc:   Needs 'openrc' installed in image.
-                         none:     No init system, image command will be PID 1.
+                         runit:      Needs 'runit' installed in image.
+                         openrc:     Needs 'openrc' installed in image.
+                         s6-overlay: Needs 's6-overlay' in image.
+                         none:       No init system, image command will be PID 1.
                        Init systems systemd, openrc, runit and sysvinit degrade
                        container isolation a bit, at most the case with systemd.
                        With init systems systemd, openrc, runit and sysvinit
@@ -3456,7 +3457,7 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
   store_runoption env "container=docker"   # At least OpenRC and systemd regard this hint
   
   case $Initsystem in
-    tini|systemd|sysvinit|openrc|runit|none) ;;
+    tini|systemd|sysvinit|openrc|runit|s6-overlay|none) ;;
     *) 
       note "Option --init: Unknown init system $Initsystem
   Fallback: Using --init=tini instead."
@@ -3594,6 +3595,11 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(while 
   it adds capability SYS_BOOT.
   SysVinit services started as root might try to abuse their privileges."
       Stopsignal="INT"
+    ;;
+    
+    s6-overlay)      
+      warning "Option --init=s6-overlay:
+  Services started as root might try to abuse their privileges."
     ;;
   esac
   return 0
@@ -3751,7 +3757,7 @@ create_dockercommand() {        # create command to run docker
   --env USER=root" ;;
       esac
     ;;
-    systemd|runit|openrc|sysvinit)
+    systemd|runit|openrc|sysvinit|s6-overlay)
       Dockercommand="$Dockercommand \\
   --user root" ;;
   esac
@@ -4016,7 +4022,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
       echo "Entrypoint=\${Entrypoint#/bin/sh -c }"
       echo "Entrypoint=\${Entrypoint%]}"
       case $Initsystem in
-        systemd|sysvinit|runit|openrc)
+        systemd|sysvinit|runit|openrc|s6-overlay)
           echo "echo \"\$Entrypoint\" | grep -qE '/init|/systemd' && {"
           echo "  note \"There seems to be an init system in ENTRYPOINT of image:
     \$Entrypoint
@@ -4083,7 +4089,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo   '  echo Entrypoint="\"$Entrypoint\""'
   echo   "  echo ''"
   echo   "  echo 'verbose \"Container system:'"
-  echo   "  echo '\$(cat /etc/os-release)\"'"
+  echo   "  echo '\$(cat /etc/os-release 2>&1)\"'"
   echo   "  echo ''"
 
   echo   "} >> $Imagecommandscript"
@@ -4108,7 +4114,8 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
       echo "  echo 'Containeruserhome=\"$Containeruserhome\"'"
     ;;
     no)
-      echo "  echo 'Containeruserhome=\$(getent passwd \$Containeruser | cut -d: -f6)'"
+#      echo "  echo 'Containeruserhome=\$(getent passwd \$Containeruser | cut -d: -f6)'"
+      echo "  echo 'Containeruserhome=\$(cat /etc/passwd | grep \"\$Containeruser:.:\" | cut -d: -f6)'"
       echo "  echo 'Containeruserhome=\${Containeruserhome:-/tmp/\$Containeruser}'"
     ;;
   esac
@@ -4182,7 +4189,6 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   [ "$Xauthentication" = "yes" ] || echo "  echo 'unset XAUTHORITY'"
 
   echo     "  echo 'env >> $Cshare/environment'"
-  echo     "  echo 'sed -i \"/\(PWD=\|_=\)/d\" $Cshare/environment'"
   echo     "  echo 'verbose \"Container environment:'"
   echo     "  echo '\$(env | sort)\"'"
   echo     "  echo 'verbose \"Copy of environment stored in $Cshare/environment\"'"
@@ -4377,7 +4383,8 @@ create_containerrootrc() {      # create container root setup script: This scrip
     yes)
       # create container user
       echo "# create user entry in /etc/passwd (and delete possibly existing same uid)"
-      echo "getent passwd | grep -v \"\$(getent passwd $Containeruseruid || echo USERNOTFOUND)\" > /tmp/passwd"
+      #echo "getent passwd | grep -v \"\$(getent passwd $Containeruseruid || echo USERNOTFOUND)\" > /tmp/passwd"
+      echo "cat /etc/passwd | grep -v ':$Containeruseruid:' > /tmp/passwd"
       echo "# disable possible /etc/shadow passwords for other users"
       echo "sed -i s%:x:%:-:% /tmp/passwd"
       echo "echo '$Containeruser:x:$Containeruseruid:$Containerusergid:$Containeruser,,,:$Containeruserhome:/bin/sh' >> /tmp/passwd"
@@ -4397,7 +4404,8 @@ create_containerrootrc() {      # create container root setup script: This scrip
   
       echo ""
       echo "# create user group entry (and delete possibly existing same gid)"
-      echo "getent group | grep -v \$(getent group $Containerusergid || echo USERNOTFOUND) > /tmp/group"
+#      echo "getent group | grep -v \$(getent group $Containerusergid || echo USERNOTFOUND) > /tmp/group"
+      echo "cat /etc/group | grep -v ':$Containerusergid:' > /tmp/group"
       echo "echo $Containerusergroup:x:$Containerusergid: >> /tmp/group"
       echo "mv /tmp/group /etc/group"
       echo ""
@@ -4426,11 +4434,12 @@ create_containerrootrc() {      # create container root setup script: This scrip
     ;;
     no)
       # check container user home. Can miss with --user=RETAIN
-      echo "Containeruserhome=\$(getent passwd \$Containeruser | cut -d: -f6)"
+#      echo "Containeruserhome=\$(getent passwd \$Containeruser | cut -d: -f6)"
+      echo "Containeruserhome=\$(cat /etc/passwd | grep '\$Containeruser:.:' | cut -d: -f6)"
       echo "Containeruserhome=\${Containeruserhome:-/tmp/\$Containeruser}"
       echo ""
       echo "debugnote \"User in container: \$(id \$Containeruser)
-\$(getent passwd \$Containeruser)\""
+\$(cat /etc/passwd | grep '\$Containeruser:.:')\""
     ;;
   esac
   
@@ -4447,13 +4456,19 @@ create_containerrootrc() {      # create container root setup script: This scrip
   
   echo "# Set up container user groups"
   for Line in $Containerusergroups ; do
-    echo "Groupname=$(getent group $Line | cut -d: -f1)"
-    echo "Groupid=$(getent group $Line | cut -d: -f3)"
-    echo "[ \"\$Groupname\" ] || Groupname=\$(getent group $Line | cut -d: -f1)"
-    echo "[ \"\$Groupid\" ]   || Groupid=\$(getent group $Line | cut -d: -f3)"
+#    echo "Groupname=$(getent group $Line | cut -d: -f1)"
+    echo "Groupname=$(cat /etc/group | grep \"$Line\" | cut -d: -f1)"
+#    echo "Groupid=$(getent group $Line | cut -d: -f3)"
+    echo "Groupid=$(cat /etc/group | grep \"$Line\" | cut -d: -f3)"
+#    echo "[ \"\$Groupname\" ] || Groupname=\$(getent group $Line | cut -d: -f1)"
+    echo "[ \"\$Groupname\" ] || Groupname=\$(cat /etc/group | grep \"$Line\" | cut -d: -f1)"
+#    echo "[ \"\$Groupid\" ]   || Groupid=\$(getent group $Line | cut -d: -f3)"
+    echo "[ \"\$Groupid\" ]   || Groupid=\$(cat /etc/group | grep \"$Line\" | cut -d: -f3)"
     echo "[ \"\$Groupname\" ] && {"
-    echo "  getent group | sed \"s/^\$Groupname.*/\$Groupname:x:\$Groupid:\$(getent group \$Groupname | cut -d: -f4 ),\$Containeruser/\" | sed 's/:,/:/' > /tmp/group"
-    echo "  getent group \$Groupname >/dev/null || echo \$Groupname:x:\$Groupid:\$Containeruser >> /tmp/group"
+#    echo "  getent group | sed \"s/^\$Groupname.*/\$Groupname:x:\$Groupid:\$(getent group \$Groupname | cut -d: -f4 ),\$Containeruser/\" | sed 's/:,/:/' > /tmp/group"
+    echo "  cat /etc/group | sed \"s/^\$Groupname.*/\$Groupname:x:\$Groupid:\$(cat /etc/group | grep \"\$Groupname:.:\" | cut -d: -f4 ),\$Containeruser/\" | sed 's/:,/:/' > /tmp/group"
+#    echo "  getent group \$Groupname >/dev/null || echo \$Groupname:x:\$Groupid:\$Containeruser >> /tmp/group"
+    echo "  cat /etc/group | grep -q \"\$Groupname:.:\" || echo \$Groupname:x:\$Groupid:\$Containeruser >> /tmp/group"
     echo "  cp /tmp/group /etc/group"
     echo "}"
     echo ""
@@ -4811,6 +4826,10 @@ exit 0\" >> /etc/rc.local"
   halt
 } &"
         echo "exec /sbin/init"
+      ;;
+      s6-overlay)
+#        echo "exec /etc/s6/init/init-stage1 /bin/su - -s /bin/sh \$Containeruser $Cshare/container.CMD.sh"
+        echo "exec /init /bin/su - -s /bin/sh \$Containeruser $Cshare/container.CMD.sh"
       ;;
       systemd)
         echo 'Systemd=/lib/systemd/systemd'
@@ -5402,7 +5421,7 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Cmdstdoutlogfile="$Sharefolder/$Cmdstdoutlogfile"                 && mkfile $Cmdstdoutlogfile 666
   Cmdstderrlogfile="$Sharefolder/$Cmdstderrlogfile"                 && mkfile $Cmdstderrlogfile 666
 
-  mkfile "$Sharefolder/environment"
+  mkfile "$Sharefolder/environment" 666
   return 0
 }
 check_runmode() {               # check run/--exe/--xonly
