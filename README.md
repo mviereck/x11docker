@@ -246,6 +246,11 @@ Core concept is:
    - Sets docker run option `--cap-drop=ALL` to drop all capabilities. Most applications don't need them.
    - Sets docker run option [`--security-opt=no-new-privileges`](https://www.projectatomic.io/blog/2016/03/no-new-privs-docker/).
    - These restrictions can be disabled with x11docker option `--cap-default` or reduced with `--sudouser` or `--user=root`.
+   
+That being said, Docker's default capabilities and its seccomp profile are not bad. 
+I am not aware of an escape from a container without an additional isolation degrading configuration.
+However, x11docker follows the [principle of least privilege](https://en.wikipedia.org/wiki/Principle_of_least_privilege). 
+Docker containers should not have capabilities or privileges that they don't need for their job.
 
 _Weaknesses:_
  - Possible SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. 
