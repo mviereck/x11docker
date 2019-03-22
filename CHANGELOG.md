@@ -10,6 +10,9 @@ Project website: https://github.com/mviereck/x11docker
 ### Added
  - `--init=s6-overlay`: Support of init system s6 as given by s6-overlay.
    [(#136)](https://github.com/mviereck/x11docker/issues/136)
+### Fixed
+ - `--exe`: Regard possible `--` in command. Command before it has been
+   dropped as `DOCKER_RUN_OPTIONS` before.
 
 ## [5.5.1](https://github.com/mviereck/x11docker/releases/tag/v5.5.1) - 2019-03-18
 ### Deprecated
