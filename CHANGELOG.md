@@ -13,6 +13,9 @@ Project website: https://github.com/mviereck/x11docker
 ### Fixed
  - `--exe`: Regard possible `--` in command. Command before it has been
    dropped as `DOCKER_RUN_OPTIONS` before.
+ - `--tty`: Workaround: Set environment variables `LINES` and `COLUMNS` to 
+   current terminal size. Only needed without `--interactive`.
+   [Docker bug ticket #33794](https://github.com/moby/moby/issues/33794)
 
 ## [5.5.1](https://github.com/mviereck/x11docker/releases/tag/v5.5.1) - 2019-03-18
 ### Deprecated
