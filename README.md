@@ -315,8 +315,17 @@ Setup:
    If everything starts up without an obvious error, but no application window appears, look at issue [#108](https://github.com/mviereck/x11docker/issues/108).
 
 
-
-## Troubleshooting
+## Contact
+Feel free to open a [ticket](https://github.com/mviereck/x11docker/issues) if you have a question or encounter an issue.
+If reporting an issue:
+ - Have a look at chapter [Troubleshooting](#troubleshooting)
+ - Most times it makes sense to store the `--verbose` output (or `~/.cache/x11docker/x11docker.log`) at [pastebin.com](https://pastebin.com/).
+### Contributing
+If you want to contribute to x11docker, please open a ticket before creating a pull request. Often it is possible to solve issues with already available options.
+### Support
+Please open a ticket if you need support. Please note that `x11docker` is a non-commercial project maintained in free time. 
+I'll help where I can, but there is no organisation behind `x11docker` that can provide large scale support.
+### Troubleshooting
 For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. 
  - x11docker shows warnings if something is insecure, missing or going wrong. 
    - Use option `-v, --verbose` to see full logfile output.
@@ -341,10 +350,6 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
    - You can run container applications as root with `--user=root`.
  - A few applications need [DBus](#dbus). Install `dbus` in image and try option `--dbus`. If that does not help, try option `--dbus-system`.
  - A few applications need systemd. Install `systemd` in image and try option `--init=systemd`.
- - Get help in the [issue tracker](https://github.com/mviereck/x11docker/issues). 
-   - Most times it makes sense to store the `--verbose` output (or `x11docker.log`) at [pastebin.com](https://pastebin.com/).
-   - Don't hesitate to ask.
-
    
 
 ## Examples
