@@ -29,7 +29,7 @@ bibliography: paper.bib
 Containerisation in general has proven as a useful technology for packaging applications and their 
 dependencies for deployment in cloud-based infrastructures.
 A container is similar in usage to a [virtual machine](https://en.wikipedia.org/wiki/Virtual_machine), 
-but needs less resources. The technical concept, however, is completly different.
+but needs less resources. The technical concept, however, is completely different.
 
 The properties of containers such as portability, dependency packaging, reduced requirements of 
 system environment (i.e. only the container runtime), isolation, and version management of complete 
@@ -37,7 +37,7 @@ application stacks make it a promising candidate to increase computational repro
 reusability of research analyses [@boettiger_introduction_2015].
 Their use has been demonstrated in various disciplines, such as software engineering research 
 [@cito_using_2016], bioinformatics [@hosny_algorun_2016], and archeology [@marwick_computational_2017], 
-and their preservation is an active field of research [@Kratzke_Heuveline_2017,@emsley_framework_2018].
+and their preservation is an active field of research [@rechert_preserving_2017,@emsley_framework_2018].
 
 Software and required libraries can be installed in a Docker image to run software that is difficult 
 to install otherwise. It is possible to run outdated versions, specific versions, or latest development 
