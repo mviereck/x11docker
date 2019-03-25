@@ -11,11 +11,13 @@ Project website: https://github.com/mviereck/x11docker
  - `--init=s6-overlay`: Support of init system s6 as given by s6-overlay.
    [(#136)](https://github.com/mviereck/x11docker/issues/136)
 ### Fixed
+ - `--dbus-system`: Regression fix for service file check.
  - `--exe`: Regard possible `--` in command. Command before it has been
    dropped as `DOCKER_RUN_OPTIONS` before.
  - `--tty`: Workaround: Set environment variables `LINES` and `COLUMNS` to 
    current terminal size. Only needed without `--interactive`.
    [Docker bug ticket #33794](https://github.com/moby/moby/issues/33794)
+ - `--init=tini`: Support on docker-for-win.
 
 ## [5.5.1](https://github.com/mviereck/x11docker/releases/tag/v5.5.1) - 2019-03-18
 ### Deprecated

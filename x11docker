@@ -3455,17 +3455,20 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
   local Message=
 
   store_runoption env "container=docker"   # At least OpenRC and systemd regard this hint
-  
+
   case $Initsystem in
-    tini|systemd|sysvinit|openrc|runit|s6-overlay|none) ;;
+    tini|systemd|sysvinit|openrc|runit|dockerinit|s6-overlay|none) ;;
     *) 
       note "Option --init: Unknown init system $Initsystem
   Fallback: Using --init=tini instead."
       Initsystem="tini" ;;
   esac
   
+  # --init in Mobyvm. /usr/bin/docker-init is not available in MSYS2/Cygwin/WSL
+  [ "$Winsubsystem" ] && [ "$Initsystem" = "tini" ] && Initsystem="dockerinit"
+  
   case $Initsystem in
-    none) ;;
+    none|dockerinit) ;;
     tini)
       Tinibinary="$(command -v docker-init ||:)"
       [ -z "$Tinibinary" ]                                      && Tinibinary="/snap/docker/current/bin/docker-init"
@@ -3755,7 +3758,7 @@ create_dockercommand() {        # create command to run docker
 
   # container user. init systems switch later.
   case $Initsystem in
-    none|tini)
+    none|tini|dockerinit)
       case $Switchcontaineruser in
         no) 
           [ "$Createcontaineruser" = "yes" ] && Dockercommand="$Dockercommand \\
@@ -3808,6 +3811,10 @@ create_dockercommand() {        # create command to run docker
   
   # shared files for some init systems
   case $Initsystem in
+    dockerinit)
+      Dockercommand="$Dockercommand \\
+  --init"
+    ;;
     tini) 
       Dockercommand="$Dockercommand \\
   --volume $(convertpath --volume "$Tinibinary:ro" "$Cshare/tini")" 
@@ -4473,18 +4480,12 @@ create_containerrootrc() {      # create container root setup script: This scrip
   
   echo "# Set up container user groups"
   for Line in $Containerusergroups ; do
-#    echo "Groupname=$(getent group $Line | cut -d: -f1)"
     echo "Groupname=$(cat /etc/group | grep \"$Line\" | cut -d: -f1)"
-#    echo "Groupid=$(getent group $Line | cut -d: -f3)"
     echo "Groupid=$(cat /etc/group | grep \"$Line\" | cut -d: -f3)"
-#    echo "[ \"\$Groupname\" ] || Groupname=\$(getent group $Line | cut -d: -f1)"
     echo "[ \"\$Groupname\" ] || Groupname=\$(cat /etc/group | grep \"$Line\" | cut -d: -f1)"
-#    echo "[ \"\$Groupid\" ]   || Groupid=\$(getent group $Line | cut -d: -f3)"
     echo "[ \"\$Groupid\" ]   || Groupid=\$(cat /etc/group | grep \"$Line\" | cut -d: -f3)"
     echo "[ \"\$Groupname\" ] && {"
-#    echo "  getent group | sed \"s/^\$Groupname.*/\$Groupname:x:\$Groupid:\$(getent group \$Groupname | cut -d: -f4 ),\$Containeruser/\" | sed 's/:,/:/' > /tmp/group"
     echo "  cat /etc/group | sed \"s/^\$Groupname.*/\$Groupname:x:\$Groupid:\$(cat /etc/group | grep \"\$Groupname:.:\" | cut -d: -f4 ),\$Containeruser/\" | sed 's/:,/:/' > /tmp/group"
-#    echo "  getent group \$Groupname >/dev/null || echo \$Groupname:x:\$Groupid:\$Containeruser >> /tmp/group"
     echo "  cat /etc/group | grep -q \"\$Groupname:.:\" || echo \$Groupname:x:\$Groupid:\$Containeruser >> /tmp/group"
     echo "  cp /tmp/group /etc/group"
     echo "}"
@@ -4553,7 +4554,7 @@ exec setsid agetty -a \$Containeruser -l /usr/local/bin/x11docker-login console
   }
   
   case $Initsystem in
-    tini|none) ;;
+    tini|none|dockerinit) ;;
     systemd)
       echo "# enable x11docker CMD service"
       echo "systemctl enable x11docker-startcmd.service"
@@ -4587,9 +4588,9 @@ waitforservice() {
 # make stderr visible
 exec 2>&1
 # wait for all other services
-for Service in \\\$(ls /etc/runit/runsvdir/default/) ; do waitforservice \\\$Service ;done
+for Service in /etc/runit/runsvdir/default/* ; do waitforservice \\\$Service ;done
 echo 'Current status of runit services:'
-for Service in \\\$(ls /etc/runit/runsvdir/default/) ; do sv status      \\\$Service ;done
+for Service in /etc/runit/runsvdir/default/* ; do sv status      \\\$Service ;done
 /usr/local/bin/x11docker-agetty
 \" > /etc/sv/x11docker/run"
       echo "chmod +x /etc/sv/x11docker/run"
@@ -4643,10 +4644,10 @@ exit 0\" >> /etc/rc.local"
   case $Dbussystem in
     yes)
       echo "verbose 'DBus: removing failing or useless services.'"
-      echo "for Line in \$(ls /usr/share/dbus-1/system-services /usr/share/dbus-1/services); do" # find is not available on fedora
+      echo "for Line in /usr/share/dbus-1/system-services/* /usr/share/dbus-1/services/*; do" # find is not available on fedora
       echo '  Name="$(cat $Line | grep Name= | cut -d= -f2)"'
       echo '  Command="$(cat $Line | grep Exec= | cut -d= -f2)"'
-      echo '  debugnote "Checking $Name: $Command"'
+      echo '  debugnote "DBus: Checking $Name: $Command"'
       echo '  echo "Checking $Name: $Command"'
       echo "  case \$Name in"
       echo "    org.bluez)"
@@ -4750,7 +4751,7 @@ exit 0\" >> /etc/rc.local"
         echo "  waitforservice org.freedesktop.Accounts"
         echo "}"
         echo "# start all other dbus system services"
-        echo "for Line in \$(ls /usr/share/dbus-1/system-services); do"
+        echo "for Line in /usr/share/dbus-1/system-services/*; do"
         echo "  Name=\"\$(cat \$Line | grep Name= | cut -d= -f2)\""
         echo "  Command=\"\$(cat \$Line | grep Exec= | cut -d= -f2)\""
         echo "  case \$Name in"
@@ -4827,7 +4828,7 @@ exit 0\" >> /etc/rc.local"
 
   [ "$Switchcontaineruser" = "yes" ] && {   # if "no", container.CMD.sh is executed in command line $Dockercommand
     case $Initsystem in
-      none)
+      none|dockerinit)
         echo "exec /usr/local/bin/x11docker-login"
       ;;
       tini)
