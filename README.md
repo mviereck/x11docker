@@ -25,25 +25,52 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#m
  - Low [dependencies](#dependencies):
    - No obliging dependencies on host beside X and Docker. Recommended: `xpra` and `Xephyr`.
    - No dependencies inside of Docker images except for some optional features.
- - [Optional features](#options): 
-   - [Persistent data storage](#shared-folders-and-home-in-container) with shared host folders and a persistent `HOME` in container.
-   - [Sound](#sound) with Pulseaudio or ALSA.
-   - [Hardware acceleration](#hardware-acceleration) for OpenGL.
-   - [Clipboard](#clipboard) sharing.
-   - [Printing](#printer) through CUPS.
-   - [Webcam](#webcam) support.
-   - [Language locale](#language-locales) creation.
-   - [Wayland](#wayland) support.
-   - Supports [DBus](#dbus) and [init systems](#init-system) `tini`, `runit`, `OpenRC`, `SysVinit` and `systemd` in container. Supports also `elogind`.
+ - Several [optional features](#options) like [GPU](#hardware-acceleration), [sound](#sound), [webcam](#webcam) and [printer](#printer) support.
  - Remote access with [SSH](https://github.com/mviereck/x11docker/wiki/Remote-access-with-SSH), [VNC](https://github.com/mviereck/x11docker/wiki/VNC) 
    or [HTML5](https://github.com/mviereck/x11docker/wiki/Container-applications-running-in-Browser-with-HTML5) possible.
  - Easy to use. [Examples](#examples): 
    - `x11docker jess/cathode`
    - `x11docker --desktop --size 320x240 x11docker/lxde` (needs nested X server `Xephyr`)
- 
-![x11docker-gui screenshot](/../screenshots/screenshot-retroterm.png?raw=true "Cathode retro term in docker") ![LXDE in xpra](/../screenshots/screenshot-lxde-small.png?raw=true "LXDE desktop in docker")
+![retro terminal cathode](/../screenshots/screenshot-retroterm.png?raw=true "Cathode retro term in docker") ![LXDE in xpra](/../screenshots/screenshot-lxde-small.png?raw=true "LXDE desktop in docker")
 
 
+### Table of contents
+ - [GUI for x11docker](#gui-for-x11docker)
+ - [Terminal usage](#terminal-usage)
+ - [Installation](#installation)
+   - [Installation options](#installation-options)
+   - [Shortest way for first installation](#shortest-way-for-first-installation)
+   - [Minimal installation](#minimal-installation)
+ - [Options](#options)
+   - [Choice of X servers and Wayland compositors](#choice-of-x-servers-and-wayland-compositors)
+   - [Desktop or seamless mode](#desktop-or-seamless-mode)
+   - [Shared folders and HOME in container](#shared-folders-and-home-in-container)
+   - [Hardware acceleration](#hardware-acceleration)
+   - [Clipboard](#clipboard)
+   - [Sound](#sound)
+   - [Webcam](#webcam)
+   - [Printer](#printer)
+   - [Language locales](#language-locales)
+   - [Wayland](#wayland)
+   - [Init system](#init-system)
+   - [DBus](#dbus)
+ - [Dependencies](#dependencies)
+   - [X server dependencies](#x-server-dependencies)
+   - [Option dependencies](#option-dependencies)
+   - [List of all host packages for all possible x11docker options](#list-of-all-host-packages-for-all-possible-x11docker-options)
+ - [Security](#security)
+   - [Options degrading container isolation](#options-degrading-container-isolation)
+   - [Sandbox](#sandbox)
+ - [MSYS2, Cygwin and WSL on MS Windows](#msys2-cygwin-and-wsl-on-ms-windows)
+ - [Troubleshooting](#troubleshooting)
+ - [Contact](#contact)
+   - [Issues](#issues)
+   - [Contributing](#contributing)
+   - [Support](#support)
+ - [Examples](#examples)
+   - [Adjust images for your needs](#adjust-images-for-your-needs)
+   - [Screenshots](#screenshots)
+   
 
 ## GUI for x11docker
 `x11docker-gui` is an optional graphical frontend for `x11docker`. It runs from console, too.
