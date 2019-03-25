@@ -345,7 +345,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
 ## Contact
 Feel free to open a [ticket](https://github.com/mviereck/x11docker/issues) if you have a question or encounter an issue.
 ### Issues
-If reporting an issue:
+If reporting an [issue](https://github.com/mviereck/x11docker/issues):
  - Have a look at chapter [Troubleshooting](#troubleshooting).
  - Most times it makes sense to store the `--verbose` output (or `~/.cache/x11docker/x11docker.log`) at [pastebin.com](https://pastebin.com/).
 ### Contributing
