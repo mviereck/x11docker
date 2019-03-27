@@ -10,6 +10,9 @@ Project website: https://github.com/mviereck/x11docker
 ### Added
  - `--init=s6-overlay`: Support of init system `s6` as given by `s6-overlay`.
    [(#136)](https://github.com/mviereck/x11docker/issues/136)
+### Changed
+ - `x11docker` without an option: show `x11docker --help` instead of running
+   an unused X server.
 ### Fixed
  - `--dbus-system`: Regression fix for service file check.
  - `--exe`: Regard possible `--` in command. Command before it has been
@@ -18,6 +21,7 @@ Project website: https://github.com/mviereck/x11docker
    current terminal size. Only needed without `--interactive`.
    [Docker bug ticket #33794](https://github.com/moby/moby/issues/33794)
  - `--init=tini`: Support on docker-for-win.
+ - Check for availability of `realpath`.
 
 ## [5.5.1](https://github.com/mviereck/x11docker/releases/tag/v5.5.1) - 2019-03-18
 ### Deprecated
