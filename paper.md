@@ -39,7 +39,7 @@ application stacks make it a promising candidate to increase computational repro
 reusability of research analyses [@boettiger_introduction_2015].
 Their use has been demonstrated in various disciplines, such as software engineering research 
 [@cito_using_2016], bioinformatics [@hosny_algorun_2016], and archeology [@marwick_computational_2017], 
-and their preservation is an active field of research [@rechert_preserving_2017,@emsley_framework_2018].
+and their preservation is an active field of research [@rechert_preserving_2017;@emsley_framework_2018].
 
 Software and required libraries can be installed in a Docker image to run software that is difficult 
 to install otherwise. It is possible to run outdated versions, specific versions, or latest development 
@@ -69,6 +69,10 @@ without compromising on a researcher's skills (not imposing browser-based GUI no
 command-line proficiency), domain (having e.g. established and widely-acknowledged GUI-based tools), 
 security, computational reproducibility, or a scholarly review process.
 
+The target audience of `x11docker` in general are users who want to run desktop applications in containers.
+Another target audience are developers of desktop applications who need an isolated environment.
+In scientific and academic context the target audience are researchers in the field of reproducible science.
+
 `x11docker` has its own (optional) graphical frontend, `x11docker-gui`, and runs on GNU/Linux. 
 Running in a Virtual Linux Machine on MS Windows and macOS is supported. 
 With a few limitations it can run natively on MS Windows, too.
@@ -76,7 +80,7 @@ With a few limitations it can run natively on MS Windows, too.
 # Alternatives to x11docker
 
 A common way to allow GUI applications in containers is by providing a web server within the container 
-and rendering an HTML-based GUI in a common web browser, e.g. as jupyter notebooks [@jupyter2018binder]. 
+and rendering an HTML-based GUI in a common web browser, e.g. as jupyter notebooks [@project_jupyter-proc-scipy-2018]. 
 Further possibilities are an xrdp server, VNC server, SSH server or xpra server within the container.
 These solutions require some specific setup and provide a rather slow interaction due to a lot of 
 network data transfer.
