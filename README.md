@@ -111,7 +111,7 @@ To run only a new empty X server:
 Note that x11docker is just a **bash script** without library dependencies. Basically it is a wrapper for X servers and Docker. To allow advanced usage of x11docker abilities look at chapter [Dependencies](#dependencies).
 ### Installation options
 As root you can install, update and remove x11docker on your system:
- - `x11docker --install` : install x11docker and x11docker-gui from current directory. 
+ - `x11docker --install` : install x11docker and x11docker-gui from current directory. (Useful to install from an extracted `zip` file or a cloned `git` repository.)
  - `x11docker --update` : download and install latest [release](https://github.com/mviereck/x11docker/releases) from github.
  - `x11docker --update-master` : download and install latest master version from github.
  - `x11docker --remove` : remove all files installed by x11docker.
@@ -119,10 +119,15 @@ As root you can install, update and remove x11docker on your system:
 Copies `x11docker` and `x11docker-gui` to `/usr/bin`. Creates an icon in `/usr/share/icons`. 
 Creates `x11docker.desktop` in `/usr/share/applications`. Copies `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
 ### Shortest way for first installation:
-Remove `sudo` and run as root if your system does not use sudo.
-```
-curl -fsSL https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker | sudo bash -s -- --update
-```
+ - For systems using `sudo`:
+   ```
+   curl -fsSL https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker | sudo bash -s -- --update
+   ```
+ - Directly as `root`:
+   ```
+   curl -fsSL https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker | bash -s -- --update
+   ```
+   
 ### Minimal installation
 For a first test you can run with `bash x11docker` respective `bash x11docker-gui`. 
 For minimal installation make `x11docker` executable with `chmod +x x11docker` and move it to `/usr/bin` (or another location in `PATH`).
