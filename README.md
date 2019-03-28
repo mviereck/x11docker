@@ -226,28 +226,15 @@ Some desktop environments and applications need a running DBus daemon and/or DBu
  
 ## Dependencies
 x11docker can run with standard system utilities without additional dependencies on host or in image. 
-As a core it only needs `bash`, an `X` server and [`docker`](https://www.docker.com/) to run Docker containers on X.
-x11docker checks dependencies for chosen options on startup and shows terminal messages if some are missing. 
+ - As a core it only needs `bash`, an `X` server and [`docker`](https://www.docker.com/) to run Docker containers on X.
+ - x11docker checks dependencies for chosen options on startup and shows terminal messages if some are missing. 
 
 For advanced usage of x11docker it is recommended to install some additional packages.
 The recommended base commands are: `xpra` `Xephyr` `weston` `Xwayland` `xdotool` `xauth` `xclip` `xrandr` `xdpyinfo`
  - To provide these base commands see [wiki: Dependencies - Recommended base](https://github.com/mviereck/x11docker/wiki/Dependencies#recommended-base) for a package list matching your distribution.
 
-### X server dependencies
-All X server options with a description are listed in [wiki: X server and Wayland options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options).
-
-| Recommendations | Dependencies | Available options |
-| --- | --- | --- |
-| Minimal base | `Xorg` (probably already installed) | `--hostdisplay` <br> `--xorg` |
-| Recommended base | `xpra` `Xephyr` | `--xpra` <br> `--xephyr` |
-| Recommended base for `--gpu` | `xpra` `weston` `Xwayland` `xdotool` | `--xpra-xwayland` <br> `--weston-xwayland` <br> `--weston` <br> `--xwayland` <br> `--wayland` |
-| Recommended X tools | `xauth` `xrandr` `xdpyinfo` | |
-
-Note that [`--gpu` support with proprietary NVIDIA drivers](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container) is possible only for options `--hostdisplay` and `--xorg`.
-
-### Option dependencies
-Some feature options have additional dependencies on host and/or in image. This affects especially options `--clipboard`, `--gpu`, `--printer` and `--pulseaudio`.
-For details look at [wiki: Depemdencies of feature options](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
+Some feature options have additional dependencies on host and/or in image. This affects especially options `--gpu`, `--printer` and `--pulseaudio`.
+For details look at [wiki: Dependencies of feature options](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
 
 
 
