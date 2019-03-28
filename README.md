@@ -200,7 +200,7 @@ x11docker provides option `--lang` for flexible language locale settings.
    
 ### Wayland
 To run  [Wayland](https://wayland.freedesktop.org/) instead of an X server x11docker provides options `--wayland`, `--weston`, `--kwin` and `--hostwayland`. 
-For further description loot at [Overview of all possible X server and Wayland options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options).
+For further description loot at [wiki: Description of Wayland options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options#description-of-wayland-options).
  - Option `--wayland` automatically sets up a Wayland environment with some related environment variables.
  - Options `--kwin` and `--weston` run Wayland compositors `kwin_wayland` or `weston`.
    - For QT5 applications without option `--wayland` add options `--dbus`  and `--env QT_QPA_PLATFORM=wayland`.
@@ -210,8 +210,8 @@ For further description loot at [Overview of all possible X server and Wayland o
  
 ### Init system
 x11docker supports several init systems as PID 1 in container with option `--init`. Init in container solves the [zombie reaping issue](https://blog.phusion.nl/2015/01/20/docker-and-the-pid-1-zombie-reaping-problem/).
-As default it uses `tini` in`/usr/bin/docker-init`. 
-Look at [x11docker wiki: Init systems in Docker: tini, systemd, SysVinit, runit, OpenRC and elogind.](https://github.com/mviereck/x11docker/wiki/Init-systems-in-docker:-tini,-systemd,-SysVinit,-runit,-OpenRC-and-elogind)
+As default x11docker uses `tini` in`/usr/bin/docker-init`. Also available are `systemd`, `SysVinit`, `runit`, `OpenRC` and `s6-overlay`. `elogind` is supported, too.
+Look at [wiki: Init systems in Docker: .](https://github.com/mviereck/x11docker/wiki/Init-systems)
 
 ### DBus
 Some desktop environments and applications need a running DBus daemon and/or DBus user session. 
@@ -226,41 +226,28 @@ Some desktop environments and applications need a running DBus daemon and/or DBu
  
 ## Dependencies
 x11docker can run with standard system utilities without additional dependencies on host or in image. 
-As a core it only needs an `X` server and, of course, [`docker`](https://www.docker.com/) to run Docker containers on X.
+As a core it only needs `bash`, an `X` server and [`docker`](https://www.docker.com/) to run Docker containers on X.
 x11docker checks dependencies for chosen options on startup and shows terminal messages if some are missing. 
 
-***TL;DR:*** Install `xpra Xephyr weston Xwayland xdotool xauth xclip xrandr xdpyinfo` on host, or leave it as it is.
+For advanced usage of x11docker it is recommended to install some additional packages.
+The recommended base commands are: `xpra` `Xephyr` `weston` `Xwayland` `xdotool` `xauth` `xclip` `xrandr` `xdpyinfo`
+ - To provide these base commands see [wiki: Dependencies - Recommended base](https://github.com/mviereck/x11docker/wiki/Dependencies#recommended-base) for a package list matching your distribution.
 
 ### X server dependencies
-All X server options with a description and their dependencies are listed in [wiki: X server and Wayland options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options).
+All X server options with a description are listed in [wiki: X server and Wayland options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options).
 
 | Recommendations | Dependencies | Available options |
 | --- | --- | --- |
 | Minimal base | `Xorg` (probably already installed) | `--hostdisplay` <br> `--xorg` |
 | Recommended base | `xpra` `Xephyr` | `--xpra` <br> `--xephyr` |
 | Recommended base for `--gpu` | `xpra` `weston` `Xwayland` `xdotool` | `--xpra-xwayland` <br> `--weston-xwayland` <br> `--weston` <br> `--xwayland` <br> `--wayland` |
-| Recommended tools | `xauth` `xrandr` `xdpyinfo` | |
+| Recommended X tools | `xauth` `xrandr` `xdpyinfo` | |
 
 Note that [`--gpu` support with proprietary NVIDIA drivers](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container) is possible only for options `--hostdisplay` and `--xorg`.
 
 ### Option dependencies
-| Option | Dependencies on host | Dependencies in image |
-| --- | --- | --- |
-| `--clipboard` | `xclip` or `xsel` | - |
-| `--gpu` | - | MESA OpenGL drivers. <br> Debian: `mesa-utils mesa-utils-extra` <br> CentOS: `glx-utils mesa-dri-drivers` <br> Arch Linux: `mesa-demos` <br> Alpine: `mesa-demos mesa-dri-ati mesa-dri-intel mesa-dri-nouveau mesa-dri-swrast` |
-| `--gpu` with NVIDIA | | look at [x11docker wiki: NVIDIA driver](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container) |
-| `--alsa` | - | optional: ALSA client libs. <br> Debian: `libasound2`, Arch, Alpine: `alsa-lib` |
-| `--pulseaudio` | `pulseaudio` | `pulseaudio` client libs. <br> Debian: `libpulse0`, Arch: `libpulse`, Alpine: `pulseaudio-libs` |
-| `--printer` | `cups` | CUPS client library. <br> Debian: `libcups2`, Arch: `libcups`, Alpine: `cups-libs` |
-| `--lang` | - | Debian: `locales`, Alpine: not supported |
-| `--xfishtank` | `xfishtank` | - |
-| `--dbus` `--hostdbus` `--dbus-system` | - | `dbus` |
-| `--launcher` | `xdg-utils` | - |
-| `--install` `--update` `--update-master` | `wget` or `curl` <br> `unzip` | - |
-   
-### List of all host packages for all possible x11docker options
-Debian package names: `kwin-wayland nxagent unzip weston wget xauth xclip  xdg-utils xdotool xdpyinfo xfishtank xpra xrandr xserver-xephyr xserver-xorg-video-dummy xvfb xwayland`, 
-further (deeper surgery in system): `cups pulseaudio xserver-xorg-legacy`.
+Some feature options have additional dependencies on host and/or in image. This affects especially options `--clipboard`, `--gpu`, `--printer` and `--pulseaudio`.
+For details look at [wiki: Depemdencies of feature options](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
 
 
 
