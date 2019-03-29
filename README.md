@@ -57,9 +57,6 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#m
    - [Init system](#init-system)
    - [DBus](#dbus)
  - [Dependencies](#dependencies)
-   - [X server dependencies](#x-server-dependencies)
-   - [Option dependencies](#option-dependencies)
-   - [List of all host packages for all possible x11docker options](#list-of-all-host-packages-for-all-possible-x11docker-options)
  - [Security](#security)
    - [Options degrading container isolation](#options-degrading-container-isolation)
    - [Sandbox](#sandbox)
@@ -136,7 +133,10 @@ Other files than `x11docker` script itself are not essential.
 
 
 ## Options
-Description of some commonly used [options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview).
+Description of some commonly used feature [options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview).
+ - Some of these options have dependencies on host and/or in image.
+   Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
+
 
 ### Choice of X servers and Wayland compositors
 If no X server option is specified, x11docker automatically chooses one depending on installed [dependencies](#dependencies) and on given or missing options `--desktop`, `--gpu` and `--wayland`.
@@ -165,7 +165,7 @@ Note that x11docker copies files from `/etc/skel` in container to `HOME` if `HOM
  
 ### Hardware acceleration
 Hardware acceleration for OpenGL is possible with option `-g, --gpu`. 
- - This will work out of the box in most cases with open source drivers on host. Otherwise have a look at [Dependencies](#option-dependencies). 
+ - This will work out of the box in most cases with open source drivers on host. Otherwise have a look at [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options). 
  - Closed source [NVIDIA drivers](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container) need some setup and support less [x11docker X server options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options#attributes-of-x-server-and-wayland-options).
  
 ### Clipboard
@@ -175,26 +175,30 @@ Clipboard sharing is possible with option `-c, --clipboard`.
  
 ### Sound
 Sound is possible with options `-p, --pulseaudio` and `--alsa`. 
- - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and in image.
+ - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and `pulseaudio` libraries in image. 
+   Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
  - For ALSA sound with `--alsa` you might need to specify a sound card with e.g. `--alsa=Generic`. Get a list of available sound cards with `aplay -l`.
-   To support virtual ALSA devices like `dmix`, too, the image needs ALSA libraries, e.g. `libasound2` in debian images.
  
 ### Webcam
 Webcams on host can be shared with option `--webcam`.
- - If webcam application in image fails, install `mesa-utils` (debian) or `mesa-demos` (arch) in image. 
+ - If webcam application in image fails, install `--gpu` dependencies in image. 
+   Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
  - `guvcview` needs `--pulseaudio` or `--alsa`.
  - `cheese` and [`gnome-ring`](https://ring.cx/) need `--init=systemd` or `--dbus-system`.
  
 ### Printer
 Printers on host can be provided to container with option `--printer`. 
- - It needs CUPS on host, the default printer server for most linux distributions. 
- - The container needs package `libcups2` (debian) or `libcups` (arch).
+ - It needs `cups` on host, the default printer server for most linux distributions.
+ - The container needs `cups` client libraries in image.
+   Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
+
  
 ### Language locales
 x11docker provides option `--lang` for flexible language locale settings. 
  - `--lang` without an argument sets `LANG` in container to same as on host. Same as `--lang=$LANG`
  - x11docker will check on container startup if the desired locale is already present in image and enable it. 
- - If x11docker does not find the locale, it creates it on container startup. (Needs package `locales` in image.) 
+ - If x11docker does not find the locale, it creates it on container startup. This needs some `locale` packages in image.
+   Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
  - Examples: `--lang=de` for German, `--lang=zh_CN` for Chinese, `--lang=ru` for Russian, `--lang=$LANG` for your host locale.
  - For support of chinese, japanese and korean characters install a font like `fonts-arphic-uming` in image.
    
@@ -211,10 +215,10 @@ For further description loot at [wiki: Description of Wayland options](https://g
 ### Init system
 x11docker supports several init systems as PID 1 in container with option `--init`. Init in container solves the [zombie reaping issue](https://blog.phusion.nl/2015/01/20/docker-and-the-pid-1-zombie-reaping-problem/).
 As default x11docker uses `tini` in`/usr/bin/docker-init`. Also available are `systemd`, `SysVinit`, `runit`, `OpenRC` and `s6-overlay`. `elogind` is supported, too.
-Look at [wiki: Init systems in Docker: .](https://github.com/mviereck/x11docker/wiki/Init-systems)
+Look at [wiki: Init systems in Docker](https://github.com/mviereck/x11docker/wiki/Init-systems).
 
 ### DBus
-Some desktop environments and applications need a running DBus daemon and/or DBus user session. 
+Some desktop environments and applications need a running DBus daemon and/or DBus user session. DBus options need `dbus` in image.
  - use `--dbus` to run a DBus user session daemon.
  - use `--dbus-system` to run DBus system daemon. This includes option `--dbus`.
    - If startup fails or takes about 90s, install an init system and use that one to run DBus. E.g. install `systemd` in image and run with `--init=systemd`.
@@ -234,7 +238,7 @@ The recommended base commands are: `xpra` `Xephyr` `weston` `Xwayland` `xdotool`
  - To provide these base commands see [wiki: Dependencies - Recommended base](https://github.com/mviereck/x11docker/wiki/Dependencies#recommended-base) for a package list matching your distribution.
 
 Some feature options have additional dependencies on host and/or in image. This affects especially options `--gpu`, `--printer` and `--pulseaudio`.
-For details look at [wiki: Dependencies of feature options](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
+Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
 
 
 
@@ -280,13 +284,16 @@ _Most important:_
   - `--pulseaudio` and `--alsa` allow catching audio output and microphone input from host.
   
 _Rather special options reducing security, but not needed for regular use:_
-  - `--sudouser` allows `su` and `sudo` with password `x11docker`for container user. 
+  - `--sudouser` and `--user=root` allow `su` and `sudo` with password `x11docker`for container user. 
     If an application somehow breaks out of container, it can harm your host system. Allows many container capabilties that x11docker would drop otherwise.
   - `--cap-default` disables x11docker's container security hardening and falls back to default Docker container capabilities.
+    If an application somehow breaks out of container, it can harm your host system.
   - `--dbus-system` and `--init=systemd|sysvinit|openrc|runit` allow some container capabilities that x11docker would drop otherwise. 
     `--init=systemd` also shares access to `/sys/fs/cgroup`. Some processes will run as root in container.
-  - `--hostipc` sets docker run option `--ipc=host`. (Allows MIT-SHM / shared memory. Disables IPC namespacing.)
-  - `--hostnet` sets docker run option `--net=host`. (Shares host network stack. Disables network namespacing. Container can spy on network traffic.)
+    If a root process somehow breaks out of container, it can harm your host system. Allows many container capabilties that x11docker would drop otherwise.
+  - `--hostipc` sets docker run option `--ipc=host`. Allows MIT-SHM / shared memory. Disables IPC namespacing.
+  - `--hostnet` sets docker run option `--net=host`. Shares host network stack. Disables network namespacing. Container can spy on an maybe manipulate host network traffic.
+  - `--hostdbus` allows communication over DBus with host applications.
 
 ### Sandbox
 Container isolation enhanced with x11docker allows to use containers as a [sandbox](https://en.wikipedia.org/wiki/Sandbox_(computer_security)) that fairly well protects the host system from possibly malicious or buggy software.
