@@ -230,7 +230,7 @@ x11docker can run with standard system utilities without additional dependencies
  - x11docker checks dependencies for chosen options on startup and shows terminal messages if some are missing. 
 
 For advanced usage of x11docker it is recommended to install some additional packages.
-The recommended base commands are: `xpra` `Xephyr` `weston` `Xwayland` `xdotool` `xauth` `xclip` `xrandr` `xdpyinfo`
+The recommended base commands are: `xpra` `Xephyr` `weston` `Xwayland` `xdotool` `xauth` `xinit` `xclip` `xhost` `xrandr` `xdpyinfo`. Some of them are probably already installed.
  - To provide these base commands see [wiki: Dependencies - Recommended base](https://github.com/mviereck/x11docker/wiki/Dependencies#recommended-base) for a package list matching your distribution.
 
 Some feature options have additional dependencies on host and/or in image. This affects especially options `--gpu`, `--printer` and `--pulseaudio`.
