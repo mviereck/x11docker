@@ -13,7 +13,7 @@ Software can be installed in a deployable Docker image with a rudimentary Linux 
 This can help to run or deploy software that is difficult to install on several systems due to dependency issues. It is possible to run outdated versions or latest development versions side by side. 
 Files to work on can be shared between host and container.
 
-x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#msys2-cygwin-and-wsl-on-ms-windows). x11docker is not adapted to run on macOS except in a Linux VM.
+x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#installation-on-ms-windows). x11docker is not adapted to run on macOS except in a Linux VM.
 
 [x11docker wiki](https://github.com/mviereck/x11docker/wiki) provides some how-to's for basic setups without x11docker.
 
@@ -39,10 +39,6 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#m
 ### Table of contents
  - [GUI for x11docker](#gui-for-x11docker)
  - [Terminal usage](#terminal-usage)
- - [Installation](#installation)
-   - [Installation options](#installation-options)
-   - [Shortest way for first installation](#shortest-way-for-first-installation)
-   - [Minimal installation](#minimal-installation)
  - [Options](#options)
    - [Choice of X servers and Wayland compositors](#choice-of-x-servers-and-wayland-compositors)
    - [Desktop or seamless mode](#desktop-or-seamless-mode)
@@ -56,11 +52,15 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#m
    - [Wayland](#wayland)
    - [Init system](#init-system)
    - [DBus](#dbus)
- - [Dependencies](#dependencies)
  - [Security](#security)
    - [Options degrading container isolation](#options-degrading-container-isolation)
    - [Sandbox](#sandbox)
- - [MSYS2, Cygwin and WSL on MS Windows](#msys2-cygwin-and-wsl-on-ms-windows)
+ - [Installation](#installation)
+   - [Installation options](#installation-options)
+   - [Shortest way for first installation](#shortest-way-for-first-installation)
+   - [Minimal installation](#minimal-installation)
+   - [Installation on MS Windows](#installation-on-ms-windows)
+ - [Dependencies](#dependencies)
  - [Troubleshooting](#troubleshooting)
  - [Contact](#contact)
    - [Issues](#issues)
@@ -104,34 +104,6 @@ To run only a new empty X server:
  
  
  
-## Installation
-Note that x11docker is just a **bash script** without library dependencies. Basically it is a wrapper for X servers and Docker. To allow advanced usage of x11docker abilities look at chapter [Dependencies](#dependencies).
-### Installation options
-As root you can install, update and remove x11docker on your system:
- - `x11docker --install` : install x11docker and x11docker-gui from current directory. (Useful to install from an extracted `zip` file or a cloned `git` repository.)
- - `x11docker --update` : download and install latest [release](https://github.com/mviereck/x11docker/releases) from github.
- - `x11docker --update-master` : download and install latest master version from github.
- - `x11docker --remove` : remove all files installed by x11docker.
- 
-Copies `x11docker` and `x11docker-gui` to `/usr/bin`. Creates an icon in `/usr/share/icons`. 
-Creates `x11docker.desktop` in `/usr/share/applications`. Copies `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
-### Shortest way for first installation:
- - For systems using `sudo`:
-   ```
-   curl -fsSL https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker | sudo bash -s -- --update
-   ```
- - Directly as `root`:
-   ```
-   curl -fsSL https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker | bash -s -- --update
-   ```
-   
-### Minimal installation
-For a first test you can run with `bash x11docker` respective `bash x11docker-gui`. 
-For minimal installation make `x11docker` executable with `chmod +x x11docker` and move it to `/usr/bin` (or another location in `PATH`).
-Other files than `x11docker` script itself are not essential.
-
-
-
 ## Options
 Description of some commonly used feature [options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview).
  - Some of these options have dependencies on host and/or in image.
@@ -228,20 +200,6 @@ Some desktop environments and applications need a running DBus daemon and/or DBu
 
  
  
-## Dependencies
-x11docker can run with standard system utilities without additional dependencies on host or in image. 
- - As a core it only needs `bash`, an `X` server and [`docker`](https://www.docker.com/) to run Docker containers on X.
- - x11docker checks dependencies for chosen options on startup and shows terminal messages if some are missing. 
-
-For advanced usage of x11docker it is recommended to install some additional packages.
-The recommended base commands are: `xpra` `Xephyr` `weston` `Xwayland` `xdotool` `xauth` `xinit` `xclip` `xhost` `xrandr` `xdpyinfo`. Some of them are probably already installed.
- - To provide these base commands see [wiki: Dependencies - Recommended base](https://github.com/mviereck/x11docker/wiki/Dependencies#recommended-base) for a package list matching your distribution.
-
-Some feature options have additional dependencies on host and/or in image. This affects especially options `--gpu`, `--printer` and `--pulseaudio`.
-Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
-
-
-
 ## Security 
 Scope of x11docker is to run containerized GUI applications while preserving and improving container isolation.
 Core concept is:
@@ -315,19 +273,52 @@ For more custom fine tuning have a look at [Docker documentation: Limit a contai
 **WARNING**: There is no restriction that can prevent the container from flooding the hard disk in Docker's container partition or in shared folders.
   
   
-## MSYS2, Cygwin and WSL on MS Windows
-x11docker runs on MS Windows in [MSYS2](https://www.msys2.org/), [Cygwin](https://www.cygwin.com/) 
+## Installation
+Note that x11docker is just a **bash script** without library dependencies. Basically it is a wrapper for X servers and Docker. To allow advanced usage of x11docker abilities look at chapter [Dependencies](#dependencies).
+### Installation options
+As root you can install, update and remove x11docker on your system:
+ - `x11docker --install` : install x11docker and x11docker-gui from current directory. (Useful to install from an extracted `zip` file or a cloned `git` repository.)
+ - `x11docker --update` : download and install latest [release](https://github.com/mviereck/x11docker/releases) from github.
+ - `x11docker --update-master` : download and install latest master version from github.
+ - `x11docker --remove` : remove all files installed by x11docker.
+ 
+Copies `x11docker` and `x11docker-gui` to `/usr/bin`. Creates an icon in `/usr/share/icons`. 
+Creates `x11docker.desktop` in `/usr/share/applications`. Copies `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
+### Shortest way for first installation:
+ - For systems using `sudo`:
+   ```
+   curl -fsSL https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker | sudo bash -s -- --update
+   ```
+ - Directly as `root`:
+   ```
+   curl -fsSL https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker | bash -s -- --update
+   ```
+   
+### Minimal installation
+For a first test you can run with `bash x11docker` respective `bash x11docker-gui`. 
+For minimal installation make `x11docker` executable with `chmod +x x11docker` and move it to `/usr/bin` (or another location in `PATH`).
+Other files than `x11docker` script itself are not essential.
+
+### Installation on MS Windows
+x11docker can run natively on MS Windows in [MSYS2](https://www.msys2.org/), [Cygwin](https://www.cygwin.com/) 
 and [WSL (Windows subsystem for Linux)](https://docs.microsoft.com/en-us/windows/wsl/about).
 Although it basically works, it misses some features available on Linux and cannot be guaranteed to be as reliable as on Linux.
 However, running in a Linux VM instead of running natively on Windows is fully supported.
-Setup:
- - Install X server [`VcXsrv`](https://sourceforge.net/projects/vcxsrv/) on Windows into `C:/Program Files/VcXsrv` (option `--vcxsrv`).
-   - Alternative: Cygwin provides X server `Xwin` (option `--xwin`). Install `xinit` package in Cygwin. Can be used in Cygwin only.
- - For sound with option `--pulseaudio` install Cygwin in `C:/cygwin64` with package `pulseaudio`. It works for MSYS2 and WSL, too.
- - Error messages like `./x11docker: line 2: $'\r': command not found` indicate a wrong line ending conversion from git. Run `dos2unix x11docker`.
- - Not all x11docker options are implemented on MS Windows. E.g. `--webcam` and `--printer` do not work.
- - Firewall settings in Windows can cause issues for container applications accessing the X server. 
-   If everything starts up without an obvious error, but no application window appears, look at issue [#108](https://github.com/mviereck/x11docker/issues/108).
+ - Further infos and installation instructions see [wiki: x11docker on MS Windows](https://github.com/mviereck/x11docker/wiki/x11docker-on-MS-Windows).
+
+
+## Dependencies
+x11docker can run with standard system utilities without additional dependencies on host or in image. 
+ - As a core it only needs `bash`, an `X` server and [`docker`](https://www.docker.com/) to run Docker containers on X.
+ - x11docker checks dependencies for chosen options on startup and shows terminal messages if some are missing. 
+
+For advanced usage of x11docker it is recommended to install some additional packages.
+The recommended base commands are: `xpra` `Xephyr` `weston` `Xwayland` `xdotool` `xauth` `xinit` `xclip` `xhost` `xrandr` `xdpyinfo`. Some of them are probably already installed.
+ - To provide these base commands see [wiki: Dependencies - Recommended base](https://github.com/mviereck/x11docker/wiki/Dependencies#recommended-base) for a package list matching your distribution.
+
+Some feature options have additional dependencies on host and/or in image. This affects especially options `--gpu`, `--printer` and `--pulseaudio`.
+Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
+
 
 
 ## Troubleshooting
