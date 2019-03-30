@@ -1,7 +1,7 @@
 # x11docker: ![x11docker logo](x11docker.png) Run GUI applications in Docker
 ## Avoid X security leaks and enhance container security
 ### Introduction
-x11docker allows to run graphical applications in Docker Linux containers.
+x11docker allows to run graphical desktop applications (and entire desktops) in Docker Linux containers.
  - [Docker](https://en.wikipedia.org/wiki/Docker_(software)) allows to run applications in an isolated [container](https://en.wikipedia.org/wiki/Operating-system-level_virtualization) environment. 
    The result is similar to a [virtual machine](https://en.wikipedia.org/wiki/Virtual_machine), but needs less resources.
  - Docker does not provide a [display server](https://en.wikipedia.org/wiki/Display_server) that would allow to run applications with a [graphical user interface](https://en.wikipedia.org/wiki/Graphical_user_interface).
@@ -86,6 +86,7 @@ Just type `x11docker IMAGENAME [COMMAND]`.
    - For desktop environments in image add option `-d, --desktop`.
    - To run without X at all use option `-t, --tty`.
    - Get an interactive TTY with option `-i, --interactive`.
+   - See generated `docker` command (and further infos) with option `--debug`.
  - If startup fails, look at chapter [Troubleshooting](#troubleshooting).
  
 General syntax:
@@ -300,11 +301,12 @@ For minimal installation make `x11docker` executable with `chmod +x x11docker` a
 Other files than `x11docker` script itself are not essential.
 
 ### Installation on MS Windows
-x11docker can run natively on MS Windows in [MSYS2](https://www.msys2.org/), [Cygwin](https://www.cygwin.com/) 
-and [WSL (Windows subsystem for Linux)](https://docs.microsoft.com/en-us/windows/wsl/about).
-Although it basically works, it misses some features available on Linux and cannot be guaranteed to be as reliable as on Linux.
-However, running in a Linux VM instead of running natively on Windows is fully supported.
- - Further infos and installation instructions see [wiki: x11docker on MS Windows](https://github.com/mviereck/x11docker/wiki/x11docker-on-MS-Windows).
+x11docker can run natively on MS Windows electively in one of:
+ - [MSYS2](https://www.msys2.org/)
+ - [Cygwin](https://www.cygwin.com/) 
+ - [WSL (Windows subsystem for Linux)](https://docs.microsoft.com/en-us/windows/wsl/about)
+
+Further informations at [wiki: x11docker on MS Windows](https://github.com/mviereck/x11docker/wiki/x11docker-on-MS-Windows).
 
 
 ## Dependencies

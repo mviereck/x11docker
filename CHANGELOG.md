@@ -22,6 +22,8 @@ Project website: https://github.com/mviereck/x11docker
    [Docker bug ticket #33794](https://github.com/moby/moby/issues/33794)
  - `--init=tini`: Support on docker-for-win.
  - Check for availability of `realpath`.
+ - `--kwin`,`--kwin-xwayland`: Check for option `--windowed`.
+   [(#144)](https://github.com/mviereck/x11docker/issues/144)
 
 ## [5.5.1](https://github.com/mviereck/x11docker/releases/tag/v5.5.1) - 2019-03-18
 ### Deprecated
