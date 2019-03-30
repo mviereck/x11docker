@@ -10,12 +10,8 @@ tags:
   - reproducible research
   - prototyping
 authors:
-  - name: Martin Viereck
+  - name: Martin Viereck, Germany
     orcid: 0000-0002-4532-4020
-    affiliation: "1"
-affiliations:
- - name: Martin Viereck, Germany
-   index: 1
 date: 22 March 2019
 bibliography: paper.bib
 ---
@@ -30,8 +26,8 @@ bibliography: paper.bib
 
 Containerisation in general has proven as a useful technology for packaging applications and their 
 dependencies for deployment in cloud-based infrastructures.
-A container is similar in usage to a [virtual machine](https://en.wikipedia.org/wiki/Virtual_machine), 
-but needs less resources. The technical concept, however, is completely different.
+Containers need much less resources than [virtual machines](https://en.wikipedia.org/wiki/Virtual_machine)
+for similar tasks. The technical concept, however, is completely different.
 
 The properties of containers such as portability, dependency packaging, minimal requirements of 
 system environment (i.e. only the container runtime), isolation, and version management of complete 

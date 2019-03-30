@@ -3,7 +3,7 @@
 ### Introduction
 x11docker allows to run graphical desktop applications (and entire desktops) in Docker Linux containers.
  - [Docker](https://en.wikipedia.org/wiki/Docker_(software)) allows to run applications in an isolated [container](https://en.wikipedia.org/wiki/Operating-system-level_virtualization) environment. 
-   The result is similar to a [virtual machine](https://en.wikipedia.org/wiki/Virtual_machine), but needs less resources.
+   Containers need much less resources than [virtual machines](https://en.wikipedia.org/wiki/Virtual_machine) for similar tasks.
  - Docker does not provide a [display server](https://en.wikipedia.org/wiki/Display_server) that would allow to run applications with a [graphical user interface](https://en.wikipedia.org/wiki/Graphical_user_interface).
  - x11docker fills the gap. It runs an [X display server](https://en.wikipedia.org/wiki/X_Window_System) on the host system and provides it to Docker containers.
  - Additionally x11docker does some [security setup](https://github.com/mviereck/x11docker#security) to enhance container isolation and to avoid X security leaks. 
@@ -112,7 +112,7 @@ Description of some commonly used feature [options](https://github.com/mviereck/
 
 
 ### Choice of X servers and Wayland compositors
-If no X server option is specified, x11docker automatically chooses one depending on installed [dependencies](#dependencies) and on given or missing options `--desktop`, `--gpu` and `--wayland`.
+If no X server option is specified, x11docker automatically chooses one depending on installed [dependencies](#dependencies) and on given or missing options `--desktop`, `--gpu` and `--wayland`. Most recommended are `xpra` and `Xephyr`.
  - [Overview of all possible X server and Wayland options.](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options)
    - [Hints to use option `--xorg` within X.](https://github.com/mviereck/x11docker/wiki/Setup-for-option---xorg)
    - Use option `-t, --tty` to run without X at all.
@@ -277,7 +277,7 @@ For more custom fine tuning have a look at [Docker documentation: Limit a contai
 ## Installation
 Note that x11docker is just a **bash script** without library dependencies. Basically it is a wrapper for X servers and Docker. To allow advanced usage of x11docker abilities look at chapter [Dependencies](#dependencies).
 ### Installation options
-As root you can install, update and remove x11docker on your system:
+As root you can install, update and remove x11docker to system directories to be available system-wide:
  - `x11docker --install` : install x11docker and x11docker-gui from current directory. (Useful to install from an extracted `zip` file or a cloned `git` repository.)
  - `x11docker --update` : download and install latest [release](https://github.com/mviereck/x11docker/releases) from github.
  - `x11docker --update-master` : download and install latest master version from github.
@@ -296,8 +296,8 @@ Creates `x11docker.desktop` in `/usr/share/applications`. Copies `README.md`, `C
    ```
    
 ### Minimal installation
-For a first test you can run with `bash x11docker` respective `bash x11docker-gui`. 
-For minimal installation make `x11docker` executable with `chmod +x x11docker` and move it to `/usr/bin` (or another location in `PATH`).
+You can run x11docker from an arbitray location with `bash x11docker`.
+For minimal system-wide installation make `x11docker` executable with `chmod +x x11docker` and move it to `/usr/bin` (or another location in `PATH`).
 Other files than `x11docker` script itself are not essential.
 
 ### Installation on MS Windows
@@ -306,7 +306,7 @@ x11docker can run natively on MS Windows electively in one of:
  - [Cygwin](https://www.cygwin.com/) 
  - [WSL (Windows subsystem for Linux)](https://docs.microsoft.com/en-us/windows/wsl/about)
 
-Further informations at [wiki: x11docker on MS Windows](https://github.com/mviereck/x11docker/wiki/x11docker-on-MS-Windows).
+It needs X server `VcXsrv.exe` or `Xwin.exe`. Further informations at [wiki: x11docker on MS Windows](https://github.com/mviereck/x11docker/wiki/x11docker-on-MS-Windows).
 
 
 ## Dependencies
