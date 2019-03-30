@@ -39,11 +39,11 @@
 `x11docker --desktop x11docker/lumina`
 ![screenshot](screenshot-lumina.png "lumina desktop running in Xephyr window using x11docker")
 
-`x11docker --desktop --net x11docker/cde`
-![screenshot](screenshot-cde.png "CDE desktop running in Xephyr window using x11docker")
-
 `x11docker --wayland --gpu x11docker/xwayland`
 ![screenshot](screenshot-xwayland.png "Xwayland in docker with fvwm desktop in Weston window")
+
+`x11docker --xfishtank`
+![screenshot](screenshot-xfishtank.png "X fish tank")
 
 `x11docker jess/cathode`
 
