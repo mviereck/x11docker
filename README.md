@@ -55,6 +55,7 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
  - [Security](#security)
    - [Options degrading container isolation](#options-degrading-container-isolation)
    - [Sandbox](#sandbox)
+   - [Security and feature check](#security-and-feature-check)
  - [Installation](#installation)
    - [Installation options](#installation-options)
    - [Shortest way for first installation](#shortest-way-for-first-installation)
