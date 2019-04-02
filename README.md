@@ -274,9 +274,9 @@ For more custom fine tuning have a look at [Docker documentation: Limit a contai
 **WARNING**: There is no restriction that can prevent the container from flooding the hard disk in Docker's container partition or in shared folders.
   
 ### Security and feature check
-To check container isolation and some feature option use image `x11docker/check` and try out with several options.
+To check container isolation and some feature options use image `x11docker/check` and try out with several options.
  - An insecure setup is `x11docker --hostdisplay --gpu x11docker/check`. It fairly well demonstrates common X security leaks.
- - Add options like `--pulseaudio --alsa --webcam --clipboard` to check their funcionality.
+ - Add options like `--pulseaudio --alsa --webcam --clipboard` to check their functionality.
   
 ## Installation
 Note that x11docker is just a **bash script** without library dependencies. Basically it is a wrapper for X servers and Docker. To allow advanced usage of x11docker abilities look at chapter [Dependencies](#dependencies).
