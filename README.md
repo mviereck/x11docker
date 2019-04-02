@@ -229,7 +229,7 @@ _Weaknesses:_
    Compare: [SELinux and Docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
  - User namespace remapping is disabled to allow options `--home` and `--homedir` without file ownership issues. (Though, this is less an issue because x11docker already avoids root in container). 
    Exception: User namespace remapping is not disabled for `--user=RETAIN`.
- - x11docker provides several different X server options. Each X server involved might have its individual vulnerabilities. x11docker only covers well-known X security leaks that result from X11 protocol.
+ - x11docker provides several different X server options. Each X server involved might have its individual vulnerabilities. x11docker only covers well-known X security leaks that result from X11 protocol design.
 
 ### Options degrading container isolation
 x11docker shows warning messages in terminal if chosen options degrade container isolation. Note that x11docker does not check custom `DOCKER_RUN_OPTIONS`.
@@ -273,6 +273,10 @@ For more custom fine tuning have a look at [Docker documentation: Limit a contai
 
 **WARNING**: There is no restriction that can prevent the container from flooding the hard disk in Docker's container partition or in shared folders.
   
+### Security and feature check
+To check container isolation and some feature option use image `x11docker/check` and try out with several options.
+ - An insecure setup is `x11docker --hostdisplay --gpu x11docker/check`. It fairly well demonstrates common X security leaks.
+ - Add options like `--pulseaudio --alsa --webcam --clipboard` to check their funcionality.
   
 ## Installation
 Note that x11docker is just a **bash script** without library dependencies. Basically it is a wrapper for X servers and Docker. To allow advanced usage of x11docker abilities look at chapter [Dependencies](#dependencies).
