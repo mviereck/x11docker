@@ -14,6 +14,7 @@ Project website: https://github.com/mviereck/x11docker
  - `x11docker` without an option: show `x11docker --help` instead of running
    an unused X server.
 ### Fixed
+ - `--init=systemd`: fixes for debian, arch, fedora.
  - `--dbus-system`: Regression fix for service file check.
  - `--exe`: Regard possible `--` in command. Command before it has been
    dropped errately as invalid `DOCKER_RUN_OPTIONS` before.
