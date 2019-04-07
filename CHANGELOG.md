@@ -14,14 +14,14 @@ Project website: https://github.com/mviereck/x11docker
  - `x11docker` without an option: show `x11docker --help` instead of running
    an unused X server.
 ### Fixed
- - `--init=systemd`: fixes for debian, arch, fedora.
+ - `--init=systemd|openrc|runit`: fixes for several container systems.
  - `--dbus-system`: Regression fix for service file check.
  - `--exe`: Regard possible `--` in command. Command before it has been
    dropped errately as invalid `DOCKER_RUN_OPTIONS` before.
  - `--tty`: Workaround: Set environment variables `LINES` and `COLUMNS` to 
    current terminal size. Only needed without `--interactive`.
    [Docker bug ticket #33794](https://github.com/moby/moby/issues/33794)
- - `--init=tini`: Support on docker-for-win.
+ - `--init=tini`: Support of native docker-init on docker-for-win.
  - Check for availability of `realpath`.
  - `--kwin`,`--kwin-xwayland`: Check for option `--windowed`.
    [(#144)](https://github.com/mviereck/x11docker/issues/144)

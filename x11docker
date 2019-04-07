@@ -3547,7 +3547,7 @@ Description=x11docker target
 Wants=multi-user.target
 After=multi-user.target
 [Install]
-Also=x11docker-startcmd.service
+Also=console-getty.service
 Also=x11docker-watch.service
 Also=x11docker-journal.service
 " >> $Systemdtarget
@@ -4146,16 +4146,17 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo   "  echo '# created startscript for docker run: container.CMD.sh'"
   echo   "  echo '# runs as unprivileged user in container'"
 
+  echo   "  echo 'calculate() {'"
+  echo   "  echo '  LC_ALL=C printf %.3f\\\\n \"\$((10**9 * \$@))e-9\"'"
+  echo   "  echo '}'"
   echo   "  echo '$Messagefifofuncs'"
   echo   "  echo 'Messagefile=$Cshare/message.fifo'"
   echo   "  echo ''"
 
   echo   "  echo '# wait for container setup script do be ready'"
-  echo   "  echo 'Zeit=\$(date +%s)'"
   echo   "  echo 'for Count in $(seq -s' ' 50); do'"
-  echo   "  echo '  verbose \"Waiting since \$((\$(date +%s) - \$Zeit))s for container root setup to be ready\"'"
-  echo   "  echo '  [ -e /x11docker.setupready ] && break'"
-  echo   "  echo '  sleep \$(awk \"BEGIN { print \$Count*0.2 }\")'"
+  echo   "  echo '  verbose \"Waiting since \${Count}s for container root setup to be ready\"'"
+  echo   "  echo '  [ -e /x11docker.setupready ] && break || sleep 1'"
   echo   "  echo 'done'"
   echo   "  echo ''"
 
@@ -4191,7 +4192,6 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
       echo "  echo 'Containeruserhome=\"$Containeruserhome\"'"
     ;;
     no)
-#      echo "  echo 'Containeruserhome=\$(getent passwd \$Containeruser | cut -d: -f6)'"
       echo "  echo 'Containeruserhome=\$(cat /etc/passwd | grep \"\$Containeruser:.:\" | cut -d: -f6)'"
       echo "  echo 'Containeruserhome=\${Containeruserhome:-/tmp/\$Containeruser}'"
     ;;
@@ -4633,7 +4633,6 @@ echo 'x11docker WARNING: /sbin/agetty not found. --interactive not possible.'
     tini|none|dockerinit) ;;
     systemd)
       echo "# enable x11docker CMD service"
-      echo "systemctl enable x11docker-startcmd.service"
       echo "systemctl unmask console-getty.service"
       echo "systemctl enable console-getty.service"
       echo "systemctl enable x11docker-journal.service"
@@ -4654,6 +4653,7 @@ echo 'x11docker WARNING: /sbin/agetty not found. --interactive not possible.'
       #echo "echo 'FAKE_SHELL    /bin/bash' >> /etc/login.defs"
       echo "mkdir -p /etc/sv/x11docker"
       echo "mkdir -p /etc/runit/runsvdir/default"
+      echo "mkdir -p /etc/runit/1.d"
       echo "mkdir -p /service"
       echo "echo \"#! /bin/sh
 waitforservice() {
@@ -4685,11 +4685,40 @@ shutdown -h 0
 halt
 \" > /etc/sv/x11docker/finish"
       echo "chmod +x /etc/sv/x11docker/finish"
+      
       echo "ln -s /etc/sv/x11docker /etc/runit/runsvdir/default" #void
       echo "ln -s /etc/sv/x11docker /service"                    #alpine
       echo "verbose 'DBus: enabling dbus service'"
       echo "ln -s /etc/sv/dbus  /etc/runit/runsvdir/default"
       echo "ln -s /etc/sv/dbus  /service"
+      
+      echo "[ -e /etc/runit/1 ] || echo '#!/usr/bin/env sh
+set -eu
+chmod 100 /etc/runit/stopit
+/bin/run-parts --exit-on-error /etc/runit/1.d || exit 100
+' >/etc/runit/1"
+      echo "chmod +x /etc/runit/1"
+      
+      echo "[ -e /etc/runit/2 ] || echo '#!/usr/bin/env sh
+set -eu
+runsvdir -P /service \"log: ..................................................................\"
+' >/etc/runit/2"
+      echo "chmod +x /etc/runit/2"
+      
+      echo '[ -e /etc/runit/3 ] || echo "#!/usr/bin/env sh
+set -eu
+exec 2>&1
+echo \"Waiting for services to stop...\"
+sv -w196 force-stop /service/*
+sv exit /service/*
+# kill any other processes still running in the container
+for ORPHAN_PID in $(ps --no-headers -eo \"%p,\" -o stat | tr -d \" \" | grep \"Z\" | cut -d, -f1); do
+    timeout 5 /bin/sh -c \"kill \$ORPHAN_PID && wait \$ORPHAN_PID || kill -9 \$ORPHAN_PID\"
+done
+" >/etc/runit/3'
+      echo "chmod +x /etc/runit/3"
+      
+      echo "touch /etc/runit/stopit"
     ;;
     openrc)
       echo "# create and enable x11docker service containing image command"
@@ -5529,7 +5558,7 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Xkbkeymapfile="$Cachefolder/$Xkbkeymapfile"                       && mkfile $Xkbkeymapfile
   
   Systemdtarget=$Cachefolder/x11docker.target                       && mkfile $Systemdtarget
-  Systemdstartcmd=$Cachefolder/x11docker-startcmd.service           && mkfile $Systemdstartcmd
+  Systemdstartcmd=$Cachefolder/console-getty.service                && mkfile $Systemdstartcmd
   Systemdwatch=$Cachefolder/x11docker-watch.service                 && mkfile $Systemdwatch
   Systemdjournal=$Cachefolder/x11docker-journal.service             && mkfile $Systemdjournal
   Journallogfile=$Sharefolder/journalctl.log                        && mkfile $Journallogfile
@@ -7097,16 +7126,16 @@ todo() {
   # FIXME: check docker version. 1.16.2 does not support --rm --detach
   # FIXME: --interactive+--init on alpine fails, no agetty
   
+  # --init=runit alpine: create init stages if missing. Compare dockerage/alpine-runit
+  
   # --init
+  # FIXME: runit, openrc: check dbus service
   # autodetect init system if possible, give a note.
-  # openrc, runit: make independant from /sbin/init ?
   # s6 support ?
   # s6-overlay:
   #  - find better solution then sleep loop for empty CMD
   #  - check possible shutdown routine for timetosaygoodbye
   #  - closer check of needed capabilities
-  #  - systemd: Failed to enable unit, unit x11docker-startcmd.service does not exist.
-  # check/drop capabilities for use switching
 
   # Enhancement:
   # --update: regard possible location in /opt
