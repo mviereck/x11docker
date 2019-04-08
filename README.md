@@ -369,7 +369,8 @@ I'll help where I can, but there is no organisation behind `x11docker` that can 
 
 
 ## Examples
-[Desktop image examples can be found on docker hub.](https://hub.docker.com/u/x11docker/)
+[x11docker image examples with desktop environments can be found on docker hub.](https://hub.docker.com/u/x11docker/)
+A special one to check features and container isolation is `x11docker/check`.
 
 | Application | x11docker command |
 | --- | --- |
