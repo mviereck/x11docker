@@ -1,5 +1,8 @@
 # Screenshots of GUI applications and desktop environments running with x11docker 
 
+`x11docker --wm --gpu x11docker/check`
+![screenshot](screenshot-check.png "Checking container isolation with x11docker/check")
+
 `x11docker --desktop x11docker/lxqt`
 ![screenshot](screenshot-lxqt.png "LXQT desktop running in Xnest window using x11docker")
 
