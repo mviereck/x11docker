@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Fixed
+ - `--init=runit`: Create DBus service files if missing.
+ - `docker commit`: Throw error if running a recursive image created from 
+   an x11docker container with `docker commit`.
+   [(#146)](https://github.com/mviereck/x11docker/issues/146)
+
 ## [5.5.2](https://github.com/mviereck/x11docker/releases/tag/v5.5.2) - 2019-04-08
 ### Added
  - `--init=s6-overlay`: Support of init system `s6` as given by `s6-overlay`.
