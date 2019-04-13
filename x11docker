@@ -657,13 +657,13 @@ rocknroll() {                   # check whether x11docker session is still runni
 waitfortheend() {               # wait for end of x11docker session
   # signal is byte in $Timetosaygoodbyefifo
   # decent read to wait for signal to terminate
-  case $Winsubsystem in
-    "")
+  case $Usemkfifo in
+    yes)
       while rocknroll; do
-        bash -c "read -n1 -t1 <&8" && saygoodbye timetosaygoodbyefifo
+        bash -c "read -n1 <&8" && saygoodbye timetosaygoodbyefifo || sleep 1
       done
     ;;
-    *) # Reading from fifo fails on Windows, workaround
+    no) # Reading from fifo fails on Windows, workaround
       while rocknroll; do
         sleep 2
       done
@@ -700,7 +700,7 @@ $(for Line in $Watchpidlist; do pspid $Line ; done)"
         saygoodbye "watchpidlist $Containername"
       }
     }
-    [ "$Winsubsystem" ] && sleep 2
+    [ "$Usemkfifo" = "no" ] && sleep 2
   done
   saygoodbye "watchpidlist"
 }
@@ -1380,15 +1380,13 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
     verbose -d "Detected NVIDIA driver version $Nvidiaversion on host."
     Nvidiadriver=$(find /usr/local/share/x11docker/NVIDIA*$Nvidiaversion*.run $Hostuserhome/.local/share/x11docker/NVIDIA*$Nvidiaversion*.run 2>/dev/null | head -n1 )
     Nvidiadriver="$(myrealpath "$Nvidiadriver" 2>/dev/null)"
-
-    grep -q -- "--runtime.nvidia" <<< "$Customdockeroptions" && Nvidiaruntime="yes"
     
-    case "$Nvidiaruntime" in
-      yes) 
+    case "$Runtime" in
+      "nvidia") 
         debugnote "NVIDIA runtime detected. Not installing driver."
         Nvidiadriver="" 
       ;;
-      no)
+      *)
         [ -e "$Nvidiadriver" ] && {
         verbose -d "Found proprietary closed source NVIDIA driver installer
   $Nvidiadriver"
@@ -1495,6 +1493,7 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
       *)  Pulseaudiomode="tcp" ;;
     esac
     [ "$Containeruser" = "$Hostuser" ] || Pulseaudiomode="tcp"
+    [ "$Runtime" = "kata" ] && Pulseaudiomode="tcp"
   }
   
   case $Pulseaudiomode in
@@ -1749,6 +1748,12 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
 #### X server setup
 check_xserver() {               # check chosen X server, auto-choose X server
 
+   [ "$Sharegpu" = "yes" ] && [ "$Runtime" = "kata" ] && {
+     note "Option --gpu: Hardware acceleration does not work with
+  --runtime=kata-runtime. Fallback: Disabling option --gpu."
+     Sharegpu="no"
+   }
+   
   ## default option '--auto': Try to automatically choose best matching and available X server
   [ "$Autochooseserver" = "yes" ] && {                              Xserver="--xpra"
     [ "$Sharegpu" = "yes" ]                                      && Xserver="--xpra-xwayland"
@@ -1766,7 +1771,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
     [ "$Winsubsystem" = "CYGWIN" ]                               && Xserver="--xwin"
     [ "$Sharewayland" = "yes" ] && { [ -n "$Hostwaylandsocket" ] && [ "$Desktopmode" = "no" ] && Xserver="--hostwayland" || Xserver="--weston" ; }
   }
-
+  
   [ "$Sharegpu" = "yes" ] && case $Xserver in
     --xpra)
       note "Option --xpra does not support GPU access.
@@ -1837,7 +1842,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
   [ "$Xserver" = "--xvfb" ]            && { check_xdepends --xvfb            || Xserver="--xdummy"  ; }
   [ "$Xserver" = "--hostwayland" ]     && { check_xdepends --hostwayland     || Xserver="--weston"  ; }
   [ "$Xserver" = "--nxagent" ]         && { check_xdepends --nxagent         || { [ "$Desktopmode" = "yes" ] && Xserver="--xephyr"        || Xserver="--xpra" ; } ; }
-  [ "$Xserver" = "--xpra" ]            && { check_xdepends --xpra            || { check_xdepends --nxagent          && Xserver="--nxagent"       || Xserver="--xephyr" ; } ; }
+  [ "$Xserver" = "--xpra" ]            && { check_xdepends --xpra            || { check_xdepends --nxagent   && Xserver="--nxagent"       || Xserver="--xephyr" ; } ; }
   [ "$Xserver" = "--xorg" ]            && { check_xdepends --xorg            || Xserver="--weston-xwayland" ; }
   [ "$Xserver" = "--xpra-xwayland" ]   && { check_xdepends --xpra            || Xserver="--weston-xwayland" ; }
   [ "$Xserver" = "--xwayland" ]        && { check_xdepends --xwayland        || Xserver="--weston-xwayland" ; }
@@ -2229,6 +2234,7 @@ check_newxenv() {               # find free display, create $Newxenv
   case $Winsubsystem in
     MSYS2|CYGWIN) Xoverip="yes" ;;
   esac
+  [ "$Runtime" = "kata" ] && Xoverip="yes"
   
   # set $Newdisplay (DISPLAY of container) and $Newxsocket
   case $Xserver in
@@ -3033,6 +3039,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   echo "Sharefolder=$Sharefolder"
   echo "Bgpidfile=$Bgpidfile"
   echo "Winsubsystem=$Winsubsystem"
+  echo "Usemkfifo=$Usemkfifo"
   
   # declaring functions echoes them into xinitrc
   declare -f storepid
@@ -3515,6 +3522,13 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
       Tinibinary="$(myrealpath "$Tinibinary" 2>/dev/null ||:)"
       [ -e "$Tinibinary" ] || Tinibinary=""
       [ "$Tinibinary" ] && {
+        case $Runtime in
+          kata)
+            # avoid sharing same file that might be shared with runc already.
+            cp -u "$Tinibinary"  "$Hostuserhome/.local/share/x11docker/tini-static-kata"
+            Tinibinary="$Hostuserhome/.local/share/x11docker/tini-static-kata"
+          ;;
+        esac
         [ -x "$Tinibinary" ] || {
           chmod +x "$Tinibinary" || {
             warning "Your tini binary is not executeable. Please run
@@ -3965,7 +3979,7 @@ create_dockercommand() {        # create command to run docker
 }
 
 #### docker helper scripts
-create_dockerrc() {             # create dockerrc: This script runs as root (or member of group docker) on host
+create_dockerrc() {             # create dockerrc: This script runs as root (or member of group docker) on host. Also creates container.CMD.sh
   # create container.CMD.sh -> runs as unprivileged user in container
   # check and set up cgroup on host for systemd or elogind
   # run docker
@@ -4016,6 +4030,23 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
 \$(tail $Containerlogfile)\"
 }"
   echo ""
+  
+  echo "Runtime=\$(grep 'Default Runtime' < '$Dockerinfofile' | awk '{print \$3}')"
+  echo "verbose -d \"Found default runtime: \$Runtime\""
+  echo "case \$Runtime in"
+  echo "  kata-runtime)"
+  echo "    [ \"\$Runtime\" != '$Runtime' ] && {"
+  echo "      warning 'Found default docker runtime kata-runtime.
+  Please run x11docker with --runtime=kata-runtime to avoid issues.'"
+  echo "    }"
+  echo "  ;;"
+  echo "  nvidia)"
+  echo "    [ \"\$Runtime\" != '$Runtime' ] && [ '$Sharegpu' = 'yes' ] && {"
+  echo "      warning 'Option --gpu: Found default docker runtime nvidia.
+  Please run x11docker with --runtime=nvidia to avoid issues.'"
+  echo "    }"
+  echo "  ;;"
+  echo "esac"
   
   echo "# refresh images.list for x11docker-gui"
   echo "mkfile $Cachebasefolder/x11docker-gui/images.list"
@@ -5177,7 +5208,7 @@ start_docker() {                # start docker container
     "")
       [ "$Containerpid1" ] && {
         storepid $Containerpid1 containerpid1
-        setonwatchpidlist $Containerpid1 containerpid1
+        setonwatchpidlist $Containerpid1 containerpid1 #kata
       } || error "Container startup seems to have failed.
   Last lines of log:
 $(tail $Containerlogfile)"
@@ -5392,6 +5423,11 @@ check_host() {                  # check host environment
   
   # Check if host uses proprietary NVIDIA driver
   Nvidiaversion=$(head -n1 2>/dev/null </proc/driver/nvidia/version | awk '{ print $8 }')
+  
+  grep -q -- "--runtime.kata"   <<< "$Customdockeroptions" && Runtime="kata"
+  grep -q -- "--runtime.nvidia" <<< "$Customdockeroptions" && Runtime="nvidia"
+
+  { [ "$Winsubsystem" ] || [ "$Runtime" = "kata" ] ; } && Usemkfifo="no"
   
   return 0
 }
@@ -6071,6 +6107,24 @@ check_option_interferences() {  # check multiple option interferences, change se
   Fallback: Setting --pull=ask" ;;
   esac
   
+  case "$Runtime" in
+    kata)
+      note "Option --runtime=kata-runtime: Support of kata-runtime
+  is experimental. You may encounter issues."
+      [ "$Sharealsa" = "yes" ] && {
+        note "Option --alsa: ALSA sound is not possible with 
+  --runtime=kata-runtime. Fallback: Enabling option --pulseaudio."
+        Sharealsa="no"
+        Pulseaudio="yes"
+      }
+      [ "$Sharecups" = "yes" ] && {
+        note "Option --printer: CUPS printer support does not work with
+  --runtime=kata-runtime. Fallback: Disabling option --printer."
+        Sharecups="no"
+      }
+    ;;
+  esac
+  
   return 0
 }
 option_messages() {             # some messages depending on options, but not changing settings
@@ -6379,17 +6433,17 @@ setup_fifo() {                  # set up fifo channels (also option --stdin)
     exec 7<>$Cmdstdinfile 
     cat <&0 >&7 & storepid $! catstdin
   }
-  
-  case $Winsubsystem in
-    MSYS2|CYGWIN|WSL)
-      Watchpidfifo="$Cachefolder/$Watchpidfifo"                 && mkfile $Watchpidfifo
-      Messagefifo="$Sharefolder/$Messagefifo"                   && mkfile $Messagefifo && chmod 666 $Messagefifo
-      Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo" && mkfile $Timetosaygoodbyefifo && chmod 666 $Timetosaygoodbyefifo
-    ;;
-    "")
+
+  case $Usemkfifo in
+    yes)
       Watchpidfifo="$Cachefolder/$Watchpidfifo"                 && $Mksu "mkfifo $Watchpidfifo"
       Messagefifo="$Sharefolder/$Messagefifo"                   && $Mksu "mkfifo $Messagefifo && chmod 666 $Messagefifo"
       Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo" && $Mksu "mkfifo $Timetosaygoodbyefifo"
+    ;;
+    no) # Windows, kata
+      Watchpidfifo="$Cachefolder/$Watchpidfifo"                 && mkfile $Watchpidfifo
+      Messagefifo="$Sharefolder/$Messagefifo"                   && mkfile $Messagefifo && chmod 666 $Messagefifo
+      Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo" && mkfile $Timetosaygoodbyefifo && chmod 666 $Timetosaygoodbyefifo
     ;;
   esac
   
@@ -6415,6 +6469,7 @@ declare_variables() {           # declare global variables
 
   Dockerexe="docker"                              # can be docker.exe on Windows
   Dockerinfofile=docker.info                      # file to store outpu of 'docker info'
+  Runtime="runc"                                  # runtime in use. Others are 'nvidia' and 'kata'
   Bgpidfile=backgroundpids                        # file to store pids and names of background processes that shut be killed on exit
   Timetosaygoodbye=timetosaygoodbye               # file giving term signal to all parties
   Timetosaygoodbyefifo=timetosaygoodbye.fifo      # message channel for --init=openrc|runit|sysvinit to shut down on x11docker signal
@@ -6473,7 +6528,6 @@ declare_variables() {           # declare global variables
   Hosttty=""                                      # x11docker runs on tty yes/no
   Hosthidepid=""                                  # /proc is mounted with hidepid=2 yes/no
   Nvidiaversion=""                                # option --gpu: proprietary nvidia driver version on host
-  Nvidiaruntime="no"                              # --runtime=nvidia in docker run options
   Nvidiadriver=""                                 # option '--gpu': nvidia driver installer for container in [...]local/share/x11docker
   Hostcanwatchroot=""                             # x11docker can watch root processes yes/no
   Runsinterminal=""                               # x11docker runs in a terminal yes/no
@@ -6483,6 +6537,8 @@ declare_variables() {           # declare global variables
   Winsubpath=""                                   # path within Windows to subsystem files
   Winpidlist=""                                   # List of stored Windows pids (currently vcxsrv.exe on WSL only)
   Winpty=""                                       # Path to winpty for --interactive on Windows
+  
+  Usemkfifo="yes"                                 # Not on Windows nor with kata-runtime
   
   # Gaining root privileges to run docker
   Passwordfrontend=""                             # --pw: method to prompt for password. one of pkexec, su, sudo, gksu, gksudo, kdesu, kdesudo, lxsu, lxsudo, beesu, auto, none
@@ -7139,6 +7195,11 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
+  # x11docker/lxde: missing entries in menu and panel
+  # test Xwayland with X over IP
+  # x11docker/check: --alsa: check soundcard iteration
+  # dockerrc / docker pid: wrong PPID output
+
   # BUG --xpra-xwayland/py3 fails with tor-browser, but not with wine pcmanfm
   # BUG --dbus-system: slow startup (90s timeout) e.g. in arch and debian buster containers for unknown reasons.
   # BUG --interactive with --init=systemd|runit|openrc|sysvinit: no job control in shell
@@ -7151,10 +7212,8 @@ todo() {
   # FIXME: check docker version. 1.16.2 does not support --rm --detach
   # FIXME: --interactive+--init on alpine fails, no agetty
   
-  # --init=runit alpine: create init stages if missing. Compare dockerage/alpine-runit
-  
   # --init
-  # FIXME: runit, openrc: check dbus service
+  # FIXME: openrc, sysvinit: check dbus service file, create it if missing
   # autodetect init system if possible, give a note.
   # s6 support ?
   # s6-overlay:
