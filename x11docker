@@ -11,7 +11,7 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="5.5.2"
+Version="5.6.0-beta"
 
 usage() {                       # --help: show usage information
   echo "
@@ -93,7 +93,7 @@ Shared folders:
      --homedir DIR     Specify custom host folder DIR for option --home.
      --homebasedir DIR Custom base folder for option --home.
                        (Compare --cachebasedir below).
-     --sharedir DIR    Share host folder (or file) DIR. DIR:ro sets read-only. 
+     --share PATH      Share host file or folder PATH. Read-only with PATH:ro 
 
 Clipboard, sound, printer, language:
  -c, --clipboard       Share clipboard between X servers (works best with xpra.
@@ -131,6 +131,10 @@ Special options:
                          pkexec beesu none
      --runfromhost CMD Run host command CMD on new X server (you may need & ).
      --runasroot CMD   Run command CMD as root in container on startup.
+     --runtime RUNTIME Specify docker runtime. Known runtimes:
+                         runc:         Docker default runtime.
+                         nvidia:       Runtime for nvidia/nvidia-docker images.
+                         kata-runtime: Runtime using a qemu VM.
      --sharessh        Share SSH agent authentication socket from host.
      --showenv         Echo new \$DISPLAY, \$XAUTHORITY and \$WAYLAND_DISPLAY.
                        For custom access to new X server. Get environment with:
@@ -946,6 +950,9 @@ convertpath() {                 # convert unix and windows pathes
     Path="$(echo "$Path" | rev | cut -c4- | rev)"
   } || Readwritemode=":rw"
 
+  # replace ~ with HOME
+  Path="$(sed s%"~"%"${Hostuserhome:-${HOME:-}}"% <<< "$Path")"
+  
   # not on Windows
   [ -z "$Winsubsystem" ] && {
     case $Mode in
@@ -1493,7 +1500,7 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
       *)  Pulseaudiomode="tcp" ;;
     esac
     [ "$Containeruser" = "$Hostuser" ] || Pulseaudiomode="tcp"
-    [ "$Runtime" = "kata" ] && Pulseaudiomode="tcp"
+    [ "$Runtime" = "kata-runtime" ] && Pulseaudiomode="tcp"
   }
   
   case $Pulseaudiomode in
@@ -1748,7 +1755,7 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
 #### X server setup
 check_xserver() {               # check chosen X server, auto-choose X server
 
-   [ "$Sharegpu" = "yes" ] && [ "$Runtime" = "kata" ] && {
+   [ "$Sharegpu" = "yes" ] && [ "$Runtime" = "kata-runtime" ] && {
      note "Option --gpu: Hardware acceleration does not work with
   --runtime=kata-runtime. Fallback: Disabling option --gpu."
      Sharegpu="no"
@@ -1838,6 +1845,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
   }
   
   ## check if dependencies for chosen X server are installed, fall back to best alternatives if not
+  [ "$Xserver" = "--hostdisplay" ]     && { check_xdepends --hostdisplay     || Xserver="--nxagent" ; }
   [ "$Xserver" = "--xephyr" ]          && { check_xdepends --xephyr          || Xserver="--nxagent" ; }
   [ "$Xserver" = "--xvfb" ]            && { check_xdepends --xvfb            || Xserver="--xdummy"  ; }
   [ "$Xserver" = "--hostwayland" ]     && { check_xdepends --hostwayland     || Xserver="--weston"  ; }
@@ -1859,7 +1867,9 @@ check_xserver() {               # check chosen X server, auto-choose X server
     --weston|--kwin) Sharewayland="yes" ;;
   esac
   [ "$Sharewayland" = "yes" ]          && { check_xdepends $Xserver || error "Failed to set up a Wayland environment.
-  Please install 'weston' or 'kwin_wayland'." ; }
+  Please install 'weston' or 'kwin_wayland'.
+  Wayland is not possible with proprietary NVIDIA driver
+  or with --runtime=kata-runtime." ; }
 
    # Xephyr as fallback for all options. Last fallback: Xorg
   check_xdepends $Xserver || Xserver="--xephyr"
@@ -1921,10 +1931,25 @@ check_xdepends() {              # check dependencies on host for X server option
       }
     ;;
   esac
-  [ "$Nvidiaversion" ] && case ${1:-} in
+  case ${1:-} in
+    --hostdisplay)
+      [ "$Runtime" = "kata-runtime" ] && {
+        nc -z 127.0.0.1 $((6000 + $Hostdisplaynumber)) || {
+          $Message "${1:-}: Display $Hostdisplay can not be accessed over TCP.
+  --runtime=kata-runtime works only with X over TCP."
+          Return=1
+        }
+      }
+    ;;
     --xpra-xwayland|--weston-xwayland|--xwayland|--weston|--kwin|--kwin-xwayland|--xdummy-xwayland|--hostwayland)
-      $Message "${1:-}: Closed source NVIDIA driver does not support Wayland."
-      Return=1
+      [ "$Nvidiaversion" ] && {
+        $Message "${1:-}: Closed source NVIDIA driver does not support Wayland."
+        Return=1
+      }
+      [ "$Runtime" = "kata-runtime" ] && {
+        $Message "${1:-} not possible with --runtime=kata-runtime"
+        Return=1
+      }
     ;;
   esac
   case ${1:-} in
@@ -2234,7 +2259,7 @@ check_newxenv() {               # find free display, create $Newxenv
   case $Winsubsystem in
     MSYS2|CYGWIN) Xoverip="yes" ;;
   esac
-  [ "$Runtime" = "kata" ] && Xoverip="yes"
+  [ "$Runtime" = "kata-runtime" ] && Xoverip="yes"
   
   # set $Newdisplay (DISPLAY of container) and $Newxsocket
   case $Xserver in
@@ -2664,7 +2689,7 @@ create_xcommand() {             # create command to start X server and/or Waylan
 
       # xpra server command
       [ "$Desktopmode" = "yes" ] && Xpraservercommand="xpra start-desktop" || Xpraservercommand="xpra start"
-      Xpraservercommand="$Xpraservercommand $Newdisplay --use-display $Xpraoptions \\
+      Xpraservercommand="$Xpraservercommand :$Newdisplaynumber --use-display $Xpraoptions \\
   --no-daemon --fake-xinerama=no --mdns=no \\
   --file-transfer=off --printing=no --notifications=no \\
   --start-new-commands=no --dbus-proxy=no --no-pulseaudio \\
@@ -2674,7 +2699,7 @@ create_xcommand() {             # create command to start X server and/or Waylan
   $Xpraservercommand"
 
       # xpra client command
-      Xpraclientcommand="xpra attach $Newdisplay $Xpraoptions \\
+      Xpraclientcommand="xpra attach :$Newdisplaynumber $Xpraoptions \\
   --title='@title@ [in container]' \\
   -z0 --quality 100 \\
   --no-speaker --no-pulseaudio \\
@@ -3371,7 +3396,7 @@ store_runoption() {             # store env, cap, volume or device for docker co
       Containerenvironmentcount=$((Containerenvironmentcount + 1))
       Containerenvironment[$Containerenvironmentcount]="${2:-}"
     ;;
-    volume) 
+    volume)
       [ -e "$(convertpath --subsystem "${2:-}")" ] && {
         Sharevolumescount=$((Sharevolumescount + 1))
         Sharevolumes[$Sharevolumescount]="${2:-}"
@@ -3523,7 +3548,7 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
       [ -e "$Tinibinary" ] || Tinibinary=""
       [ "$Tinibinary" ] && {
         case $Runtime in
-          kata)
+          kata-runtime)
             # avoid sharing same file that might be shared with runc already.
             cp -u "$Tinibinary"  "$Hostuserhome/.local/share/x11docker/tini-static-kata"
             Tinibinary="$Hostuserhome/.local/share/x11docker/tini-static-kata"
@@ -3846,6 +3871,10 @@ create_dockercommand() {        # create command to run docker
   Possible sound or GPU setup may fail. Please update your docker installation."
     }
   }
+  
+  # Runtime runc|nvidia|kata
+  [ "$Runtime" ] && Dockercommand="$Dockercommand \\
+  --runtime='$Runtime'"
       
   # capabilities
   [ "$Capdropall" = "yes" ] && Dockercommand="$Dockercommand \\
@@ -4030,7 +4059,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
 \$(tail $Containerlogfile)\"
 }"
   echo ""
-  
+
   echo "Runtime=\$(grep 'Default Runtime' < '$Dockerinfofile' | awk '{print \$3}')"
   echo "verbose -d \"Found default runtime: \$Runtime\""
   echo "case \$Runtime in"
@@ -5208,7 +5237,7 @@ start_docker() {                # start docker container
     "")
       [ "$Containerpid1" ] && {
         storepid $Containerpid1 containerpid1
-        setonwatchpidlist $Containerpid1 containerpid1 #kata
+        setonwatchpidlist $Containerpid1 containerpid1
       } || error "Container startup seems to have failed.
   Last lines of log:
 $(tail $Containerlogfile)"
@@ -5424,10 +5453,9 @@ check_host() {                  # check host environment
   # Check if host uses proprietary NVIDIA driver
   Nvidiaversion=$(head -n1 2>/dev/null </proc/driver/nvidia/version | awk '{ print $8 }')
   
-  grep -q -- "--runtime.kata"   <<< "$Customdockeroptions" && Runtime="kata"
+  grep -q -- "--runtime.kata"   <<< "$Customdockeroptions" && Runtime="kata-runtime"
   grep -q -- "--runtime.nvidia" <<< "$Customdockeroptions" && Runtime="nvidia"
-
-  { [ "$Winsubsystem" ] || [ "$Runtime" = "kata" ] ; } && Usemkfifo="no"
+  grep -q -- "--runtime.runc"   <<< "$Customdockeroptions" && Runtime="runc"
   
   return 0
 }
@@ -6108,9 +6136,10 @@ check_option_interferences() {  # check multiple option interferences, change se
   esac
   
   case "$Runtime" in
-    kata)
-      note "Option --runtime=kata-runtime: Support of kata-runtime
-  is experimental. You may encounter issues."
+    ""|runc|nvidia) ;;
+    kata-runtime)
+      warning "Option --runtime=kata-runtime: Be aware not to share
+  the same files with runc and kata-runtime containers at the same time."
       [ "$Sharealsa" = "yes" ] && {
         note "Option --alsa: ALSA sound is not possible with 
   --runtime=kata-runtime. Fallback: Enabling option --pulseaudio."
@@ -6122,6 +6151,14 @@ check_option_interferences() {  # check multiple option interferences, change se
   --runtime=kata-runtime. Fallback: Disabling option --printer."
         Sharecups="no"
       }
+      [ "$Sharewebcam" = "yes" ] && {
+        note "Option --webcam: Webcam support does not work with
+  --runtime=kata-runtime. Fallback: Disabling option --webcam."
+        Sharewebcam="no"
+      }
+    ;;
+    *)
+      note "Option --runtime: x11docker does not know runtime: $Runtime"
     ;;
   esac
   
@@ -6423,12 +6460,15 @@ setup_fifo() {                  # set up fifo channels (also option --stdin)
   # &8  $Timetosaygoodbyefifo for saygoodbye() and waitfortheend()
   # &9  $Watchpidfifo         for watchpidlist()
 
+  [ "$Runtime" = "kata-runtime" ] && Usemkfifo="no"
+  [ "$Winsubsystem" ]             && Usemkfifo="no"
+
   # redirect stdin to named pipe. Named pipe is shared with container and used as stdin of image command in container.CMD.sh
   [ "$Forwardstdin" = "yes" ] && {
     Cmdstdinfile="$Sharefolder/$Cmdstdinfile"
-    case $Winsubsystem in
-      "") $Mksu "mkfifo $Cmdstdinfile" ;;
-      *)  mkfile $Cmdstdinfile ;;
+    case $Usemkfifo in
+      yes) $Mksu "mkfifo $Cmdstdinfile" ;;
+      no)  mkfile $Cmdstdinfile ;;
     esac
     exec 7<>$Cmdstdinfile 
     cat <&0 >&7 & storepid $! catstdin
@@ -6469,7 +6509,7 @@ declare_variables() {           # declare global variables
 
   Dockerexe="docker"                              # can be docker.exe on Windows
   Dockerinfofile=docker.info                      # file to store outpu of 'docker info'
-  Runtime="runc"                                  # runtime in use. Others are 'nvidia' and 'kata'
+  Runtime=""                                      # runtime in use. runc|nvidia|kata-runtime
   Bgpidfile=backgroundpids                        # file to store pids and names of background processes that shut be killed on exit
   Timetosaygoodbye=timetosaygoodbye               # file giving term signal to all parties
   Timetosaygoodbyefifo=timetosaygoodbye.fifo      # message channel for --init=openrc|runit|sysvinit to shut down on x11docker signal
@@ -6784,15 +6824,15 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,fullscreen,size:,scale:,rotate:,dpi:,output-count:,gpu,xfishtank,border::"                     # X appearance options
   Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,env:,showenv,showid,showpid1"                                      # X and environment options
   Longoptions="$Longoptions,home,clipboard,pulseaudio::,alsa::,lang::,printer,webcam"                                      # comfort options
-  Longoptions="$Longoptions,no-xhost,pw:,no-internet,workdir:,sharessh,limit::,pull::"                                     # advanced options
+  Longoptions="$Longoptions,no-xhost,pw:,no-internet,workdir:,sharessh,limit::,pull::,runtime:"                            # advanced options
   Longoptions="$Longoptions,init::,sys-admin,sharecgroup,dbus,dbus-system,hostdbus"                                        # advanced options
-  Longoptions="$Longoptions,homedir:,sharedir:,cachebasedir:,homebasedir:"                                                 # host folders
+  Longoptions="$Longoptions,homedir:,share:,cachebasedir:,homebasedir:"                                                    # host folders
   Longoptions="$Longoptions,launcher,cleanup,license,licence,help,version,install,update,update-master,remove,wmlist"      # special options without starting X or container
   Longoptions="$Longoptions,verbose::,quiet,debug,stdin"                                                                   # verbose options
   Longoptions="$Longoptions,hostipc,hostnet,cap-default,sudouser,hostuser:,user:,group-add:,name:"                         # capabilities, users
   Longoptions="$Longoptions,keymap:,name:,no-entrypoint,runfromhost:,runasroot:,westonini:,interactive"                    # developer options
   Longoptions="$Longoptions,cachedir:,starter,trusted,untrusted,xtest,no-xtest,stdout,stderr,silent,nothing,ps"            # deprecated
-  Longoptions="$Longoptions,tini,no-init,systemd,runit,openrc,sysvinit"                                                    # deprecated
+  Longoptions="$Longoptions,tini,no-init,systemd,runit,openrc,sysvinit,sharedir:"                                          # deprecated
   Longoptions="$Longoptions,xtest,xcomposite"                                                                              # experimental
   
   Parsedoptions="$(getopt --options $Shortoptions --longoptions $Longoptions --name "$0" -- "$@" 2>/tmp/x11docker_parsererror)"
@@ -6888,14 +6928,16 @@ parse_options() {               # parse cli options
          --limit)      Limitresources="${2:-0.5}" ; shift ;; # run with limited CPU and RAM access
          --no-entrypoint) Noentrypoint="yes" ;;            # don't use ENTRYPOINT of image
          --no-internet)Internetaccess="no" ;;              # disallow internet access
-         --workdir)    Workdir="${2:-}" ; shift ;;         # set working directory
+         --pull)       Pullimage="${2:-yes}" ; shift ;;    # allow 'docker pull'
          --pw)         Passwordfrontend="${2:-}" ; shift ;;  # frontend for password prompt
          --runfromhost) Runfromhost="$Runfromhost
 ${2:-}"                ; shift ;;                          # add custom host command in xinitrc
          --runasroot)  Runasroot="$Runasroot
 ${2:-}"                ; shift ;;        # add custom root command in container setup script
+         --runtime)    Runtime="${2:-}" ; shift            # runtime=runc|nvidia|kata-runtime
+                       [ "$Runtime" = "kata" ] && Runtime="kata-runtime" ;;
          --stdin)      Forwardstdin="yes" ;;               # forward stdin to image command
-         --pull)       Pullimage="${2:-yes}" ; shift ;;    # allow 'docker pull'
+         --workdir)    Workdir="${2:-}" ; shift ;;         # set working directory
 
 
      #### Verbose options
@@ -6972,7 +7014,11 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
          --cachedir)     Cachebasefolder="${2:-}" ; shift 
                          note "Option --cachedir is deprecated.
   Please use instead: --cachebasedir" ;;
+         --share)        store_runoption volume "${2:-}"   # share host directory
+                         shift ;;
          --sharedir)     store_runoption volume "${2:-}"   # share host directory
+                         note "Option --sharedir is deprecated.
+  Please use instead: --share"
                          shift ;;
 
        ## docker options
@@ -7195,10 +7241,11 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
-  # x11docker/lxde: missing entries in menu and panel
-  # test Xwayland with X over IP
+  # x11docker/lxde: missing entries in menu and panel, high CPU usage
   # x11docker/check: --alsa: check soundcard iteration
+  # x11docker/check: --lang fails
   # dockerrc / docker pid: wrong PPID output
+  # test Xwayland with X over IP
 
   # BUG --xpra-xwayland/py3 fails with tor-browser, but not with wine pcmanfm
   # BUG --dbus-system: slow startup (90s timeout) e.g. in arch and debian buster containers for unknown reasons.

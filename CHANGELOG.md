@@ -8,11 +8,14 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
- - Experimental support of `--runtime=kata-runtime` in custom docker run 
-   options.
+ - `--runtime=RUNTIME`: New option to specify container runtime. 
+   Known runtimes: `runc` (default), `nvidia` and `kata-runtime`.
    [(#138)](https://github.com/mviereck/x11docker/issues/138)
+ - `--share=PATH`: Share file or folder. Replaces `--sharedir`.
+### Deprecated
+ - `--sharedir`: Use `--share` instead.
 ### Fixed
- - `--init=runit`: Create DBus service files if missing.
+ - `--init=runit`: Create runit service for DBus if missing.
  - `docker commit`: Throw error if running a recursive image created from 
    an x11docker container with `docker commit`.
    [(#146)](https://github.com/mviereck/x11docker/issues/146)
