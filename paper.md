@@ -10,12 +10,12 @@ tags:
   - reproducible research
   - prototyping
 authors:
-  - name: Martin Viereck
+  - name: Martin Viereck, Germany
     orcid: 0000-0002-4532-4020
     affiliation: "1"
 affiliations:
- - name: Martin Viereck, Germany
-   index: 1
+  - name: None
+    index: 1
 date: 22 March 2019
 bibliography: paper.bib
 ---
