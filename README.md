@@ -60,16 +60,6 @@
 
 ![screenshot](screenshot-xpra-pstree.png "xterm showing pstree in xpra window using x11docker")
 
-# x11docker-gui
-
 ![screenshot](x11docker-gui.png "x11docker GUI main")
-
-![screenshot](x11docker-developer.png "x11docker GUI developer options")
-
-![screenshot](x11docker-security.png "x11docker GUI security")
-
-![screenshot](x11docker-server.png "x11docker GUI x server options")
-
-![screenshot](x11docker-dependencies.png "x11docker GUI dependencies")
 
 ![screenshot](x11docker-512x512.png "x11docker logo")
