@@ -14,6 +14,8 @@ Project website: https://github.com/mviereck/x11docker
  - `--share=PATH`: Share file or folder. Replaces `--sharedir`.
 ### Deprecated
  - `--sharedir`: Use `--share` instead.
+ - `--no-xhost`: No replacement.
+ - `--sys-admin`: No replacement.
 ### Fixed
  - `--init=runit`: Create runit service for DBus if missing.
  - `docker commit`: Throw error if running a recursive image created from 
