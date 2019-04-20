@@ -3501,6 +3501,7 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
     tini|systemd|sysvinit|openrc|runit|dockerinit|s6-overlay|none) ;;
     *) 
       note "Option --init: Unknown init system $Initsystem
+  Possible: tini systemd sysvinit openrc runit s6-overlay none
   Fallback: Using --init=tini instead."
       Initsystem="tini" ;;
   esac
@@ -3578,11 +3579,11 @@ Before=getty.target
 #ExecStart=/bin/sh $Cshare/container.CMD.sh
 #ExecStart=/bin/su - -s /bin/sh CONTAINERUSER $Cshare/container.CMD.sh
 #ExecStart=/usr/local/bin/x11docker-login
-ExecStart=/sbin/agetty -a CONTAINERUSER -l /usr/local/bin/x11docker-login console
+ExecStart=/usr/local/bin/x11docker-agetty
+#ExecStart=/sbin/agetty -a CONTAINERUSER -l /usr/local/bin/x11docker-login console
 StandardInput=tty
 StandardOutput=tty
 Type=idle
-#Restart=always
 UtmpIdentifier=cons
 TTYPath=/dev/console
 TTYReset=yes
@@ -3639,25 +3640,33 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(while 
   It adds some user switching capabilities x11docker would drop otherwise.
   However, they are still within default docker capabilities.
   Not within default docker capabilities it adds capability SYS_BOOT.  
-  It shares access to host cgroups in /sys/fs/cgroup."
+  It shares access to host cgroups in /sys/fs/cgroup.
+  Some processes in container will run as root."
     ;;
     runit|openrc|sysvinit) 
       warning "Option --init=$Initsystem slightly degrades container isolation.
-  It adds some user switching capabilities x11docker would disable otherwise.
+  It adds some user switching capabilities x11docker would drop otherwise.
   However, they are still within default docker capabilities.
-  Not within default docker capabilities it adds capability SYS_BOOT."
+  Not within default docker capabilities it adds capability SYS_BOOT.
+  Some processes in container will run as root."
     ;;
     s6-overlay) 
       warning "Option --init=$Initsystem slightly degrades container isolation.
-  It adds some user switching capabilities x11docker would disable otherwise.
-  However, they are still within default docker capabilities."
+  It adds some user switching capabilities x11docker would drop otherwise.
+  However, they are still within default docker capabilities.
+  Some processes in container will run as root."
     ;;
-  esac
-  
-  case $Initsystem in
-    systemd|openrc|runit|sysvinit|s6-overlay)
-      warning "Option --init=$Initsystem: Services started as root
-  in container might try to abuse their privileges." ;;
+    tini|none)
+      [ "$Dbussystem" = "yes" ] && {
+      warning "Option --dbus-system slightly degrades container isolation.
+  It adds some user switching capabilities x11docker would drop otherwise.
+  However, they are still within default docker capabilities.
+  Some processes in container will run as root."
+        note "Option --dbus-system can have a long 90s startup delay
+  with some container systems, especially seen with arch Linux containers.
+  In that case run with one of --init=systemd|runit|openrc|sysvinit."
+      }
+    ;;
   esac
   
   return 0
@@ -3681,10 +3690,7 @@ setup_capabilities() {          # check linux capabilities needed by container
   [ "$Dbussystem" = "yes" ]    && {
     Dbusrunsession="yes"
     store_runoption cap "CHOWN"
-    case $Sharewayland in
-      yes) Switchcontaineruser="yes" ;;
-      no)  Switchcontainerusercaps="yes" ;;
-    esac
+    Switchcontaineruser="yes"
   }
       
   # option --sys-admin
@@ -4096,9 +4102,10 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo "  Imagecommand=\"\${Imagecommand#[}\""
   echo "  Imagecommand=\"\${Imagecommand%]}\""
   echo "  Imagecommand=\"\${Imagecommand#/bin/sh -c }\""
-  echo "  echo \"\$Imagecommand\" | grep -q /x11docker/container.CMD.sh && error 'Recursion error: Found CMD /x11docker/container.CMD.sh in image. 
+  echo "  echo \"\$Imagecommand\" | grep -q /x11docker/container.CMD.sh && error 'Recursion error: Found CMD /x11docker/container.CMD.sh in image.
   Did you use docker commit with an x11docker container?
-  Please build new images instead of using docker commit.'"
+  Please build new images with a Dockerfile instead of using docker commit,
+  or provide a different image command.'"
   echo "}"
   
   echo "# check USER"
@@ -4564,6 +4571,7 @@ create_containerrootrc() {      # create container root setup script: This scrip
       echo ""
       echo "debugnote \"User in container: \$(id \$Containeruser)
 \$(cat /etc/passwd | grep '\$Containeruser:.:')\""
+      echo ""
     ;;
   esac
   
@@ -4648,17 +4656,19 @@ chmod +x $Cshare/container.CMD.sh
 exec su - -s /bin/sh  \$Containeruser $Cshare/container.CMD.sh
 \" >/usr/local/bin/x11docker-login"
     echo "chmod +x /usr/local/bin/x11docker-login"
+    echo ""
     
     echo "echo \"#! /bin/sh
 $Messagefifofuncs_escaped
 Messagefile=$Cshare/message.fifo
 debugnote \"Path of agetty: \$(command -v agetty || echo not found)\"
-[ -e /sbin/agetty ] && exec setsid agetty -a \$Containeruser -l /usr/local/bin/x11docker-login console
+[ -e /sbin/agetty ] && exec agetty -a \$Containeruser -l /usr/local/bin/x11docker-login console
 [ '$Interactive' = 'yes' ] && note '/sbin/agetty not found. --interactive can fail.
   Please install package util-linux in image.'
 exec /usr/local/bin/x11docker-login
 \" >/usr/local/bin/x11docker-agetty"
     echo "chmod +x /usr/local/bin/x11docker-agetty"
+    echo ""
   }
   
   case $Initsystem in
@@ -4772,20 +4782,23 @@ start() {
     sysvinit)
       echo "# adding x11docker start command to rc.local"
       echo "sed -i '/exit 0/d' /etc/rc.local"
-      echo "echo \"/usr/local/bin/x11docker-login || echo \\\"x11docker: Exit code of x11docker-login: \\\$?\\\"
+      echo "echo \"/usr/local/bin/x11docker-agetty || echo \\\"x11docker: Exit code of x11docker-agetty: \\\$?\\\"
 echo 'x11docker: rc.local sends shutdown -h now'
 shutdown -h now
 exit 0\" >> /etc/rc.local"
       echo "chmod +x /etc/rc.local"
     ;;
   esac
+  echo ""
 
   echo "# disable getty in inittab"
   echo "[ -e /etc/inittab ] && sed -i 's/.*getty/##getty disabled by x11docker## \0/' /etc/inittab"
+  echo ""
 
   # start dbus daemon and dbus services
   case $Dbussystem in
     yes)
+      echo "# set up DBus"
       echo "verbose 'DBus: removing failing or useless services.'"
       echo "for Line in /usr/share/dbus-1/system-services/* /usr/share/dbus-1/services/*; do" # find is not available on fedora
       echo '  Name="$(cat $Line | grep Name= | cut -d= -f2)"'
@@ -4843,108 +4856,129 @@ exit 0\" >> /etc/rc.local"
       echo "    ;;"
       echo "  esac"
       echo "done"
-    ;;
-  esac
+      echo ""
+      
+    case $Initsystem in
+      tini|none)
+        echo "debugnote 'DBus: starting dbus system daemon'"
+        echo "echo 'x11docker: DBus: starting dbus system daemon'"
+        echo "dbus-daemon --system --fork"
+        echo "for Count in 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0; do"
+        echo "  [ -e /run/dbus/system_bus_socket ] && break"
+        echo "  echo 'Waiting for DBus system daemon to be ready.'"
+        echo "  sleep 1"
+        echo "done"
+        echo "[ -e /run/dbus/system_bus_socket ] || warning 'DBus startup seems to have failed. /run/dbus/system_bus_socket not found.'"
+        echo ""
 
-  [ "$Dbussystem" = "yes" ] && case $Initsystem in
-    tini|none)
-      warning "Will run DBus system services as root in container.
-  If the image contains malicious applications started by DBus service files,
-  they might abuse their root privileges and may try to break out of container."
-      note "Option --dbus-system can have a long 90s delay in some setups.
-  In that case install systemd in image and run with --init=systemd.
-  (Also --init=runit|openrc|sysvinit can be set up and used)."  ### FIXME
-
-      echo "echo 'x11docker: DBus: starting dbus system daemon'"
-      echo "dbus-daemon --system --fork"
-      echo "for Count in 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0; do"
-      echo "  [ -e /run/dbus/system_bus_socket ] && break"
-      echo "  sleep 0.2"
-      echo "done"
-      echo "[ -e /run/dbus/system_bus_socket ] || warning 'DBus startup seems to have failed. /run/dbus/system_bus_socket not found.'"
-
-      [ "$Nonewprivileges" = "yes" ] && {
-        echo "# support for dbus daemon with no-new-privileges"
-        echo "waitforservice() {"
-        echo "  # wait for dbus service \$1 to appear in dbus service list"
-        echo "  for Count in 1 2 3 4 5 6 7 8 9 10 ; do"
-        echo "    dbus-send --system --dest=org.freedesktop.DBus --type=method_call --print-reply /org/freedesktop/DBus org.freedesktop.DBus.ListNames | grep -q \$1 && break"
-        echo "    verbose -d \"DBus: waiting for \$1 to be ready\""
-        echo "    sleep 0.1"
-        echo "  done"
-        echo "}"
-        echo '[ "$Loginservice" ] && {'
-        echo '  verbose -d "Starting login service $Loginservicecommand"'
-        echo '  command -v $Loginservicecommand && {'
-        echo '    eval $Loginservicecommand &'
-        echo '  } || {'
-        echo '    echo $Loginservicecommand | grep -q elogind && elogind &'
-        echo '  }'
-        echo '  waitforservice $Loginservice'
-        echo '}'
-        echo "# start polkitd as first service"
-        echo "[ -x /usr/lib/policykit-1/polkitd ] && {"
-        echo "  verbose -d 'DBus: starting PolicyKit'"
-        echo "  /usr/lib/policykit-1/polkitd &"
-        echo "  waitforservice org.freedesktop.PolicyKit1"
-        echo "}"
-        echo "[ -x /usr/lib/accountsservice/accounts-daemon ] && {"
-        echo "  verbose -d 'DBus: starting Accounts daemon'"
-        echo "  /usr/lib/accountsservice/accounts-daemon &"
-        echo "  waitforservice org.freedesktop.Accounts"
-        echo "}"
-        echo "# start all other dbus system services"
-        echo "for Line in /usr/share/dbus-1/system-services/*; do"
-        echo "  Name=\"\$(cat \$Line | grep Name= | cut -d= -f2)\""
-        echo "  Command=\"\$(cat \$Line | grep Exec= | cut -d= -f2)\""
-        echo "  case \$Name in"
-        echo "    org.freedesktop.PolicyKit1|org.freedesktop.Accounts) ;;"
-        echo "    org.freedesktop.login1) ;;"
-        echo '    *)'
-        echo '      verbose -d "DBus: starting service $Name: $Command"'
-        echo '      $Command &'
-        echo '      [ "$Command" != "/bin/false" ] && waitforservice $Name'
-        echo '    ;;'
-        echo '  esac'
-        echo 'done'
-      }
-      echo "verbose -d \"DBus: Running system services:
+        [ "$Nonewprivileges" = "yes" ] && {
+          echo "# support for dbus daemon with no-new-privileges"
+          echo "waitforservice() {"
+          echo "  # wait for dbus service \$1 to appear in dbus service list"
+          echo "  for Count in 1 2 3 4 5 6 7 8 9 10 ; do"
+          echo "    dbus-send --system --dest=org.freedesktop.DBus --type=method_call --print-reply /org/freedesktop/DBus org.freedesktop.DBus.ListNames | grep -q \$1 && break"
+          echo "    verbose -d \"DBus: waiting for \$1 to be ready\""
+          echo "    sleep 0.1"
+          echo "  done"
+          echo "}"
+          echo '[ "$Loginservice" ] && {'
+          echo '  verbose -d "Starting login service $Loginservicecommand"'
+          echo '  command -v $Loginservicecommand && {'
+          echo '    eval $Loginservicecommand &'
+          echo '  } || {'
+          echo '    echo $Loginservicecommand | grep -q elogind && elogind &'
+          echo '  }'
+          echo '  waitforservice $Loginservice'
+          echo '}'
+          echo "# start polkitd as first service"
+          echo "[ -x /usr/lib/policykit-1/polkitd ] && {"
+          echo "  verbose -d 'DBus: starting PolicyKit'"
+          echo "  /usr/lib/policykit-1/polkitd &"
+          echo "  waitforservice org.freedesktop.PolicyKit1"
+          echo "}"
+          echo "[ -x /usr/lib/accountsservice/accounts-daemon ] && {"
+          echo "  verbose -d 'DBus: starting Accounts daemon'"
+          echo "  /usr/lib/accountsservice/accounts-daemon &"
+          echo "  waitforservice org.freedesktop.Accounts"
+          echo "}"
+          echo "# start all other dbus system services"
+          echo "for Line in /usr/share/dbus-1/system-services/*; do"
+          echo "  Name=\"\$(cat \$Line | grep Name= | cut -d= -f2)\""
+          echo "  Command=\"\$(cat \$Line | grep Exec= | cut -d= -f2)\""
+          echo "  case \$Name in"
+          echo "    org.freedesktop.PolicyKit1|org.freedesktop.Accounts) ;;"
+          echo "    org.freedesktop.login1) ;;"
+          echo '    *)'
+          echo '      verbose -d "DBus: starting service $Name: $Command"'
+          echo '      $Command &'
+          echo '      [ "$Command" != "/bin/false" ] && waitforservice $Name'
+          echo '    ;;'
+          echo '  esac'
+          echo 'done'
+          echo ""
+        }
+        echo "verbose -d \"DBus: Running system services:
 \$(dbus-send --system         \
   --dest=org.freedesktop.DBus \
   --type=method_call          \
   --print-reply               \
   /org/freedesktop/DBus       \
   org.freedesktop.DBus.ListNames)\""
-    ;;
-    systemd)
-      echo "systemctl unmask dbus"
-      echo "systemctl enable dbus"
-    ;;
-    openrc)
-      echo "verbose 'DBus: enabling dbus service'"
-      echo "rc-update add dbus default"
-      echo "[ -e /etc/init.d/dbus ] || note 'Did not find service file /etc/init.d/dbus'"
-    ;;
-    sysvinit)
-      echo "[ -e /etc/init.d/dbus ] || note 'Did not find service file /etc/init.d/dbus'"
-    ;;
-    runit)
-      echo "command -v dbus-daemon && {"
-      echo "  [ -e /etc/sv/dbus ] || {"
-      echo "    mkdir -p /etc/sv/dbus"
-      echo "    echo '#!/bin/sh
+        echo ""
+      ;;
+      systemd)
+        echo "systemctl unmask dbus"
+        echo "systemctl enable dbus"
+      ;;
+      sysvinit)
+        echo "[ -e /etc/init.d/dbus ] || note 'Did not find service file /etc/init.d/dbus'"
+      ;;
+      runit)
+        echo "command -v dbus-daemon && {"
+        echo "  [ -e /etc/sv/dbus ] || {"
+        echo "    mkdir -p /etc/sv/dbus"
+        echo "    echo '#!/bin/sh
 [ ! -d /run/dbus ] && install -m755 -g 22 -o 22 -d /run/dbus
 exec dbus-daemon --system --nofork --nopidfile' >/etc/sv/dbus/run"
-      echo "    echo '#!/bin/sh
+        echo "    echo '#!/bin/sh
 exec dbus-send --system / org.freedesktop.DBus.Peer.Ping > /dev/null 2> /dev/null' >/etc/sv/dbus/check"
-      echo "    chmod +x /etc/sv/dbus/run /etc/sv/dbus/check"
-      echo "  }"
-      echo "  verbose 'DBus: enabling dbus service'"
-      echo "  ln -s /etc/sv/dbus  /etc/runit/runsvdir/default"  # void
-      echo "  ln -s /etc/sv/dbus  /service"                     # alpine
-      echo "}"
-    ;;
+        echo "    chmod +x /etc/sv/dbus/run /etc/sv/dbus/check"
+        echo "  }"
+        echo "  verbose 'DBus: enabling dbus service'"
+        echo "  ln -s /etc/sv/dbus  /etc/runit/runsvdir/default"  # void
+        echo "  ln -s /etc/sv/dbus  /service"                     # alpine
+        echo "}"
+      ;;
+      openrc)
+        echo "[ ! -e /etc/init.d/dbus ] && echo '#!/sbin/openrc-run
+start() {
+  ebegin \"Starting D-BUS system messagebus\"
+  /usr/bin/dbus-uuidgen --ensure=/etc/machine-id
+  mkdir -p /var/run/dbus 
+  start-stop-daemon --start --pidfile /var/run/dbus.pid --exec /usr/bin/dbus-daemon -- --system
+  eend \$?
+}
+stop() {
+  ebegin \"Stopping D-BUS system messagebus\"
+  start-stop-daemon --stop --pidfile /var/run/dbus.pid
+  retval=\$?
+  eend \${retval}
+  [ -S /var/run/dbus/system_bus_socket ] && rm -f /var/run/dbus/system_bus_socket
+  return \${retval}
+}
+reload() {
+  ebegin \"Reloading D-BUS messagebus config\"
+  /usr/bin/dbus-send --print-reply --system --type=method_call --dest=org.freedesktop.DBus / org.freedesktop.DBus.ReloadConfig > /dev/null
+  retval=\$?
+  eend \${retval}
+  return \${retval}
+}' >/etc/init.d/dbus && chmod +x /etc/init.d/dbus"
+        echo "verbose 'DBus: enabling dbus service'"
+        echo "rc-update add dbus default"
+      ;;
+    esac
   esac
+  echo ""
 
   # --lang: language locale
   [ "$Langwunsch" ] && {
@@ -4995,16 +5029,18 @@ exec dbus-send --system / org.freedesktop.DBus.Peer.Ping > /dev/null 2> /dev/nul
   [ "$Runasroot" ] && {
     echo "# custom setup root command added with option --runasroot"
     echo "$Runasroot"
+    echo ""
   }
   
   # message to container.CMD.sh
   echo "echo 'x11docker: Container root setup is ready'"
   echo ":> /x11docker.setupready"
+  echo ""
 
   [ "$Switchcontaineruser" = "yes" ] && {   # if "no", container.CMD.sh is executed in command line $Dockercommand
     case $Initsystem in
       none|dockerinit)
-        echo "exec /usr/local/bin/x11docker-login"
+        echo "exec /usr/local/bin/x11docker-agetty"
       ;;
       tini)
         echo "Exec=exec"
@@ -5032,7 +5068,7 @@ exec dbus-send --system / org.freedesktop.DBus.Peer.Ping > /dev/null 2> /dev/nul
         echo "[ -e /sbin/runit-init ] && exec runit-init || exec /sbin/init"
       ;;
       s6-overlay)
-        echo "exec /init /usr/local/bin/x11docker-login"
+        echo "exec /init /usr/local/bin/x11docker-agetty"
       ;;
       systemd)
         echo 'Systemd=/lib/systemd/systemd'
@@ -6102,8 +6138,9 @@ check_option_interferences() {  # check multiple option interferences, change se
   case "$Runtime" in
     ""|runc|nvidia|crun) ;;
     kata-runtime)
-      warning "Option --runtime=kata-runtime: Be aware not to share
-  the same files with runc and kata-runtime containers at the same time."
+      note "Option --runtime=kata-runtime: Be aware not to share
+  the same files with runc and kata-runtime containers at the same time.
+  Otherwise container startup may fail."
       [ "$Sharealsa" = "yes" ] && {
         note "Option --alsa: ALSA sound is not possible with 
   --runtime=kata-runtime. Fallback: Enabling option --pulseaudio."
@@ -7234,19 +7271,21 @@ $(nl -ba <$Westonini)"
   saygoodbye main
 }
 main "$@"
+exit
   
 #### ToDo notes for development
 todo() {
+  :
   # x11docker/check: --alsa: check soundcard iteration
   
-  # FIXME: openrc, sysvinit: check dbus service file, create it if missing
+  # FIXME: sysvinit: check dbus service file, create it if missing
   # CHECK: check where to replace x11docker-login with x11docker-agetty
   # CHECK: try --printer with lpr instead of CUPS socket. Use cases: --runtime=kata-runtine and Windows.
 
   # FIXME: myrealpath()
   # CHECK: Xwayland with X over IP
   # CHECK: --xpra-xwayland/py3 fails with tor-browser, but not with wine pcmanfm
-  # FIXME: --dbus-system: slow startup (90s timeout) e.g. in arch containers for unknown reasons.
+  # FIXME: --dbus-system: slow startup (90s timeout) in arch containers for unknown reasons.
   # FIXME: --interactive with --init=systemd|runit|openrc|sysvinit: no job control in shell
   # FIXME: x11docker/deepin: new builds have strange issues
   # BUG x11docker/fluxbox on arch host: background missing, sometimes no context menu. where is the difference?
