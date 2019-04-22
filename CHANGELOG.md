@@ -18,10 +18,11 @@ Project website: https://github.com/mviereck/x11docker
  - `--sys-admin`: No replacement.
 ### Fixed
  - `--dbus-system`: Fixed startup failure with user switching.
- - `--init=runit|openrc`: Create service to start DBus if missing.
+ - `--init=sysvinit|runit|openrc`: Always create service to start system DBus.
  - `docker commit`: Throw error if running a recursive image command
    created with `docker commit` from an x11docker container.
    [(#146)](https://github.com/mviereck/x11docker/issues/146)
+ - `elogind` support for debian buster containers.
 
 ## [5.5.2](https://github.com/mviereck/x11docker/releases/tag/v5.5.2) - 2019-04-08
 ### Added
