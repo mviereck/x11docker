@@ -22,19 +22,17 @@ bibliography: paper.bib
 
 # Summary
 
-[`x11docker`](https://github.com/mviereck/x11docker) allows to run graphical desktop applications in a 
+[`x11docker`](https://github.com/mviereck/x11docker) allows to run graphical applications in a 
 [GNU/Linux container](https://en.wikipedia.org/wiki/Operating-system-level_virtualization) using 
-[Docker](https://en.wikipedia.org/wiki/Docker_(software)).
+[Docker](https://www.docker.com).
 
 ## About Containers in general
-
 Containerisation in general has proven as a useful technology for packaging applications and their 
 dependencies for deployment in cloud-based infrastructures.
 Containers need much less resources than [virtual machines](https://en.wikipedia.org/wiki/Virtual_machine)
-for similar tasks. The technical concept, however, is completely different.
+for similar tasks. The technical concept, however, is different.
 
-The properties of containers such as portability, dependency packaging, minimal requirements of 
-system environment (i.e. only the container runtime), isolation, and version management of complete 
+The properties of containers such as portability, isolation, and version management of complete 
 application stacks make it a promising candidate to increase computational reproducibility and 
 reusability of research analyses [@boettiger_introduction_2015].
 Their use has been demonstrated in various disciplines, such as software engineering research 
@@ -48,7 +46,7 @@ code side by side.
 ## About x11docker
 
 The most popular Linux container frontend, Docker, does not provide a 
-[display server](https://en.wikipedia.org/wiki/Display_server) that would allow to run applications 
+[display server](https://en.wikipedia.org/wiki/Display_server) that would allow running applications 
 with a [graphical user interface](https://en.wikipedia.org/wiki/Graphical_user_interface) (GUI), 
 because Docker is originally built for server software.
 `x11docker` fills this gap.
@@ -61,7 +59,7 @@ on the host system and providing it to applications in Docker containers.
 audio, webcam and printer. Non-GUI applications can benefit from this, too.
 
 Additionally, `x11docker` does some [security setup](https://github.com/mviereck/x11docker#security) 
-to enhance container isolation from host system. 
+to enhance container isolation from host system.
 It follows the [principle of least privilege](https://en.wikipedia.org/wiki/Principle_of_least_privilege).
 
 `x11docker` thereby facilitates quick creation, distribution, and evaluation of research prototypes 
@@ -69,18 +67,18 @@ without compromising on a researcher's skills (not imposing browser-based GUI no
 command-line proficiency), domain (having e.g. established and widely-acknowledged GUI-based tools), 
 security, computational reproducibility, or a scholarly review process.
 
-The target audience of `x11docker` in general are users who want to run desktop applications in containers.
-Another target audience are developers of desktop applications who need an isolated environment.
-In scientific and academic context the target audience are researchers in the field of reproducible science.
+The target audience of `x11docker` in general are users who want to run GUI applications in containers.
+Another target audience are developers of GUI applications who need an isolated environment.
+In scientific and academic context, the target audience are researchers in the field of reproducible science.
 
-`x11docker` has its own (optional) graphical frontend, `x11docker-gui`, and runs on GNU/Linux. 
+`x11docker` has its own (optional) graphical frontend, `x11docker-gui` that runs on GNU/Linux. 
 Running in a Virtual Linux Machine on MS Windows and macOS is supported. 
 With a few limitations it can run natively on MS Windows, too.
 
 # Alternatives to x11docker
 
 A common way to allow GUI applications in containers is by providing a web server within the container 
-and rendering an HTML-based GUI in a common web browser, e.g. as jupyter notebooks [@project_jupyter-proc-scipy-2018]. 
+and rendering an HTML-based GUI in a web browser, e.g. as Jupyter notebooks [@project_jupyter-proc-scipy-2018]. 
 Further possibilities are an xrdp server, VNC server, SSH server or xpra server within the container.
 These solutions require some specific setup and provide a rather slow interaction due to a lot of 
 network data transfer.
