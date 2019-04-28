@@ -9,7 +9,7 @@ Project website: https://github.com/mviereck/x11docker
 ## [Unreleased]
 ### Added
  - `--runtime=RUNTIME`: New option to specify container runtime. 
-   Known runtimes: `runc` (default), `crun`, `nvidia` and `kata-runtime`.
+   Known runtimes: `runc` (docker default), `crun`, `nvidia` and `kata-runtime`.
    [(#138)](https://github.com/mviereck/x11docker/issues/138)
  - `--share=PATH`: Share file or folder. Replaces `--sharedir`.
 ### Deprecated

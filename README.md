@@ -52,6 +52,7 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
    - [Wayland](#wayland)
    - [Init system](#init-system)
    - [DBus](#dbus)
+   - [Container runtime](#container-runtime)
  - [Security](#security)
    - [Options degrading container isolation](#options-degrading-container-isolation)
    - [Sandbox](#sandbox)
@@ -200,7 +201,39 @@ Some desktop environments and applications need a running DBus daemon and/or DBu
  - use `--sharedir /run/dbus/system_bus_socket` to share host DBus system socket.
  - DBus will be started automatically with [init systems](#Init-system) `systemd`, `openrc`, `runit` and `sysvinit` (option `--init`).
 
+### Container runtime
+It is possible to run containers with different backends following the [OCI runtime specification](https://github.com/opencontainers/runtime-spec). Docker's default is `runc`. You can specify another one with option `--runtime=RUNTIME`.
+Container runtimes known and supported by x11docker are:
+ - `runc`: Docker default.
+ - [`kata-runtime`](https://katacontainers.io/): Sets up a virtual machine with its own Linux kernel to run the container. `kata` aims to combine the security advantages of containers and virtual machines.
+   - Some x11docker options are not possible with `--runtime=kata-runtime`. Most important: `--hostdisplay`, `--gpu`, `--printer`, `--webcam` and all Wayland related options.
+ - `nvidia`: Specialized fork of `runc` to support `nvidia/nvidia-docker` images.
+ - [`crun`](https://github.com/giuseppe/crun): Fast and lightweight alternative to `runc` with same functionality.
  
+Note that currently option `--runtime` is in master branch only. It will be part of the next x11docker release.
+
+Possible runtime configuration in `/etc/docker/daemon.json`:
+```
+{
+  "default-runtime": "runc",
+  "runtimes": {
+    "kata-runtime": {
+      "path": "/opt/kata/bin/kata-runtime",
+      "runtimeArgs": [
+        "--kata-config /opt/kata/share/defaults/kata-containers/configuration.toml"
+      ]
+    },
+    "crun": {
+      "path": "/usr/local/bin/crun",
+      "runtimeArgs": []
+    },
+    "nvidia": {
+      "path": "nvidia-container-runtime",
+      "runtimeArgs": []
+    }
+  }
+}
+```
  
 ## Security 
 Scope of x11docker is to run containerized GUI applications while preserving and improving container isolation.
@@ -224,14 +257,19 @@ I am not aware of an escape from a container without an additional isolation deg
 However, x11docker follows the [principle of least privilege](https://en.wikipedia.org/wiki/Principle_of_least_privilege). 
 Docker containers should not have capabilities or privileges that they don't need for their job.
 
+Docker's default runtime `runc` uses Linux namespaces to isolate container applications, but shares the kernel from host. 
+If you are concerned about container access to host kernel, consider to use [container runtime](#container-runtime) `kata-runtime` instead.
+
 _Weaknesses:_
  - Possible SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. 
    A more restrictive solution is desirable.
    Compare: [SELinux and Docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
- - User namespace remapping is disabled to allow options `--home` and `--homedir` without file ownership issues. (Though, this is less an issue because x11docker already avoids root in container). 
-   Exception: User namespace remapping is not disabled for `--user=RETAIN`.
+ - A possible user namespace remapping setup is disabled to allow options `--home`, `--homedir` and `--share` without file ownership issues. 
+   - This is less an issue because x11docker already avoids root in container. 
+   - Exception: User namespace remapping is not disabled for `--user=RETAIN`.
  - x11docker provides several different X server options. Each X server involved might have its individual vulnerabilities. x11docker only covers well-known X security leaks that result from X11 protocol design.
 
+ 
 ### Options degrading container isolation
 x11docker shows warning messages in terminal if chosen options degrade container isolation. Note that x11docker does not check custom `DOCKER_RUN_OPTIONS`.
 
@@ -266,13 +304,14 @@ Using Docker with x11docker as a sandbox is not intended to run obviously evil s
  - Security layer for software that may be malicious in worst case. Examples: Internet browser with Javascript enabled, or wine with Windows applications.
 
 x11docker already restricts process capabilities. You can additionally restrict access to CPU and RAM with option `--limit`. 
-As default `--limit` restricts to 50% of available CPUs and 50% of currently free RAM. Another amount can be specified with `--limit=FACTOR` with a `FACTOR` greater than zero and less than or equal 1.
+As default `--limit` restricts to 50% of available CPUs and 50% of currently free RAM. Another amount can be specified with `--limit=FACTOR` with a `FACTOR` greater than zero and less than or equal one.
 
 For more custom fine tuning have a look at [Docker documentation: Limit a container's resources](https://docs.docker.com/config/containers/resource_constraints).
 
 **NOTE**: Internet access is allowed per default. You can disable internet access with `--no-internet`.
 
 **WARNING**: There is no restriction that can prevent the container from flooding the hard disk in Docker's container partition or in shared folders.
+
   
 ### Security and feature check
 To check container isolation and some feature options use image `x11docker/check` and try out with several options.
@@ -343,9 +382,9 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
    - If yes, try with `--user=RETAIN` to run with the `USER` specified in image.
  - Some applications need more privileges or capabilities than x11docker provides as default. 
    - Reduce container isolation with e.g.:
-     - x11docker options: `--cap-default --hostipc --hostnet --sys-admin`. (Try `--cap-default` first).
+     - x11docker options: `--cap-default --hostipc --hostnet`. (Try `--cap-default` first).
      - docker run options: `--cap-add ALL --security-opt seccomp=unconfined --privileged`
-     - Example: `x11docker --cap-default --hostipc --hostnet --sys-admin -- --cap-add ALL --security-opt seccomp=unconfined --privileged -- IMAGENAME`
+     - Example: `x11docker --cap-default --hostipc --hostnet -- --cap-add ALL --security-opt seccomp=unconfined --privileged -- IMAGENAME`
      - Try with reduced container isolation. If it works, drop options one by one until the needed one(s) are left.
      - If `--cap-add ALL` helps, find the [capability](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) you really need and add only that one.
      - If `--privileged` helps, your application probably needs a device in `/dev`. Find out which one and share it with e.g. `--device /dev/vboxdrv`. Try also `--sharedir /dev/udev/data:ro`.
