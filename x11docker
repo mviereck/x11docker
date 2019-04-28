@@ -4123,7 +4123,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
       echo "Entrypoint=\${Entrypoint%]}"
       case $Initsystem in
         systemd|sysvinit|runit|openrc)
-          echo "echo \"\$Entrypoint\" | grep -qE '/init|/systemd' && {"
+          echo "echo \"\$Entrypoint\" | grep -qE 'tini|init|systemd' && {"
           echo "  note \"There seems to be an init system in ENTRYPOINT of image:
     \$Entrypoint
   Will disable it as x11docker already runs an init with option --$Initsystem.
@@ -4138,7 +4138,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
           echo "}"
         ;;
         tini)
-          echo "echo \"\$Entrypoint\" | grep -qE '/tini|/init|/systemd' && {"
+          echo "echo \"\$Entrypoint\" | grep -qE 'tini|init|systemd' && {"
           echo "  note \"There seems to be an init system in ENTRYPOINT of image:
     \$Entrypoint
   x11docker will run this instead of tini from host.
@@ -4147,18 +4147,8 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
           echo "}"
         ;;
         none)
-          echo "echo \"\$Entrypoint\" | grep -qE '/tini|/init|/systemd' && {"
-          echo "  note \"There seems to be an init system in ENTRYPOINT of image:
+          echo "echo \"\$Entrypoint\" | grep -qE 'tini|init|systemd' && note \"There seems to be an init system in ENTRYPOINT of image:
   \$Entrypoint \""
-          echo "} || {"
-          [ "$Desktopmode" = "yes" ] && [ "$Switchcontaineruser" = "no" ] && {
-            echo "  Exec=  # disable exec to have sh as a fake init for desktop environments. Allows logout."
-            echo "  note 'Using sh as a fake init system / PID 1 in container
-  due to missing /usr/bin/docker-init on host.
-  Without at least a fake init desktop logouts would fail.
-  Please consider to provide tini for x11docker containers.'"
-          } || echo "  :"
-          echo "}"
         ;;
       esac
     ;;
@@ -4245,6 +4235,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   [ "$Xserver" = "--tty" ]   && echo "  echo 'unset DISPLAY WAYLAND_DISPLAY XAUTHORITY'"
   [ "$Dbusrunsession" = "yes" ]  && echo "  echo 'command -v dbus-run-session >/dev/null && Dbus=dbus-run-session || note \"Option --dbus: dbus seems to be not installed.
   Cannot run a DBus user session. Please install dbus in image.\"'"
+  [ "$Initsystem" = "none" ] && [ "$Desktopmode" = "yes" ] && [ "$Switchcontaineruser" = "no" ] && echo "  echo '[ \"\$Dbus\" ] || Exec='" # disable exec to have sh as a fake init for desktop environments. Allows logout.
   echo     "  echo 'export NO_AT_BRIDGE=1'"
   echo     "  echo ''"
   echo     '  echo "[ -e \"\$XDG_RUNTIME_DIR\" ] || {"'
@@ -4656,6 +4647,15 @@ exec /usr/local/bin/x11docker-login
 \" >/usr/local/bin/x11docker-agetty"
     echo "chmod +x /usr/local/bin/x11docker-agetty"
     echo ""
+    
+    echo "echo \"
+  read Dummy <$Cshare/timetosaygoodbye.fifo
+  echo timetosaygoodbye >$Cshare/timetosaygoodbye.fifo
+  echo 'x11docker: $Initsystem shutdown now'
+  shutdown now
+  halt
+\" >/usr/local/bin/x11docker-watch"
+    echo "chmod +x /usr/local/bin/x11docker-watch"
   }
   
   case $Initsystem in
@@ -5112,32 +5112,22 @@ reload() {
   [ "$Switchcontaineruser" = "yes" ] && {   # if "no", container.CMD.sh is executed in command line $Dockercommand
     case $Initsystem in
       none|dockerinit)
-        echo "exec /usr/local/bin/x11docker-login"
+#        echo "exec /usr/local/bin/x11docker-login"
+        echo "exec /usr/local/bin/x11docker-agetty"
       ;;
       tini)
-#        echo "Exec=exec"
-#        [ "$Sharecgroup" = "yes" ] && echo '[ "$Loginservice" ] && Exec='
-#        echo "\$Exec /bin/su - -s /bin/sh \$Containeruser $Cshare/container.CMD.sh"
         echo "exec $Cshare/tini -- /usr/local/bin/x11docker-agetty"
       ;;
-      openrc|sysvinit)
-        echo "{
-  read Dummy <$Cshare/timetosaygoodbye.fifo
-  echo timetosaygoodbye >$Cshare/timetosaygoodbye.fifo
-  echo 'x11docker: $Initsystem shutdown now'
-  shutdown now
-  halt
-} &"
+      sysvinit)
+        echo "/usr/local/bin/x11docker-watch &"
         echo "exec /sbin/init"
       ;;
+      openrc)
+        echo "/usr/local/bin/x11docker-watch &"
+        echo "command -v openrc-init && exec openrc-init || exec /sbin/init"
+      ;;
       runit)
-        echo "{
-  read Dummy <$Cshare/timetosaygoodbye.fifo
-  echo timetosaygoodbye >$Cshare/timetosaygoodbye.fifo
-  echo 'x11docker: $Initsystem shutdown now'
-  shutdown now
-  halt
-} &"
+        echo "/usr/local/bin/x11docker-watch &"
         echo "[ -e /sbin/runit-init ] && exec runit-init || exec /sbin/init"
       ;;
       s6-overlay)
@@ -7348,7 +7338,10 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
+  # deprecate --hostipc and --hostnet ?
   # --init=none: check exec with Switchcontaineruser=yes / desktop logout
+  # try elogind on void
+  # BUG su on void not possible. pam.d?
   
   # x11docker/check: --alsa: check soundcard iteration
   
