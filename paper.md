@@ -26,7 +26,7 @@ bibliography: paper.bib
 [GNU/Linux container](https://en.wikipedia.org/wiki/Operating-system-level_virtualization) using 
 [Docker](https://www.docker.com).
 
-## About Containers in general
+## About containers in general
 Containerisation in general has proven as a useful technology for packaging applications and their 
 dependencies for deployment in cloud-based infrastructures.
 Containers need much less resources than [virtual machines](https://en.wikipedia.org/wiki/Virtual_machine)
