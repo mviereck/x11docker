@@ -81,7 +81,5 @@ Running in a Virtual Linux Machine on MS Windows and macOS is fully supported.
 A common way to allow GUI applications in containers is by providing a web server within the container 
 and rendering an HTML-based GUI in a web browser, e.g. as Jupyter notebooks [@project_jupyter-proc-scipy-2018]. 
 Further possibilities are an xrdp server, VNC server, SSH server or xpra server within the container.
-These solutions require some specific setup and provide a rather slow interaction due to a lot of 
-network data transfer.
 
 # References
