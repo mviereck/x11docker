@@ -10,11 +10,11 @@ tags:
   - reproducible research
   - prototyping
 authors:
-  - name: Martin Viereck, Germany
+  - name: Martin Viereck
     orcid: 0000-0002-4532-4020
     affiliation: "1"
 affiliations:
-  - name: None
+  - name: No affiliations.
     index: 1
 date: 22 March 2019
 bibliography: paper.bib
@@ -69,11 +69,12 @@ security, computational reproducibility, or a scholarly review process.
 
 The target audience of `x11docker` in general are users who want to run GUI applications in containers.
 Another target audience are developers of GUI applications who need an isolated environment.
-In scientific and academic context, the target audience are researchers in the field of reproducible science.
+In scientific and academic context the target audience are researchers in the field of reproducible science.
 
-`x11docker` has its own (optional) graphical frontend, `x11docker-gui` that runs on GNU/Linux. 
-Running in a Virtual Linux Machine on MS Windows and macOS is supported. 
-With a few limitations it can run natively on MS Windows, too.
+`x11docker` is developed on GNU/Linux and was tested on several distributions. 
+With a few limitations it can run natively on MS Windows, too, but is not guaranteed to be as reliable as on GNU/Linux.
+Running in a Virtual Linux Machine on MS Windows and macOS is fully supported. 
+`x11docker` has an optional graphical frontend, `x11docker-gui`.
 
 # Alternatives to x11docker
 
