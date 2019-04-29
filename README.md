@@ -202,7 +202,7 @@ Some desktop environments and applications need a running DBus daemon and/or DBu
  - DBus will be started automatically with [init systems](#Init-system) `systemd`, `openrc`, `runit` and `sysvinit` (option `--init`).
 
 ### Container runtime
-It is possible to run containers with different backends following the [OCI runtime specification](https://github.com/opencontainers/runtime-spec). Docker's default is `runc`. You can specify another one with option `--runtime=RUNTIME`.
+It is possible to run containers with different backends following the [OCI runtime specification](https://github.com/opencontainers/runtime-spec). Docker's default runtime is `runc`. You can specify another one with option `--runtime=RUNTIME`.
 Container runtimes known and supported by x11docker are:
  - `runc`: Docker default.
  - [`kata-runtime`](https://katacontainers.io/): Sets up a virtual machine with its own Linux kernel to run the container. `kata` aims to combine the security advantages of containers and virtual machines.
