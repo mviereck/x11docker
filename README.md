@@ -130,11 +130,11 @@ x11docker assumes that you want to run a single application in seamless mode, i.
 Changes in a running Docker container system will be lost, the created Docker container will be discarded. For persistent data storage you can share host directories:
  - Option `-m, --home` creates a host directory in `~/.local/share/x11docker/IMAGENAME` that is shared with the container and mounted as its `HOME` directory. Files in container home and configuration changes will persist. 
    x11docker creates a softlink from `~/.local/share/x11docker` to `~/x11docker`.
- - Option `--sharedir DIR` mounts a host directory at the same location in container. `--sharedir DIR:ro` restricts to read-only access.
+ - Option `--share PATH` mounts a host file or folder at the same location in container. `--share PATH:ro` restricts to read-only access. Device files in `/dev` are supported, too.
  - Option `--homedir DIR` is similar to `--home` but allows you to specify a custom host directory for data storage.
  - Special cases for `$HOME`:
    - `--homedir $HOME` will use your host home as container home. Discouraged, use with care.
-   - `--sharedir $HOME` will symlink your host home as a subfolder of container home. 
+   - `--share $HOME` will symlink your host home as a subfolder of container home. 
    
 Note that x11docker copies files from `/etc/skel` in container to `HOME` if `HOME` is empty. That allows to provide customized user settings.
  
@@ -198,7 +198,7 @@ Some desktop environments and applications need a running DBus daemon and/or DBu
  - use `--dbus-system` to run DBus system daemon. This includes option `--dbus`.
    - If startup fails or takes about 90s, install an init system and use that one to run DBus. E.g. install `systemd` in image and run with `--init=systemd`.
  - use `--hostdbus` to connect to host DBus user session.
- - use `--sharedir /run/dbus/system_bus_socket` to share host DBus system socket.
+ - use `--share /run/dbus/system_bus_socket` to share host DBus system socket.
  - DBus will be started automatically with [init systems](#Init-system) `systemd`, `openrc`, `runit` and `sysvinit` (option `--init`).
 
 ### Container runtime
@@ -210,8 +210,6 @@ Container runtimes known and supported by x11docker are:
  - `nvidia`: Specialized fork of `runc` to support `nvidia/nvidia-docker` images.
  - [`crun`](https://github.com/giuseppe/crun): Fast and lightweight alternative to `runc` with same functionality.
  
-Note that currently option `--runtime` is in master branch only. It will be part of the next x11docker release.
-
 Possible runtime configuration in `/etc/docker/daemon.json`:
 ```
 {
@@ -387,7 +385,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
      - Example: `x11docker --cap-default --hostipc --hostnet -- --cap-add ALL --security-opt seccomp=unconfined --privileged -- IMAGENAME`
      - Try with reduced container isolation. If it works, drop options one by one until the needed one(s) are left.
      - If `--cap-add ALL` helps, find the [capability](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) you really need and add only that one.
-     - If `--privileged` helps, your application probably needs a device in `/dev`. Find out which one and share it with e.g. `--device /dev/vboxdrv`. Try also `--sharedir /dev/udev/data:ro`.
+     - If `--privileged` helps, your application probably needs a device in `/dev`. Find out which one and share it with e.g. `--share /dev/vboxdrv`. Try also `--share /dev/udev/data:ro`.
        - Please, don't use `--privileged` as a solution. It allows too much access to host and fatally breaks container isolation. Investigate the permissions your container needs indeed.
    - You can run container applications as root with `--user=root`.
  - A few applications need [DBus](#dbus). Install `dbus` in image and try option `--dbus`. If that does not help, try option `--dbus-system`.
@@ -415,13 +413,13 @@ A special one to check features and container isolation is `x11docker/check`.
 | --- | --- |
 | Xfce4 Terminal | `x11docker x11docker/xfce xfce4-terminal` |
 | GLXgears with hardware acceleration | `x11docker --gpu x11docker/xfce glxgears` |
-| [Kodi media center](https://kodi.tv/) with hardware <br> acceleration, Pulseaudio sound <br> and shared `Videos` folder. <br> For setup look at [ehough/docker-kodi](https://github.com/ehough/docker-kodi). | `x11docker --gpu --pulseaudio --sharedir ~/Videos erichough/kodi`. |
+| [Kodi media center](https://kodi.tv/) with hardware <br> acceleration, Pulseaudio sound <br> and shared `Videos` folder. <br> For setup look at [ehough/docker-kodi](https://github.com/ehough/docker-kodi). | `x11docker --gpu --pulseaudio --share ~/Videos erichough/kodi`. |
 | [XaoS](https://github.com/patrick-nw/xaos) fractal generator | `x11docker patricknw/xaos` |
 | [Telegram messenger](https://telegram.org/) with persistent <br> `HOME` for configuration storage | `x11docker --home xorilog/telegram` |
-| Firefox with shared `Download` folder. | `x11docker --sharedir $HOME/Downloads jess/firefox` |
+| Firefox with shared `Download` folder. | `x11docker --share $HOME/Downloads jess/firefox` |
 | [Tor browser](https://www.torproject.org/projects/torbrowser.html) | `x11docker jess/tor-browser` |
 | Chromium browser | `x11docker -- jess/chromium --no-sandbox` |
-| VLC media player with shared `Videos` <br> folder and Pulseaudio sound | `x11docker --pulseaudio --sharedir=$HOME/Videos jess/vlc` |
+| VLC media player with shared `Videos` <br> folder and Pulseaudio sound | `x11docker --pulseaudio --share=$HOME/Videos jess/vlc` |
 
 
 | Desktop environment <br> (most based on Debian)| x11docker command |
