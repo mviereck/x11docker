@@ -92,7 +92,8 @@ Shared folders:
      --homedir DIR     Specify custom host folder DIR for option --home.
      --homebasedir DIR Custom base folder for option --home.
                        (Compare --cachebasedir below).
-     --share PATH      Share host file or folder PATH. Read-only with PATH:ro 
+     --share PATH      Share host file or folder PATH. Read-only with PATH:ro
+                       Device files in /dev can be shared, too.
 
 Clipboard, sound, printer, language:
  -c, --clipboard       Share clipboard between X servers.
@@ -1351,7 +1352,7 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
 
   # check device files
   while read -r Gpudevice ; do
-    store_runoption device "$Gpudevice"
+    store_runoption volume "$Gpudevice"
   done < <(find /dev/dri /dev/nvidia* /dev/vga_arbiter -maxdepth 0 2>/dev/null ||:)
 
   # check for closed source nvidia driver on host, provide automated installation, warn about disadvantages
@@ -1413,7 +1414,7 @@ setup_webcam() {                # option --webcam: share webcam devices
   # Hotplug support would have to be different.)
   local Webcamdevice=
   while read -r Webcamdevice ; do
-    store_runoption device "$Webcamdevice"
+    store_runoption volume "$Webcamdevice"
   done < <(find /dev/video* -maxdepth 0 2>/dev/null)
   # at least cheese and gnome-ring need some device information from udev.
   store_runoption volume "/run/udev/data:ro"
@@ -1560,7 +1561,7 @@ setup_sound_alsa() {            # option --alsa: share sound devices
   Host sound may not work while container is playing sound and vice versa.
   Alternative: with pulseaudio on host and in image, use option --pulseaudio."
     
-  [ -d /dev/snd ] && store_runoption device "/dev/snd" || {
+  [ -d /dev/snd ] && store_runoption volume "/dev/snd" || {
     warning "Option --alsa: /dev/snd not found.
   Sound support not possible."
     Sharealsa="no"
@@ -3356,10 +3357,9 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
 } >> $Xinitrc
 
 #### docker command setup
-store_runoption() {             # store env, cap, volume or device for docker command
+store_runoption() {             # store env, cap or volume/device for docker command
   # $1  env     store environment variable $2
-  #     volume  store volume path $2
-  #     device  store device $2
+  #     volume  store volume or device path $2
   #     cap     store apability $2
   #     dump    dump all entries of $2
   local Count Line
@@ -3375,13 +3375,6 @@ store_runoption() {             # store env, cap, volume or device for docker co
       } || warning "File or folder not found. Will not share volume:
   ${2:-}"
     ;;
-    device) 
-      [ -e "$(convertpath --subsystem "${2:-}")" ] && {
-        Sharedevicescount=$((Sharedevicescount + 1))
-        Sharedevices[$Sharedevicescount]="${2:-}"
-      } || warning "Device not found:
-  ${2:-}"
-    ;;
     cap)
       for Line in ${2:-} ; do
         Capabilities="$Capabilities
@@ -3392,7 +3385,6 @@ $Line"
       case ${2:-} in
         env) for ((Count=$Containerenvironmentcount ; Count>=1 ; Count --)) ; do echo "${Containerenvironment[$Count]}" ; done ;;
         volume) for ((Count=1 ; Count<=$Sharevolumescount ; Count ++))      ; do echo "${Sharevolumes[$Count]}" ; done ;;
-        device) for ((Count=1 ; Count<=$Sharedevicescount ; Count ++))      ; do echo "${Sharedevices[$Count]}" ; done ;;
         cap)
           while read Line; do
             [ "$Line" ] && case $Capdropall in
@@ -3913,17 +3905,17 @@ create_dockercommand() {        # create command to run docker
     case "$Line" in
       "$Containeruserhome")  Dockercommand="$Dockercommand \\
   --volume $(convertpath --volume "$Containeruserhome" "$Containeruserhome/$(basename $Containeruserhome)")" ;;
-      *) Dockercommand="$Dockercommand \\
-  --volume $(convertpath --volume "$Line")" ;;
+      *) 
+        Dockercommand="$Dockercommand \\
+  --volume $(convertpath --volume "$Line")" 
+        [ "$(cut -c1-5 <<< "$Line")" = "/dev/" ] && {
+          Dockercommand="$Dockercommand \\
+  --device $(convertpath --volume "$Line")"
+          warning "Sharing device file: $Line"
+        }
+      ;;
     esac
   done < <(store_runoption dump volume)
-      
-  # devices: --gpu, --webcam, --alsa
-  while read -r Line; do
-    Dockercommand="$Dockercommand \\
-  --device $(convertpath --volume "$Line") \\
-  --volume $(convertpath --volume "$Line")"
-  done < <(store_runoption dump device)
   
   # --gpu: share NVIDIDA driver installer
   [ -e "$Nvidiadriver" ] && Dockercommand="$Dockercommand \\

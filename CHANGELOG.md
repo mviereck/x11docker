@@ -11,7 +11,8 @@ Project website: https://github.com/mviereck/x11docker
  - `--runtime=RUNTIME`: New option to specify container runtime. 
    Known runtimes: `runc` (docker default), `crun`, `nvidia` and `kata-runtime`.
    [(#138)](https://github.com/mviereck/x11docker/issues/138)
- - `--share=PATH`: Share file or folder. Replaces `--sharedir`.
+ - `--share=PATH`: Share file or folder. Replaces `--sharedir`. 
+   Works for device files in `/dev`, too
 ### Deprecated
  - `--sharedir`: Use `--share` instead.
  - `--no-xhost`: No replacement.
@@ -30,7 +31,7 @@ Project website: https://github.com/mviereck/x11docker
    [(#136)](https://github.com/mviereck/x11docker/issues/136)
 ### Changed
  - `x11docker` without an option: show `x11docker --help` instead of running
-   an unused X server.
+   an empty X server.
 ### Fixed
  - `--init=systemd|openrc|runit`: fixes for several container systems.
  - `--dbus-system`: Regression fix for service file check.
