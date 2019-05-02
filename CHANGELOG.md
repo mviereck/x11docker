@@ -6,24 +6,26 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [5.6.0](https://github.com/mviereck/x11docker/releases/tag/v5.6.0) - 2019-05-02
 ### Added
  - `--runtime=RUNTIME`: New option to specify container runtime. 
    Known runtimes: `runc` (docker default), `crun`, `nvidia` and `kata-runtime`.
    [(#138)](https://github.com/mviereck/x11docker/issues/138)
  - `--share=PATH`: Share file or folder. Replaces `--sharedir`. 
-   Works for device files in `/dev`, too
+   Works for device files in `/dev`, too. Shares targets of symlinks, too.
 ### Deprecated
  - `--sharedir`: Use `--share` instead.
  - `--no-xhost`: No replacement.
  - `--sys-admin`: No replacement.
 ### Fixed
+ - `--clipboard`: Bugfix for `--xephyr` and some other desktop mode X servers.
+   [(#152)](https://github.com/mviereck/x11docker/issues/152)
  - `--dbus-system`: Fixed startup failure with user switching.
  - `--init=sysvinit|runit|openrc`: Always create service to start system DBus.
+ - `elogind` support for debian buster containers. Partial support for Void.
  - `docker commit`: Throw error if running a recursive image command
    created with `docker commit` from an x11docker container.
    [(#146)](https://github.com/mviereck/x11docker/issues/146)
- - `elogind` support for debian buster containers.
 
 ## [5.5.2](https://github.com/mviereck/x11docker/releases/tag/v5.5.2) - 2019-04-08
 ### Added

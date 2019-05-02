@@ -11,7 +11,7 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="5.6.0-beta"
+Version="5.6.0"
 
 usage() {                       # --help: show usage information
   echo "
@@ -904,10 +904,11 @@ writeaccess() {                 # check if useruid $1 has write access to folder
 }
 convertpath() {                 # convert unix and windows pathes
   # $1: Mode:
-  #   --windows   echo windows path               - result: C:/path
-  #   --unix      echo unix path                  - result: /c/path
-  #   --subsystem echo path within subsystem      - result: /cygdrive/c/path  or  /path
-  #   --volume    echo --volume compatible syntax - result: 'unixpath':'containerpath':rw  (or ":ro")
+  #   --windows   echo windows path                - result: C:/path
+  #   --unix      echo unix path                   - result: /c/path
+  #   --subsystem echo path within subsystem       - result: /cygdrive/c/path  or  /path
+  #   --volume    echo --volume compatible syntax  - result: 'unixpath':'containerpath':rw  (or ":ro")
+  #   --container echo path of volume in container - result: /path
   # $2: Path to convert. Arbitrary syntax, can be C:/path, /c/path, /cygdrive/c/path, /path
   #     Can have suffix :rw or :ro. If none is given, return with :rw
   # $3: Optional for --volume: containerpath
@@ -929,9 +930,10 @@ convertpath() {                 # convert unix and windows pathes
   # not on Windows
   [ -z "$Winsubsystem" ] && {
     case $Mode in
-      --volume) echo "'$Path':'${3:-$Path}'$Readwritemode" ;;
       --unix|--subsystem) echo "$Path" ;;
       --windows) warning "Nonsense path conversion $Mode: $Path" ; return 1 ;;
+      --volume) echo "'$Path':'${3:-$Path}'$Readwritemode" ;;
+      --container) echo "${3:-$Path}" ;;
     esac
     return 0
   }
@@ -975,6 +977,7 @@ convertpath() {                 # convert unix and windows pathes
         --unix)      echo "$Winsubpath$Path" ;;
         --subsystem) echo "$Path" ;;
         --volume)    echo "'$Winsubpath$Path':'${3:-$Path}'$Readwritemode" ;;
+        --container) echo "${3:-$Path}" ;;
       esac
     ;;
     *) # Path outside of subsystem
@@ -983,6 +986,7 @@ convertpath() {                 # convert unix and windows pathes
         --unix)      echo "/$Drive$Path" ;;
         --subsystem) echo "$Winsubmount/$Drive$Path" ;;
         --volume)    echo "'/$Drive$Path':'${3:-/$Drive$Path}'$Readwritemode" ;;
+        --container) echo "${3:-/$Drive$Path}" ;;
       esac
     ;;
   esac
@@ -1027,9 +1031,12 @@ myrealpath() {                  # real path of possible symlink
   command -v realpath >/dev/null && {
     realpath "$@"
   } || {
+    [ -h "$@" ] && warning "Could not check symbolic link. 
+  Please install 'realpath' (mostly package 'coreutils'),
+  or provide real file path instead of symbolic link path.
+  Symbolic link: $@"
     echo "$@"   ### FIXME: Maybe workaround with ls
-    verbose -d "Could not check for possible symlink. Missing command realpath.
-  File: $@"
+    return 1
   }
 }
 
@@ -1592,9 +1599,11 @@ setup_clipboard() {             # option --clipboard: create shareclipboard scri
       command -v xclip >/dev/null && {
         Clipsend="xclip -selection clipboard -in"
         Clipreceive="xclip -selection clipboard -out"
-      } || command -v xsel >/dev/null && {
-        Clipsend="xsel --clipboard --input"
-        Clipreceive="xsel --clipboard --output"
+      } || {
+        command -v xsel >/dev/null && {
+          Clipsend="xsel --clipboard --input"
+          Clipreceive="xsel --clipboard --output"
+        }
       } || {
         warning "Option --clipboard: Need either xclip or xsel
   for clipboard sharing with X server $Xserver.
@@ -1610,24 +1619,22 @@ setup_clipboard() {             # option --clipboard: create shareclipboard scri
 while [ ! -s "$Timetosaygoodbye" ] ; do
   # read content of clipboard of first X server
   D1CLIP=\"\$(env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipreceive)\"
-
   # check if clipboard of first X server has changed; if yes, send new content to second X server
   [ \"\$CLIP\" != \"\$D1CLIP\" ] && {
     CLIP=\"\$D1CLIP\"
     env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipreceive | env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipsend
   }
   [ -z \"\$CLIP\" ] && CLIP=' '      # avoid empty string error
-
+  sleep 0.5                          # sleep a bit to avoid high cpu usage
+    
   # read content of clipboard of second X server
   D2CLIP=\"\$(env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipreceive)\"
-
   # check if clipboard of second X server has changed; if yes, send new content to first X server
   [ \"\$CLIP\" != \"\$D2CLIP\" ] && {
     CLIP=\"\$D2CLIP\"
     env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipreceive | env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipsend
   }
   [ -z \"\$CLIP\" ] && CLIP=' '      # avoid empty string error
-
   sleep 0.5                          # sleep a bit to avoid high cpu usage
 done
 " >> $Shareclipboardscript
@@ -3362,18 +3369,27 @@ store_runoption() {             # store env, cap or volume/device for docker com
   #     volume  store volume or device path $2
   #     cap     store apability $2
   #     dump    dump all entries of $2
-  local Count Line
+  local Count Line Path Readwritemode
   case ${1:-} in
     env)
       Containerenvironmentcount=$((Containerenvironmentcount + 1))
       Containerenvironment[$Containerenvironmentcount]="${2:-}"
     ;;
     volume)
-      [ -e "$(convertpath --subsystem "${2:-}")" ] && {
+      Path="$(convertpath --subsystem "${2:-}")"
+      Readwritemode="$(echo "${2:-}" | rev | cut -c1-3 | rev)"
+      [ "$Readwritemode" = ":ro" ] || Readwritemode=""
+      [ -e "$Path" ] && {
         Sharevolumescount=$((Sharevolumescount + 1))
         Sharevolumes[$Sharevolumescount]="${2:-}"
       } || warning "File or folder not found. Will not share volume:
   ${2:-}"
+      [ -h "$Path" ] && myrealpath "$Path" >/dev/null && {
+        note "Option --share: Shared file is a symbolic link. Sharing target, too.
+  Symlink: $Path
+  Target:  $(myrealpath "$Path")"
+        store_runoption volume "$(myrealpath "$Path")$Readwritemode"
+      }
     ;;
     cap)
       for Line in ${2:-} ; do
@@ -3900,7 +3916,7 @@ create_dockercommand() {        # create command to run docker
   [ "$Sharehosthome" = "yes" ] && [ -n "$Containeruserhosthome" ] && Dockercommand="$Dockercommand \\
   --volume $(convertpath --volume "$Containeruserhosthome:rw" "$Containeruserhome")"
   
-  # --sharedir
+  # --share
   while read -r Line; do
     case "$Line" in
       "$Containeruserhome")  Dockercommand="$Dockercommand \\
@@ -3971,7 +3987,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   # create container.CMD.sh -> runs as unprivileged user in container
   # check and set up cgroup on host for systemd or elogind
   # run docker
-  local Line= Wantcgroup=
+  local Line= Wantcgroup= Path=
   echo "#! /usr/bin/env bash"
 
   declare -f mkfile
@@ -4211,15 +4227,16 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
       
   [ "$Sharehosthome" = "no" ] && echo   "  echo 'mkdir -p \$Containeruserhome'"
   echo     "  echo '# Copy files from /etc/skel into empty HOME'"
-  echo     "  echo '[ -d /etc/skel ] && {'"
-  echo     "  echo '  cp -R /etc/skel/. \$Containeruserhome'"
+  echo     "  echo '[ -d /etc/skel ] && [ \"\$(ls -A \"$Containeruserhome\" 2>/dev/null)\" ] && {'"
+  echo     "  echo '  cp -n -R /etc/skel/. \$Containeruserhome'"
   echo     "  echo '}'"
-  [ "$Sharehosthome" = "no" ] && {
-    while read -r Line; do
-      echo "  echo '# create soft links of shared folders to fake home'"
-      echo "  echo 'ln -s \"$Line\" \"\$Containeruserhome\"'"
-    done < <(store_runoption dump volume)
-  }
+  while read -r Line; do
+    Path="$(convertpath --container "$Line")"
+    [ "$Path" = "${Path#$Containeruserhome}" ] && {
+      echo "  echo '# --share: create soft links of shared folders to container home'"
+      echo "  echo 'ln -s \"$(convertpath --container "$Line")\" \"\$Containeruserhome\"'"
+    }
+  done < <(store_runoption dump volume)
 
   [ -n "$Newdisplay" ] && echo "  echo '[ -e /tmp/.X11-unix/X$Newdisplaynumber ] || ln -s /X$Newdisplaynumber /tmp/.X11-unix'"
   
@@ -7231,7 +7248,6 @@ Parsed options:    $Parsedoptions"
   [ "$Sharecups" = "yes" ]      && setup_printer                                # --printer
   [ "$Pulseaudiomode" ]         && setup_sound_pulseaudio                       # --pulseaudio
   [ "$Sharealsa" = "yes" ]      && setup_sound_alsa                             # --alsa
-  [ "$Shareclipboard" = "yes" ] && setup_clipboard                              # --clipboard
   
   #### Create command to run X server [and/or Wayland compositor]
   [ "$Xserver" = "--xorg" ]     && [ -z "$Newxvt" ]              && check_vt    # --vt: find free tty/virtual terminal for Xorg
@@ -7242,6 +7258,7 @@ Parsed options:    $Parsedoptions"
   $Xcommand"
   [ "$Compositorcommand" ]      && verbose -d "Compositor command:
   $Compositorcommand"
+  [ "$Shareclipboard" = "yes" ] && setup_clipboard                              # --clipboard
     
   check_terminalemulator        # find terminal emulator like xterm for error messages and 'docker pull'
   check_passwordfrontend        # check for su/sudo/gksu/pkexec etc.            # --pw
@@ -7331,12 +7348,8 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
-  # CHECK: elogind on void: loginctl is empty. ck-list-sessions, too.
-  # CHECK: su on void not possible.
-  
   # x11docker/check: --alsa: check soundcard iteration
-  
-  # FIXME: myrealpath(): If realpath is missing, the path argument is returned without a check.
+  # FIXME: myrealpath(): If realpath is missing, the path argument is returned without resolving.
   # CHECK: Xwayland with X over IP
   # CHECK: --xpra-xwayland/py3 fails with tor-browser, but not with wine pcmanfm
   # FIXME: --dbus-system: slow startup (90s timeout) in arch containers for unknown reasons.
@@ -7345,6 +7358,8 @@ todo() {
   # BUG x11docker/fluxbox on arch host: background missing, sometimes no context menu. where is the difference?
   # BUG error message window in wayland fails: xterm: no display. should use konsole
   # CHECK: x11docker/xwayland in a nested setup: where is the X socket ??
+  # CHECK: elogind in void container: loginctl is empty. ck-list-sessions, too.
+  # CHECK: su in void containers not possible.
   
   # --init
   # autodetect init system if possible, give a note.

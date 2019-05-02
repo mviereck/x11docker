@@ -385,7 +385,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
      - Example: `x11docker --cap-default --hostipc --hostnet -- --cap-add ALL --security-opt seccomp=unconfined --privileged -- IMAGENAME`
      - Try with reduced container isolation. If it works, drop options one by one until the needed one(s) are left.
      - If `--cap-add ALL` helps, find the [capability](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) you really need and add only that one.
-     - If `--privileged` helps, your application probably needs a device in `/dev`. Find out which one and share it with e.g. `--share /dev/vboxdrv`. Try also `--share /dev/udev/data:ro`.
+     - If `--privileged` helps, your application probably needs a device in `/dev`. Find out which one and share it with e.g. `--share /dev/vboxdrv`. Try also `--share /run/udev/data:ro`.
        - Please, don't use `--privileged` as a solution. It allows too much access to host and fatally breaks container isolation. Investigate the permissions your container needs indeed.
    - You can run container applications as root with `--user=root`.
  - A few applications need [DBus](#dbus). Install `dbus` in image and try option `--dbus`. If that does not help, try option `--dbus-system`.
