@@ -1,5 +1,6 @@
 # x11docker: ![x11docker logo](x11docker.png) Run GUI applications in Docker
 ## Avoid X security leaks and enhance container security
+[![DOI](http://joss.theoj.org/papers/10.21105/joss.01349/status.svg)](https://doi.org/10.21105/joss.01349)
 ### Introduction
 x11docker allows to run graphical desktop applications (and entire desktops) in Docker Linux containers.
  - [Docker](https://en.wikipedia.org/wiki/Docker_(software)) allows to run applications in an isolated [container](https://en.wikipedia.org/wiki/Operating-system-level_virtualization) environment. 
