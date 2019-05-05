@@ -10,6 +10,8 @@ Project website: https://github.com/mviereck/x11docker
 ### Fixed
  - WSL: Add Windows System32 path to `PATH`. Can miss with `sudo`.
    [(#153)](https://github.com/mviereck/x11docker/issues/153)
+ - `--update`, `--update-master`: Support more common `tar` beside `unzip`.
+   [(#115)](https://github.com/mviereck/x11docker/issues/115)
 
 ## [5.6.0](https://github.com/mviereck/x11docker/releases/tag/v5.6.0) - 2019-05-02
 ### Added
