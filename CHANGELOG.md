@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Fixed
+ - WSL: Add Windows System32 path to `PATH`. Can miss with `sudo`.
+   [(#153)](https://github.com/mviereck/x11docker/issues/153)
+
 ## [5.6.0](https://github.com/mviereck/x11docker/releases/tag/v5.6.0) - 2019-05-02
 ### Added
  - `--runtime=RUNTIME`: New option to specify container runtime. 
