@@ -12,6 +12,11 @@ Project website: https://github.com/mviereck/x11docker
    [(#153)](https://github.com/mviereck/x11docker/issues/153)
  - `--update`, `--update-master`: Support more common `tar` beside `unzip`.
    [(#115)](https://github.com/mviereck/x11docker/issues/115)
+ - `--vcxsrv`, `--xwin`: fix for free display number check.
+   [(#155)](https://github.com/mviereck/x11docker/issues/155)
+ - `--pulseaudio` on Windows: Check ultiple drives for cygwin64.
+   [(#145)](https://github.com/mviereck/x11docker/issues/145)
+  
 
 ## [5.6.0](https://github.com/mviereck/x11docker/releases/tag/v5.6.0) - 2019-05-02
 ### Added
