@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
+### Changed
+ - `--wm`: Use image `x11docker/openbox` to provide a window manager.
+   Set `--wm=host` or `--wm=COMMAND`to use a host window manager.
+   [(#158)](https://github.com/mviereck/x11docker/issues/158)
 ### Fixed
  - WSL: Add Windows System32 path to `PATH`. Can miss with `sudo`.
    [(#153)](https://github.com/mviereck/x11docker/issues/153)

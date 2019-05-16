@@ -11,7 +11,7 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="5.6.1-beta"
+Version="5.7.0-beta"
 
 usage() {                       # --help: show usage information
   echo "
@@ -79,11 +79,11 @@ Basic settings: (especially influencing auto choosing X server)
                        on host and OpenGL/Mesa in image.
                        For closed source nvidia drivers regard terminal output.
                        Degrades container isolation. Container access to GPU.
- -w, --wm [=COMMAND]   Use host window manager COMMAND for single applications
+ -w, --wm [=COMMAND]   Provide a window manager for container applications
                        in nested X server options like --xephyr.
-                       Without COMMAND autodetect a host window manager.
-                       To set default autodetected window manager:
-                           update-alternatives --config x-window-manager
+                       By default image x11docker/openbox will be used.
+                       Alternatively specify a host window manager with COMMAND
+                       or set --wm=host to autodetect a host window manager.
 
 Shared folders:
  -m, --home            Share a host folder ~/.local/share/x11docker/imagename
@@ -1650,15 +1650,24 @@ check_windowmanager() {         # option --wm: check window manager
   # Checks x-window-manager, wmctrl and list $Wm_all.
   # Default x-window-manager can be changed with: update-alternatives --config x-window-manager
   
+  [ "$Windowmanager" = "auto" ] && case "$X11dockermode" in
+    "exe") Windowmanager="host" ;;
+    "run") Windowmanager="container" ;;
+  esac
+  
   case $Windowmanager in
     ""|"none") Windowmanager="" ;;
+    "container") 
+      note "Option --wm: Will use image x11docker/openbox to provide
+  a window manager for container applications."
+    ;;
     *)
-      [ "$Windowmanager" = "auto" ] && Windowmanager=""
+      [ "$Windowmanager" = "host" ] && Windowmanager=""
 
       # check if one is chosen with option --wm
       [ "$Windowmanager" ] && {
         command -v $Windowmanager > /dev/null || {
-          warning "Window manager '$Windowmanager' not found.
+          warning "Option --wm: Window manager '$Windowmanager' not found.
   Fallback: Will try to autodetect a window manager on host."
           Windowmanager=""
         }
@@ -1666,8 +1675,8 @@ check_windowmanager() {         # option --wm: check window manager
 
       # try to find window manager from alternatives system
       [ -z "$Windowmanager" ] && [ -e "/etc/alternatives/x-window-manager" ] && {
-        note "Looking for windowmanager linked with x-window-manager.
-  You can set the default one detected in auto mode with
+        note "Option --wm: Looking for windowmanager linked with
+  x-window-manager. You can set the default one detected for --wm=host with
     update-alternatives --config x-window-manager"
         Windowmanager=$(command -v $(ls -l /etc/alternatives/x-window-manager | cut -d ">" -f2))
       }
@@ -1707,17 +1716,17 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
         mate|mate-session) Windowmanager="mate-session -f" ;;
         mate-wm) Windowmanager="marco --sm-disable"  ;;
         openbox) Windowmanager="openbox --sm-disable" ;;
-        gnome-shell|gnome-session) warning "$Windowmanager is known to cause segfaults.
+        gnome-shell|gnome-session) warning "Option --wm: $Windowmanager is known to cause segfaults.
   Please choose another one."
         Windowmanager="gnome-shell --sm-disable" ;;
-        budgie-wm|mutter) warning "$Windowmanager is known to cause segfaults
+        budgie-wm|mutter) warning "Option --wm: $Windowmanager is known to cause segfaults
   in some versions and to cause unusable window sizes in others.
   Please choose or install another one like xfwm4." ;;
       esac
 
       [ "$Windowmanager" ] && case $(basename $Windowmanager | cut -d' ' -f1) in
         enlightenment_start|lxsession|mate-session|cinnamon)
-          note "Using extensive window manager '$Windowmanager'.
+          note "Option --wm: Using extensive window manager '$Windowmanager'.
   It is recommended to install and use a lightweight window manager like
   $Wm_recommended_nodesktop_light"
         ;;
@@ -1725,22 +1734,23 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
 
       [ "$Windowmanager" ] && ! command -v $Windowmanager >/dev/null && warning "No executeable window manager '$Windowmanager' found."
       [ "$Windowmanager" ] && {
-        note "Using host window manager $Windowmanager
+        note "Option --wm: Using host window manager $Windowmanager
   If it is a window manager with a context menu like e. g. openbox,
   you are able to run host applications in the new X server.
   Don't be confused, container applications should not be able to abuse this.
   X extension XTEST is disabled to avoid remote host control with xdotool
   through emulated keypresses or mouse clicks.
   The clipboard within X server $Xserver will be shared, though.
-  Also the container can move or close other windows within this X server."
+  Also the container can move or close other windows within this X server,
+  and can run a keylogger for keypresses within this X server."
       } || {
-        note "Could not detect a host window manager.
+        note "Option --wm=host: Could not detect a host window manager.
   Please specify one with option --wm=WINDOWMANAGER or install one of
   $Wm_good"
       }
     ;;
   esac
-  [ "$Windowmanager" ] && verbose -d "Chosen window manager from host: $Windowmanager"
+  [ "$Windowmanager" ] && verbose -d "Option --wm: Chosen window manager from host: $Windowmanager"
   return 0
 }
 
@@ -3809,6 +3819,7 @@ create_dockercommand() {        # create command to run docker
   local Line= Memory
   
   Dockercommand="$Dockerexe run --tty"
+  Wmdockercommand="$Dockerexe run --rm --detach"
   [ "$Preservecachefiles" = "no" ] && Dockercommand="$Dockercommand --rm"
   case $Interactive in
     yes) Dockercommand="$Dockercommand --interactive" ;;
@@ -3818,6 +3829,8 @@ create_dockercommand() {        # create command to run docker
   [ -z "$Containername" ] && Containername="x11docker_X${Newdisplaynumber}_${Mycookie}_$Codename"
   Dockercommand="$Dockercommand \\
   --name $Containername"
+  Wmdockercommand="$Wmdockercommand \\
+  --name ${Containername}_wm"
   
   [ "$Limitresources" ] && {
     Memory="$(awk "BEGIN {print int($(free -b | awk 'NR==2 {print $7}') * $Limitresources)}")"
@@ -3845,6 +3858,8 @@ create_dockercommand() {        # create command to run docker
       Dockercommand="$Dockercommand \\
   --user root" ;;
   esac
+  Wmdockercommand="$Wmdockercommand \\
+  --user 1999:1999"
   
   [ "$Createcontaineruser" = "yes" ] && {
     # Disable user namespacing to avoid file permission issues with --home or --sharedir. Files need same UID/GID.
@@ -3866,8 +3881,12 @@ create_dockercommand() {        # create command to run docker
   }
   
   # Runtime runc|nvidia|kata
-  [ "$Runtime" ] && Dockercommand="$Dockercommand \\
+  [ "$Runtime" ] && {
+    Dockercommand="$Dockercommand \\
   --runtime='$Runtime'"
+    Wmdockercommand="$Wmdockercommand \\
+  --runtime=$Runtime"
+  }
       
   # capabilities
   [ "$Capdropall" = "yes" ] && Dockercommand="$Dockercommand \\
@@ -3883,6 +3902,11 @@ create_dockercommand() {        # create command to run docker
 
   # SELinux restrictions for containers must be disabled to allow access to X socket. Flags z or Z do not help.
   Dockercommand="$Dockercommand \\
+  --security-opt label=type:container_runtime_t"
+  
+  Wmdockercommand="$Wmdockercommand \\
+  --cap-drop=ALL \
+  --security-opt=no-new-privileges \
   --security-opt label=type:container_runtime_t"
 
   # stop signal for some init systems
@@ -3945,14 +3969,20 @@ create_dockercommand() {        # create command to run docker
       ;;
     esac
   done < <(store_runoption dump volume)
+  [ "$Xauthentication" = "yes" ] && Wmdockercommand="$Wmdockercommand \\
+  --volume $(convertpath --volume "$Xclientcookie" "$Cshare/Xclientcookie")"
   
   # --gpu: share NVIDIDA driver installer
   [ -e "$Nvidiadriver" ] && Dockercommand="$Dockercommand \\
   --volume $(convertpath --volume "$Nvidiadriver:ro" "$Cshare/NVIDIA-$Nvidiaversion.run")"
 
   # X socket will be softlinked to /tmp/.X11-unix in container.CMD.sh
-  [ "$Newxsocket" ] && Dockercommand="$Dockercommand \\
+  [ "$Newxsocket" ] && {
+    Dockercommand="$Dockercommand \\
   --volume $(convertpath --volume "$Newxsocket" "/X$Newdisplaynumber")"
+    Wmdockercommand="$Wmdockercommand \\
+  --volume $(convertpath --volume "$Newxsocket")"
+  }
   
   # Wayland socket will be softlinked to XDG_RUNTIME_DIR in container.CMD.sh
   [ "$Sharewayland" = "yes" ] && Dockercommand="$Dockercommand \\
@@ -3981,6 +4011,10 @@ create_dockercommand() {        # create command to run docker
   while read Line; do
     Dockercommand="$Dockercommand \\
   --env '$Line'"
+    grep -q "DISPLAY"    <<< "$Line" && Wmdockercommand="$Wmdockercommand \\
+  --env '$Line'"
+    grep -q "XAUTHORITY" <<< "$Line" && Wmdockercommand="$Wmdockercommand \\
+  --env '$Line'"
   done < <(store_runoption dump env)
       
   # add custom docker arguments, imagename and imagecommand
@@ -3992,6 +4026,12 @@ create_dockercommand() {        # create command to run docker
     no)  Dockercommand="$Dockercommand $Imagename /bin/sh - $Cshare/container.CMD.sh" ;;  # dockerrc runs containerrootrc with 'docker exec'
     yes) Dockercommand="$Dockercommand $Imagename /bin/sh - $Cshare/containerrootrc"  ;;  # containerrootrc runs container.CMD.sh
   esac
+  
+  Wmdockercommand="$Wmdockercommand \\
+  -- x11docker/openbox sh -c 'openbox --config-file /etc/x11docker/openbox-nomenu.rc'"
+  [ "$Windowmanager" = "container" ] && debugnote "Docker command for window manager:
+  $Wmdockercommand"
+  
   return 0
 }
 
@@ -4375,6 +4415,12 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
 
   #### run docker image ####
   [ "$Winsubsystem" = "MSYS2" ] && echo "export MSYS2_ARG_CONV_EXCL='*'"
+  [ "$Windowmanager" = "container" ] && {
+    echo "Wmcontainerid=\"\$($Wmdockercommand)\""
+    echo '[ "$Wmcontainerid" ] && debugnote "Window manager container: $Wmcontainerid"'
+    #echo '[ "$Wmcontainerid" ] && echo "$Wmcontainerid" >> "'$Wmcontaineridfile'"'    ### FIXME
+    echo '[ "$Wmcontainerid" ] || warning "Option --wm: Failed to run window manager image."'
+  }
   case $Interactive in
     no)  
       echo "read Containerid < <($Dockercommand 2>>$Containerlogfile | rmcr)" 
@@ -5859,10 +5905,12 @@ check_option_interferences() {  # check multiple option interferences, change se
         case $Sharegpu in
           no)  note "Did not find a nice solution to run a seamless application
   on your desktop. (Only insecure option --hostdisplay would work).
-  It is recommended to install xpra or nxagent." ;;
+  It is recommended to install xpra or nxagent 
+  to allow a seamless mode without the need of a window manager from host." ;;
           yes) note "Did not find a nice solution to run a seamless application with
   option --gpu on your desktop. (Only insecure option --hostdisplay would work).
-  It is recommended to install xpra, weston, Xwayland and xdotool." ;;
+  It is recommended to install xpra, weston, Xwayland and xdotool
+  to allow a seamless mode without the need of a window manager from host." ;;
         esac
       }
     ;;
@@ -7008,15 +7056,11 @@ parse_options() {               # parse cli options
       -d|--desktop)    Desktopmode="yes" ;;                # image contains a desktop environment.
       -g|--gpu)        Sharegpu="yes" ;;                        # share files in /dev/dri, allow GPU usage
       -w|--wm)         case ${2:-} in                      # choose host window manager
-                         "n"|"none")    Windowmanager="none" ;;
-                         "")            Windowmanager="auto" ;;
-                         "auto")        Windowmanager="auto" 
-                           note "Option -w, --wm: Use --wm without an option
-  instead of --wm=auto" ;;
-                         "m")           Windowmanager="auto" 
-                           note "Option -w, --wm: Use --wm without an option
-  instead of -wm" ;;
-                         *)             Windowmanager=${2:-} ;;
+                         "n"|"none")                Windowmanager="none" ;;
+                         "host")                    Windowmanager="host" ;;
+                         "container")               Windowmanager="container" ;;
+                         ""|"auto"|"m")             Windowmanager="auto" ;;
+                         *)                         Windowmanager=${2:-} ;;
                        esac
                        shift ; Desktopmode="yes" ;;
       -W|--wayland)    Sharewayland="yes"                  # set up wayland environment, regards --desktop
@@ -7379,6 +7423,8 @@ main "$@"
 #### ToDo notes for development
 todo() {
   # add tar to dependency wiki
+  
+  # MSYS2 start script: cmd //c start "${@//&/^&}"
   
   # BUG --runtime=kata-runtime --nxagent: ALT-GR works wrong.
   # x11docker/check: --alsa: check soundcard iteration
