@@ -79,11 +79,14 @@ Basic settings: (especially influencing auto choosing X server)
                        on host and OpenGL/Mesa in image.
                        For closed source nvidia drivers regard terminal output.
                        Degrades container isolation. Container access to GPU.
- -w, --wm [=COMMAND]   Provide a window manager for container applications
-                       in nested X server options like --xephyr.
-                       By default image x11docker/openbox will be used.
-                       Alternatively specify a host window manager with COMMAND
-                       or set --wm=host to autodetect a host window manager.
+ -w, --wm [=ARG]       Provide a window manager for container applications
+                       for nested X server options like --xephyr.
+                       If available, image x11docker/openbox will be used,
+                       otherwise x11docker looks for a host window manager.
+                       Possible ARG:
+                         host: Enforce autodetection of a host window manager.
+                         COMMAND: COMMAND can be a desired host window manager.
+                         none: Run without a window manager. Same as --desktop.
 
 Shared folders:
  -m, --home            Share a host folder ~/.local/share/x11docker/imagename
@@ -716,7 +719,7 @@ storepid () {                   # store pid $1 and name $2 of background process
   # for use on exit / with trap to clean up with background processes
   # this subroutine has a twin in xinitrc
   echo ${1:-} ${2:-} >> $Bgpidfile
-  verbose -d "Stored background pid ${1:-} of ${2:-}"
+  verbose -d "Stored background pid ${1:-} of ${2:-}" 2>/dev/null
   disown ${1:-} 2>/dev/null ||:
 }
 checkpid() {                    # check if PID $1 is active
@@ -1645,113 +1648,35 @@ done
   esac
   return 0
 }
-check_windowmanager() {         # option --wm: check window manager
-  # Searches for a window manager on on to provide it for single applications in nested X servers like Xephyr.
-  # Checks x-window-manager, wmctrl and list $Wm_all.
-  # Default x-window-manager can be changed with: update-alternatives --config x-window-manager
-  
+check_windowmanager() {         # option --wm: search a host window manager
+
   [ "$Windowmanager" = "auto" ] && case "$X11dockermode" in
     "exe") Windowmanager="host" ;;
     "run") Windowmanager="container" ;;
   esac
   
-  case $Windowmanager in
-    ""|"none") Windowmanager="" ;;
-    "container") 
-      note "Option --wm: Will use image x11docker/openbox to provide
-  a window manager for container applications."
-    ;;
-    *)
-      [ "$Windowmanager" = "host" ] && Windowmanager=""
-
-      # check if one is chosen with option --wm
-      [ "$Windowmanager" ] && {
-        command -v $Windowmanager > /dev/null || {
-          warning "Option --wm: Window manager '$Windowmanager' not found.
-  Fallback: Will try to autodetect a window manager on host."
-          Windowmanager=""
-        }
-      }
-
-      # try to find window manager from alternatives system
-      [ -z "$Windowmanager" ] && [ -e "/etc/alternatives/x-window-manager" ] && {
-        note "Option --wm: Looking for windowmanager linked with
-  x-window-manager. You can set the default one detected for --wm=host with
-    update-alternatives --config x-window-manager"
-        Windowmanager=$(command -v $(ls -l /etc/alternatives/x-window-manager | cut -d ">" -f2))
-      }
-
-      # try to find one in list
-      [ "$Windowmanager" ] || {
-        verbose -d "Searching for window manager in list."
-        for Windowmanager in $Wm_all "" ; do
-          command -v $Windowmanager >/dev/null && break
-        done
-      }
-
-      # try with wmctrl
-      [ -z "$Windowmanager" ] && command -v wmctrl >/dev/null && {
-        verbose -d "Searching for window manager with wmctrl"
-        Windowmanager=$(wmctrl -m | grep 'PID' | awk '{print $2}')                 # wmtrl, if installed, can find already running wm. At first get pid
-        [ -e "/proc/${Windowmanager:--1}" ] && {                                   # check if pid is valid
-          Windowmanager=$(ls -l "/proc/$Windowmanager/exe" | awk '{print $11}')    # if yes, then get /path/executable
-        } || {                                                                     # otherwise, try insecure way over name
-          Windowmanager=$(wmctrl -m | grep 'Name' | awk '{print $2}' | tr '[:upper:]' '[:lower:]')
-        }
-      }
-
-      # check some special cases
-      [ "$Windowmanager" ] && case $(basename $Windowmanager | cut -d' ' -f1) in
-        cinnamon|cinnamon-session) Windowmanager="cinnamon --sm-disable";;
-        compiz) # if none, create minimal config to have useable window decoration and can move windows
-          [ -e "$Hostuserhome/.config/compiz-1/compizconfig/Default.ini" ] || {
-            $Mksu "mkdir -p '$Hostuserhome/.config/compiz-1/compizconfig'"
-            mkfile "$Hostuserhome/.config/compiz-1/compizconfig/Default.ini"
-            echo '[core]
+  for Hostwindowmanager in $Hostwindowmanager $Wm_all FAIL; do
+    command -v "$Hostwindowmanager" >/dev/null && break
+  done
+  command -v "$Hostwindowmanager" >/dev/null || Hostwindowmanager=""
+  
+  case $(basename "$(cut -d' ' -f1 <<< "$Hostwindowmanager")") in
+    cinnamon|cinnamon-session) Hostwindowmanager="cinnamon --sm-disable";;
+    compiz) # if none, create minimal config to have useable window decoration and can move windows
+      [ -e "$Hostuserhome/.config/compiz-1/compizconfig/Default.ini" ] || {
+        $Mksu "mkdir -p '$Hostuserhome/.config/compiz-1/compizconfig'"
+        mkfile "$Hostuserhome/.config/compiz-1/compizconfig/Default.ini"
+        echo '[core]
 s0_active_plugins = core;composite;opengl;decor;resize;move;
 ' >> "$Hostuserhome/.config/compiz-1/compizconfig/Default.ini"
-          }  ;;
-        enlightenment|e17|e16|e19|e20|e) Windowmanager="enlightenment_start" ;;
-        matchbox) Windowmanager="matchbox-window-manager"  ;;
-        mate|mate-session) Windowmanager="mate-session -f" ;;
-        mate-wm) Windowmanager="marco --sm-disable"  ;;
-        openbox) Windowmanager="openbox --sm-disable" ;;
-        gnome-shell|gnome-session) warning "Option --wm: $Windowmanager is known to cause segfaults.
-  Please choose another one."
-        Windowmanager="gnome-shell --sm-disable" ;;
-        budgie-wm|mutter) warning "Option --wm: $Windowmanager is known to cause segfaults
-  in some versions and to cause unusable window sizes in others.
-  Please choose or install another one like xfwm4." ;;
-      esac
-
-      [ "$Windowmanager" ] && case $(basename $Windowmanager | cut -d' ' -f1) in
-        enlightenment_start|lxsession|mate-session|cinnamon)
-          note "Option --wm: Using extensive window manager '$Windowmanager'.
-  It is recommended to install and use a lightweight window manager like
-  $Wm_recommended_nodesktop_light"
-        ;;
-      esac
-
-      [ "$Windowmanager" ] && ! command -v $Windowmanager >/dev/null && warning "No executeable window manager '$Windowmanager' found."
-      [ "$Windowmanager" ] && {
-        note "Option --wm: Using host window manager $Windowmanager
-  If it is a window manager with a context menu like e. g. openbox,
-  you are able to run host applications in the new X server.
-  Don't be confused, container applications should not be able to abuse this.
-  X extension XTEST is disabled to avoid remote host control with xdotool
-  through emulated keypresses or mouse clicks.
-  The clipboard within X server $Xserver will be shared, though.
-  Also the container can move or close other windows within this X server,
-  and can run a keylogger for keypresses within this X server."
-      } || {
-        note "Option --wm=host: Could not detect a host window manager.
-  Please specify one with option --wm=WINDOWMANAGER or install one of
-  $Wm_good"
-      }
-    ;;
+      }  ;;
+    enlightenment|e17|e16|e19|e20|e) Hostwindowmanager="enlightenment_start" ;;
+    matchbox) Hostwindowmanager="matchbox-window-manager"  ;;
+    mate|mate-session) Hostwindowmanager="mate-session -f" ;;
+    mate-wm) Hostwindowmanager="marco --sm-disable"  ;;
+    openbox) Hostwindowmanager="openbox --sm-disable" ;;
   esac
-  [ "$Windowmanager" ] && verbose -d "Option --wm: Chosen window manager from host: $Windowmanager"
-  return 0
+  verbose -d "Detected host window manager: $Hostwindowmanager"
 }
 
 #### X server setup
@@ -3371,10 +3296,6 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
 \$(xrandr)\""
 
   [ "$Xfishtank" = "yes" ] && echo "xfishtank & storepid \$! xfishtank"
-  [ -n "$Windowmanager" ] && {
-    echo "verbose 'Starting host window manager $Windowmanager on new display $Newdisplay'"
-    echo "$Windowmanager & storepid \$! windowmanager"
-  }
 
   [ "$Runfromhost" ] && {
     echo "# custom host command added with option --runfromhost"
@@ -4046,11 +3967,14 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   declare -f waitforfilecreation
   declare -f askyesno
   declare -f escapestring rmcr
-  echo "Hostuser=$Hostuser"
-  echo "Hostusergid=$Hostusergid"
-  echo "Timetosaygoodbye=$Timetosaygoodbye"
+  declare -f storepid
+  export -f storepid
+  echo "Hostuser='$Hostuser'"
+  echo "Hostusergid='$Hostusergid'"
+  echo "Timetosaygoodbye='$Timetosaygoodbye'"
+  echo "export Bgpidfile='$Bgpidfile'"
   echo "$Messagefifofuncs"
-  echo "Messagefile=$Messagefifo"
+  echo "Messagefile='$Messagefifo'"
   echo ""
   echo "verbose -d 'Running dockerrc'"
   [ "$Debugmode" = "yes" ] && {
@@ -4411,14 +4335,36 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
     }
   }
 
-  #### run docker image ####
+  # avoid path conversion in MSYS2 commands
   [ "$Winsubsystem" = "MSYS2" ] && echo "export MSYS2_ARG_CONV_EXCL='*'"
+  #### run window manager ####
+  echo   "Windowmanager=$Windowmanager"
   [ "$Windowmanager" = "container" ] && {
-    echo "Wmcontainerid=\"\$($Wmdockercommand)\""
-    echo '[ "$Wmcontainerid" ] && debugnote "Window manager container: $Wmcontainerid"'
-    #echo '[ "$Wmcontainerid" ] && echo "$Wmcontainerid" >> "'$Wmcontaineridfile'"'    ### FIXME
-    echo '[ "$Wmcontainerid" ] || warning "Option --wm: Failed to run window manager image."'
+    echo "$Dockerexe inspect x11docker/openbox >>$Containerlogfile 2>&1 && {"
+    echo "  Wmcontainerid=\"\$($Wmdockercommand)\""
+    echo '  [ "$Wmcontainerid" ] && debugnote "Window manager container: $Wmcontainerid"'
+    #echo '  [ "$Wmcontainerid" ] && echo "$Wmcontainerid" >> "'$Wmcontaineridfile'"'    ### FIXME
+    echo '  [ "$Wmcontainerid" ] || warning "Option --wm: Failed to run window manager image."'
+    echo '} || {'
+    echo "  note 'Option --wm: Did not find image x11docker/openbox locally
+  to provide a containerized window manager. Please run:
+      docker pull x11docker/openbox
+  If you want to use a host window manager instead and avoid this warning,
+  use option --wm=host or --wm=COMMAND
+  Fallback: Will try to run a host window manager: $Hostwindowmanager'"
+    echo "  Windowmanager=host"
+    echo "}"
   }
+  echo   '[ "$Windowmanager" = "host" ] && {'
+  echo   "  command -v '$Hostwindowmanager' >/dev/null || note 'Did not find a host window manager.
+  Please pull image x11docker/openbox or provide one of:
+  $Wm_good'"
+  echo   "  verbose -d 'Starting host window manager: $Hostwindowmanager'"
+  echo   "  [ \"\$(id -u)\" = '0' ]  && su $Hostuser -c 'env $Newxenv ${Hostwindowmanager:-NO_WM_FOUND} >>$Xinitlogfile 2>&1 & storepid \$! windowmanager'"
+  echo   "  [ \"\$(id -u)\" != '0' ] &&                  env $Newxenv ${Hostwindowmanager:-NO_WM_FOUND} >>$Xinitlogfile 2>&1 & storepid \$! windowmanager"
+  echo   '}'
+  
+  #### run docker image ####
   case $Interactive in
     no)  
       echo "read Containerid < <($Dockercommand 2>>$Containerlogfile | rmcr)" 
@@ -6822,7 +6768,8 @@ declare_variables() {           # declare global variables
   # Main options influencing --auto
   Autochooseserver="yes"                          # option '--auto': automatically choose X server (default)
   Desktopmode="no"                                # option --desktop: image contains a desktop enironment.
-  Windowmanager=""                                # option '-w, --wm': window manager to use. If not given but needed, autodetection is used
+  Windowmanager=""                                # option '-w, --wm': window manager to use: container/host/auto
+  Hostwindowmanager=""                            # option --wm: A window manager from host
   Sharegpu="no"                                   # option '--gpu': Use hardware accelerated OpenGL, share files in /dev/dri
 
   # Screensize and related X server adjustments
@@ -7055,12 +7002,12 @@ parse_options() {               # parse cli options
      #### Influencing X server
       -d|--desktop)    Desktopmode="yes" ;;                # image contains a desktop environment.
       -g|--gpu)        Sharegpu="yes" ;;                        # share files in /dev/dri, allow GPU usage
-      -w|--wm)         case ${2:-} in                      # choose host window manager
+      -w|--wm)         case ${2:-} in                      # choose window manager
                          "n"|"none")                Windowmanager="none" ;;
                          "host")                    Windowmanager="host" ;;
                          "container")               Windowmanager="container" ;;
                          ""|"auto"|"m")             Windowmanager="auto" ;;
-                         *)                         Windowmanager=${2:-} ;;
+                         *)                         Windowmanager="host"; Hostwindowmanager="${2:-}" ;;
                        esac
                        shift ; Desktopmode="yes" ;;
       -W|--wayland)    Sharewayland="yes"                  # set up wayland environment, regards --desktop
