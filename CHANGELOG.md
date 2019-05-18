@@ -10,6 +10,7 @@ Project website: https://github.com/mviereck/x11docker
 ### Changed
  - `--wm`: Use image `x11docker/openbox` to provide a window manager.
    Set `--wm=host` or `--wm=COMMAND`to use a host window manager.
+   Set `--wm=IMAGE` to run local image IMAGE as window manager.
    [(#158)](https://github.com/mviereck/x11docker/issues/158)
 ### Fixed
  - WSL: Add Windows System32 path to `PATH`. Can miss with `sudo`.
@@ -18,7 +19,7 @@ Project website: https://github.com/mviereck/x11docker
    [(#115)](https://github.com/mviereck/x11docker/issues/115)
  - `--vcxsrv`, `--xwin`: fix for free display number check.
    [(#155)](https://github.com/mviereck/x11docker/issues/155)
- - `--pulseaudio` on Windows: Check ultiple drives for cygwin64.
+ - `--pulseaudio` on Windows: Check multiple drives for cygwin64.
    [(#145)](https://github.com/mviereck/x11docker/issues/145)
   
 
