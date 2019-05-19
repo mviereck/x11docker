@@ -1651,19 +1651,19 @@ done
   return 0
 }
 check_windowmanager() {         # option --wm: search a host window manager
-
-#  [ "$Windowmanager" = "auto" ] && case "$X11dockermode" in
-#    "exe") Windowmanager="host" ;;
-#    "run") Windowmanager="container" ;;
-#  esac
-  
-  command -v "$(cut -d' ' -f1 <<< "$Windowmanagercommand")" && Hostwindowmanager="$Windowmanagercommand" && Windowmanager="host"
+  command -v "$(cut -d' ' -f1 <<< "$Windowmanagercommand")" >/dev/null && Hostwindowmanager="$Windowmanagercommand" && Windowmanager="host"
   [ "$Hostwindowmanager" ] || for Hostwindowmanager in $Wm_all FAIL; do
     command -v "$Hostwindowmanager" >/dev/null && break
   done
   [ "$Hostwindowmanager" = "FAIL" ] && Hostwindowmanager=""
-  [ "$Windowmanager" = "auto" ]     && Windowmanager="container"
-  [ "$X11dockermode" = "exe" ]      && Windowmanager="host"
+  [ "$X11dockermode" = "exe" ] && [ "$Windowmanager" != "host" ] && {
+    [ -n "$Windowmanagercommand" ] && [ "$Hostwindowmanager" != "$Windowmanagercommand" ] && note "Option --wm: With option --exe 
+  x11docker does not support a containerized window manager yet.
+  Will run host window manager: ${Hostwindowmanager:-(none found)}"  
+    Windowmanager="host"
+  }
+  [ "$Windowmanager" = "auto" ] && Windowmanager="container"
+  [ "$Windowmanager" = "container" ] && Windowmanagercommand="${Windowmanagercommand:-x11docker/openbox sh -c 'openbox --config-file /etc/x11docker/openbox-nomenu.rc'}"
   
   case $(basename "$(cut -d' ' -f1 <<< "$Hostwindowmanager")") in
     cinnamon|cinnamon-session) Hostwindowmanager="cinnamon --sm-disable";;
@@ -1681,7 +1681,7 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
     mate-wm) Hostwindowmanager="marco --sm-disable"  ;;
     openbox) Hostwindowmanager="openbox --sm-disable" ;;
   esac
-  verbose "Detected host window manager: ${Hostwindowmanager:-none}"
+  verbose "Detected host window manager: ${Hostwindowmanager:-"(none)"}"
 }
 
 #### X server setup
@@ -3756,7 +3756,7 @@ create_dockercommand() {        # create command to run docker
   Dockercommand="$Dockercommand \\
   --name $Containername"
   Wmdockercommand="$Wmdockercommand \\
-  --name ${Containername}_wm"
+  --name ${Containername}_WM"
   
   [ "$Limitresources" ] && {
     Memory="$(awk "BEGIN {print int($(free -b | awk 'NR==2 {print $7}') * $Limitresources)}")"
@@ -3784,9 +3784,10 @@ create_dockercommand() {        # create command to run docker
       Dockercommand="$Dockercommand \\
   --user root" ;;
   esac
+#  Wmdockercommand="$Wmdockercommand \\
+#  --user $Hostuseruid:$Hostusergid"
   Wmdockercommand="$Wmdockercommand \\
-  --user $Hostuseruid:$Hostusergid"
-#  --user 1999:1999"
+  --user 1999:1999"
   
   [ "$Createcontaineruser" = "yes" ] && {
     # Disable user namespacing to avoid file permission issues with --home or --sharedir. Files need same UID/GID.
@@ -4341,12 +4342,12 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   # avoid path conversion in MSYS2 commands
   [ "$Winsubsystem" = "MSYS2" ] && echo "export MSYS2_ARG_CONV_EXCL='*'"
   
-  #### run window manager ####
+  #### run window manager (in image or from host) ####
   echo "Windowmanager=\"$Windowmanager\""
   echo "Windowmanagercommand=\"$Windowmanagercommand\""
   echo "Wmdockercommand=\"$Wmdockercommand\""
   echo '[ "$Windowmanager" = "container" ] && {'
-  echo '  Windowmanagercommand="${Windowmanagercommand:-x11docker/openbox sh -c "openbox --config-file /etc/x11docker/openbox-nomenu.rc"}"'
+#  echo '  Windowmanagercommand="${Windowmanagercommand:-x11docker/openbox sh -c "openbox --config-file /etc/x11docker/openbox-nomenu.rc"}"'
   echo "  $Dockerexe inspect \"\$(cut -d' ' -f1 <<<\"\$Windowmanagercommand\")\" >>$Containerlogfile 2>&1 && {"
   echo '    Wmdockercommand="$Wmdockercommand \
   -- $Windowmanagercommand"'
@@ -4363,7 +4364,6 @@ $Wmdockercommand"'
   echo "      done"
   echo '    }'
   echo '    checkpid "$Pid1pid" && storepid "$Pid1pid" windowcontainerpid1'
-  #echo '    [ "$Wmcontainerid" ] && echo "$Wmcontainerid" >> "'$Wmcontaineridfile'"'    ### FIXME
   echo '    [ -z "$Wmcontainerid" ] && note "Option --wm: Failed to run window manager image: $Windowmanagercommand." && Windowmanager=host ||:'
   echo '  } || {'
   echo "    note \"Option --wm: Did not find window manager image
@@ -4382,7 +4382,7 @@ $Wmdockercommand"'
   echo "  command -v '$Hostwindowmanager' >/dev/null || note 'Did not find a host window manager.
   Please pull image x11docker/openbox or provide one of:
   $Wm_good'"
-  echo "  note 'Starting host window manager: $Hostwindowmanager'"
+  echo "  note 'Option --wm: Starting host window manager: $Hostwindowmanager'"
   echo "  [ \"\$(id -u)\" = '0' ]  && su $Hostuser -c 'env $Newxenv ${Hostwindowmanager:-NO_WM_FOUND} >>$Xinitlogfile 2>&1 & storepid \$! windowmanager'"
   echo "  [ \"\$(id -u)\" != '0' ] &&                  env $Newxenv ${Hostwindowmanager:-NO_WM_FOUND} >>$Xinitlogfile 2>&1 & storepid \$! windowmanager"
   echo '}'
@@ -5359,9 +5359,10 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
   # create start script
   { echo "#! /usr/bin/env bash"
     #[ "$Debugmode" = "yes" ] && echo "set -Eux"
-    echo "storepid() {"
-    echo "  echo \${1:-} \${2:-} >> $Bgpidfile"
-    echo "}"
+    echo "Bgpidfile='$Bgpidfile'"
+    echo "$Messagefifofuncs"
+    echo "Messagefile='$Messagefifo'"
+    declare -f storepid
     [ "$Dbusrunsession" = "yes" ] && command -v dbus-run-session >/dev/null && echo "Dbus=dbus-run-session" || Dbus=
     echo "export $Newxenv"
     [ "$Sharehosthome" = "yes" ] && {
@@ -5373,6 +5374,10 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
     echo "for i in 3 4 6 7 8 9; do"
     echo "  { >&\$i ;} 2>/dev/null && exec >&\$i-"
     echo "done"
+    [ "$Windowmanager" ] && {
+      echo "  note 'Option --wm: Starting host window manager: $Hostwindowmanager'"
+      echo "  ${Hostwindowmanager:-NO_WM_FOUND} >>$Xinitlogfile 2>&1 & storepid \$! windowmanager"
+    }
     echo "\$Dbus $Hostexe $( [ "$Forwardstdin" = "yes" ] && echo "<$Cmdstdinfile") >>$Cmdstdoutlogfile 2>>$Cmdstderrlogfile &"
     echo "storepid \$! hostexe"
   } >> $Imagecommandscript
@@ -7025,8 +7030,8 @@ parse_options() {               # parse cli options
 
      #### Influencing X server
       -d|--desktop)    Desktopmode="yes" ;;                # image contains a desktop environment.
-      -g|--gpu)        Sharegpu="yes" ;;                        # share files in /dev/dri, allow GPU usage
-      -w|--wm)         case ${2:-} in                      # choose window manager
+      -g|--gpu)        Sharegpu="yes" ;;                   # share files in /dev/dri, allow GPU usage
+      -w|--wm)         case "${2:-}" in                    # choose window manager
                          "n"|"none")                Windowmanager="none" ;;
                          "host")                    Windowmanager="host" ;;
                          "container")               Windowmanager="container" ;;
@@ -7395,13 +7400,9 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
-  # add tar to dependency wiki
-  
   # MSYS2 start script: cmd //c start "${@//&/^&}"
   
   # BUG --runtime=kata-runtime --nxagent: ALT-GR works wrong.
-  # x11docker/check: --alsa: check soundcard iteration
-  
   # FIXME: myrealpath(): If realpath is missing, the path argument is returned without resolving.
   # CHECK: Xwayland with X over IP
   # CHECK: --xpra-xwayland/py3 fails with tor-browser, but not with wine pcmanfm
