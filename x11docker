@@ -801,6 +801,9 @@ download() {                    # download file at URL $1 and store it in file $
 makecookie() {                  # bake a cookie
   mcookie 2>/dev/null || echo $RANDOM$RANDOM$RANDOM$RANDOM$RANDOM$RANDOM | cut -b1-32
 }
+wincmd() {                      # execute a command on windows with cmd.exe
+  cmd /C "${@//&/^&}" 2>&1 | rmcr
+}
 
 #### file routines
 waitforfilecreation() {         # similar to inotify-wait: wait up to 15s for file $1 to be created
@@ -2932,8 +2935,8 @@ mode=$Screensize
       # workaround as nxagent ignores XAUTHORITY and fails to start if option -auth is given. Option -ac above complies "xhost +" and is disabled in xinitrc
       [ "$Xauthentication" = "yes" ] && {
         $Mksu "cp '$Hostxauthority' '$Xservercookie'"
-        $Mksu "$Xauthexe -f '$Xclientcookie' add   $Newdisplay . $(makecookie)"
-        $Mksu "$Xauthexe -f '$Xclientcookie' nlist $Newdisplay | $Xauthexe -f '$Xservercookie' nmerge -"
+        $Mksu "xauth -f '$Xclientcookie' add   $Newdisplay . $(makecookie)"
+        $Mksu "xauth -f '$Xclientcookie' nlist $Newdisplay | xauth -f '$Xservercookie' nmerge -"
       }
       # fake NXclient
       export NX_CLIENT="$Cachefolder/nx_client"
@@ -3024,9 +3027,9 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   echo "Usemkfifo=$Usemkfifo"
   
   # declaring functions echoes them into xinitrc
-  declare -f storepid
-  declare -f rocknroll waitfortheend saygoodbye
-  declare -f rmcr disable_xhost
+  declare -f storepid rocknroll waitfortheend saygoodbye
+  declare -f disable_xhost
+  declare -f wincmd rmcr
 
   echo "$Messagefifofuncs"
   echo "Messagefile=$Messagefifo"
@@ -3057,72 +3060,76 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
       esac
 
       [ "$Xauthentication" = "yes" ] && {
-        echo "# create new XAUTHORITY cookies"
-        echo "cd $Sharefolder"
-        [ "$Xserver" = "--nxagent" ] && {
-          echo "cp $Xclientcookie $Xclientcookie.bak   # nxagent workaround cookie was created before starting xinit"
-          echo "export XAUTHORITY=$Xclientcookie.bak"
-        }
-
-        [ "$Trusted" = "yes" ] && Trusted="trusted" || Trusted="untrusted"
-        echo     ":> $Xclientcookie"
-        [ "$Xserver" = "--hostdisplay" ] && {
-          [ -s "$Hostxauthority" ] && echo "export XAUTHORITY=$Hostxauthority"
-          echo   "xhost | rmcr | grep -q 'SI:localuser:$Hostuser' || { xhost +SI:localuser:$Hostuser | rmcr ; Xhostentry='yes' ; }"
-        }
-        case "$Hostssh" in
-          no)
-            case $Xserver in
-              --vcxsrv) ;;
-              *)
-                echo "verbose 'Requesting $Trusted cookie from X server'"
+        echo         "# create new XAUTHORITY cookies"
+        echo         "cd $Sharefolder"
+        echo         ":> $Xclientcookie"
+        case "$Xserver" in
+          --vcxsrv|--xwin)
+            echo     "set -x"
+            echo     "wincmd '$Xauthexe -v -i -f Xclientcookie add :$Newdisplaynumber . $(makecookie)'"
+            echo     "# create prepared cookie with localhost identification disabled by ffff, needed if X socket is shared. ffff means 'familiy wild'"
+            echo     "Cookie=\"\$(wincmd '$Xauthexe -i -f Xclientcookie nlist' | grep -v -i Ignoring | sed -e 's/^..../ffff/')\""
+            echo     "echo \"\$Cookie\" | wincmd '$Xauthexe -v -i -f Xclientcookie nmerge -'"
+            echo     "verbose -d \"Created cookie: \$(wincmd '$Xauthexe -f Xclientcookie list')\""
+            echo     "set +x"
+          ;;
+          *)
+            [ "$Xserver" = "--nxagent" ] && {
+              echo   "cp $Xclientcookie $Xclientcookie.bak   # nxagent workaround cookie was created before starting xinit"
+              echo   "export XAUTHORITY=$Xclientcookie.bak"
+            }
+            [ "$Trusted" = "yes" ] && Trusted="trusted" || Trusted="untrusted"
+            [ "$Xserver" = "--hostdisplay" ] && {
+              [ -s "$Hostxauthority" ] && echo "export XAUTHORITY=$Hostxauthority"
+              echo   "xhost | rmcr | grep -q 'SI:localuser:$Hostuser' || { xhost +SI:localuser:$Hostuser | rmcr ; Xhostentry='yes' ; }"
+            }
+            case "$Hostssh" in
+              no)
                 echo "echo 'Requesting $Trusted cookie from X server'"
-                echo "$Xauthexe -v -i -f Xclientcookie generate $Newdisplay . $Trusted timeout 3600 | rmcr"
+                echo "xauth -v -i -f Xclientcookie generate $Newdisplay . $Trusted timeout 3600"
+              ;;
+              yes)
+                echo "verbose 'Can not use cookies created over SSH. Will bake one myself.'"
               ;;
             esac
-          ;;
-          yes)
-            echo "verbose 'Can not use cookies created over SSH. Will bake one myself.'"
-          ;;
-        esac
-        echo     "export XAUTHORITY=$Xclientcookie"
-        echo     "[ -s '$Xclientcookie' ] || { "
-        echo     "  [ '$Trusted' = 'untrusted' ] && note 'Could not create untrusted cookie. 
+            echo     "[ -s '$Xclientcookie' ] || { "
+            echo     "  [ '$Trusted' = 'untrusted' ] && note 'Could not create untrusted cookie. 
   Maybe your X server misses extension SECURITY.'"
-        [ "$Xserver" = "--hostdisplay" ] && {
-          [ "$Sharehostipc" = "no" ] && [ "$Hostssh" = "no" ] && {
-            echo "  warning 'Memory access failures and rendering glitches
+            [ "$Xserver" = "--hostdisplay" ] && {
+              [ "$Sharehostipc" = "no" ] && [ "$Hostssh" = "no" ] && {
+                echo "  warning 'Memory access failures and rendering glitches
   may occure due to unrestricted cookie.
   Avoid them with isolation breaking option --hostipc,
   or use another X server option like --xpra or --nxagent.'"
-          }
-          echo   "  warning 'SECURITY RISK! Keylogging and remote host control "
-          echo   "  may be possible! Better avoid using option --hostdisplay,"
-          echo   "  rather use --xpra or --nxagent.'"
-          echo   "  cp $Hostxauthority $Xclientcookie"
-        }
-        echo     "}"
-        echo     "ls -l $Xclientcookie"
-        echo     "[ -s '$Xclientcookie' ] || { "
-        echo     "  # still no cookie? try to create one without extension security"
-        echo     "  verbose -d 'Failed to retrieve trusted cookie from X server. Will bake one myself.'"
-        echo     "  echo 'Failed to retrieve trusted cookie from X server. Will bake one myself.'"
-        echo     "  $Xauthexe -v -i -f Xclientcookie add :$Newdisplaynumber . $(makecookie) | rmcr"
-        echo     "  ls -l $Xclientcookie"
-        echo     "}"
-        echo     "# create prepared cookie with localhost identification disabled by ffff, needed if X socket is shared. ffff means 'familiy wild'"
-        echo     "Cookie=\"\$($Xauthexe -i -f Xclientcookie nlist | rmcr | sed -e 's/^..../ffff/')\""
-        echo     "echo \"\$Cookie\" | $Xauthexe -v -i -f Xclientcookie nmerge - | rmcr"
-        echo     "cp $Xclientcookie $Xservercookie"
-        echo     "[ -s '$Xclientcookie' ] || warning 'Cookie creation failed!'"
-        echo     "verbose -d \"Created cookie: \$($Xauthexe -f Xclientcookie list 2>&1 | rmcr)\""
-        echo     "chmod 644 $Xclientcookie"
+              }
+              echo   "  warning 'SECURITY RISK! Keylogging and remote host control "
+              echo   "  may be possible! Better avoid using option --hostdisplay,"
+              echo   "  rather use --xpra or --nxagent.'"
+              echo   "  cp $Hostxauthority $Xclientcookie"
+            }
+            echo     "}"
+            echo     "[ -s '$Xclientcookie' ] || { "
+            echo     "  # still no cookie? try to create one without extension security"
+            echo     "  verbose -d 'Failed to retrieve trusted cookie from X server. Will bake one myself.'"
+            echo     "  echo 'Failed to retrieve trusted cookie from X server. Will bake one myself.'"
+            echo     "  xauth -v -i -f Xclientcookie add :$Newdisplaynumber . $(makecookie)"
+            echo     "  ls -l $Xclientcookie"
+            echo     "}"
+            echo     "# create prepared cookie with localhost identification disabled by ffff, needed if X socket is shared. ffff means 'familiy wild'"
+            echo     "Cookie=\"\$(xauth -i -f Xclientcookie nlist | sed -e 's/^..../ffff/')\""
+            echo     "echo \"\$Cookie\" | xauth -v -i -f Xclientcookie nmerge -"
+            echo     "verbose -d \"Created cookie: \$(xauth -f Xclientcookie list 2>&1)\""
+          ;;
+        esac
+        echo         "ls -l $Xclientcookie"
+        echo         "cp $Xclientcookie $Xservercookie"
+        echo         "[ -s '$Xclientcookie' ] || warning 'Cookie creation failed!'"
+        echo         "chmod 644 $Xclientcookie"
         [ "$Xserver" = "--hostdisplay" ] && echo "[ '\$Xhostentry' = 'yes' ] && env XAUTHORITY=$Hostxauthority xhost -SI:localuser:$Hostuser | rmcr"
         [ "$Xserver" = "--nxagent" ]     && echo "rm $Xclientcookie.bak"
       }
-
-      echo "export XAUTHORITY=$Xclientcookie"
-      echo "[ '$Xauthentication' = 'no' ] || [ ! -s '$Xclientcookie' ] && unset XAUTHORITY && warning '$Xserver: X server $Newdisplay runs without cookie authentication.'"
+      echo           "export XAUTHORITY=$Xclientcookie"
+      echo           "[ '$Xauthentication' = 'no' ] || [ ! -s '$Xclientcookie' ] && unset XAUTHORITY && warning '$Xserver: X server $Newdisplay runs without cookie authentication.'"
 
       case "$Xserver" in
         --hostdisplay) ;;   # do not change host settings
@@ -5697,7 +5704,7 @@ check_hostxenv() {              # check environment variables for host X display
   [ -z "$XAUTHORITY" ]   && [ -e "$Hostuserhome/.Xauthority" ] && XAUTHORITY="$Hostuserhome/.Xauthority"
   [ "$Hostssh" = "yes" ] && [ -e "$Hostuserhome/.Xauthority" ] && XAUTHORITY="$Hostuserhome/.Xauthority"
   [ "${XAUTHORITY:-}" ]  && {
-    $Mksu "$Xauthexe -i -f ${XAUTHORITY:-} nlist $Hostdisplay 2>/dev/null | rmcr | $Xauthexe -f $Hostxauthority nmerge - 2>/dev/null"
+    $Mksu "xauth -i -f ${XAUTHORITY:-} nlist $Hostdisplay 2>/dev/null | rmcr | xauth -f $Hostxauthority nmerge - 2>/dev/null"
     chown $Hostuser $Hostxauthority
     chmod 600 $Hostxauthority
     export XAUTHORITY
@@ -5928,25 +5935,28 @@ check_option_interferences() {  # check multiple option interferences, change se
 
   # check xauth
   [ "$Xserver" != "--tty" ] && [ "$Xauthentication" = "yes" ] && {
-    command -v xauth.exe >/dev/null && Xauthexe="xauth.exe"
-    command -v xauth     >/dev/null && Xauthexe="xauth"
-    command -v $Xauthexe    >/dev/null || {
-      warning "Command 'xauth' not found.
+    case "$Winsubsystem" in
+      "")
+        command -v xauth >/dev/null || {
+          warning "Command 'xauth' not found.
   Please install 'xauth' to allow X cookie authentication.
+  Securing X access with cookie authentication is not possible.
   Fallback: Disabling X authentication protocol. (option --no-auth)
   $Wikipackages"
-      Xauthentication="no"
-    }
-    command -v $Xauthexe | grep -q VcXsrv && {
-      Vcxsrvversion="$(vcxsrv.exe -version 2>&1 | rmcr | grep Release | cut -d' ' -f2)"
-      verlt "$Vcxsrvversion" "1.20.0.1" && {
-        warning "Please update X server VcXsrv to at least version 1.20.0.1.
-  Your currently installed version $Vcxsrvversion provides a buggy xauth.exe.
-  Can not create a cookie for secure X connections.
+          Xauthentication="no"
+        }
+      ;;
+      *)
+        Xauthexe="$(command -v "$Cygwinpath/bin/xauth.exe")"
+        [ "$Xauthexe" ] || {
+          warning "Command 'xauth.exe' not found.
+  Please install Cygwin/X and make sure 'xauth.exe' is available.
+  Securing X access with cookie authentication is not possible.
   Fallback: Disabling X authentication protocol. (option --no-auth)"
-        Xauthentication="no"
-      }
-    }
+          Xauthentication="no"
+        }
+      ;;
+    esac
   }
 
   # --fullscreen is nonsense on tty at all. Avoids weston error on tty.
@@ -6733,15 +6743,17 @@ declare_variables() {           # declare global variables
   Nvidiadriver=""                                 # option '--gpu': nvidia driver installer for container in [...]local/share/x11docker
   Hostcanwatchroot=""                             # x11docker can watch root processes yes/no
   Runsinterminal=""                               # x11docker runs in a terminal yes/no
-  
+  Usemkfifo="yes"                                 # Not on Windows nor with kata-runtime
+
+  # MS Windows
   Winsubsystem=""                                 # Windows subsystem WSL, MSYS2 or CYGWIN
   Winsubmount=""                                  # path within subsystem to mounted Windows drives
   Winsubpath=""                                   # path within Windows to subsystem files
   Winpidlist=""                                   # List of stored Windows pids (currently vcxsrv.exe on WSL only)
   Winpty=""                                       # Path to winpty for --interactive on Windows
   Cygwinpath=""                                   # Path to cygwin64/bin on Windows
-  
-  Usemkfifo="yes"                                 # Not on Windows nor with kata-runtime
+  Vcxsrvpath=""                                   # path to vcxsrv.exe (--vcxsrv)
+  Xauthexe=""                                     # Path to 'xauth.exe' in Cygwin
   
   # Gaining root privileges to run docker
   Passwordfrontend=""                             # --pw: method to prompt for password. one of pkexec, su, sudo, gksu, gksudo, kdesu, kdesudo, lxsu, lxsudo, beesu, auto, none
@@ -6798,8 +6810,7 @@ declare_variables() {           # declare global variables
   Xservercookie=Xservercookie                     # generated X server cookie
   Xclientcookie=Xclientcookie                     # generated X client cookie. Normally same as $Xservercookie, except for --hostdisplay and --nxagent
   Xkbkeymapfile=xkb_keymap                        # file to store output of host keymap in xinitrc: 'setxkbmap -display $Hostdisplay -print'
-  Vcxsrvpath=""                                   # path to vcxsrv.exe and xauth.exe (--vcxsrv)
-
+  
   # stdin stdout stderr
   Forwardstdin="no"                               # option --stdin: forward stdin to image command
   Cmdstdinfile=stdin                              # stdin for image command. fifo/named pipe to forward stdin of x11docker to image command
@@ -6828,7 +6839,6 @@ declare_variables() {           # declare global variables
   Xkblayout=""                                    # option '--keymap': Layout for keymap, compare /usr/share/X11/xkb/symbols
   Xtest=""                                        # enable extension Xtest yes/no. If empty, yes for --xpra/--xdummy/--xvfb, otherwise no
   Xcomposite=""                                   # +extension COMPOSITE yes/no
-  Xauthexe="xauth"                                # either 'xauth' or 'xauth.exe'
   Xoverip="no"                                    # Connect to X over TCP yes/no
 
   # Main options influencing --auto

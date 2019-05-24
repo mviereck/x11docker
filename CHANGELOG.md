@@ -13,6 +13,8 @@ Project website: https://github.com/mviereck/x11docker
    Set `--wm=IMAGE` to run local image IMAGE as window manager.
    [(#158)](https://github.com/mviereck/x11docker/issues/158)
 ### Fixed
+ - `--vcxsrv`: Depend on `xauth.exe` in Cygwin/X.
+   [(#160)](https://github.com/mviereck/x11docker/issues/160)
  - `--gpu` with automated NVIDIA drivr installation:
    Don't set `--security-opt=no-new-privileges`.
    [(#162)](https://github.com/mviereck/x11docker/issues/162)
