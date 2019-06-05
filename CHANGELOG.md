@@ -12,22 +12,27 @@ Project website: https://github.com/mviereck/x11docker
    Set `--wm=host` or `--wm=COMMAND`to use a host window manager.
    Set `--wm=IMAGE` to run local image IMAGE as window manager.
    [(#158)](https://github.com/mviereck/x11docker/issues/158)
+### Removed
+ - `--vcxsrv`: X server on Windows. Use `runx` on MS Windows instead
+   to provide X for x11docker:  https://github.com/mviereck/runx
+ - `--pulseaudio` on MS Windows is no longer supported.
+ - `--ps`, `--trusted`, `--untrusted`, `--no-xtest`, `--no-xhost`, `--silent`,
+   `--stderr`, `--stdout`, `--nothing`, `--cachedir`, `--sharedir`,`--starter`,
+   `--tini`, `--systemd`, `--openrc`, `--runit`, `--sysvinit`, `--no-init`,
+   `--sys-admin`: Removed; search this changelog for possible replacements in 
+   noted in 'Deprecated' chapters.
+   
 ### Fixed
- - `--vcxsrv`: Depend on `xauth.exe` in Cygwin/X.
-   [(#160)](https://github.com/mviereck/x11docker/issues/160)
- - `--gpu` with automated NVIDIA drivr installation:
+ - `--gpu` with automated NVIDIA driver installation:
    Don't set `--security-opt=no-new-privileges`.
    [(#162)](https://github.com/mviereck/x11docker/issues/162)
  - WSL: Add Windows System32 path to `PATH`. Can miss with `sudo`.
    [(#153)](https://github.com/mviereck/x11docker/issues/153)
  - `--update`, `--update-master`: Support more common `tar` beside `unzip`.
    [(#115)](https://github.com/mviereck/x11docker/issues/115)
- - `--vcxsrv`, `--xwin`: fix for free display number check.
+ - `--xwin`: fix for free display number check.
    Add `xwininfo` to dependency check of `--xwin`.
    [(#155)](https://github.com/mviereck/x11docker/issues/155)
- - `--pulseaudio` on Windows: Check multiple drives for cygwin64.
-   Share pulseaudio cookie.
-   [(#161)](https://github.com/mviereck/x11docker/issues/161)
   
 
 ## [5.6.0](https://github.com/mviereck/x11docker/releases/tag/v5.6.0) - 2019-05-02

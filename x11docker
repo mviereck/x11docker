@@ -11,7 +11,7 @@
 # Type 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="5.7.0-beta"
+Version="6.0.0-beta"
 
 usage() {                       # --help: show usage information
   echo "
@@ -55,7 +55,7 @@ Dependencies on host:
   It will check for them on startup and show messages if some are missing.
   Core list of recommended packages:
    * Recommended to allow security and convenience:
-       X servers: Xephyr xpra nxagent (on Windows: VcXsrv or Xwin)
+       X servers: Xephyr xpra nxagent (on Windows: Cygwin/X or WSL with runx)
        X tools:   xauth xclip xrandr xhost xinit
    * Advanced GPU support: weston Xwayland xpra xdotool
   See also: https://github.com/mviereck/x11docker/wiki/Dependencies
@@ -177,8 +177,7 @@ Special X server options:
                        Output of environment variables on stdout. (--showenv)
                        Along with option --gpu an invisible setup with Weston,
                        Xwayland and xdotool is used (instead of Xdummy or Xvfb).
-     --xwin            X server for Windows to run with Cygwin/X.
-     --vcxsrv          X server for Windows to run with MSYS2, Cygwin or WSL.
+     --xwin            X server to run in Cygwin/X on MS Windows.
 
 Wayland without X:
  -W, --wayland         Automatically set up a Wayland environment.
@@ -503,7 +502,7 @@ $(cat $Bgpidfile 2>/dev/null)"
       checkpid $Pid && {        
         case $Name in
           xinit)                  killpid $Pid $Name xinit ;;
-          Xserver)                killpid $Pid $Name 'Xorg|Xephyr|Xvfb|Xwayland|nxagent|vcxsrv.exe|Xwin' ;;
+          Xserver)                killpid $Pid $Name 'Xorg|Xephyr|Xvfb|Xwayland|nxagent|XWin' ;;
           containershell)         killpid $Pid $Name x11docker ;;
           windowmanager)          killpid $Pid $Name ;;
           xpraserver|xpraclient)  killpid $Pid $Name xpra ;;
@@ -553,9 +552,6 @@ $(pspid $Pid)"
       }
     done < <(tac $Bgpidfile)
   }
-  
-  # Possibly stored Windows pids to terminate. Currently only VcXsrv in WSL.
-  [ "$Winpidlist" ] && for Line in $Winpidlist ; do verbose -d "Terminating Windows PID $Line: $(taskkill.exe /F /PID $Line 2>&1 | rmcr)" ; done
 
   saygoodbye "finish"
 
@@ -1492,13 +1488,11 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
   warning "Option --pulseaudio allows container applications
   to catch your audio output and microphone input."
   
+  [ -z "$Pulseaudiomode" ] && Pulseaudiomode="socket" 
   [ "$Pulseaudiomode" = "auto" ] && {
-    case "$Winsubsystem" in
-      "") Pulseaudiomode="socket" ;;
-      *)  Pulseaudiomode="tcp" ;;
-    esac
+    Pulseaudiomode="socket" 
     [ "$Containeruser" = "$Hostuser" ] || Pulseaudiomode="tcp"
-    [ "$Runtime" = "kata-runtime" ] && Pulseaudiomode="tcp"
+    [ "$Runtime" = "kata-runtime" ]    && Pulseaudiomode="tcp"
   }
   
   case $Pulseaudiomode in
@@ -1529,47 +1523,17 @@ enable-shm = false
 $(nl -ba <$Pulseaudioconf)"
     ;;
     tcp)
-      case $Winsubsystem in
-        "")
-          read Lowerport Upperport < /proc/sys/net/ipv4/ip_local_port_range 2>/dev/null
-          [ "$Lowerport" ] || Lowerport=33000
-          [ "$Upperport" ] || Upperport=60000
-          while : ; do
-            Pulseaudioport="$(shuf -i $Lowerport-$Upperport -n1)"
-            ss -lpn | grep -q ":$Pulseaudioport " || break
-          done
-          [ -e "$Hostuserhome/.config/pulse/cookie" ] && cp "$Hostuserhome/.config/pulse/cookie" "$Sharefolder/pulsecookie" || note "Option --pulseaudio: Did not find cookie
+      read Lowerport Upperport < /proc/sys/net/ipv4/ip_local_port_range 2>/dev/null
+      [ "$Lowerport" ] || Lowerport=33000
+      [ "$Upperport" ] || Upperport=60000
+      while : ; do
+        Pulseaudioport="$(shuf -i $Lowerport-$Upperport -n1)"
+        ss -lpn | grep -q ":$Pulseaudioport " || break
+      done
+      [ -e "$Hostuserhome/.config/pulse/cookie" ] && cp "$Hostuserhome/.config/pulse/cookie" "$Sharefolder/pulsecookie" || note "Option --pulseaudio: Did not find cookie
   $Hostuserhome/.config/pulse/cookie"
-        ;;
-        *)
-          Pulseaudiopath="$Cygwinpath/bin/pulseaudio.exe"
-          [ -e "$(convertpath --subsystem "$Pulseaudiopath")" ] && { 
-            note "Option --pulseaudio: Pulseaudio daemon will continue
-  to run after x11docker terminates. You can kill pulseaudio manually 
-  in Windows cmd.exe with:
-    taskkill.exe /PID pulseaudio.exe /F"
-          } || { 
-            note "Option --pulseaudio: Did not find C:/cygwin64/bin/pulseaudio.exe.
-  Please install Cygwin with pulseaudio.
-  Fallback: Disabling option --pulseaudio"
-            Pulseaudiomode=""
-          }
-          Line="$(netstat -n)"
-          while :; do
-            Pulseaudioport="$(shuf -i 34000-54000 -n1)"
-            grep -q $Pulseaudioport <<<"$Line" || break
-          done
-          env XDG_RUNTIME_DIR="" HOME="" cmd.exe /C "$Pulseaudiopath -D 2>&1" 2>&1 >>$Messagelogfile
-          for Count in 1 2 3 4 5 6 7 8 9 10; do
-            [ -e "$Cygwinpath/home/$Hostuser/.config/pulse/cookie" ] && break
-          done
-          [ -e "$Cygwinpath/home/$Hostuser/.config/pulse/cookie" ] && cp "$Cygwinpath/home/$Hostuser/.config/pulse/cookie" "$Sharefolder/pulsecookie" || note "Option --pulseaudio: No pulse cookie found in
-  $Cygwinpath/home/$Hostuser/.config/pulse/cookie"
-        ;;
-      esac
       [ "$Pulseaudiomode" ] && store_runoption env "PULSE_SERVER=tcp:$Hostip:$Pulseaudioport"
     ;;
-    "") ;;
     *)
       warning "Option --pulseaudio: Unknown pulseaudio mode: $Pulseaudiomode
   Allowed are --pulseaudio=socket or --pulseaudio=tcp
@@ -1620,7 +1584,7 @@ setup_clipboard() {             # option --clipboard: create shareclipboard scri
       Shareclipboard="no"
       return 1
     ;;
-    --nxagent|--xpra|--xpra-xwayland|--vcxsrv|--xwin) ;; # have their own clipboard management, look at create_xcommand().
+    --nxagent|--xpra|--xpra-xwayland|--xwin) ;; # have their own clipboard management, look at create_xcommand().
     
     --xephyr|--xorg|--xdummy|--xdummy-xwayland|--xvfb|--xwayland|--weston-xwayland)
       # check for either xclip or xsel
@@ -1676,7 +1640,7 @@ check_windowmanager() {         # option --wm: search a host window manager
     command -v "$Hostwindowmanager" >/dev/null && break
   done
   [ "$Hostwindowmanager" = "FAIL" ] && Hostwindowmanager=""
-  [ "$X11dockermode" = "exe" ] && [ "$Windowmanager" != "host" ] && {
+  [ "$X11dockermode" = "exe" ] && [ "$Windowmanager" != "host" ] && [ -n "$Windowmanager" ] && {
     [ -n "$Windowmanagercommand" ] && [ "$Hostwindowmanager" != "$Windowmanagercommand" ] && note "Option --wm: With option --exe 
   x11docker does not support a containerized window manager yet.
   Will run host window manager: ${Hostwindowmanager:-(none found)}"  
@@ -1720,7 +1684,6 @@ check_xserver() {               # check chosen X server, auto-choose X server
     [ "$Scaling" ]              && [ "$Sharegpu" = "no" ]        && Xserver="--xpra"
     [ "$Hosttty" = "yes" ]                                       && Xserver="--xorg"
     [ -z "$Hostdisplay" ]       && [ -n "$Hostwaylandsocket" ]   && Xserver="--weston-xwayland"
-    [ "$Winsubsystem" ]                                          && Xserver="--vcxsrv"
     [ "$Winsubsystem" = "CYGWIN" ]                               && Xserver="--xwin"
     [ "$Sharewayland" = "yes" ] && { [ -n "$Hostwaylandsocket" ] && [ "$Desktopmode" = "no" ] && Xserver="--hostwayland" || Xserver="--weston" ; }
   }
@@ -1815,8 +1778,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
   [ "$Xserver" = "--weston-xwayland" ] && { check_xdepends --weston-xwayland || Xserver="--kwin-xwayland" ; }
   [ "$Xserver" = "--weston" ]          && { check_xdepends --weston          || Xserver="--kwin" ; }
   [ "$Xserver" = "--xdummy-xwayland" ] && { check_xdepends --xdummy-xwayland || Xserver="--kwin-xwayland" ; }
-  [ "$Xserver" = "--xwin" ]            && { check_xdepends --xwin            || Xserver="--vcxsrv" ; }
-  [ "$Xserver" = "--vcxsrv" ]          && { check_xdepends --vcxsrv          || Xserver="--hostdisplay" ; }
+  [ "$Xserver" = "--xwin" ]            && { check_xdepends --xwin            || Xserver="--hostdisplay" ; }
 
   case $Xserver in
     --weston|--kwin) Sharewayland="yes" ;;
@@ -1831,7 +1793,6 @@ check_xserver() {               # check chosen X server, auto-choose X server
   [ "$Xserver" = "--xephyr" ]         && {  check_xdepends --xephyr || {
                                               check_xdepends --kwin-xwayland   && Xserver="--kwin-xwayland"
                                               check_xdepends --hostdisplay     && [ "$Desktopmode" = "no" ] && Xserver="--hostdisplay"
-                                              check_xdepends --vcxsrv          && Xserver="--vcxsrv"
                                               check_xdepends --xwin            && Xserver="--xwin"
                                               check_xdepends --nxagent         && Xserver="--nxagent"
                                               check_xdepends --weston-xwayland && Xserver="--weston-xwayland"
@@ -1860,10 +1821,9 @@ check_xserver() {               # check chosen X server, auto-choose X server
     To run from TTY or within Wayland, install:
       weston and Xwayland" ;;
       CYGWIN)    error "Did not find a possibility to provide a display.
-  Please install Xwin (xinit package) in Cygwin,
-  or VcXsrv on Windows host." ;;
+  Please install XWin (xinit package) and xwininfo in Cygwin." ;;
       MSYS2|WSL) error "Did not find a possibility to provide a display.
-  Please install X server VcXsrv on Windows host." ;;
+  Please provide an X server with runx. https://github.com/mviereck/runx" ;;
     esac
   }
 
@@ -1939,35 +1899,19 @@ check_xdepends() {              # check dependencies on host for X server option
         Return=1
       } ;;
     --xwin)
-      command -v "$Cygwinpath/bin/XWin.exe" >/dev/null || {
-        $Message "${1:-}: Xwin not found. 
+      command -v XWin >/dev/null || {
+        $Message "${1:-}: XWin not found. 
   Need 'xinit' package in Cygwin (X11 section)."
         Return=1
       }
-      command -v "$(convertpath --subsystem "$Xwininfoexe")" >/dev/null || {
-        $Message "${1:-}: xwininfo.exe not found. 
-  Need 'xwininfo' package either from Cygwin (X11 section) or in VcXsrv."
+      command -v xwininfo >/dev/null || {
+        $Message "${1:-}: xwininfo not found. 
+  Need 'xwininfo' package from Cygwin/X (X11 section)."
         Return=1
-      }
-      ;;
-    --vcxsrv)
-      Vcxsrvexe="$(convertpath --subsystem "$Vcxsrvpath/vcxsrv.exe")"
-      #Vcxsrvexe="$(escapestring "$Vcxsrvexe")"
-      command -v "$Vcxsrvexe" >/dev/null || {
-        $Message "${1:-}: X server VcXsrv not found."
-        Return=1
-        [ "$Winsubsystem" ] && note "To run x11docker within MSYS2, Cygwin or WSL on MS Windows,
-  please install either X server VcXsrv or Xwin on Cygwin.
-  Searching for vcxsrv.exe in: 
-    C:/Program Files/VcXsrv"
-#      [ -d "$Vcxsrvpath" ] && export PATH="${PATH:-}:$Vcxsrvpath"
-      }
-#      Vcxsrvpath="$(echo "$Vcxsrvpath" | rev | cut -d/ -f2- | rev)"
-      [ -z "$Winsubsystem" ] && Return=1 && $Message "${1:-}: X server VcXsrv is available on MS Windows only."
-    ;;
+      } ;;
   esac
   case $Xserver in
-    --vcxsrv|--xwin)
+    --xwin)
       [ "$Hostip" ] || {
         warning "${1:-}: Failed to get host IP address."
         Return=1
@@ -2073,7 +2017,8 @@ check_screensize() {            # check physical and virtual screen size (also o
       Maxyaxis=$(echo "$Line" | cut -dx -f2 | cut -d ' ' -f1)
     }
     [ -z "$Maxxaxis" ] && command -v xwininfo >/dev/null && {
-      Line="$(xwininfo -root -stats | rmcr)"
+#      Line="$(xwininfo -root -stats | rmcr)"
+      Line="$(xwininfo -root -stats)"
       Maxxaxis=$(echo "$Line" | grep Width  | rev | cut -d' ' -f1 | rev)
       Maxyaxis=$(echo "$Line" | grep Height | rev | cut -d' ' -f1 | rev)
     }
@@ -2208,7 +2153,7 @@ check_newxenv() {               # find free display, create $Newxenv
   [ "$Newdisplaynumber" ] || for ((Newdisplaynumber=100 ; Newdisplaynumber <=1000 ; Newdisplaynumber++)); do
     [ -n "$(find /tmp/.X11-unix/X$Newdisplaynumber /tmp/.X$Newdisplaynumber-lock ${XDG_RUNTIME_DIR:-}/wayland-$Newdisplaynumber 2>/dev/null)" ] || { 
       case $Xserver in
-        --vcxsrv|--xwin) grep -q -E 'Authorization|Absolute|MIT-MAGIC-COOKIE' <<< "$(wincmd "$Xwininfoexe -display $Hostip:$Newdisplaynumber -root")" || break ;;
+        --xwin) grep -q -E 'Authorization|Absolute|MIT-MAGIC-COOKIE' <<< "$(xwininfo -display $Hostip:$Newdisplaynumber -root 2>&1)" || break ;;
         *) break ;;
       esac
     }
@@ -2216,7 +2161,7 @@ check_newxenv() {               # find free display, create $Newxenv
 
   # X over IP/TCP
   [ "$Xoverip" ] || case $Xserver in
-    --vcxsrv|--xwin) Xoverip="yes" ;;
+    --xwin) Xoverip="yes" ;;
   esac
   case $Winsubsystem in
     MSYS2|CYGWIN) Xoverip="yes" ;;
@@ -2250,7 +2195,7 @@ check_newxenv() {               # find free display, create $Newxenv
   
   #### create $Newxenv: collection of environment variables to access new X from host (e.g. in xinitrc)
   case $Xserver in
-    --xpra|--xephyr|--xpra-xwayland|--weston-xwayland|--hostdisplay|--xorg|--xdummy|--xvfb|--xdummy-xwayland|--xwayland|--kwin-xwayland|--nxagent|--vcxsrv|--xwin)
+    --xpra|--xephyr|--xpra-xwayland|--weston-xwayland|--hostdisplay|--xorg|--xdummy|--xvfb|--xdummy-xwayland|--xwayland|--kwin-xwayland|--nxagent|--xwin)
       Newxenv="DISPLAY=$Newdisplay"
       [ "$Xauthentication" = "yes" ] && Newxenv="$Newxenv XAUTHORITY=$Xclientcookie"
       Newxenv="$Newxenv XSOCKET=$Newxsocket"
@@ -2277,7 +2222,7 @@ check_newxenv() {               # find free display, create $Newxenv
   
   # X / Wayland environment variables for container
   case $Xserver in
-    --xpra|--xephyr|--xpra-xwayland|--weston-xwayland|--hostdisplay|--xorg|--xdummy|--xvfb|--xdummy-xwayland|--xwayland|--kwin-xwayland|--nxagent|--vcxsrv|--xwin)
+    --xpra|--xephyr|--xpra-xwayland|--weston-xwayland|--hostdisplay|--xorg|--xdummy|--xvfb|--xdummy-xwayland|--xwayland|--kwin-xwayland|--nxagent|--xwin)
       store_runoption env "DISPLAY=$Newdisplay"
       store_runoption env "XAUTHORITY=$Cshare/Xclientcookie"
     ;;
@@ -2532,12 +2477,8 @@ create_xcommand() {             # create command to start X server and/or Waylan
   # X cookie authentication
   case $Xauthentication in
     yes)
-      case $Xserver in
-        --vcxsrv) Xserveroptions="$Xserveroptions \\
-  -auth '$(convertpath --windows "$Xservercookie")'" ;;
-        *) Xserveroptions="$Xserveroptions \\
+      Xserveroptions="$Xserveroptions \\
   -auth $Xservercookie" ;;
-      esac ;;
     no) [ "$Xserver" = "--hostdisplay" ] || warning "Option --no-auth: SECURITY RISK!
   Allowing access to X server for everyone."
       Xserveroptions="$Xserveroptions \\
@@ -2559,12 +2500,12 @@ create_xcommand() {             # create command to start X server and/or Waylan
   
   # X extension COMPOSITE
   [ "$Xcomposite" ] || case $Xserver in
-    --nxagent|--vcxsrv|--xwin) Xcomposite="no" ;;
+    --nxagent|--xwin) Xcomposite="no" ;;
     *) Xcomposite="yes" ;;
   esac
   case $Xcomposite in
     yes)
-      # Most X servers have extension "Composite", recent Xwayland and VcXsrv calls it "COMPOSITE".
+      # Old X servers have extension "Composite", recent ones call it "COMPOSITE".
       Xserveroptions="$Xserveroptions \\
   +extension Composite +extension COMPOSITE" ;;
     no)
@@ -2665,7 +2606,8 @@ create_xcommand() {             # create command to start X server and/or Waylan
   --title='@title@ [in container]' \\
   -z0 --quality 100 \\
   --no-speaker --no-pulseaudio \\
-  --notifications=no \\
+  --notifications=no"
+      xpra --help | grep -q modal && Xpraclientcommand="$Xpraclientcommand \\
   --modal-windows=no"
       [ "$Desktopmode" = "yes" ] && Xpraclientcommand="$Xpraclientcommand \\
   --title='$Codename on $Newdisplay (shift+F11 toggles fullscreen)'"
@@ -2978,10 +2920,8 @@ esac
 </keystrokes>' >> "$NXAGENT_KEYSTROKEFILE"
     ;;
 
-    --vcxsrv|--xwin)
-      [ "$Xserver" = "--vcxsrv" ] && Xcommand="$Vcxsrvexe :$Newdisplaynumber"
-      [ "$Xserver" = "--xwin" ]   && Xcommand="$Cygwinpath/bin/Xwin :$Newdisplaynumber"
-      
+    --xwin)
+      Xcommand="$(command -v XWin) :$Newdisplaynumber"
       Xcommand="$Xcommand \\
   $Xserveroptions \\
  "
@@ -3065,17 +3005,6 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
         echo         "# create new XAUTHORITY cookies"
         echo         "cd $Sharefolder"
         echo         ":> $Xclientcookie"
-        case "$Xserver" in
-          --vcxsrv|--xwin)
-            echo     "set -x"
-            echo     "wincmd '$Xauthexe -v -i -f Xclientcookie add :$Newdisplaynumber . $(makecookie)'"
-            echo     "# create prepared cookie with localhost identification disabled by ffff, needed if X socket is shared. ffff means 'familiy wild'"
-            echo     "Cookie=\"\$(wincmd '$Xauthexe -i -f Xclientcookie nlist' | grep -v -i Ignoring | sed -e 's/^..../ffff/')\""
-            echo     "echo \"\$Cookie\" | wincmd '$Xauthexe -v -i -f Xclientcookie nmerge -'"
-            echo     "verbose -d \"Created cookie: \$(wincmd '$Xauthexe -f Xclientcookie list')\""
-            echo     "set +x"
-          ;;
-          *)
             [ "$Xserver" = "--nxagent" ] && {
               echo   "cp $Xclientcookie $Xclientcookie.bak   # nxagent workaround cookie was created before starting xinit"
               echo   "export XAUTHORITY=$Xclientcookie.bak"
@@ -3121,8 +3050,6 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
             echo     "Cookie=\"\$(xauth -i -f Xclientcookie nlist | sed -e 's/^..../ffff/')\""
             echo     "echo \"\$Cookie\" | xauth -v -i -f Xclientcookie nmerge -"
             echo     "verbose -d \"Created cookie: \$(xauth -f Xclientcookie list 2>&1)\""
-          ;;
-        esac
         echo         "ls -l $Xclientcookie"
         echo         "cp $Xclientcookie $Xservercookie"
         echo         "[ -s '$Xclientcookie' ] || warning 'Cookie creation failed!'"
@@ -3135,7 +3062,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
 
       case "$Xserver" in
         --hostdisplay) ;;   # do not change host settings
-        --vcxsrv|--xwin) ;; # xhost does not work over tcp
+        --xwin) ;; # xhost does not work over tcp
         *)
           case $Xauthentication in
             yes)
@@ -3159,7 +3086,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
       esac
       
       case $Xserver in
-        --hostdisplay|--vcxsrv|--xwin|--nxagent) ;;
+        --hostdisplay|--xwin|--nxagent) ;;
         *)
           # Keyboard layout
           command -v setxkbmap >/dev/null && {
@@ -3183,7 +3110,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
 
       [ "$Shareclipboard" = "yes" ] && [ -n "$Hostdisplay" ] && {
         case $Xserver in
-          --xpra|--xpra-xwayland|--nxagent|--vcxsrv|--xwin) ;;  # have their own clipboard management
+          --xpra|--xpra-xwayland|--nxagent|--xwin) ;;           # have their own clipboard management
           --hostdisplay) ;;                                     # already same clipboard
           *)                                                    # synchronizing between different X servers
             echo "# option '-c, --clipboard': Run clipboard script "
@@ -3215,7 +3142,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
       echo "  xrandr | grep -q primary || xrandr --output \$(xrandr | grep ' connected' | head -n1 | cut -d' ' -f1) --primary"
       echo "  echo \$(xrandr | grep primary | cut -d' ' -f1)"
       echo "}"
-      [ "$Xserver" != "--vcxsrv" ] && echo "Output=\$(getprimary)"
+      echo "Output=\$(getprimary)"
     ;;
   esac
 
@@ -3330,7 +3257,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
       echo "}"
     ;;
   esac
-  [ -n "$Newdisplay" ] && [ "$Xserver" != "--vcxsrv" ] && echo "verbose \"Output of xrandr on $Newdisplay
+  [ -n "$Newdisplay" ] && echo "verbose \"Output of xrandr on $Newdisplay
 \$(xrandr)\""
 
   [ "$Xfishtank" = "yes" ] && echo "xfishtank & storepid \$! xfishtank"
@@ -3449,7 +3376,7 @@ check_containerhome() {         # options --home, --homedir, --homebasedir: chec
       Homebasefolder=""
     }
   }
-  [ "$Homebasefolder" ] || case $Winsubsystem in
+  [ "$Homebasefolder" ] || case $Winsubsystem in ### FIXME 
     "") Homebasefolder="$Containeruserhome/.local/share/x11docker" ;;
     *)  Homebasefolder="$(convertpath --subsystem "$(cmd.exe /C "echo %userprofile%" | rmcr)")/x11docker/home" ;;
   esac
@@ -3676,9 +3603,6 @@ setup_capabilities() {          # check linux capabilities needed by container
     store_runoption cap "CHOWN"
     Switchcontaineruser="yes"
   }
-      
-  # option --sys-admin
-  [ "$Capsysadmin" = "yes" ] && store_runoption cap "SYS_ADMIN"
   
   case $Initsystem in
     none|tini) ;;
@@ -3823,7 +3747,7 @@ create_dockercommand() {        # create command to run docker
   --user 1999:1999"
   
   [ "$Createcontaineruser" = "yes" ] && {
-    # Disable user namespacing to avoid file permission issues with --home or --sharedir. Files need same UID/GID.
+    # Disable user namespacing to avoid file permission issues with --home or --share. Files need same UID/GID.
     $Dockerexe run --help | grep -q -- '--userns' && Dockercommand="$Dockercommand \\
   --userns host"
   }
@@ -4032,9 +3956,6 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
     echo "export '$Line'"
     verbose -d "Found docker environment variable: $Line"
   done < <(env | grep -e '^DOCKER_')
-  
-  # possible Windows pathes to docker.exe
-  [ "$Winsubsystem" ] && echo "export PATH=\"$(convertpath --subsystem "C:/Program Files/docker"):$(convertpath --subsystem "C:/Program Files/Docker/Docker/resources/bin"):${PATH}\""
 
   echo "# check whether docker daemon is running, get docker info"
   echo "$Dockerexe info >>$Dockerinfofile 2>>$Containerlogfile  || {
@@ -5284,7 +5205,7 @@ $(tail $Compositorlogfile)"
 
   # check and watch X server
   case $Xserver in
-    --tty|--hostdisplay|--hostwayland|--weston|--kwin|--vcxsrv) ;;
+    --tty|--hostdisplay|--hostwayland|--weston|--kwin) ;;
     *)
       Xinitpid="$(pgrep -a xinit 2>/dev/null | grep "xinit $Xinitrc" | awk '{print $1}')"
       checkpid "$Xinitpid"   && setonwatchpidlist $Xinitpid xinit     && storepid $Xinitpid xinit
@@ -5443,15 +5364,7 @@ $(pstree -p $Hostexepid 2>&1 ||:)"
   return 0
 } 
 start_pulseaudiotcp() {         # option --pulseaudio=tcp: load Pulseaudio TCP module (authenticated with container IP)
-  case $Winsubsystem in
-    "") 
-      $Mksu "pactl load-module module-native-protocol-tcp  port=$Pulseaudioport auth-ip-acl=${Containerip:-"127.0.0.1"} 2>&1" >>$Messagelogfile 
-    ;;
-    *)  
-      env XDG_RUNTIME_DIR="" HOME="" cmd.exe /C "$Cygwinpath/bin/pactl.exe load-module module-native-protocol-tcp  port=$Pulseaudioport auth-ip-acl=${Containerip:-$Hostip} auth-anonymous=1 2>&1" 2>&1 >>$Messagelogfile 
-      warning "Option --pulseaudio: Authentication for Pulseaudio TCP clients is disabled."
-    ;;
-  esac
+  $Mksu "pactl load-module module-native-protocol-tcp  port=$Pulseaudioport auth-ip-acl=${Containerip:-"127.0.0.1"} 2>&1" >>$Messagelogfile 
   return 0
 }
 start_compositor() {            # start Wayland compositor Weston or KWin
@@ -5480,22 +5393,7 @@ start_xserver() {               # start X server
   case $Xserver in
     --xpra|--xephyr|--xdummy|--xvfb|--xwayland|--nxagent|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland)
       $Mksu "exec env WAYLAND_DISPLAY=$Newwaylandsocket      xinit $Xinitrc -- $Xcommand             >> $Xinitlogfile  2>&1 " ;;
-#    --xwin) Xcommand="$(echo $Xcommand | sed 's/\\//g')" ;   xinit $Xinitrc -- $Xcommand             >> $Xinitlogfile  2>&1   ;;
-    --xwin) 
-      set -x
-      Xcommand="$(echo $Xcommand | sed 's/\\//g')"
-      #wincmd "$Cygwinpath/bin/xinit $Xinitrc -- $Xcommand  >> $Xinitlogfile  2>&1 "
-      export -f wincmd
-      $Mksu "wincmd                                                           '$Xcommand'            >> $Xinitlogfile  2>&1 & echo \$! >$Cachefolder/Xserverpid"
-      Xserverpid=$(cat "$Cachefolder/Xserverpid")
-      [ "$Xserverpid" ] && {
-        storepid $Xserverpid Xserver
-        setonwatchpidlist $Xserverpid Xserver
-      } || error "Failed to receive PID of X server."
-      $Mksu "exec                                             bash $Xinitrc                          >> $Xinitlogfile  2>&1 "
-      set +x
-    ;;
-      #xinit $Xinitrc -- $Xcommand             >> $Xinitlogfile  2>&1   ;;
+    --xwin) Xcommand="$(echo $Xcommand | sed 's/\\//g')" ;   xinit $Xinitrc -- $Xcommand             >> $Xinitlogfile  2>&1   ;;
     --xorg)
       case $Xlegacywrapper in
         yes) $Mksu   "exec                                   xinit $Xinitrc -- $Xcommand             >> $Xinitlogfile  2>&1 " ;;
@@ -5503,28 +5401,6 @@ start_xserver() {               # start X server
       esac
     ;;
     --hostdisplay|--hostwayland|--weston|--kwin|--tty)
-      $Mksu "exec                                             bash $Xinitrc                          >> $Xinitlogfile  2>&1 " ;;
-    --vcxsrv)
-      [ "$Winsubsystem" = "WSL" ] && Tasklistold="$(tasklist.exe | rmcr | grep vcxsrv.exe | awk '{print $2}')"
-      $Mksu "exec env MSYS2_ARG_CONV_EXCL='*'                                  $Xcommand             >> $Xinitlogfile  2>&1 & echo \$! >$Cachefolder/Xserverpid"
-      Xserverpid=$(cat "$Cachefolder/Xserverpid")
-      [ "$Xserverpid" ] && {
-        storepid $Xserverpid Xserver
-        setonwatchpidlist $Xserverpid Xserver
-      } || error "Failed to receive PID of X server."
-      # Wait for VcXsrv to accept connections
-#      for Count in $(seq -s' ' 25); do
-#        sleep 0.2
-#        verbose "$Count. access check for $Xserver"
-#        grep -q -E 'Authorization|Absolute|MIT-MAGIC-COOKIE' <<< "$(xwininfo.exe -display $Newdisplay -root 2>&1)" && break
-#      done
-      # bug in WSL: WSL does not terminate Windows process on TERM for processes started in bash. Workaround to get Windows pid.
-      [ "$Winsubsystem" = "WSL" ] && {
-        Tasklistnew="$(tasklist.exe | rmcr | grep vcxsrv.exe | awk '{print $2}')"
-        Winpidlist="$Winpidlist $(echo "$Tasklistold
-$Tasklistnew" | sort | uniq -u)"
-        verbose -d "Stored Windows pids: $Winpidlist"
-      }
       $Mksu "exec                                             bash $Xinitrc                          >> $Xinitlogfile  2>&1 " ;;
   esac
 
@@ -5574,24 +5450,12 @@ check_host() {                  # check host environment
   esac
   
   [ "$Winsubsystem" ] && {
-    export PATH="$PATH:$(convertpath --subsystem "C:/Program Files/docker"):$(convertpath --subsystem "C:/Program Files/Docker/Docker/resources/bin")"
-    Dockerexe="docker.exe"
-    Hostsystem="Windows-$Winsubsystem"
-    
-    for Drive in C D E F G H I J K L M N O; do
-      Cygwinpath="$Drive:/cygwin64"
-      [ -d "$(convertpath --subsystem "$Cygwinpath")" ] && break
-    done
-    [ -d "$(convertpath --subsystem "$Cygwinpath")" ] || Cygwinpath=""
-    
-    Vcxsrvpath="C:/Program Files/VcXsrv"
-    [ -d "$(convertpath --subsystem "$Vcxsrvpath")" ] || Vcxsrvpath=""
-    
-    [ -e "$(convertpath --subsystem $Vcxsrvpath/xwininfo.exe)" ]     && Xwininfoexe="$Vcxsrvpath/bin/xwininfo.exe"
-    [ -e "$(convertpath --subsystem $Cygwinpath/bin/xwininfo.exe)" ] && Xwininfoexe="$Cygwinpath/bin/xwininfo.exe"
+    command -v docker.exe >/dev/null || export PATH="$PATH:$(convertpath --subsystem "C:/Program Files/docker"):$(convertpath --subsystem "C:/Program Files/Docker/Docker/resources/bin")"
+    Dockerexe="$(command -v docker.exe)"
+    Hostsystem="MSWindows-$Winsubsystem"
   }
   
-  # Check host IP. Needed for --pulseaudio=tcp, --vcxsrv and --xwin
+  # Check host IP. Needed for --pulseaudio=tcp and --xwin
   case $Winsubsystem in
     "") Hostip="$(ip -4 -o a | grep 'docker0' | awk '{print $4}' | cut -d/ -f1)"
       [ "$Hostip" ] || Hostip="$(ip -4 -o a | awk '{print $4}' | cut -d/ -f1 | grep -v 127.0.0.1 | head -n1)" ;;
@@ -5726,7 +5590,8 @@ check_hostxenv() {              # check environment variables for host X display
   [ -z "$XAUTHORITY" ]   && [ -e "$Hostuserhome/.Xauthority" ] && XAUTHORITY="$Hostuserhome/.Xauthority"
   [ "$Hostssh" = "yes" ] && [ -e "$Hostuserhome/.Xauthority" ] && XAUTHORITY="$Hostuserhome/.Xauthority"
   [ "${XAUTHORITY:-}" ]  && {
-    $Mksu "xauth -i -f ${XAUTHORITY:-} nlist $Hostdisplay 2>/dev/null | rmcr | xauth -f $Hostxauthority nmerge - 2>/dev/null"
+#    $Mksu "xauth -i -f ${XAUTHORITY:-} nlist $Hostdisplay 2>/dev/null | rmcr | xauth -f $Hostxauthority nmerge - 2>/dev/null"
+    $Mksu "xauth -i -f ${XAUTHORITY:-} nlist $Hostdisplay 2>/dev/null | xauth -f $Hostxauthority nmerge - 2>/dev/null"
     chown $Hostuser $Hostxauthority
     chmod 600 $Hostxauthority
     export XAUTHORITY
@@ -5760,10 +5625,11 @@ check_hostxenv() {              # check environment variables for host X display
 create_cachefiles() {           # create empty cache files owned by unprivileged user
   # create base cache folder
   [ "$Cachebasefolder" ] || {
-    case $Winsubsystem in
-      "") Cachebasefolder="$Hostuserhome/.cache/x11docker" ;;
-      *)  Cachebasefolder="$(convertpath --subsystem "$(cmd.exe /C "echo %userprofile%")" | rmcr)/x11docker/cache" ;;
-    esac
+    Cachebasefolder="$Hostuserhome/.cache/x11docker"
+#    case $Winsubsystem in
+#      "") Cachebasefolder="$Hostuserhome/.cache/x11docker" ;;
+#      *)  Cachebasefolder="$(convertpath --subsystem "$(cmd.exe /C "echo %userprofile%")" | rmcr)/x11docker/cache" ;;
+#    esac
   }
   Cachebasefolder="$(convertpath --subsystem "$Cachebasefolder")"
   $Mksu "mkdir -p $Cachebasefolder"         || error "Could not create cache folder
@@ -5957,29 +5823,14 @@ check_option_interferences() {  # check multiple option interferences, change se
 
   # check xauth
   [ "$Xserver" != "--tty" ] && [ "$Xauthentication" = "yes" ] && {
-    case "$Winsubsystem" in
-      "")
-        command -v xauth >/dev/null || {
-          warning "Command 'xauth' not found.
+    command -v xauth >/dev/null || {
+      warning "Command 'xauth' not found.
   Please install 'xauth' to allow X cookie authentication.
   Securing X access with cookie authentication is not possible.
   Fallback: Disabling X authentication protocol. (option --no-auth)
   $Wikipackages"
-          Xauthentication="no"
-        }
-      ;;
-      *)
-        Xauthexe="$(command -v "$Cygwinpath/bin/xauth.exe")"
-        [ "$Xauthexe" ] || {
-          warning "Command 'xauth.exe' not found.
-  Please install Cygwin/X and make sure 'xauth.exe' is available.
-  Securing X access with cookie authentication is not possible.
-  Fallback: Disabling X authentication protocol. (option --no-auth)
-  Severe reduction of desired X server security!"
-          Xauthentication="no"
-        }
-      ;;
-    esac
+      Xauthentication="no"
+    }
   }
 
   # --fullscreen is nonsense on tty at all. Avoids weston error on tty.
@@ -5996,10 +5847,6 @@ check_option_interferences() {  # check multiple option interferences, change se
         note "Option $Xserver does not support hardware acceleration.
   Fallback: using software rendering, disabling option --gpu"
         Sharegpu="no"
-      ;;
-      --vcxsrv)
-        note "Option --gpu with --vcxsrv: X server VcXsrv has some GPU
-  issues with NVIDIA cards. Best --gpu support is given with --xwin in Cygwin/X."
       ;;
     esac
   }
@@ -6043,7 +5890,7 @@ check_option_interferences() {  # check multiple option interferences, change se
       ;;
     esac
     case $Xserver in
-      --xpra|--xpra-xwayland|--hostdisplay|--kwin|--weston|--tty|--vcxsrv|--xwin) ;;
+      --xpra|--xpra-xwayland|--hostdisplay|--kwin|--weston|--tty|--xwin) ;;
       *) note "Sharing picture clips with option --clipboard
   is only possible with options --xpra, --xpra-xwayland and --hostdisplay." ;;
     esac
@@ -6180,7 +6027,7 @@ check_option_interferences() {  # check multiple option interferences, change se
   # --output-count
   [ "$Outputcount" != "1" ] && {
     case $Xserver in
-      --xephyr|--weston|--kwin|--weston-xwayland|--kwin-xwayland|--vcxsrv|--xwin)
+      --xephyr|--weston|--kwin|--weston-xwayland|--kwin-xwayland|--xwin)
         [[ "$Outputcount" =~ ^[1-9]$ ]] || {
           note "Option --output-count: Value must be one of 1 2 3 4 5 6 7 8 9
   Disabling invalid value $Outputcount"
@@ -6245,6 +6092,11 @@ check_option_interferences() {  # check multiple option interferences, change se
   to the X server. If no application window appears, but no obvious error
   is shown, please check your firewall settings. Compare issue #108 on github." ;;
     esac
+    [ "$Pulseaudiomode" ] && {
+      note "Option --pulseaudio is not supported on MS Windows.
+  Fallback: Disabling option --pulseaudio"
+      Pulseaudiomode=""
+    }
   }
   
   # check XDG_RUNTIME_DIR
@@ -6270,7 +6122,7 @@ check_option_interferences() {  # check multiple option interferences, change se
     no)
       [ "$Sharehosthome" = "yes" ] && {
         warning "Option --home is not supported with option --user=RETAIN.
-  You can use option --sharedir to share host directories.
+  You can use option --share to share host directories.
   To use option --home, you can check uid and gid of container user
   and run x11docker with --user=uid:gid instead of --user=RETAIN.
   Fallback: Disabling option --home."
@@ -6337,7 +6189,7 @@ check_option_interferences() {  # check multiple option interferences, change se
         note "Option --alsa: ALSA sound is not possible with 
   --runtime=kata-runtime. Fallback: Enabling option --pulseaudio."
         Sharealsa="no"
-        Pulseaudio="yes"
+        Pulseaudiomode="tcp"
       }
       [ "$Sharecups" = "yes" ] && {
         note "Option --printer: CUPS printer support does not work with
@@ -6470,7 +6322,7 @@ option_messages() {             # some messages depending on options, but not ch
   # --fullscreen
   [ "$Fullscreen" = "yes" ] && {
     case $Xserver in
-      --xephyr|--weston|--weston-xwayland|--nxagent|--xpra|--xpra-xwayland|--vcxsrv|--xwin) ;;
+      --xephyr|--weston|--weston-xwayland|--nxagent|--xpra|--xpra-xwayland|--xwin) ;;
       --xdummy|--xdummy-xwayland|--xvfb|--xorg) ;;
       *) note "$Xserver does not support option --fullscreen" ;;
     esac
@@ -6510,10 +6362,6 @@ option_messages() {             # some messages depending on options, but not ch
   # --cap-default
   [ "$Capdropall" = "no" ] && warning "Option --cap-default disables security hardening
   for containers. Granting docker's default capabilities is considered insecure."
-
-  # --sys-admin
-  [ "$Capsysadmin" = "yes" ] && warning "Option --sys-admin is dangerous.
-  It adds insecure capability SYS_ADMIN to container."
   
   # --webcam
   [ "$Sharewebcam" = "yes" ] && warning "Option --webcam: Container applications might look 
@@ -6656,7 +6504,10 @@ setup_fifo() {                  # set up fifo channels (also option --stdin)
   # &9  $Watchpidfifo         for watchpidlist()
 
   [ "$Runtime" = "kata-runtime" ] && Usemkfifo="no"
-  [ "$Winsubsystem" ]             && Usemkfifo="no"
+  #[ "$Winsubsystem" ]             && Usemkfifo="no"
+  case "$Winsubsystem" in
+    MSYS2|CYGWIN) Usemkfifo="no" ;;
+  esac
 
   # redirect stdin to named pipe. Named pipe is shared with container and used as stdin of image command in container.CMD.sh
   [ "$Forwardstdin" = "yes" ] && {
@@ -6772,13 +6623,7 @@ declare_variables() {           # declare global variables
   Winsubsystem=""                                 # Windows subsystem WSL, MSYS2 or CYGWIN
   Winsubmount=""                                  # path within subsystem to mounted Windows drives
   Winsubpath=""                                   # path within Windows to subsystem files
-  Winpidlist=""                                   # List of stored Windows pids (currently vcxsrv.exe on WSL only)
   Winpty=""                                       # Path to winpty for --interactive on Windows
-  Cygwinpath=""                                   # Path to cygwin64/bin on Windows
-  Vcxsrvexe=""                                    # Path to vcxsrv.exe (--vcxsrv)
-  Vcxsrvpath=""                                   # Path to VcXsrv program folder
-  Xauthexe=""                                     # Path to 'xauth.exe' in Cygwin
-  Xwininfoexe=""                                  # Path to xwininfo.exe in Cygwin or VcXsrv
   
   # Gaining root privileges to run docker
   Passwordfrontend=""                             # --pw: method to prompt for password. one of pkexec, su, sudo, gksu, gksudo, kdesu, kdesudo, lxsu, lxsudo, beesu, auto, none
@@ -6947,7 +6792,6 @@ declare_variables() {           # declare global variables
   Sharehostipc="no"                               # option --hostipc, set --ipc=host.
   Sharehostnet="no"                               # option --hostnet, set --ipc=net
   Preservecachefiles="no"                         # if yes, dont delete cache files
-  Capsysadmin="no"                                # deprecated option --sys-admin: add capability SYS_ADMIN (deprecated)
   Runfromhost=""                                  # option --runfromhost: add host command to xinitrc
   Runasroot=""                                    # option --runasroot: add command running as root to container setup script
   Workdir="/tmp"                                  # option --workdir: set working directory
@@ -7052,8 +6896,10 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,verbose::,quiet,debug,stdin"                                                                   # verbose options
   Longoptions="$Longoptions,hostipc,hostnet,cap-default,sudouser,hostuser:,user:,group-add:,name:"                         # capabilities, users
   Longoptions="$Longoptions,keymap:,name:,no-entrypoint,runfromhost:,runasroot:,westonini:,interactive"                    # developer options
-  Longoptions="$Longoptions,cachedir:,starter,trusted,untrusted,xtest,no-xtest,stdout,stderr,silent,nothing,ps"            # deprecated
-  Longoptions="$Longoptions,tini,no-init,systemd,runit,openrc,sysvinit,sharedir:"                                          # deprecated
+  
+  Longoptions="$Longoptions,cachedir:,starter,trusted,untrusted,no-xtest,stdout,stderr,silent,nothing,ps"                  # removed
+  Longoptions="$Longoptions,tini,no-init,systemd,runit,openrc,sysvinit,sharedir:"                                          # removed
+
   Longoptions="$Longoptions,xtest,xcomposite"                                                                              # experimental
   
   Parsedoptions="$(getopt --options $Shortoptions --longoptions $Longoptions --name "$0" -- "$@" 2>/tmp/x11docker_parsererror)"
@@ -7097,7 +6943,6 @@ parse_options() {               # parse cli options
       -K|--kwin)            Xserver="--kwin" ;            Autochooseserver="no"  ;;
          --kwin-xwayland)   Xserver="--kwin-xwayland" ;   Autochooseserver="no"  ;;
       -n|--nxagent)         Xserver="--nxagent" ;         Autochooseserver="no"  ;;
-         --vcxsrv)          Xserver="--vcxsrv" ;          Autochooseserver="no"  ;;
          --xwin)            Xserver="--xwin" ;            Autochooseserver="no"  ;;
       -t|--tty)             Xserver="--tty" ;             Autochooseserver="no"  ;; # Do not provide any X nor Wayland
 
@@ -7132,11 +6977,10 @@ parse_options() {               # parse cli options
          --alsa)       Sharealsa="yes"                     # enable ALSA sound (shares /dev/snd)
                        Alsacard="${2:-$Alsacard}" ; shift ;;
       -p)              Pulseaudiomode="auto" ;;            # enable pulseaudio sound
-         --pulseaudio) Pulseaudiomode="${2:-}" ; shift     # enable pulseaudio sound
-                       [ "$Pulseaudiomode" ] || Pulseaudiomode="auto" ;;
+         --pulseaudio) Pulseaudiomode="${2:-auto}" ; shift ;;     # enable pulseaudio sound
          --lang)       Langwunsch="${2:-${LANG:-}}" ; shift    # locale/language setting
                        [ "$Langwunsch" ] || note "Option --lang: Environment variable \$LANG is empty.
-  Please specify desired language locale with w.g. --lang=en_US or --lang=zh_CN." ;;
+  Please specify desired language locale with e.g. --lang=en_US or --lang=zh_CN." ;;
          --printer)    Sharecups="yes" ;;                  # share printer (cups)
          --webcam)     Sharewebcam="yes" ;;                # share webcam
 
@@ -7194,8 +7038,6 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
                        [ "$(echo $Newdisplaynumber | cut -c1)" = ":" ] && Newdisplaynumber="$(echo $Newdisplaynumber | cut -c2-)"
                        shift ;;
          --keymap)     Xkblayout="${2:-}" ; shift ;;       # keymap layout for xkbcomp. Compare /usr/share/X11/xkb/symbols
-         --xtest)      Xtest="yes" ;;
-         --xcomposite) Xcomposite="yes" ;;
 
        ## X Authentication
          --xhost)      Xhost="$2" ; shift ;;               # custom xhost setting on new X server
@@ -7217,66 +7059,30 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
          --name)       Containername="${2:-}" ; shift ;;   # set container name
 
      #### special options not starting X or docker
-      --launcher|--starter) Createlauncher="yes" ;;        # create application launcher on desktop and exit
+      --launcher)      Createlauncher="yes" ;;        # create application launcher on desktop and exit
       --cleanup)       Cleanup="yes"  ;;                   # check for orphaned containers and files owned by root, created by docker)
       --install|--update|--update-master|--remove) Installermode="${1:-}" ;;   # installer
       --wmlist)        echo $Wm_all ; exit 0 ;;            # special option for x11docker-gui to retrieve list of window managers
       
-     #### deprecated
-         --ps)         Preservecachefiles="yes"            # preserve container instead of removing it with 'docker run --rm'
-                       note "Option --ps is deprecated and has no replacement." ;;
-         --trusted)    Shareclipboard="yes" 
-                       warning "Option --trusted is deprecated.
-  To allow trusted cookies for --hostdisplay use option --clipboard.
-  Fallback: enabling option --clipboard." ;;
-         --untrusted)  warning "Option --untrusted is deprecated."
-                       Trusted="no"  ;;                    # create untrusted cookies
-#         --xtest)      warning "Option --xtest is deprecated."
-#                       Xtest="yes" ;;                      # allow extension XTEST. default for xvfb, xdummy and xpra
-         --no-xtest)   warning "Option --no-xtest is deprecated."
-                       Xtest="no" ;;                       # disable extension XTEST. default for most X server options
-         --stdout)     note "Option --stdout is deprecated.
-  stdout of container application will always be displayed." ;;
-         --stderr)     note "Option --stderr is deprecated.
-  stderr of container application will always be displayed." ;;
-      -Q)              note "Option -Q is deprecated.
-  stdout and stderr of container application will always be displayed." ;;
-         --silent)     Silent="yes" 
-                       note "Option --silent is deprecated. Use --quiet instead." ;;
-      -N|--nothing)    Xserver="--tty" ; Autochooseserver="no"  
-                       warning "Option -N, --nothing is deprecated. Please use -t, --tty instead." ;; # Do not provide any X nor Wayland
-      -o|--no-xhost)   Noxhost="yes"  
-                       note "Option --no-xhost is deprecated without a replacement." ;; 
-         --no-init)    Initsystem="none"                   # no init, image command is PID 1
-                       note "Option --no-init is deprecated.
-  Please use --init=none instead." ;;
-         --tini)       Initsystem="tini"                   # default init system tini (run option --init)
-                       note "Option --tini is deprecated.
-  Please use --init=tini instead.
-  However, --init=tini is x11docker default already." ;;
-         --runit)      Initsystem="runit"                  # run runit as init system and image command as a service
-                       note "Option --runit is deprecated.
-  Please use --init=runit instead." ;;
-         --openrc)     Initsystem="openrc" 
-                       note "Option --openrc is deprecated.
-  Please use --init=openrc instead." ;;
-         --systemd)    Initsystem="systemd"                # run systemd as init system and image command as a service
-                       note "Option --systemd is deprecated.
-  Please use --init=systemd instead." ;;
-         --sysvinit)   Initsystem="sysvinit" 
-                       note "Option --sysvinit is deprecated.
-  Please use --init=sysvinit instead." ;;
-         --sharedir)   store_runoption volume "${2:-}"   # share host directory
-                       note "Option --sharedir is deprecated.
-  Please use instead: --share"
-                       shift ;;
-         --cachedir)   Cachebasefolder="${2:-}" ; shift 
-                       note "Option --cachedir is deprecated.
-  Please use instead: --cachebasedir" ;;
-         --sys-admin)  Capsysadmin="yes" 
-                       note "Option --sys-admin is deprecated without a replacement.
-  If you insist, use --cap-add=SYS_ADMIN in custom docker run options." ;; # add capability SYS_ADMIN for older systemd versions in image (i.e. debian 9 needs it, debian 10 runs well)
-
+     #### experimental
+         --xtest)      Xtest="yes" ; note "Option --xtest: experimental only." ;;
+         --xcomposite) Xcomposite="yes" ; note "Option --xcomposite: experimental only." ;;
+      
+     #### removed
+         --vcxsrv)     error "Option --vcxsrv is no longer supported.
+  Please use either option --xwin in Cygwin/X
+  or run x11docker with runx in WSL or MSYS2. 
+  For 'runx' look at:  https://github.com/mviereck/runx" ;;
+         --sharedir)   error "Option ${1:-} has been removed.
+  Please use option --share=PATH instead." ;;
+         --no-init|--openrc|--runit|--systemd|--sysvinit|--tini)
+                       error "Option ${1:-} has been removed.
+  Please use option --init=INITSYSTEM instead." ;;
+         --cachedir|--nothing|--no-xtest|--ps|--silent|--starter|--stderr|--stdout|--trusted|--untrusted)
+                       error "Option ${1:-} has been removed.
+  Please have a look at 'x11docker --help' for possible replacements
+  or search for '${1:-}' in /usr/share/doc/x11docker/CHANGELOG.md." ;;
+  
      ##### custom docker options / image name + image command
       --) shift
         [ "$(cut -c1 <<< "${1:-}")"  = "-" ] && grep -q " -- "  <<< " $*" && {
@@ -7344,7 +7150,7 @@ Parsed options:    $Parsedoptions"
   [ "$Createlauncher" = "yes" ] && { create_launcher ; exit ; }                 # --launcher: Create application launcher icon on desktop
   [ "$Cleanup" = "yes" ]        && { cleanup ;         exit ; }                 # --cleanup: Clean up cache and orphaned x11docker containers
   [ "$Installermode" ]          && {                                            # --install, --update, --update-master, --remove
-    [ "$Startuser" = "root" ] || [ "$Winsubsystem" ] || error "Must run as root to install, update or remove x11docker."
+    [ "$Startuser" = "root" ] || [ "$Winsubsystem" = "CYGWIN" ] || [ "$Winsubsystem" = "MSYS2" ] || error "Must run as root to install, update or remove x11docker."
     installer $Installermode
     exit
   }
@@ -7472,6 +7278,8 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
+  # BUG Xenial: xpra initialization error: no such option: --socket-dirs xpra v0.15.8
+
   # MSYS2 start script: cmd //c start "${@//&/^&}"
   
   # BUG --runtime=kata-runtime --nxagent: ALT-GR works wrong.
@@ -7523,7 +7331,7 @@ todo() {
   # --no-init no-new-privileges switchuser: exec fails, but why?
   # check out capsh. replace su with capsh? (missing in alpine) But how to trigger login?
   # check echo especially in sh scripts, replace with printf if needed (#25)
-  # avoid possible confusions --home --sharedir. --sharedir mounts can overlap --home folder. What about softlinks with existing target in --home? Maybe avoid /home/$USER at all
+  # avoid possible confusions --home --share. --share mounts can overlap --home folder. What about softlinks with existing target in --home? Maybe avoid /home/$USER at all
   # --lang: find out locale package names for several distris for documentation
   # further check of xpra server crashes with jess/atom and chromium. --mmap=no avoids the bug: xpra bug report?
 
