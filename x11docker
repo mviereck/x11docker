@@ -2003,18 +2003,20 @@ check_xdepends() {              # check dependencies on host for X server option
     "") ;;
     *)
       case ${1:-} in
-        tty|xwin) ;;
+        --tty|--xwin) ;;
         *)
-          case $Winsubsystem in
-            Cygwin) $Message "${1:-} needs a running X server. DISPLAY is empty.
+          [ -z "$Hostdisplay" ] && {
+            case $Winsubsystem in
+              Cygwin) $Message "${1:-} needs a running X server. DISPLAY is empty.
   Please install packages in Cygwin:  xinit xauth xwininfo
   or use runx to provide an X server on MS Windows:  
     https://github.com/mviereck/runx" ;;
-            MSYS2|WSL) $Message "${1:-} needs a running X server. DISPLAY is empty.
+              MSYS2|WSL) $Message "${1:-} needs a running X server. DISPLAY is empty.
   Please use runx to provide an X server on MS Windows:  
     https://github.com/mviereck/runx" ;;
-          esac
-          Return=1
+            esac
+            Return=1
+          }
         ;;
       esac
     ;;
@@ -3053,13 +3055,13 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
             echo     "  [ '$Trusted' = 'untrusted' ] && note 'Could not create untrusted cookie. 
   Maybe your X server misses extension SECURITY.'"
             [ "$Xserver" = "--hostdisplay" ] && {
-              [ "$Sharehostipc" = "no" ] && [ "$Hostssh" = "no" ] && {
+              [ "$Sharehostipc" = "no" ] && [ "$Hostssh" = "no" ] && [ "$Hostmitshm" = "yes" ] && {
                 echo "  warning 'Memory access failures and rendering glitches
   may occure due to unrestricted cookie.
   Avoid them with isolation breaking option --hostipc,
   or use another X server option like --xpra or --nxagent.'"
               }
-              echo   "  warning 'SECURITY RISK! Keylogging and remote host control "
+              echo   "  [ '$Trusted' = 'untrusted' ] && warning 'SECURITY RISK! Keylogging and remote host control "
               echo   "  may be possible! Better avoid using option --hostdisplay,"
               echo   "  rather use --xpra or --nxagent.'"
               echo   "  cp $Hostxauthority $Xclientcookie"
@@ -5607,6 +5609,7 @@ check_hostxenv() {              # check environment variables for host X display
   command -v xdpyinfo >/dev/null && xdpyinfo >/dev/null 2>&1 && {
     xdpyinfo | grep -q "MIT-SHM" && Hostmitshm="yes" || Hostmitshm="no"
   }
+  [ "$Winsubsystem" ] && Hostmitshm="no"
   
   # get cookie from host display
   XAUTHORITY=${XAUTHORITY:-}
@@ -5809,6 +5812,9 @@ check_option_interferences() {  # check multiple option interferences, change se
         tput cols  >/dev/null 2>&1 && store_runoption env "COLUMNS=$(tput cols)"
       }
     ;;
+    --hostdisplay)
+      [ "$Winsubsystem" ] && Trusted="yes" || Trusted="no"
+    ;;
   esac
   case $Xserver in
     -xpra|--xpra-xwayland)
@@ -5876,9 +5882,9 @@ check_option_interferences() {  # check multiple option interferences, change se
   }
 
   # --hostdisplay --gpu
-  [ "$Xserver" = "--hostdisplay" ] && [ "$Sharegpu" = "yes" ] && {
+  [ "$Xserver" = "--hostdisplay" ] && [ "$Sharegpu" = "yes" ]  && [ "$Trusted" = "no" ] && {
     note "Option --gpu: To allow GPU acceleration with --hostdisplay,
-  x11docker will allow trusted cookies. That enables option --clipboard, too."
+  x11docker will allow trusted cookies."
     Trusted="yes"
   }
 
@@ -5900,25 +5906,27 @@ check_option_interferences() {  # check multiple option interferences, change se
   [ "$Trusted" = "no" ] && warning "Clipboard isolation may fail."
   
   # --clipboard
-  [ "$Shareclipboard" = "yes" ] && {
-    case $Xserver in
-      --weston|--kwin) note "Sharing clipboard with $Xserver is not supported" ;;
-      --hostwayland) note "Sharing clipboard may or may not work.
+  case "$Shareclipboard" in
+    yes)
+      case $Xserver in
+        --weston|--kwin) note "Sharing clipboard with $Xserver is not supported" ;;
+        --hostwayland) note "Sharing clipboard may or may not work.
   Cannot enable or disable it, it depends on your Wayland compositor." ;;
-      --hostdisplay)
-        warning "Option --clipboard: To allow clipboard sharing with
+        --hostdisplay)
+          [ "$Trusted" = "no" ] && warning "Option --clipboard: To allow clipboard sharing with
   option --hostdisplay, trusted cookies will be enabled.
   No protection against X security leaks is left!
   Consider to use another X server option."
-        Trusted="yes"
-      ;;
-    esac
-    case $Xserver in
-      --xpra|--xpra-xwayland|--hostdisplay|--kwin|--weston|--tty|--xwin) ;;
-      *) note "Sharing picture clips with option --clipboard
+          Trusted="yes"
+        ;;
+      esac
+      case $Xserver in
+        --xpra|--xpra-xwayland|--hostdisplay|--kwin|--weston|--tty|--xwin) ;;
+        *) note "Sharing picture clips with option --clipboard
   is only possible with options --xpra, --xpra-xwayland and --hostdisplay." ;;
-    esac
-  }
+      esac
+    ;;
+  esac
 
   # --hostdisplay with SSH
   [ "$Xserver" = "--hostdisplay" ] && [ "$Hostssh" = "yes" ] && {
@@ -6251,10 +6259,14 @@ option_messages() {             # some messages depending on options, but not ch
   If you encounter application ${Colredbg}errors${Colnorm}, enable option --clipboard
   that disables security restrictions for --hostdisplay as a side effect."
       } || {
-        warning "Option --hostdisplay with trusted cookies provides
+        case $Winsubsystem in
+          "") warning "Option --hostdisplay with trusted cookies provides
       QUITE BAD CONTAINER ISOLATION !
   Keylogging and controlling host applications is possible!
-  It is recommended to use another X server option like --xpra or --nxagent."
+  It is recommended to use another X server option like --xpra or --nxagent." ;;
+          *) warning "Option --hostdisplay allows less security hardening.
+  It is recommended to use another X server option like --xpra or --nxagent." ;;
+        esac
       }
       [ "$Desktopmode" = "yes" ] && note "Can not avoid to use host window manager
   along with option --hostdisplay.
@@ -6950,8 +6962,7 @@ parse_options() {               # parse cli options
                             Xserver="--xpra" ;            Autochooseserver="no"  ;; # use xpra on host
       -y|--xephyr)          Xserver="--xephyr" ;          Autochooseserver="no"  ;; # use Xephyr
       -x|--xorg|--x11)      Xserver="--xorg" ;            Autochooseserver="no"  ;; # use core Xorg
-      -h|--hostdisplay)     Xserver="--hostdisplay" ;     Autochooseserver="no"     # use host display :0 with shared X socket
-                            Trusted="no" ;; 
+      -h|--hostdisplay)     Xserver="--hostdisplay" ;     Autochooseserver="no"  ;; # use host display :0 with shared X socket
       -X|--xwayland)        Xserver="--xwayland" ;        Autochooseserver="no"  ;; # Xwayland needs already running Wayland
       -A|--xpra-xwayland)   Xserver="--xpra-xwayland" ;   Autochooseserver="no"  ;; # Xpra with Xwayland
       -Y|--weston-xwayland) Xserver="--weston-xwayland" ; Autochooseserver="no"  ;; # Weston-Xwayland as Wayland compositor with Xwayland, runs in X or standalone from console
