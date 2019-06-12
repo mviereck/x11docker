@@ -753,7 +753,7 @@ verlt() {                       # version number check $1 less than $2
 check_parent_sshd() {           # check whether pid $1 runs in SSH session
   local Wanted_pid="${1:-}" Process_line
   ps -p 1 >/dev/null 2>&1 || {
-    note "Failed to check for sshd. ps -p not supported."
+    verbose -d "Failed to check for sshd. ps -p not supported."
     return 1
   }
   while [ $Wanted_pid -ne 1 ] ; do
@@ -1686,6 +1686,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
     [ "$Hosttty" = "yes" ]                                       && Xserver="--xorg"
     [ -z "$Hostdisplay" ]       && [ -n "$Hostwaylandsocket" ]   && Xserver="--weston-xwayland"
     [ "$Winsubsystem" = "CYGWIN" ]                               && Xserver="--xwin"
+    [ "$Winsubsystem" = "MSYS2" ]                                && Xserver="--hostdisplay"
     [ "$Sharewayland" = "yes" ] && { [ -n "$Hostwaylandsocket" ] && [ "$Desktopmode" = "no" ] && Xserver="--hostwayland" || Xserver="--weston" ; }
   }
   
@@ -1909,27 +1910,41 @@ check_xdepends() {              # check dependencies on host for X server option
         Return=1
       } ;;
     --xwin)
-      [ "$Winsubsystem" ] || {
-        $Message "${1:-}: XWin is available on MS Windows only."
-        Return=1
-      }
-      command -v XWin >/dev/null || {
-        $Message "${1:-}: XWin not found. 
-  Need 'xinit' package in Cygwin (X11 section)."
-        Return=1
-      }
+      case "$Winsubsystem" in
+        CYGWIN)
+          command -v XWin >/dev/null || {
+            $Message "${1:-}: XWin not found. 
+  Need packages 'xinit', 'xauth' and 'xwininfo' in Cygwin (X11 section)."
+            Return=1
+          }
+        ;;
+        WSL)
+          $Message "${1:-}: XWin is available in Cygwin on MS Windows only.
+  Use runx to provide XWin in WSL:  https://github.com/mviereck/runx"
+          Return=1
+        ;;
+        MSYS2)
+          $Message "${1:-}: XWin is available in Cygwin on MS Windows only.
+  With runx XWin is available in WSL, too.
+  In MSYS2 you can only use runx with VcXsrv to provide an X server:
+    https://github.com/mviereck/runx"
+          Return=1
+        ;;
+        "")
+          $Message "${1:-}: XWin is available in Cygwin on MS Windows only."
+          Return=1
+        ;;
+      esac
       command -v xwininfo >/dev/null || {
         $Message "${1:-}: xwininfo not found. 
   Need 'xwininfo' package from Cygwin/X (X11 section)."
         Return=1
-      } ;;
-  esac
-  case $Xserver in
-    --xwin)
+      }
       [ "$Hostip" ] || {
-        warning "${1:-}: Failed to get host IP address."
+        $Message "${1:-}: Failed to get host IP address."
         Return=1
-      } ;;
+      }
+    ;;
   esac
   case ${1:-} in
     --weston|--xpra-xwayland|--weston-xwayland|--xdummy-xwayland)
@@ -1999,28 +2014,25 @@ check_xdepends() {              # check dependencies on host for X server option
       }
     ;;
   esac
-  case "$Winsubsystem" in
-    "") ;;
-    *)
-      case ${1:-} in
-        --tty|--xwin) ;;
-        *)
-          [ -z "$Hostdisplay" ] && {
-            case $Winsubsystem in
-              Cygwin) $Message "${1:-} needs a running X server. DISPLAY is empty.
+  [ "$Winsubsystem" ] && {
+    case ${1:-} in
+      --tty|--xwin) ;;
+      *)
+        [ -z "$Hostdisplay" ] && {
+          case $Winsubsystem in
+            Cygwin) $Message "${1:-} needs a running X server. DISPLAY is empty.
   Please install packages in Cygwin:  xinit xauth xwininfo
   or use runx to provide an X server on MS Windows:  
     https://github.com/mviereck/runx" ;;
-              MSYS2|WSL) $Message "${1:-} needs a running X server. DISPLAY is empty.
+            MSYS2|WSL) $Message "${1:-} needs a running X server. DISPLAY is empty.
   Please use runx to provide an X server on MS Windows:  
     https://github.com/mviereck/runx" ;;
-            esac
-            Return=1
-          }
-        ;;
-      esac
-    ;;
-  esac
+          esac
+          Return=1
+        }
+      ;;
+    esac
+  }
 
   verbose -d "Dependency check for ${1:-}: ${Return:-0}"
   [ "$Return" = "1" ] && {
@@ -6423,6 +6435,7 @@ check_passwordfrontend() {      # check password prompt frontend (pkexec, su, su
   # check if x11docker can run docker without prompting for password
   [ "$Passwordfrontend" = "none" ] && Passwordneeded="no"
   [ "$X11dockermode" = "exe" ]     && Passwordneeded="no"
+  [ "$Winsubsystem" ]              && Passwordneeded="no" && Passwordfrontend="none"
   [ -z "$Passwordfrontend" ] && $Dockerexe info >/dev/null 2>&1 && Passwordfrontend="none" && Passwordneeded="no"
   [ -z "$Passwordfrontend" ] && sudo -n env >/dev/null 2>&1     && Passwordfrontend="sudo" && Passwordneeded="no"
 
@@ -7239,9 +7252,10 @@ Parsed options:    $Parsedoptions"
   Terminal for password frontend:                 $Passwordterminal
   Running on console:                             $Hosttty
   Running over SSH:                               $Hostssh"
-  [ "$Winsubsystem" ] && verbose -d "Running on Windows subsystem: $Winsubsystem
-  Path to subsystem: $(convertpath --windows $Winsubpath)
-  Mount path in subsystem: $Winsubmount/"
+  [ "$Winsubsystem" ] && verbose -d "
+  Running on Windows subsystem:                   $Winsubsystem
+  Path to subsystem:                              $(convertpath --windows $Winsubpath)
+  Mount path in subsystem:                        $Winsubmount/"
 
   #### Create docker command
   [ "$X11dockermode" = "run" ] && {
@@ -7313,6 +7327,8 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
+  # --hostdisplay trusted: warn about clipboard
+  # docker-for-win: check docker version check /group-add
   # BUG Xenial: xpra initialization error: no such option: --socket-dirs xpra v0.15.8
 
   # MSYS2 start script: cmd //c start "${@//&/^&}"
