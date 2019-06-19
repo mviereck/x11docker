@@ -16,23 +16,25 @@ Project website: https://github.com/mviereck/x11docker
  - `--vcxsrv`: X server on Windows. Use `runx` on MS Windows instead
    to provide X for x11docker:  https://github.com/mviereck/runx
  - `--pulseaudio` on MS Windows is no longer supported.
- - `--ps`, `--trusted`, `--untrusted`, `--no-xtest`, `--no-xhost`, `--silent`,
-   `--stderr`, `--stdout`, `--nothing`, `--cachedir`, `--sharedir`,`--starter`,
+ - `--ps`, `--trusted`, `--untrusted`, `--no-xtest`, `--no-xhost`,
+    `--silent`, `--stderr`, `--stdout`, `--nothing`, `--cachedir`, `--starter`,
    `--tini`, `--systemd`, `--openrc`, `--runit`, `--sysvinit`, `--no-init`,
-   `--sys-admin`: Removed; search this changelog for possible replacements in 
+   `--sys-admin`: Removed; search this changelog for possible replacements 
    noted in 'Deprecated' chapters.
-   
 ### Fixed
  - `--gpu` with automated NVIDIA driver installation:
    Don't set `--security-opt=no-new-privileges`.
    [(#162)](https://github.com/mviereck/x11docker/issues/162)
+ - `--hostwayland`: Fix socket name issue.
+   [(ehough/kodi #26)](https://github.com/ehough/docker-kodi/issues/26)
  - WSL: Add Windows System32 path to `PATH`. Can miss with `sudo`.
    [(#153)](https://github.com/mviereck/x11docker/issues/153)
  - `--update`, `--update-master`: Support more common `tar` beside `unzip`.
    [(#115)](https://github.com/mviereck/x11docker/issues/115)
- - `--xwin`: fix for free display number check.
-   Add `xwininfo` to dependency check of `--xwin`.
-   [(#155)](https://github.com/mviereck/x11docker/issues/155)
+ - `--xwin`: Use random display number.
+   [(#165)](https://github.com/mviereck/x11docker/issues/165)
+ - `--xpra`: Check for option `--modal-windows`.
+   [(#167)](https://github.com/mviereck/x11docker/issues/167)
   
 
 ## [5.6.0](https://github.com/mviereck/x11docker/releases/tag/v5.6.0) - 2019-05-02
