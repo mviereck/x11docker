@@ -970,8 +970,10 @@ convertpath() {                 # convert unix and windows pathes
       grep -q "$Cachefolder" <<< "$Path" || {
         [ "$Readwritemode" = ":rw" ] && warning "Request of Windows path to path within WSL:
   $Path
-  Write access from Windows host to WSL files can damage WSL.
-  Read-only access is ok."
+  Write access from Windows host to WSL files can damage the WSL file system. 
+  Read-only access is ok. 
+  Option --share: You can add :ro to the path to allow read-only access.
+  Example: --share='$Path:ro'"
       }
     ;;
   esac
@@ -2197,7 +2199,7 @@ check_newxenv() {               # find free display, create $Newxenv
       ;;
       *)
         for ((Newdisplaynumber=100 ; Newdisplaynumber <=1000 ; Newdisplaynumber++)); do
-          [ -n "$(find /tmp/.X11-unix/X$Newdisplaynumber /tmp/.X$Newdisplaynumber-lock ${XDG_RUNTIME_DIR:-}/wayland-$Newdisplaynumber 2>/dev/null)" ] || break
+          [ -n "$(find /tmp/.X11-unix/X$Newdisplaynumber /tmp/.X$Newdisplaynumber-lock $XDG_RUNTIME_DIR/wayland-$Newdisplaynumber 2>/dev/null)" ] || break
         done
       ;;
     esac
@@ -5655,7 +5657,7 @@ check_hostxenv() {              # check environment variables for host X display
   }
   [ -n "$Hostxsocket" ]       && Hostxenv="$Hostxenv XSOCKET=$Hostxsocket"
   [ -n "$Hostwaylandsocket" ] && Hostxenv="$Hostxenv WAYLAND_DISPLAY=$Hostwaylandsocket"
-  Hostxenv="$Hostxenv XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-}"
+  Hostxenv="$Hostxenv XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
   [ -n "$Hostdisplay" ] && [ -z "$Hostxauthority" ] && warning "Your host X server runs without cookie authentication."
   
   return 0
@@ -5900,6 +5902,18 @@ check_option_interferences() {  # check multiple option interferences, change se
     Trusted="yes"
   }
 
+  # --hostdisplay with SSH
+  [ "$Xserver" = "--hostdisplay" ] && [ "$Hostssh" = "yes" ] && {
+    [ "$Trusted" = "no" ] || [ "$Sharehostnet" = "no" ]  && {
+      note "For SSH connection with option --hostdisplay
+  x11docker must enable option --hostnet and allow trusted cookies.
+  It is recommended to use other X server options
+  like --xpra, --xephyr or --nxagent."
+      Sharehostnet="yes"
+      Trusted="yes"
+    }
+  }
+  
   # --hostdisplay with untrusted cookies: check xdpyinfo
   [ "$Xserver" = "--hostdisplay" ] && [ "$Trusted" = "no" ] && {
     command -v xdpyinfo >/dev/null && {
@@ -5940,17 +5954,6 @@ check_option_interferences() {  # check multiple option interferences, change se
     ;;
   esac
 
-  # --hostdisplay with SSH
-  [ "$Xserver" = "--hostdisplay" ] && [ "$Hostssh" = "yes" ] && {
-    [ "$Trusted" = "no" ] || [ "$Sharehostnet" = "no" ]  && {
-      note "For SSH connection with option --hostdisplay
-  x11docker must enable option --hostnet and allow trusted cookies.
-  It is recommended to use other X server options
-  like --xpra, --xephyr or --nxagent."
-      Sharehostnet="yes"
-      Trusted="yes"
-    }
-  }
 
   [ "$Xserver" = "--hostdisplay" ] && [ "$Trusted" = "yes" ] && [ "$Hostmitshm" = "yes" ] && [ "$Sharehostipc" = "no" ] && [ "$Hostssh" = "no" ] && {
     note "Option --hostdisplay: To allow --hostdisplay with trusted cookies,
@@ -6143,15 +6146,30 @@ check_option_interferences() {  # check multiple option interferences, change se
   }
   
   # check XDG_RUNTIME_DIR
-  case $Xserver in
-    --weston|--weston-xwayland|--kwin|--kwin-xwayland|--xpra-xwayland|--xwayland)
-      [ -z "${XDG_RUNTIME_DIR:-}" ] && [ -e "/run/user/$Hostuseruid" ] && export XDG_RUNTIME_DIR="/run/user/$Hostuseruid"
-      [ -z "${XDG_RUNTIME_DIR:-}" ] && {
-        export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR.x11docker.$Hostuseruid
-        $Mksu "mkdir -p $XDG_RUNTIME_DIR"
-        $Mksu "chmod 700 $XDG_RUNTIME_DIR"
-      } ;;
-  esac
+  [ "$Sharewayland" = "yes" ] && {
+    [ -z "$XDG_RUNTIME_DIR" ] && [ -e "/run/user/${Hostuseruid:-empty}" ] && export XDG_RUNTIME_DIR="/run/user/${Hostuseruid:-empty}"
+    [ -z "$XDG_RUNTIME_DIR" ] && {
+      export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR.x11docker.$Hostuseruid
+      $Mksu "mkdir -p $XDG_RUNTIME_DIR"
+      $Mksu "chmod 700 $XDG_RUNTIME_DIR"
+    }
+    case $Xserver in
+      --weston|--kwin|--weston-xwayland|--kwin-xwayland) ;;
+      --hostwayland|--xwayland|--hostdisplay) 
+        [ "$WAYLAND_DISPLAY" ] || {
+          warning "Wayland: WAYLAND_DISPLAY is empty.
+  Cannot share Wayland socket."
+          Sharewayland="no"
+        }
+      ;;
+      *) 
+        note "Option --wayland: Sharing Wayland socket is not supported
+  for X server option $Xserver.
+  Fallback: Disabling option --wayland."
+        Sharewayland="no"
+      ;;
+    esac
+  }
 
   # check --westonini
   [ -n "$Customwestonini" ] && [ ! -e "$Customwestonini" ] && {
@@ -6261,25 +6279,28 @@ option_messages() {             # some messages depending on options, but not ch
   please install one or more of:
     xpra, Xephyr, nxagent, weston+Xwayland, kwin_wayland+Xwayland or Xnest,
   or run a second Xorg server with option --xorg."
-      [ "$Trusted" = "no" ] && {
-        warning "Option --hostdisplay provides only low container isolation!
+      case "$Trusted" in
+        no)
+          warning "Option --hostdisplay provides only low container isolation!
   It is recommended to use another X server option like --xpra or --nxagent.
 
   To improve security with --hostdisplay x11docker uses untrusted cookies.
   This can lead to strange behaviour of some applications.
 
   If you encounter application ${Colredbg}errors${Colnorm}, enable option --clipboard
-  that disables security restrictions for --hostdisplay as a side effect."
-      } || {
-        case $Winsubsystem in
-          "") warning "Option --hostdisplay with trusted cookies provides
+  that disables security restrictions for --hostdisplay as a side effect." ;;
+        yes)
+          case $Winsubsystem in
+            "") warning "Option --hostdisplay with trusted cookies provides
       QUITE BAD CONTAINER ISOLATION !
-  Keylogging and controlling host applications is possible!
+  Keylogging and controlling host applications is possible! 
+  Clipboard sharing is enabled (option --cliboard).
   It is recommended to use another X server option like --xpra or --nxagent." ;;
-          *) warning "Option --hostdisplay allows less security hardening.
+            *) warning "Option --hostdisplay allows less security hardening.
   It is recommended to use another X server option like --xpra or --nxagent." ;;
-        esac
-      }
+          esac
+        ;;
+      esac
       [ "$Desktopmode" = "yes" ] && note "Can not avoid to use host window manager
   along with option --hostdisplay.
   You may get strange interferences with your host desktop.
@@ -6668,6 +6689,11 @@ declare_variables() {           # declare global variables
   Hostcanwatchroot=""                             # x11docker can watch root processes yes/no
   Runsinterminal=""                               # x11docker runs in a terminal yes/no
   Usemkfifo="yes"                                 # Not on Windows nor with kata-runtime
+  HOME="${HOME:-}"
+  DISPLAY="${DISPLAY:-}"
+  WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}"
+  XAUTHORITY="${XAUTHORITY:-}"
+  XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}"
 
   # MS Windows
   Winsubsystem=""                                 # Windows subsystem WSL, MSYS2 or CYGWIN
@@ -7332,7 +7358,6 @@ todo() {
   # --wayland, --hostwayland: failure checking screen size. Failure in "wait for file creation", name empty.
   # --hostdisplay trusted: warn about clipboard
   # pull: needs additonal enter, why?
-  # --wayland --tty: catch invalid combination
   
   # BUG --runtime=kata-runtime --nxagent: ALT-GR works wrong.
   # FIXME: myrealpath(): If realpath is missing, the path argument is returned without resolving.
