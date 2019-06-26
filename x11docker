@@ -875,8 +875,8 @@ $(grep -i -E 'error|failed|fatal'  <"${2:-}")"
 
     Count=$(( Count + 1 ))
     Dauer=$(( $(date +%s) - $Zeit ))
-    verbose "Waiting since ${Dauer}s for ${1:-} to be ready."
-    sleep $(awk "BEGIN { print $Count * 0.1 }")
+    verbose -d "Waiting since ${Dauer}s for ${1:-} to be ready."
+    sleep $(awk "BEGIN { print $Count * 0.05 }")
     [ $Warten -lt $Dauer ] && return 1
 
     rocknroll || {
@@ -2000,9 +2000,12 @@ check_xdepends() {              # check dependencies on host for X server option
       [ "$Return" = "1" ] || {
         # check xpra version
         [ "$Xpraversion" ] || {
-          Xpraversion="$(xpra --version 2>/dev/null)"
-          Xprarelease="$(echo $Xpraversion | cut -s -d- -f2)"
-          verbose "Xpra version: ${Xpraversion:-XPRA_NOT_FOUND}"
+          [ "$Xpraversion" ] || {
+            Xpraversion="$(xpra --version 2>/dev/null)"
+            Xprarelease="$(echo $Xpraversion | cut -s -d- -f2)"
+            verbose "Xpra version: ${Xpraversion:-XPRA_NOT_FOUND}"
+          }
+          [ "$Xprahelp" ] || Xprahelp="$(xpra --help 2>/dev/null)"
         }
         ! verlte "$Xprarelease" "r18663" && verlte $Xprarelease "r19519" && {
           [ "$Sharehostipc" = "no" ] && {
@@ -2358,6 +2361,11 @@ check_vt() {                    # option --xorg: find free vt / tty
   You can avoid this issue with switching to a black tty before switching to X."
   return 0
 }
+check_xpraoption() {           # check if xpra option $1 is available
+  local Option
+  Option="$(cut -d= -f1 <<< "${1:-}")"
+  grep -q -- "$Option" <<< "$Xprahelp" && echo "$@" || return 1
+}
 create_xdummyxorgconf() {       # options --xdummy, --xpra: create xorg.conf and Xorg wrapper
   { echo '# This xorg configuration file is forked and changed from xpra to start a dummy X11 server.
 # For original and details, please see: https://xpra.org/Xdummy.html
@@ -2623,54 +2631,62 @@ create_xcommand() {             # create command to start X server and/or Waylan
   case $Xserver in
     --xpra|--xpra-xwayland)
 
-      # disable proxy for high versions
-      verlt "$Xpraversion" "xpra v2.1" || Xpraoptions="$Xpraoptions \\
-  --start-via-proxy=no"
+      Xpraoptions="--no-speaker --no-pulseaudio --no-microphone \\
+  $(check_xpraoption --start-via-proxy=no) \\
+  $(check_xpraoption --webcam=no) \\
+  $(check_xpraoption --socket-dirs="'$Cachefolder'")"
+      
       # disable --dpi for buggy versions
       [ -n "$Dpi" ] && verlt "$Xpraversion" "xpra v2.1-r16547" && ! verlt "$Xpraversion" "xpra v2.1" &&  Dpi=""
-      verlt "$Xpraversion" "xpra v1.0" || Xpraoptions="$Xpraoptions \\
-  --webcam=no"
+      
       # --keymap
       [ "$Xkblayout" ] && Xpraoptions="$Xpraoptions \\
-  --keyboard-layout='$Xkblayout' --keyboard-raw=yes"
+  $(check_xpraoption --keyboard-layout="'$Xkblayout'") \\
+  $(check_xpraoption --keyboard-raw=yes)"
   
-      # specify unix socket location
-      Xpraoptions="$Xpraoptions \\
-  --socket-dirs=$Cachefolder"
+#      --opengl=noprobe \\ ### FIXME
 
       # xpra server command
       [ "$Desktopmode" = "yes" ] && Xpraservercommand="xpra start-desktop" || Xpraservercommand="xpra start"
-      Xpraservercommand="$Xpraservercommand :$Newdisplaynumber --use-display $Xpraoptions \\
-  --no-daemon --fake-xinerama=no --mdns=no \\
-  --file-transfer=off --printing=no --notifications=no \\
-  --start-new-commands=no --dbus-proxy=no --no-pulseaudio \\
-  --html=off --session-name=\"$Codename \""
-      verlt  "$Xprarelease" "r13378" || Xpraservercommand="$Xpraservercommand --systemd-run=no"
+      Xpraservercommand="$Xpraservercommand :$Newdisplaynumber --use-display \\
+  --no-daemon \\
+  $Xpraoptions \\
+  $(check_xpraoption --fake-xinerama=no) \\
+  $(check_xpraoption --mdns=no) \\
+  $(check_xpraoption --file-transfer=off) \\
+  $(check_xpraoption --printing=no) \\
+  $(check_xpraoption --notifications=no) \\
+  $(check_xpraoption --start-new-commands=no) \\
+  $(check_xpraoption --dbus-proxy=no) \\
+  $(check_xpraoption --html=off) \\
+  $(check_xpraoption --session-name="'$Codename '") \\
+  $(check_xpraoption --systemd-run=no)"
       verbose -d "Xpra server command:
   $Xpraservercommand"
 
       # xpra client command
-      Xpraclientcommand="xpra attach :$Newdisplaynumber $Xpraoptions \\
+      Xpraclientcommand="xpra attach :$Newdisplaynumber \\
+  $Xpraoptions \\
   --title='@title@ [in container]' \\
   -z0 --quality 100 \\
-  --no-speaker --no-pulseaudio \\
-  --notifications=no"
-      xpra --help | grep -q modal && Xpraclientcommand="$Xpraclientcommand \\
-  --modal-windows=no"
+  $(check_xpraoption --notifications=no) \\
+  $(check_xpraoption --modal-windows=no)"
       [ "$Desktopmode" = "yes" ] && Xpraclientcommand="$Xpraclientcommand \\
   --title='$Codename on $Newdisplay (shift+F11 toggles fullscreen)'"
       [ "$Fullscreen" = "yes" ]  && Xpraclientcommand="$Xpraclientcommand \\
-  --desktop-fullscreen=yes"
+  $(check_xpraoption --desktop-fullscreen=yes)"
       [ "$Scaling" ] && Xpraclientcommand="$Xpraclientcommand \\
-  --desktop-scaling=$Scaling"
+  $(check_xpraoption --desktop-scaling="'$Scaling'")"
       [ -n "$Dpi" ] && Xpraclientcommand="$Xpraclientcommand \\
   --dpi=$Dpi"
-      case $Shareclipboard in
-        yes) Xpraclientcommand="$Xpraclientcommand --clipboard"    ;;
-        no)  Xpraclientcommand="$Xpraclientcommand --no-clipboard" ;;
-      esac
       [ "$Xpraborder" ] && Xpraclientcommand="$Xpraclientcommand \\
-  --border=$Xpraborder"
+  $(check_xpraoption --border=$Xpraborder)"
+      case $Shareclipboard in
+        yes) Xpraclientcommand="$Xpraclientcommand \\
+  --clipboard"    ;;
+        no)  Xpraclientcommand="$Xpraclientcommand \\
+  --no-clipboard" ;;
+      esac
       verbose -d "Xpra client command:
   $Xpraclientcommand"
     ;;
@@ -5280,6 +5296,7 @@ $(tail $Xpraserverlogfile)"
             mkfile $Xpraserverlogfile   # clear logfile to remove "xpra is ready" message
           }
           verbose -d "Starting Xpra server"
+          echo "x11docker [$(date)]: Starting Xpra server" >> $Xpraserverlogfile
           $Mksu "env $Newxenv XPRA_OPENGL_DOUBLE_BUFFERED=1 $Xpraservercommand" >> $Xpraserverlogfile 2>&1 &
           Xpraserverpid=$! && storepid $Xpraserverpid xpraserver
           waitforlogentry "xpra server" $Xpraserverlogfile 'xpra is ready' && verbose "Xpra server is ready" || {
@@ -5292,8 +5309,9 @@ $(tail $Xpraserverlogfile)"
 
         # xpra client
         checkpid $Xpraclientpid && kill $Xpraclientpid
-        verbose -d "Starting Xpra client"
         [ -n "$Xpraclientpid" ] && note "Restarting Xpra client."
+        verbose -d "Starting Xpra client"
+        echo "x11docker [$(date)]: Starting Xpra client" >> $Xpraclientlogfile
         $Mksu "env $Hostxenv XPRA_PADDING_COLORS='0,0.2,1' $Xpraclientcommand" >> $Xpraclientlogfile 2>&1 &
         Xpraclientpid=$! && storepid $Xpraclientpid xpraclient
         checkpid $Xpraclientpid && {
@@ -6329,7 +6347,7 @@ option_messages() {             # some messages depending on options, but not ch
     --xpra|--xpra-xwayland)
       verlt "$Xpraversion" "xpra v1.0" && {
         note "Your xpra version '$Xpraversion' is out of date. It is
-  recommended to install at least xpra v1.0."
+  recommended to install at least xpra v1.0. Look at:  www.xpra.org"
         [ "$Desktopmode" = "yes" ] && {
           note "Your xpra version does not support desktop mode.
   Please use another X server option like --xephyr or --nxagent."
@@ -6773,6 +6791,7 @@ declare_variables() {           # declare global variables
   Xprashm=""                                      # content XPRA_XSHM=0 disables usage of MIT-SHM in xpra
   Xpraversion=""                                  # $(xpra --version) to decide some xpra options and messages
   Xprarelease=""                                  # release number from $Xpraversion
+  Xprahelp=""                                     # output of 'xpra --help'
   Xephyrglamor="yes"                              # former option '--glamor': enable Xephyr glamor 2D acceleration (deprecated, now always yes)
   Xfishtank="no"                                  # option --xfishtank: fish tank on new X server
   Xkblayout=""                                    # option '--keymap': Layout for keymap, compare /usr/share/X11/xkb/symbols
