@@ -2236,7 +2236,6 @@ check_newxenv() {               # find free display, create $Newxenv
       esac
     ;;
   esac
-  [ -e "$Hostxsocket" ] || Newxsocket=
 
   # set $Newwaylandsocket
   case $Xserver in
@@ -2364,7 +2363,10 @@ check_vt() {                    # option --xorg: find free vt / tty
 check_xpraoption() {           # check if xpra option $1 is available
   local Option
   Option="$(cut -d= -f1 <<< "${1:-}")"
-  grep -q -- "$Option" <<< "$Xprahelp" && echo "$@" || return 1
+  grep -q -- "$Option" <<< "$Xprahelp" && echo "$@" || {
+    debugnote "Xpra option not found: $Option"
+    return 1
+  }
 }
 create_xdummyxorgconf() {       # options --xdummy, --xpra: create xorg.conf and Xorg wrapper
   { echo '# This xorg configuration file is forked and changed from xpra to start a dummy X11 server.
@@ -2535,10 +2537,17 @@ create_xcommand() {             # create command to start X server and/or Waylan
     yes)
       Xserveroptions="$Xserveroptions \\
   -auth $Xservercookie" ;;
-    no) [ "$Xserver" = "--hostdisplay" ] || warning "Option --no-auth: SECURITY RISK!
-  Allowing access to X server for everyone."
+    no) 
+      case $Xoverip in
+        yes) warning "Option --no-auth: SECURITY RISK!
+  Allowing access to new X server for everyone.
+  Your X server is accessable over TCP network without any restriction.
+  That can be abused to take control over your system." ;;
+        no) [ "$Xserver" = "--hostdisplay" ] || warning "Option --no-auth: SECURITY RISK!
+  Allowing access to new X server for everyone."
       Xserveroptions="$Xserveroptions \\
   -ac" ;;
+    esac
   esac
 
   # X over IP/TCP
@@ -2631,8 +2640,11 @@ create_xcommand() {             # create command to start X server and/or Waylan
   case $Xserver in
     --xpra|--xpra-xwayland)
 
-      Xpraoptions="--no-speaker --no-pulseaudio --no-microphone \\
-  $(check_xpraoption --start-via-proxy=no) \\
+      Xpraoptions="$(check_xpraoption --start-via-proxy=no) \\
+  $(check_xpraoption --speaker=no) \\
+  $(check_xpraoption --pulseaudio=no) \\
+  $(check_xpraoption --microphone=no) \\
+  $(check_xpraoption --notifications=no) \\
   $(check_xpraoption --webcam=no) \\
   $(check_xpraoption --socket-dirs="'$Cachefolder'")"
       
@@ -2649,13 +2661,12 @@ create_xcommand() {             # create command to start X server and/or Waylan
       # xpra server command
       [ "$Desktopmode" = "yes" ] && Xpraservercommand="xpra start-desktop" || Xpraservercommand="xpra start"
       Xpraservercommand="$Xpraservercommand :$Newdisplaynumber --use-display \\
-  --no-daemon \\
   $Xpraoptions \\
+  $(check_xpraoption --daemon=no) \\
   $(check_xpraoption --fake-xinerama=no) \\
   $(check_xpraoption --mdns=no) \\
   $(check_xpraoption --file-transfer=off) \\
   $(check_xpraoption --printing=no) \\
-  $(check_xpraoption --notifications=no) \\
   $(check_xpraoption --start-new-commands=no) \\
   $(check_xpraoption --dbus-proxy=no) \\
   $(check_xpraoption --html=off) \\
@@ -2667,25 +2678,32 @@ create_xcommand() {             # create command to start X server and/or Waylan
       # xpra client command
       Xpraclientcommand="xpra attach :$Newdisplaynumber \\
   $Xpraoptions \\
-  --title='@title@ [in container]' \\
-  -z0 --quality 100 \\
-  $(check_xpraoption --notifications=no) \\
+  $(check_xpraoption --compress=0) \\
+  $(check_xpraoption --quality=100) \\
   $(check_xpraoption --modal-windows=no)"
-      [ "$Desktopmode" = "yes" ] && Xpraclientcommand="$Xpraclientcommand \\
-  --title='$Codename on $Newdisplay (shift+F11 toggles fullscreen)'"
       [ "$Fullscreen" = "yes" ]  && Xpraclientcommand="$Xpraclientcommand \\
   $(check_xpraoption --desktop-fullscreen=yes)"
       [ "$Scaling" ] && Xpraclientcommand="$Xpraclientcommand \\
   $(check_xpraoption --desktop-scaling="'$Scaling'")"
       [ -n "$Dpi" ] && Xpraclientcommand="$Xpraclientcommand \\
-  --dpi=$Dpi"
+  $(check_xpraoption --dpi="'$Dpi'")"
       [ "$Xpraborder" ] && Xpraclientcommand="$Xpraclientcommand \\
   $(check_xpraoption --border=$Xpraborder)"
       case $Shareclipboard in
         yes) Xpraclientcommand="$Xpraclientcommand \\
-  --clipboard"    ;;
+  $(check_xpraoption --clipboard=yes)"    ;;
         no)  Xpraclientcommand="$Xpraclientcommand \\
-  --no-clipboard" ;;
+  $(check_xpraoption --clipboard=no)" ;;
+      esac
+      case $X11dockermode in
+        run)
+          case "$Desktopmode" in
+            yes) Xpraclientcommand="$Xpraclientcommand \\
+  $(check_xpraoption --title="'$Codename on $Newdisplay [in container] (shift+F11 toggles fullscreen)'")" ;;
+            no)  Xpraclientcommand="$Xpraclientcommand \\
+  $(check_xpraoption --title="'@title@ [in container]'")" ;;
+          esac
+        ;;
       esac
       verbose -d "Xpra client command:
   $Xpraclientcommand"
@@ -5312,7 +5330,7 @@ $(tail $Xpraserverlogfile)"
         [ -n "$Xpraclientpid" ] && note "Restarting Xpra client."
         verbose -d "Starting Xpra client"
         echo "x11docker [$(date)]: Starting Xpra client" >> $Xpraclientlogfile
-        $Mksu "env $Hostxenv XPRA_PADDING_COLORS='0,0.2,1' $Xpraclientcommand" >> $Xpraclientlogfile 2>&1 &
+        $Mksu "env $Hostxenv $Xpraclientcommand" >> $Xpraclientlogfile 2>&1 &
         Xpraclientpid=$! && storepid $Xpraclientpid xpraclient
         checkpid $Xpraclientpid && {
           while { checkpid $Xpraserverpid && checkpid $Xpraclientpid ; } do sleep 1 ; done
@@ -5839,6 +5857,13 @@ check_option_interferences() {  # check multiple option interferences, change se
     ;;
     --hostdisplay)
       [ "$Winsubsystem" ] && Trusted="yes" || Trusted="no"
+      [ -n "$(cut -d: -f1 <<< "$Hostdisplay")" ] && Xoverip="yes"
+      [ -z "$Hostxauthority" ] && {
+        note "Option --hostdisplay: You host X server seems to run
+  without cookie authentication. Cannot set up a cookie for X access.
+  Fallback: Enabling option --no-auth."
+        Xauthentication="no"
+      }
     ;;
   esac
   case $Xserver in
@@ -5877,16 +5902,31 @@ check_option_interferences() {  # check multiple option interferences, change se
   esac
 
   # check xauth
-  [ "$Xserver" != "--tty" ] && [ "$Xauthentication" = "yes" ] && {
-    command -v xauth >/dev/null || {
-      warning "Command 'xauth' not found.
+  [ "$Xauthentication" = "yes" ] && case $Xserver in
+    --tty) ;;
+    *)
+      command -v xauth >/dev/null || {
+        case $Xoverip in
+          yes) 
+            error "Command 'xauth' not found.
+      SECURITY RISK!
+  Your X server would be accessable over network without authentication!
+  That could be abused to take control over your system.
+  Please install 'xauth' to allow X cookie authentication.
+  You can disable cookie authentication with discouraged option --no-auth."
+          ;;
+          no)
+            warning "Command 'xauth' not found.
   Please install 'xauth' to allow X cookie authentication.
   Securing X access with cookie authentication is not possible.
   Fallback: Disabling X authentication protocol. (option --no-auth)
   $Wikipackages"
-      Xauthentication="no"
-    }
-  }
+            Xauthentication="no"
+          ;;
+        esac
+      }
+    ;;
+  esac
 
   # --fullscreen is nonsense on tty at all. Avoids weston error on tty.
   [ "$Hosttty" = "yes" ] && Fullscreen="no"
@@ -6287,7 +6327,7 @@ option_messages() {             # some messages depending on options, but not ch
   case $Xserver in
     --hostdisplay)
       [ "$Autochooseserver" = "yes" ] && note "To allow protection against X security leaks,
-  please install one or more of:
+  please install 'xinit' and one or more of:
     xpra, Xephyr, nxagent, weston+Xwayland, kwin_wayland+Xwayland or Xnest,
   or run a second Xorg server with option --xorg."
       case "$Trusted" in
@@ -7367,6 +7407,9 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
+  # disable fallback to --no-auth if xauth is missing? At least for TCP connections it makes sense.
+  # 
+ 
   # --hostdisplay trusted: warn about clipboard
   # pull: needs additonal enter, why?
   # dependeny wiki: Cygwin packages
