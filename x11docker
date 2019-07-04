@@ -481,11 +481,22 @@ finish_sigint() {               # trap SIGINT to activate debug mode on finish()
   finish
 }
 finish() {                      # trap EXIT routine to clean up background processes and cache
-  local Pid= Name= Zeit= Catlogfilepid= Exitcode= Pid1pid=
+  local Pid= Name= Zeit= Catlogfilepid= Exitcode Pid1pid=
   trap - EXIT
   debugnote "Terminating x11docker."
   debugnote "List of stored background processes:
 $(cat $Bgpidfile 2>/dev/null)"
+  
+  case $Xserver in
+    --xpra|--xpra-xwayland)
+      grep -q -i "error" $Xpraserverlogfile && debugnote "Error lines in xpra server logfile:
+$(grep -i error $Xpraserverlogfile)"
+      grep -q -i "error" $Xpraclientlogfile && debugnote "Error lines in xpra client logfile:
+$(grep -i error $Xpraclientlogfile)"
+      grep -q -i -E "traceback|initialization error" $Xpraserverlogfile && note "Error in xpra server logfile. Last lines:
+$(tail $Xpraserverlogfile)"
+    ;;
+  esac
 
   [ "$$" = "$BASHPID" ] || saygoodbye finish-subshell
   [ "$Sudo" ] && Sudo="sudo -n" # no password prompt here, rather fail
@@ -591,12 +602,12 @@ $(pspid $Pid)"
       }
     }
   }
-  
+
   # check for possible error
   Exitcode=${1:-0}
   [ -e "$Cachefolder/error" ] && Exitcode=1
   debugnote "Exitcode $Exitcode"
-
+  
   # backup of logfile in $Cachebasedir
   [ -e "$Logfile" ] && {
     [ "$Verbose" = "yes" ] && sleep 1
@@ -682,6 +693,7 @@ setonwatchpidlist() {           # add PID $1 to watchpidlist()
   #echo ${1:-} >&9
   debugnote "Set pid ${1:-} on watchlist: ${2:-}"
   echo "${1:-}" >>$Watchpidfifo
+  storepid "${1:-pid}" "${2:-processname}"
 }
 watchmessagefifo() {            # watch for messages out of container or dockerrc
   # message in fifo must end with :$Messagetype
@@ -3787,7 +3799,7 @@ create_dockercommand() {        # create command to run docker
     no)  Dockercommand="$Dockercommand --detach" ;;
   esac
 
-  [ -z "$Containername" ] && Containername="x11docker_X${Newdisplaynumber}_${Mycookie}_$Codename"
+  [ -z "$Containername" ] && Containername="x11docker_X${Newdisplaynumber}_${Cachenumber}_$Codename"
   Dockercommand="$Dockercommand \\
   --name $Containername"
   Wmdockercommand="$Wmdockercommand \\
@@ -5300,7 +5312,8 @@ $(tail $Compositorlogfile)"
 start_xpra() {                  # options --xpra / --xpra-xwayland: start and watch xpra server and xpra client
   debugnote "Starting Xpra server"
   echo "x11docker [$(timestamp)]: Starting Xpra server" >> $Xpraserverlogfile
-  $Mksu "env $Newxenv GDK_BACKEND=x11 XPRA_UINPUT=0 $Xpraservercommand" >> $Xpraserverlogfile 2>&1 & setonwatchpidlist $! xpraserver
+  $Mksu "env $Newxenv GDK_BACKEND=x11 XPRA_UINPUT=0 $Xpraservercommand" >> $Xpraserverlogfile 2>&1 & 
+  setonwatchpidlist $! xpraserver
   verlt "$Xprarelease" "r23060" && {
     waitforlogentry "xpra server" $Xpraserverlogfile 'xpra is ready' || {
       rocknroll && error "Xpra server startup failed.
@@ -5309,9 +5322,12 @@ $(tail $Xpraserverlogfile)"
       return 1
     }
   }
+  
   debugnote "Starting Xpra client"
   echo "x11docker [$(timestamp)]: Starting Xpra client" >> $Xpraclientlogfile
-  $Mksu "env $Hostxenv GDK_BACKEND=$GDK_BACKEND NO_AT_BRIDGE=1 $(verlt $Xpraversion v2.1 && echo XPRA_OPENGL_DOUBLE_BUFFERED=1) XPRA_MENU_ICONS=0 XPRA_ICON_OVERLAY=0 XPRA_EXPORT_ICON_DATA=0 $Xpraclientcommand" >> $Xpraclientlogfile 2>&1 & setonwatchpidlist $! xpraclient
+  $Mksu "env $Hostxenv NO_AT_BRIDGE=1 $(verlt $Xpraversion v2.1 && echo XPRA_OPENGL_DOUBLE_BUFFERED=1) XPRA_MENU_ICONS=0 XPRA_ICON_OVERLAY=0 XPRA_EXPORT_ICON_DATA=0 $Xpraclientcommand" >> $Xpraclientlogfile 2>&1 & 
+  setonwatchpidlist $! xpraclient
+
   return 0
 }
 start_docker() {                # start docker container
@@ -5692,7 +5708,7 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   $Cachebasefolder"
   
   # create cache subfolder
-  Cachefolder="$Cachebasefolder/$Codename-$Mycookie"
+  Cachefolder="$Cachebasefolder/$Codename-$Cachenumber"
   [ -d "$Cachefolder" ] && error "Cache folder already exists:
   $Cachefolder"
 
@@ -6668,8 +6684,9 @@ declare_variables() {           # declare global variables
   Logfile=""                                      # x11docker.log
   Logbackup=""
 
-  Mycookie=$(makecookie | cut -b1-6)              # random number used for container name and cache folder name
-
+  Cachenumber="$(date +%s%N | cut -c6-12)"
+  [ -z "$Cachenumber" ] && Cachenumber="$(makecookie)"
+  
   # terminal colors used for messages and --verbose=c
   Esc="$(printf '\033')"
   Colblue="${Esc}[35m"
@@ -6706,7 +6723,7 @@ declare_variables() {           # declare global variables
   Hostip=""                                       # An IP address to access host
   Hostdisplay=""                                  # environment variable DISPLAY
   Hostdisplaynumber=""                            # DISPLAY without :
-  Hostxauthority="Xauthority-$Hostdisplaynumber"  # file to store copy of $XAUTHORITY
+  Hostxauthority="Xauthority-${DISPLAY:-host}"  # file to store copy of $XAUTHORITY
   Hostxsocket=""                                  # socket of DISPLAY in /tmp/.X11-unix
   Hostxenv=""                                     # collection of host X environment variables
   Hostmitshm="yes"                                # X on host has extension MIT-SHM enabled? Assume yes, check later
@@ -6745,7 +6762,6 @@ declare_variables() {           # declare global variables
   Cachefolder=""                                  # subfolder of $Cachebasefolder for current container
   Sharefolder=share                               # subfolder of $Cachefolder for files shared with container
   Cshare=/x11docker                               # mountpoint of $Sharefolder in container
-  Codename=""                                     # Generated name for cache, containerhome and other purposes from image name or hostexe
 
   # Parsed arguments
   X11dockermode="run"                             # can be either "xonly", "run" or "exe", depends on options. while parsing, xonly changes to run or exe
@@ -7390,20 +7406,19 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
-  # somehow look for xpra errors in log and give a note, maybe in finish()
-  # --xpra --wayland (experimental): version check, py3 check
+  # --xpra client: fill GDK_BACKEND
+  # --xpra on wayland (experimental): version check, py3 check
   # dependeny wiki: Cygwin packages
   
   # BUG --runtime=kata-runtime --nxagent: ALT-GR works wrong.
   # FIXME: myrealpath(): If realpath is missing, the path argument is returned without resolving.
   # CHECK: Xwayland with X over IP
-  # CHECK: --xpra-xwayland/py3 fails with tor-browser, but not with wine pcmanfm
   # FIXME: --dbus-system: slow startup (90s timeout) in arch containers for unknown reasons.
   # FIXME: --interactive with --init=runit|openrc|sysvinit: no job control in shell
+  # CHECK: --interactive not possiblewithout winpty in WSLand Cygwin
   # FIXME: x11docker/deepin: new builds have strange issues
   # BUG x11docker/fluxbox on arch host: background missing, sometimes no context menu. where is the difference?
   # BUG error message window in wayland fails: xterm: no display. should use konsole
-  # CHECK: x11docker/xwayland in a nested setup: where is the X socket ??
   # CHECK: elogind in void container: loginctl is empty. ck-list-sessions, too.
   # BUG: --sudouser: su in void containers not possible.
   
