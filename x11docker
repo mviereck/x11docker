@@ -486,17 +486,6 @@ finish() {                      # trap EXIT routine to clean up background proce
   debugnote "Terminating x11docker."
   debugnote "List of stored background processes:
 $(cat $Bgpidfile 2>/dev/null)"
-  
-  case $Xserver in
-    --xpra|--xpra-xwayland)
-      grep -q -i "error" $Xpraserverlogfile && debugnote "Error lines in xpra server logfile:
-$(grep -i error $Xpraserverlogfile)"
-      grep -q -i "error" $Xpraclientlogfile && debugnote "Error lines in xpra client logfile:
-$(grep -i error $Xpraclientlogfile)"
-      grep -q -i -E "traceback|initialization error" $Xpraserverlogfile && note "Error in xpra server logfile. Last lines:
-$(tail $Xpraserverlogfile)"
-    ;;
-  esac
 
   [ "$$" = "$BASHPID" ] || saygoodbye finish-subshell
   [ "$Sudo" ] && Sudo="sudo -n" # no password prompt here, rather fail
@@ -5310,10 +5299,12 @@ $(tail $Compositorlogfile)"
   return 0
 }
 start_xpra() {                  # options --xpra / --xpra-xwayland: start and watch xpra server and xpra client
+  local Xpraserverpid Xpraclientpid
   debugnote "Starting Xpra server"
   echo "x11docker [$(timestamp)]: Starting Xpra server" >> $Xpraserverlogfile
   $Mksu "env $Newxenv GDK_BACKEND=x11 XPRA_UINPUT=0 $Xpraservercommand" >> $Xpraserverlogfile 2>&1 & 
-  setonwatchpidlist $! xpraserver
+  Xpraserverpid=$!
+  storepid $! xpraserver
   verlt "$Xprarelease" "r23060" && {
     waitforlogentry "xpra server" $Xpraserverlogfile 'xpra is ready' || {
       rocknroll && error "Xpra server startup failed.
@@ -5326,7 +5317,23 @@ $(tail $Xpraserverlogfile)"
   debugnote "Starting Xpra client"
   echo "x11docker [$(timestamp)]: Starting Xpra client" >> $Xpraclientlogfile
   $Mksu "env $Hostxenv NO_AT_BRIDGE=1 $(verlt $Xpraversion v2.1 && echo XPRA_OPENGL_DOUBLE_BUFFERED=1) XPRA_MENU_ICONS=0 XPRA_ICON_OVERLAY=0 XPRA_EXPORT_ICON_DATA=0 $Xpraclientcommand" >> $Xpraclientlogfile 2>&1 & 
-  setonwatchpidlist $! xpraclient
+  Xpraclientpid=$!
+  storepid $! xpraclient
+
+  { # catch possible xpra crashes
+    while rocknroll; do
+      ps -p $Xpraserverpid >/dev/null || break
+      ps -p $Xpraclientpid >/dev/null || break
+      sleep 1
+    done
+    rocknroll && note "Xpra terminated unexpectedly.
+  Last lines of xpra server log:
+$(tail $Xpraserverlogfile)
+---------------------------------
+  Last lines of xpra client log:
+$(tail $Xpraclientlogfile)"
+    saygoodbye xpra
+  } & storepid $! xpraloop
 
   return 0
 }
@@ -7424,7 +7431,7 @@ todo() {
   # CHECK: Xwayland with X over IP
   # FIXME: --dbus-system: slow startup (90s timeout) in arch containers for unknown reasons.
   # FIXME: --interactive with --init=runit|openrc|sysvinit: no job control in shell
-  # CHECK: --interactive not possiblewithout winpty in WSLand Cygwin
+  # CHECK: --interactive not possible without winpty in WSL and Cygwin
   # FIXME: x11docker/deepin: new builds have strange issues
   # BUG x11docker/fluxbox on arch host: background missing, sometimes no context menu. where is the difference?
   # BUG error message window in wayland fails: xterm: no display. should use konsole
@@ -7447,14 +7454,12 @@ todo() {
   # further checks of multimonitor behaviour
 
   # check xhost +localhost
-  # --weston/x: allow tty switch/option --vt if running as root?
   # --init=systemd: try to avoid xhost +SI:localuser:$Containeruser, needed by deepin, it does not recognize XAUTHORITY
   # --no-init no-new-privileges switchuser: exec fails, but why?
   # check out capsh. replace su with capsh? (missing in alpine) But how to trigger login?
   # check echo especially in sh scripts, replace with printf if needed (#25)
   # avoid possible confusions --home --share. --share mounts can overlap --home folder. What about softlinks with existing target in --home? Maybe avoid /home/$USER at all
   # --lang: find out locale package names for several distris for documentation
-  # further check of xpra server crashes with jess/atom and chromium. --mmap=no avoids the bug: xpra bug report?
 
   # --keymap does not work on tty with --kwin and --kwin-xwayland. No idea how to set it.
   # bug report to docker about --volume waylandsocket in --volume
