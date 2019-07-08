@@ -104,7 +104,7 @@ To run a host application on a new X server:
 To run only a new empty X server:
   x11docker [OPTIONS] --xonly
 ```
-`DOCKER_RUN_OPTIONS` are just added to `docker run` command without a check by x11docker.
+`DOCKER_RUN_OPTIONS` are just added to `docker run` command without a serious check by x11docker.
  
  
  
@@ -123,10 +123,12 @@ If no X server option is specified, x11docker automatically chooses one dependin
 ### Desktop or seamless mode
 x11docker assumes that you want to run a single application in seamless mode, i.e. a single window on your regular desktop. If you want to run a desktop environment in image, add option `--desktop`. 
  - Seamless mode is supported with options `--xpra` and `--nxagent`. As a fallback insecure option `--hostdisplay` is possible.
-   - If neither `xpra` nor `nxagent` are installed, but x11docker finds a desktop capable X server like `Xephyr`, it avoids insecure option `--hostdisplay` and runs Xephyr with a host window manager.
-     - You can specify a host window manager with option `--wm=WINDOWMANAGER`, for example `--wm=openbox`.
  - Desktop mode with `--desktop` is supported with all X server options except `--hostdisplay`. If available, x11docker prefers `--xephyr` and `--nxagent`.
- 
+ - Special case: Single applications with a window manager (option `--wm`).
+   - If neither `xpra` nor `nxagent` are installed, but x11docker finds a desktop capable X server like `Xephyr`, it avoids insecure option `--hostdisplay` and runs Xephyr with a window manager.
+   - If available, x11docker uses image `x11docker/openbox` to run a window manager in its own container. 
+   - Another window manager image an be specified with e.g. `--wm=x11docker/lxde`.
+   - As a fallback x11docker runs a window manager from host, either autodetected or specified with e.g. `--wm=xfwm4`. 
 ### Shared folders and HOME in container
 Changes in a running Docker container system will be lost, the created Docker container will be discarded. For persistent data storage you can share host directories:
  - Option `-m, --home` creates a host directory in `~/.local/share/x11docker/IMAGENAME` that is shared with the container and mounted as its `HOME` directory. Files in container home and configuration changes will persist. 
@@ -208,7 +210,7 @@ Container runtimes known and supported by x11docker are:
  - `runc`: Docker default.
  - [`kata-runtime`](https://katacontainers.io/): Sets up a virtual machine with its own Linux kernel to run the container. `kata` aims to combine the security advantages of containers and virtual machines.
    - Some x11docker options are not possible with `--runtime=kata-runtime`. Most important: `--hostdisplay`, `--gpu`, `--printer`, `--webcam` and all Wayland related options.
- - `nvidia`: Specialized fork of `runc` to support `nvidia/nvidia-docker` images.
+ - [`nvidia`](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container#nvidianvidia-docker-images): Specialized fork of `runc` to support `nvidia/nvidia-docker` images.
  - [`crun`](https://github.com/giuseppe/crun): Fast and lightweight alternative to `runc` with same functionality.
  
 Possible runtime configuration in `/etc/docker/daemon.json`:
@@ -237,7 +239,7 @@ Possible runtime configuration in `/etc/docker/daemon.json`:
 ## Security 
 Scope of x11docker is to run containerized GUI applications while preserving and improving container isolation.
 Core concept is:
- - Runs a second X server to avoid [X security leaks](http://tutorials.section6.net/home/basics-of-securing-x11).
+ - Runs a second X server to avoid [X security leaks](http://tutorials.section6.net/tutorials/freebsd/security/basics-of-securing-x11.html).
    - This in opposite to widespread solutions that share host X socket of display :0, thus breaking container isolation, allowing keylogging and remote host control. 
      (However, x11docker provides this with fallback option `--hostdisplay`).
    - Authentication is done with MIT-MAGIC-COOKIE, stored separate from file `~/.Xauthority`.
@@ -345,11 +347,11 @@ Other files than `x11docker` script itself are not essential.
 
 ### Installation on MS Windows
 x11docker can run natively on MS Windows electively in one of:
- - [MSYS2](https://www.msys2.org/)
- - [Cygwin](https://www.cygwin.com/) 
  - [WSL (Windows subsystem for Linux)](https://docs.microsoft.com/en-us/windows/wsl/about)
+ - [Cygwin](https://www.cygwin.com/) 
+ - [MSYS2](https://www.msys2.org/)
 
-It needs X server `VcXsrv.exe` or `Xwin.exe`. Further informations at [wiki: x11docker on MS Windows](https://github.com/mviereck/x11docker/wiki/x11docker-on-MS-Windows).
+Further informations at [wiki: x11docker on MS Windows](https://github.com/mviereck/x11docker/wiki/x11docker-on-MS-Windows).
 
 
 ## Dependencies
@@ -431,7 +433,6 @@ A special one to check features and container isolation is `x11docker/check`.
 | LXDE | `x11docker --desktop x11docker/lxde` |
 | LXQt | `x11docker --desktop x11docker/lxqt` |
 | Xfce | `x11docker --desktop x11docker/xfce` |
-| [CDE Common Desktop Environment](https://en.wikipedia.org/wiki/Common_Desktop_Environment) | `x11docker --desktop --init=systemd --cap-default x11docker/cde` |
 | Mate | `x11docker --desktop x11docker/mate` |
 | Enlightenment (based on [Void Linux](https://www.voidlinux.org/)) | `x11docker --desktop --gpu --runit x11docker/enlightenment` |
 | [Trinity](https://www.trinitydesktop.org/) (successor of KDE 3) | `x11docker --desktop x11docker/trinity` |

@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [6.0.0](https://github.com/mviereck/x11docker/releases/tag/v6.0.0) - 2019-07-08
 ### Changed
  - `--wm`: Use image `x11docker/openbox` to provide a window manager.
    Set `--wm=host` or `--wm=COMMAND`to use a host window manager.
@@ -15,6 +15,7 @@ Project website: https://github.com/mviereck/x11docker
 ### Removed
  - `--vcxsrv`: X server on Windows. Use `runx` on MS Windows instead
    to provide X for x11docker:  https://github.com/mviereck/runx
+   [(#165)](https://github.com/mviereck/x11docker/issues/165)
  - `--pulseaudio` on MS Windows is no longer supported.
  - `--ps`, `--trusted`, `--untrusted`, `--no-xtest`, `--no-xhost`,
     `--silent`, `--stderr`, `--stdout`, `--nothing`, `--cachedir`, `--starter`,
@@ -33,8 +34,10 @@ Project website: https://github.com/mviereck/x11docker
    [(#115)](https://github.com/mviereck/x11docker/issues/115)
  - `--xwin`: Use random display number.
    [(#165)](https://github.com/mviereck/x11docker/issues/165)
- - `--xpra`: Check for option `--modal-windows`.
+ - `--xpra`: Check for option availability to support multiple versions.
+   Significantly faster startup since xpra v3.0-r23066.
    [(#167)](https://github.com/mviereck/x11docker/issues/167)
+   [(#165)](https://github.com/mviereck/x11docker/issues/167)
   
 
 ## [5.6.0](https://github.com/mviereck/x11docker/releases/tag/v5.6.0) - 2019-05-02
