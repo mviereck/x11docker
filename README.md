@@ -439,8 +439,6 @@ A special one to check features and container isolation is `x11docker/check`.
 | Cinnamon | `x11docker --desktop --gpu --dbus-system x11docker/cinnamon` |
 | [deepin](https://www.deepin.org/en/dde/) (3D desktop from China) | `x11docker --desktop --gpu --init=systemd x11docker/deepin` |
 | [LiriOS](https://liri.io/) (needs at least docker 18.06 <br> or this [xcb bugfix](https://github.com/mviereck/x11docker/issues/76).) (based on Fedora) | `x11docker --desktop --gpu lirios/unstable` |
-| KDE Plasma | `x11docker --desktop --gpu x11docker/plasma` |
-| KDE Plasma as nested Wayland compositor | `x11docker --gpu x11docker/plasma startplasmacompositor` |
 | LXDE with wine and PlayOnLinux and <br> a persistent `HOME` folder to preserve <br> installed Windows applications, <br> and with Pulseaudio sound. | `x11docker --desktop --home --pulseaudio x11docker/lxde-wine` |
    
 ### Adjust images for your needs
@@ -456,9 +454,6 @@ Sample screenshots are stored in [screenshot branch](https://github.com/mviereck
 
 `x11docker --desktop x11docker/lxde-wine`
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxde-wine.png "LXDE desktop in docker")
-
-`x11docker --desktop --gpu x11docker/plasma`
-![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-plasma.png "KDE plasma desktop in docker")
 
 `x11docker --desktop x11docker/lxqt`
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxqt.png "LXQT desktop in docker")
