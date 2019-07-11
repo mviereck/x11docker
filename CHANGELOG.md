@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Changed
+ - `--home`: Allow optional host folder DIR with `--home=DIR`.
+### Deprecated
+ - `--homedir=DIR`: Use `--home=DIR` instead.
+
 ## [6.0.0](https://github.com/mviereck/x11docker/releases/tag/v6.0.0) - 2019-07-08
 ### Changed
  - `--wm`: Use image `x11docker/openbox` to provide a window manager.

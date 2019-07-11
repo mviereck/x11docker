@@ -91,10 +91,10 @@ Basic settings: (especially influencing auto choosing X server)
                          none: Run without a window manager. Same as --desktop.
 
 Shared folders:
- -m, --home            Share a host folder ~/.local/share/x11docker/imagename
+ -m, --home [=DIR]     Share a host folder ~/.local/share/x11docker/imagename
                        as home folder in container to store persistent data.
-                       ~/.local/share/x11docker has a softlink to ~/x11docker
-     --homedir DIR     Specify custom host folder DIR for option --home.
+                       ~/.local/share/x11docker has a softlink to ~/x11docker.
+                       Optionally specify another host folder DIR.
      --homebasedir DIR Custom base folder for option --home.
                        (Compare --cachebasedir below).
      --share PATH      Share host file or folder PATH. Read-only with PATH:ro
@@ -517,7 +517,10 @@ $(cat $Bgpidfile 2>/dev/null)"
             # Send TERM to PID1 of container
             checkpid  $Pid1pid 2>&1 && {
               debugnote "Sending TERM to PID 1 of container: $(pspid $Pid1pid)"
-              killpid $Pid1pid containerPID1 2>/dev/null || note "Could not terminate PID 1 of container: $(pspid $Pid1pid)"
+              killpid $Pid1pid containerPID1 2>/dev/null || {
+                note "Could not terminate PID 1 of container: $(pspid $Pid1pid)"
+                Debugmode="yes"
+              }
               # Give container a bit time for graceful shutdown
               case $Initsystem in
                 systemd) ;;
@@ -2210,7 +2213,7 @@ check_newxenv() {               # find free display, create $Newxenv
   [ "$Newdisplaynumber" ] || {
     case $Xserver in
       --xwin)
-        Newdisplaynumber="$((RANDOM / 10))"
+        Newdisplaynumber="$((RANDOM / 10 + 150))"
         note "Using random X display number :$Newdisplaynumber.
   If this display number is already in use, x11docker will fail.
   You can specify a display number N with option '--display N'."
@@ -2867,7 +2870,7 @@ $(tail "$Compositorlogfile")"
     --weston|--weston-xwayland)
       [ "$Xserver" = "--weston-xwayland" ] && Xcommand="$(command -v Xwayland) :$Newdisplaynumber \\
   $Xserveroptions"
-      Compositorcommand="weston --socket=$Newwaylandsocket"
+      Compositorcommand="weston-launch -- --socket=$Newwaylandsocket"
       [ -n "$Westonoutput" ] && for ((Count=1 ; Count<=$Outputcount ; Count++)) ; do
         [ "$Westonoutput" = "WL" ] || [ "$Westonoutput" = "X" ] || {
           Count=""
@@ -4756,11 +4759,14 @@ exec /usr/local/bin/x11docker-login
       echo "systemctl mask plymouth-start plymouth-read-write plymouth-quit plymouth-quit-wait"
       echo "# disable useless NetworkManager"
       echo "systemctl mask NetworkManager"
+#      echo "systemctl mask systemd-localed.service"
+      echo "# disable realtimekit, fails in container"
+      echo "systemctl mask rtkit-daemon.service"
+
       echo "# disable deepin update service"
       echo "systemctl mask lastore-daemon lastore-update-metadata-info"
-      
-      echo "systemctl mask rtkit-daemon.service"
-      echo "systemctl mask systemd-localed.service"
+      echo "systemctl mask deepin-anything-monitor.service"
+      echo "systemctl mask deepin-sync-daemon.service"
     ;;
     runit)
       echo "# create and enable x11docker service containing image command"
@@ -4874,6 +4880,7 @@ exit 0\" >> /etc/rc.local"
       echo "  # set up DBus"
       echo "  verbose 'DBus: removing failing or useless services.'"
       echo "  for Line in /usr/share/dbus-1/system-services/* /usr/share/dbus-1/services/*; do" # find is not available on fedora
+#echo break
       echo '    Name="$(cat $Line | grep Name= | cut -d= -f2)"'
       echo '    Command="$(cat $Line | grep Exec= | cut -d= -f2)"'
       echo '    debugnote "DBus: Checking $Name: $Command"'
@@ -4881,7 +4888,7 @@ exit 0\" >> /etc/rc.local"
       echo "      org.bluez)"
       echo "        rm -v \$Line"
       echo "      ;;"
-      echo "      org.freedesktop.UPower|org.freedesktop.resolve1|org.freedesktop.network1|org.freedesktop.timedate1)"
+      echo "      org.freedesktop.UPower|org.freedesktop.resolve1|org.freedesktop.network1|org.freedesktop.timedate1|org.freedesktop.secrets)"
       echo "        rm -v \$Line"
       echo "      ;;"
       echo "      org.freedesktop.systemd1) "
@@ -7040,7 +7047,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,wm::,desktop,exe,xonly"
   Longoptions="$Longoptions,fullscreen,size:,scale:,rotate:,dpi:,output-count:,gpu,xfishtank,border::"                     # X appearance options
   Longoptions="$Longoptions,xhost:,no-auth,vt:,display:,env:,showenv,showid,showpid1"                                      # X and environment options
-  Longoptions="$Longoptions,home,clipboard,pulseaudio::,alsa::,lang::,printer,webcam"                                      # comfort options
+  Longoptions="$Longoptions,home::,clipboard,pulseaudio::,alsa::,lang::,printer,webcam"                                    # comfort options
   Longoptions="$Longoptions,no-xhost,pw:,no-internet,workdir:,sharessh,limit::,pull::,runtime:"                            # advanced options
   Longoptions="$Longoptions,init::,sys-admin,sharecgroup,dbus,dbus-system,hostdbus"                                        # advanced options
   Longoptions="$Longoptions,homedir:,share:,cachebasedir:,homebasedir:"                                                    # host folders
@@ -7195,17 +7202,17 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
          --no-auth)    Xauthentication="no" ;;             # disable cookie authentication
 
        ## host folders
-      -m|--home)         Sharehosthome="yes" ;;            # share folder ~/x11docker/Imagename with container
-         --homedir)      Sharehosthome="yes"               # set host folder to share as home folder instead of ~/x11docker/NAME
+      -m)                Sharehosthome="yes" ;;
+         --home|--homedir) Sharehosthome="yes"              # share host folder as HOME in container, ~/x11docker/imagename or $2
+                         [ "${1:-}" = "--homedir" ] && note "Option --homedir is deprecated.
+  Please use --home=DIR instead."
                          Containeruserhosthome="${2:-}" ; shift ;;
-         --homebasedir)  Homebasefolder="${2:-}" ; shift ;;
-         --cachebasedir) Cachebasefolder="${2:-}" ; shift ;; # set cache folder instead of default $Cachebasefolder
-         --share)        store_runoption volume "${2:-}"   # share host directory
-                         shift ;;
-         --sharedir)     store_runoption volume "${2:-}"   # share host directory
-                         note "Option --sharedir is deprecated.
+         --share|--sharedir) store_runoption volume "${2:-}"  # share host file, device or directory
+                         [ "${1:-}" = "--homedir" ] && note "Option --sharedir is deprecated.
   Please use option --share=PATH instead."
                          shift ;;
+         --homebasedir)  Homebasefolder="${2:-}" ; shift ;;
+         --cachebasedir) Cachebasefolder="${2:-}" ; shift ;; # set cache folder instead of default $Cachebasefolder
 
        ## docker options
          --hostipc)    Sharehostipc="yes" ;;               # docker run option --ipc=host
