@@ -9,8 +9,14 @@ Project website: https://github.com/mviereck/x11docker
 ## [Unreleased]
 ### Changed
  - `--home`: Allow optional host folder DIR with `--home=DIR`.
+ - `--printer`: Allow optional argument `tcp|socket`.
+   Allows CUPS printing for `--runtime=kata-runtime`.
+ - `--share`: Dont share `--volume` along with `--device`. 
+   (Workaround for old Docker bug setting wrong file ownerships.)
 ### Deprecated
  - `--homedir=DIR`: Use `--home=DIR` instead.
+### Fixed
+ - Copy `/etc/skel` into empty `HOME`.
 
 ## [6.0.0](https://github.com/mviereck/x11docker/releases/tag/v6.0.0) - 2019-07-08
 ### Changed
