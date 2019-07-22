@@ -434,6 +434,7 @@ A special one to check features and container isolation is `x11docker/check`.
 | LXQt | `x11docker --desktop x11docker/lxqt` |
 | Xfce | `x11docker --desktop x11docker/xfce` |
 | Mate | `x11docker --desktop x11docker/mate` |
+| Sway | `x11docker --gpu x11docker/sway` |
 | Enlightenment (based on [Void Linux](https://www.voidlinux.org/)) | `x11docker --desktop --gpu --runit x11docker/enlightenment` |
 | [Trinity](https://www.trinitydesktop.org/) (successor of KDE 3) | `x11docker --desktop x11docker/trinity` |
 | Cinnamon | `x11docker --desktop --gpu --dbus-system x11docker/cinnamon` |
