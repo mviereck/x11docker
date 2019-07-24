@@ -16,6 +16,7 @@ Project website: https://github.com/mviereck/x11docker
 ### Deprecated
  - `--homedir=DIR`: Use `--home=DIR` instead.
 ### Fixed
+ - `--xpra --clipboard`: Fix not using xpra option `--xsettings=no`.
  - Copy `/etc/skel` into empty `HOME`.
 
 ## [6.0.0](https://github.com/mviereck/x11docker/releases/tag/v6.0.0) - 2019-07-08
