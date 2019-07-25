@@ -309,7 +309,7 @@ As default `--limit` restricts to 50% of available CPUs and 50% of currently fre
 
 For more custom fine tuning have a look at [Docker documentation: Limit a container's resources](https://docs.docker.com/config/containers/resource_constraints).
 
-**NOTE**: Internet access is allowed per default. You can disable internet access with `--no-internet`.
+**NOTE**: Internet access is allowed by default. You can disable internet access with `--no-internet`.
 
 **WARNING**: There is no restriction that can prevent the container from flooding the hard disk in Docker's container partition or in shared folders.
 
@@ -381,15 +381,18 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
    x11docker sets up a container user that can mismatch this container user setup. 
    - Check for a `USER` specification in image with `docker inspect --format '{{.Config.User}}' IMAGENAME`.
    - If yes, try with `--user=RETAIN` to run with the `USER` specified in image.
- - Some applications need more privileges or capabilities than x11docker provides as default. 
+ - Some applications need more privileges or capabilities than x11docker provides by default. 
    - Reduce container isolation with e.g.:
      - x11docker options: `--cap-default --hostipc --hostnet`. (Try `--cap-default` first).
      - docker run options: `--cap-add ALL --security-opt seccomp=unconfined --privileged`
      - Example: `x11docker --cap-default --hostipc --hostnet -- --cap-add ALL --security-opt seccomp=unconfined --privileged -- IMAGENAME`
      - Try with reduced container isolation. If it works, drop options one by one until the needed one(s) are left.
      - If `--cap-add ALL` helps, find the [capability](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) you really need and add only that one.
+       - List of capabilities disabled by Docker by default: `--cap-add=SYS_MODULE --cap-add=SYS_RAWIO --cap-add=SYS_PACCT --cap-add=SYS_ADMIN --cap-add=SYS_NICE --cap-add=SYS_RESOURCE --cap-add=SYS_TIME --cap-add=SYS_TTY_CONFIG --cap-add=AUDIT_CONTROL --cap-add=MAC_OVERRIDE --cap-add=MAC_ADMIN --cap-add=NET_ADMIN --cap-add=SYSLOG --cap-add=DAC_READ_SEARCH --cap-add=LINUX_IMMUTABLE --cap-add=NET_BROADCAST --cap-add=IPC_LOCK --cap-add=IPC_OWNER --cap-add=SYS_PTRACE --cap-add=SYS_BOOT --cap-add=LEASE --cap-add=WAKE_ALARM --cap-add=BLOCK_SUSPEND --cap-add=AUDIT_READ`
      - If `--privileged` helps, your application probably needs a device in `/dev`. Find out which one and share it with e.g. `--share /dev/vboxdrv`. Try also `--share /run/udev/data:ro`.
        - Please, don't use `--privileged` as a solution. It allows too much access to host and fatally breaks container isolation. Investigate the permissions your container needs indeed.
+     - If `--cap-default` helps, container security is degraded to a reasonable level. It causes x11docker not to set `--security-opt=no-new-privileges` and allows Docker#s default capabilities.
+       - List of capabilities allowed with `--cap-default`: `--cap-add=SETPCAP --cap-add=MKNOD --cap-add=AUDIT_WRITE --cap-add=CHOWN --cap-add=NET_RAW --cap-add=DAC_OVERRIDE --cap-add=FOWNER --cap-add=FSETID --cap-add=KILL --cap-add=SETGID --cap-add=SETUID --cap-add=NEW_BIND_SERVICE --cap-add=SYS_CHROOT --cap-add=SETFCAP`
    - You can run container applications as root with `--user=root`.
  - A few applications need [DBus](#dbus). Install `dbus` in image and try option `--dbus`. If that does not help, try option `--dbus-system`.
  - A few applications need systemd. Install `systemd` in image and try option `--init=systemd`.
@@ -428,7 +431,7 @@ A special one to check features and container isolation is `x11docker/check`.
 | Desktop environment <br> (most based on Debian)| x11docker command |
 | --- | --- |
 | [Cinnamon](https://github.com/mviereck/dockerfile-x11docker-cinnamon) | `x11docker --desktop --gpu --dbus-system x11docker/cinnamon` |
-| [deepin](https://github.com/mviereck/dockerfile-x11docker-deepin) ([website](https://www.deepin.org/en/dde/)) (3D desktop from China) | `x11docker --desktop --gpu --init=systemd x11docker/deepin` |
+| [deepin](https://github.com/mviereck/dockerfile-x11docker-deepin) ([website](https://www.deepin.org/en/dde/)) (3D desktop from China) | `x11docker --desktop --gpu --init=systemd --cap-default --hostipc -- --cap-add=SYS_RESOURCE --cap-add=IPC_LOCK -- x11docker/deepin` |
 | [Enlightenment](https://github.com/mviereck/dockerfile-x11docker-enlightenment) (based on [Void Linux](https://www.voidlinux.org/)) | `x11docker --desktop --gpu --runit x11docker/enlightenment` |
 | [Fluxbox](https://github.com/mviereck/dockerfile-x11docker-fluxbox) (based on Debian, 87 MB) | `x11docker --desktop x11docker/fluxbox` |
 | [FVWM](https://github.com/mviereck/dockerfile-x11docker-fvwm) (based on [Alpine](https://alpinelinux.org/), 22.5 MB) | `x11docker --desktop x11docker/fvwm` |
@@ -438,7 +441,7 @@ A special one to check features and container isolation is `x11docker/check`.
 | [LXDE with wine and PlayOnLinux](https://github.com/mviereck/dockerfile-x11docker-lxde-wine) and <br> a persistent `HOME` folder to preserve <br> installed Windows applications, <br> and with Pulseaudio sound. | `x11docker --desktop --home --pulseaudio x11docker/lxde-wine` |
 | [LXQt](https://github.com/mviereck/dockerfile-x11docker-lxqt) | `x11docker --desktop x11docker/lxqt` |
 | [Mate](https://github.com/mviereck/dockerfile-x11docker-mate) | `x11docker --desktop x11docker/mate` |
-| [Sway](https://github.com/mviereck/dockerfile-x11docker-sway) Wayland compositor [website](https://swaywm.org/)| `x11docker --gpu x11docker/sway` |
+| [Sway](https://github.com/mviereck/dockerfile-x11docker-sway) Wayland compositor ([website](https://swaywm.org/))| `x11docker --gpu x11docker/sway` |
 | [Trinity](https://github.com/mviereck/dockerfile-x11docker-trinity) ([website](https://www.trinitydesktop.org/)) (successor of KDE 3) | `x11docker --desktop x11docker/trinity` |
 | [Xfce](https://github.com/mviereck/dockerfile-x11docker-xfce) | `x11docker --desktop x11docker/xfce` |
    
