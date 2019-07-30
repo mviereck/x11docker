@@ -6,17 +6,27 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [6.1.0](https://github.com/mviereck/x11docker/releases/tag/v6.1.0) - 2019-07-30
+### Added
+ - `--clean-xhost`: Disable xhost access policies on host display.
+ - `--no-xhost`: Reintroduced for backwards compatibility. Deprecated.
+   Use `--clean-xhost`instead.
+ - `--systemd`: Reintroduced for backwards compatibility. Deprecated.
+   Use `--init=systemd` instead.
 ### Changed
  - `--home`: Allow optional host folder DIR with `--home=DIR`.
  - `--printer`: Allow optional argument `tcp|socket`.
    Allows CUPS printing for `--runtime=kata-runtime`.
  - `--share`: Dont share `--volume` along with `--device`. 
-   (Workaround for old Docker bug setting wrong file ownerships.)
+   Has been a workaround for an old Docker bug setting wrong file ownerships.
+   [#24](https://github.com/mviereck/x11docker/pull/24)
 ### Deprecated
  - `--homedir=DIR`: Use `--home=DIR` instead.
+ - `--systemd`: Use `--init=systemd` instead.
+ - `--no-xhost`: Use `--clean-xhost` instead.
 ### Fixed
  - `--xpra --clipboard`: Fix not using xpra option `--xsettings=no`.
+   [xpra ticket #2342](https://xpra.org/trac/ticket/2342)
  - Copy `/etc/skel` into empty `HOME`.
 
 ## [6.0.0](https://github.com/mviereck/x11docker/releases/tag/v6.0.0) - 2019-07-08
