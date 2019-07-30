@@ -133,10 +133,10 @@ x11docker assumes that you want to run a single application in seamless mode, i.
 Changes in a running Docker container system will be lost, the created Docker container will be discarded. For persistent data storage you can share host directories:
  - Option `-m, --home` creates a host directory in `~/.local/share/x11docker/IMAGENAME` that is shared with the container and mounted as its `HOME` directory. Files in container home and configuration changes will persist. 
    x11docker creates a softlink from `~/.local/share/x11docker` to `~/x11docker`.
+   - You can specify another host directory for container `HOME` with `--home=DIR`.
  - Option `--share PATH` mounts a host file or folder at the same location in container. `--share PATH:ro` restricts to read-only access. Device files in `/dev` are supported, too.
- - Option `--homedir DIR` is similar to `--home` but allows you to specify a custom host directory for data storage.
  - Special cases for `$HOME`:
-   - `--homedir $HOME` will use your host home as container home. Discouraged, use with care.
+   - `--home=$HOME` will use your host home as container home. Discouraged, use with care.
    - `--share $HOME` will symlink your host home as a subfolder of container home. 
    
 Note that x11docker copies files from `/etc/skel` in container to `HOME` if `HOME` is empty. That allows to provide customized user settings.
