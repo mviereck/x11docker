@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [6.1.1](https://github.com/mviereck/x11docker/releases/tag/v6.1.1) - 2019-07-31
+### Fixed
+ - `--gpu`: Add user to group `render`.
+
 ## [6.1.0](https://github.com/mviereck/x11docker/releases/tag/v6.1.0) - 2019-07-30
 ### Added
  - `--clean-xhost`: Disable xhost access policies on host display.
