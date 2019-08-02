@@ -4142,22 +4142,30 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   esac
   echo "  $Sudo $Dockerexe pull $Imagename 1>&2 || error 'Pulling docker image '$Imagename' seems to have failed!'"
   echo "}"
+  echo ""
+
+  [ "$Tinibinary" ] && [ "$Switchcontaineruser" = "no" ] && echo "Tini=\"$Cshare/tini --\"" || echo "Tini="
+  echo ""
+  
+  echo "Inspect=\$($Dockerexe inspect $Imagename --format='{{.Config.Entrypoint}}{{.Config.Cmd}}[{{.Config.User}}][{{.Config.WorkingDir}}]')"
+  echo "debugnote \"INSPECT: \$Inspect\""
+  echo ""
 
   echo "# check CMD"
   echo "[ -z \"\$Imagecommand\" ] && {"
   echo "  # extract image command from image if not given on cli"
-  echo "  Imagecommand=\"\$($Dockerexe inspect --format='{{.Config.Cmd}}' $Imagename | rmcr)\""
-  echo "  Imagecommand=\"\${Imagecommand#[}\""
-  echo "  Imagecommand=\"\${Imagecommand%]}\""
-  echo "  Imagecommand=\"\${Imagecommand#/bin/sh -c }\""
+  echo "  Imagecommand=\$(cut -d] -f2 <<< \"\$Inspect\" | cut -d[ -f2)"
+  echo "  debugnote \"CMD: \$Imagecommand\""
   echo "  echo \"\$Imagecommand\" | grep -q /x11docker/container.CMD.sh && error 'Recursion error: Found CMD /x11docker/container.CMD.sh in image.
   Did you use docker commit with an x11docker container?
   Please build new images with a Dockerfile instead of using docker commit,
   or provide a different image command.'"
   echo "}"
+  echo ""
   
   echo "# check USER"
-  echo "Imageuser=\$($Dockerexe inspect --format '{{.Config.User}}' $Imagename | rmcr)"
+  echo "Imageuser=\$(cut -d[ -f4 <<< \"\$Inspect\" | cut -d] -f1)"
+  echo "debugnote \"USER: \$Imageuser\""
   case $Createcontaineruser in
     yes)
       echo "[ \"\$Imageuser\" ] && note \"Found 'USER \$Imageuser' in image."
@@ -4169,16 +4177,14 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
       echo "echo \${Imageuser:-root} >> $Containeruserfile"
     ;;
   esac
+  echo ""
   
-  [ "$Tinibinary" ] && [ "$Switchcontaineruser" = "no" ] && echo "Tini=\"$Cshare/tini --\"" || echo "Tini="
   case $Noentrypoint in
     yes) echo "Entrypoint=" ;;
     no)
       echo "# check ENTRYPOINT"
-      echo "Entrypoint=\$($Dockerexe inspect --format='{{.Config.Entrypoint}}' $Imagename | rmcr)"
-      echo "Entrypoint=\${Entrypoint#[}"
-      echo "Entrypoint=\${Entrypoint#/bin/sh -c }"
-      echo "Entrypoint=\${Entrypoint%]}"
+      echo "  Entrypoint=\$(cut -d] -f1 <<< \"\$Inspect\" | cut -d[ -f2)"
+      echo "  debugnote \"ENTRYPOINT: \$Entrypoint\""
       case $Initsystem in
         systemd|sysvinit|runit|openrc)
           echo "echo \"\$Entrypoint\" | grep -qE 'tini|init|systemd' && {"
@@ -4212,8 +4218,11 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
     ;;
   esac
   echo ""
+  echo "Workdir=\$(cut -d[ -f5 <<< \"\$Inspect\" | cut -d] -f1)"
+  echo "debugnote \"WORKDIR: \$Workdir\""
 
-  echo "[ -z \"\$Imagecommand\$Entrypoint\" ] && error 'No image command specified and no CMD or ENTRYPOINT found in image.' && exit 1"
+
+  echo "[ -z \"\$Imagecommand\$Entrypoint\" ] && error 'No image command specified and no CMD or ENTRYPOINT found in image.'"
   echo ""
 
   #### create container.CMD.sh ####
@@ -4362,7 +4371,6 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo     "  echo ''"
 
   echo     "  echo 'cd \"\$HOME\"'"                                                    # HOME as default working directory
-  echo     "  Workdir=\$($Dockerexe inspect --format='{{.Config.WorkingDir}}' $Imagename 2>>'$Containerlogfile'| rmcr)" # WORKDIR in image
   echo     '  [ "$Workdir" ] && echo "[ -d \"$Workdir\" ] && cd \"$Workdir\"   # WORKDIR in image"'
   [ "$Workdir" = "/tmp" ] || echo "  echo 'cd $Workdir'"                             # x11docker option --workdir
   echo     "  echo ''"
@@ -5758,16 +5766,15 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
 #    esac
   }
   Cachebasefolder="$(convertpath --subsystem "$Cachebasefolder")"
-  $Mksu "mkdir -p $Cachebasefolder"         || error "Could not create cache folder
-  $Cachebasefolder"
-  writeaccess $Hostuseruid $Cachebasefolder || error "User $Hostuser does not have write access to
-  cache folder $Cachebasefolder"  # can happen with --cachebasedir
-  Logbackup="$Cachebasefolder/x11docker.log"       # afterward copy of $Logfile in $Cachebasefolder
-  $Mksu "mkdir -p $Cachebasefolder/x11docker-gui"
-  Imageslist="$Cachebasefolder/$Imageslist"                         && mkfile $Imageslist
-
   [ "$Cachebasefolder" != "$(echo $Cachebasefolder | sed -e 's/ *//g')" ] && error "Cache root folder must not contain whitespaces.
   $Cachebasefolder"
+  $Mksu "mkdir -p $Cachebasefolder"                                       || error "Could not create cache folder
+  $Cachebasefolder"
+  writeaccess $Hostuseruid $Cachebasefolder                               || error "User $Hostuser does not have write access to cache folder
+  $Cachebasefolder"                                # can happen with --cachebasedir
+  Logbackup="$Cachebasefolder/x11docker.log"       # afterward copy of $Logfile in $Cachebasefolder
+  Imageslist="$Cachebasefolder/$Imageslist"                         && mkfile $Imageslist
+
   
   # create cache subfolder
   Cachefolder="$Cachebasefolder/$Codename-$Cachenumber"
@@ -6757,7 +6764,7 @@ declare_variables() {           # declare global variables
 
   Dockerexe="docker"                              # can be docker.exe on Windows
   Dockerinfofile=docker.info                      # file to store outpu of 'docker info'
-  Imageslist="x11docker-gui/images.list"
+  Imageslist="images.list"
   Runtime=""                                      # runtime in use. runc|nvidia|kata-runtime
   Bgpidfile=backgroundpids                        # file to store pids and names of background processes that shut be killed on exit
   Timetosaygoodbye=timetosaygoodbye               # file giving term signal to all parties
@@ -7506,6 +7513,7 @@ main "$@"
 #### ToDo notes for development
 todo() {
   # improve speed of dockerrc
+  #   inspect USER, CMD ENTRYPOINT in one command
   # CHECK --xpra-xwayland, --weston-xwayland: Xwayland does not fit Weston window size if parts of weston window are offscreen
 
   # --xpra on wayland (experimental): version check, py3 check
