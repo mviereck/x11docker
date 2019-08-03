@@ -162,7 +162,7 @@ Webcams on host can be shared with option `--webcam`.
  - If webcam application in image fails, install `--gpu` dependencies in image. 
    Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
  - `guvcview` needs `--pulseaudio` or `--alsa`.
- - `cheese` and [`gnome-ring`](https://ring.cx/) need `--init=systemd` or `--dbus-system`.
+ - `cheese` and [`gnome-ring`](https://ring.cx/) need `--init=systemd`.
  
 ### Printer
 Printers on host can be provided to container with option `--printer`. 
@@ -198,11 +198,9 @@ Look at [wiki: Init systems in Docker](https://github.com/mviereck/x11docker/wik
 ### DBus
 Some desktop environments and applications need a running DBus daemon and/or DBus user session. DBus options need `dbus` in image.
  - use `--dbus` to run a DBus user session daemon.
- - use `--dbus-system` to run DBus system daemon. This includes option `--dbus`.
-   - If startup fails or takes about 90s, install an init system and use that one to run DBus. E.g. install `systemd` in image and run with `--init=systemd`.
+ - A DBus system daemon will be started automatically with [init systems](#Init-system) `systemd`, `openrc`, `runit` and `sysvinit` (option `--init`).
  - use `--hostdbus` to connect to host DBus user session.
  - use `--share /run/dbus/system_bus_socket` to share host DBus system socket.
- - DBus will be started automatically with [init systems](#Init-system) `systemd`, `openrc`, `runit` and `sysvinit` (option `--init`).
 
 ### Container runtime
 It is possible to run containers with different backends following the [OCI runtime specification](https://github.com/opencontainers/runtime-spec). Docker's default runtime is `runc`. You can specify another one with option `--runtime=RUNTIME`.
@@ -287,7 +285,7 @@ _Rather special options reducing security, but not needed for regular use:_
     If an application somehow breaks out of container, it can harm your host system. Allows many container capabilties that x11docker would drop otherwise.
   - `--cap-default` disables x11docker's container security hardening and falls back to default Docker container capabilities.
     If an application somehow breaks out of container, it can harm your host system.
-  - `--dbus-system` and `--init=systemd|sysvinit|openrc|runit` allow some container capabilities that x11docker would drop otherwise. 
+  - `--init=systemd|sysvinit|openrc|runit` allow some container capabilities that x11docker would drop otherwise. 
     `--init=systemd` also shares access to `/sys/fs/cgroup`. Some processes will run as root in container.
     If a root process somehow breaks out of container, it can harm your host system. Allows many container capabilties that x11docker would drop otherwise.
   - `--hostipc` sets docker run option `--ipc=host`. Allows MIT-SHM / shared memory. Disables IPC namespacing.
@@ -394,7 +392,7 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
      - If `--cap-default` helps, container security is degraded to a reasonable level. It causes x11docker not to set `--security-opt=no-new-privileges` and allows Docker#s default capabilities.
        - List of capabilities allowed with `--cap-default`: `--cap-add=SETPCAP --cap-add=MKNOD --cap-add=AUDIT_WRITE --cap-add=CHOWN --cap-add=NET_RAW --cap-add=DAC_OVERRIDE --cap-add=FOWNER --cap-add=FSETID --cap-add=KILL --cap-add=SETGID --cap-add=SETUID --cap-add=NEW_BIND_SERVICE --cap-add=SYS_CHROOT --cap-add=SETFCAP`
    - You can run container applications as root with `--user=root`.
- - A few applications need [DBus](#dbus). Install `dbus` in image and try option `--dbus`. If that does not help, try option `--dbus-system`.
+ - A few applications need [DBus](#dbus). Install `dbus` in image and try option `--dbus`.
  - A few applications need systemd. Install `systemd` in image and try option `--init=systemd`.
    
    
@@ -430,7 +428,7 @@ A special one to check features and container isolation is `x11docker/check`.
 
 | Desktop environment <br> (most based on Debian)| x11docker command |
 | --- | --- |
-| [Cinnamon](https://github.com/mviereck/dockerfile-x11docker-cinnamon) | `x11docker --desktop --gpu --dbus-system x11docker/cinnamon` |
+| [Cinnamon](https://github.com/mviereck/dockerfile-x11docker-cinnamon) | `x11docker --desktop --gpu --init=systemd x11docker/cinnamon` |
 | [deepin](https://github.com/mviereck/dockerfile-x11docker-deepin) ([website](https://www.deepin.org/en/dde/)) (3D desktop from China) | `x11docker --desktop --gpu --init=systemd --cap-default --hostipc -- --cap-add=SYS_RESOURCE --cap-add=IPC_LOCK -- x11docker/deepin` |
 | [Enlightenment](https://github.com/mviereck/dockerfile-x11docker-enlightenment) (based on [Void Linux](https://www.voidlinux.org/)) | `x11docker --desktop --gpu --runit x11docker/enlightenment` |
 | [Fluxbox](https://github.com/mviereck/dockerfile-x11docker-fluxbox) (based on Debian, 87 MB) | `x11docker --desktop x11docker/fluxbox` |

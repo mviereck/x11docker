@@ -238,12 +238,11 @@ Init system and DBus daemon:
                          tini: Default. Mostly present as docker-init on host.
                          none: No init system, image command will be PID 1.
                        Special: systemd, sysvinit, runit, openrc, s6-overlay.
-                       The special init systems include option --dbus-system.
      --sharecgroup     Share /sys/fs/cgroup. Allows elogind in container if
-                       used with --dbus-system or special --init options.
+                       used with one of --init=systemd|openrc|runit|sysvinit
      --dbus            Run DBus user session daemon for image command.
-     --dbus-system     Run DBus system daemon in container (includes --dbus).
-                       Rather use one of --init=systemd|openrc|sysvinit|runit
+                       To also run a DBUS system daemon in container, 
+                       use one of --init=systemd|openrc|runit|sysvinit
      --hostdbus        Connect to DBus user session from host.
 
 Container capabilities:
@@ -3197,9 +3196,9 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
             echo "xhost $Xhost"
           }
 
-          [ "$Initsystem" = "systemd" ] || [ "$Dbussystem" = "yes" ] && {
-            echo "note 'Allowing xhost access for $Containeruser on display $Newdisplay"
-            echo "  to avoid service issues with X access. (option --init=systemd or --dbus-system):"
+          [ "$Initsystem" = "systemd" ] && {
+            echo "note 'Option --init=systemd: Allowing xhost access for $Containeruser"
+            echo "  on display $Newdisplay to avoid service issues with X access.:"
             echo "    xhost +SI:localuser:$Containeruser'"
             echo "xhost +SI:localuser:$Containeruser"
           }
@@ -3690,17 +3689,7 @@ DefaultEnvironment=DISPLAY=$Newdisplay XAUTHORITY=$Cshare/Xclientcookie $(while 
   However, they are still within default docker capabilities.
   Some processes in container will run as root."
     ;;
-    tini|none)
-      [ "$Dbussystem" = "yes" ] && {
-      warning "Option --dbus-system slightly degrades container isolation.
-  It adds some user switching capabilities x11docker would drop otherwise.
-  However, they are still within default docker capabilities.
-  Some processes in container will run as root."
-        note "Option --dbus-system can have a long 90s startup delay
-  with some container systems, especially seen with arch Linux containers.
-  In that case run with one of --init=systemd|runit|openrc|sysvinit."
-      }
-    ;;
+    tini|none) ;;
   esac
   
   return 0
@@ -3951,7 +3940,7 @@ create_dockercommand() {        # create command to run docker
   $Dockerexe run --help | grep -q -- '--tmpfs' && Dockercommand="$Dockercommand \\
   --tmpfs /run --tmpfs /run/lock" || {
     note "Your docker version does not support option --tmpfs.
-  Options like --init=systemd or --dbus-system may fail.
+  Options like --init=systemd may fail.
   Please update your docker installation."
   }
 
@@ -4550,7 +4539,6 @@ create_containerrootrc() {      # create container root setup script: This scrip
   echo "# commands in this script are executed as root in container"
     
 #  [ "$Debugmode" = "yes" ] && echo "set -x"
-  declare -f mysleep
   echo "$Messagefifofuncs"
   echo "Messagefile=$Cshare/message.fifo"
   echo ""
@@ -4981,73 +4969,6 @@ exit 0\" >> /etc/rc.local"
       echo ""
       
       case $Initsystem in
-        tini|none)
-          echo "  debugnote 'DBus: starting dbus system daemon'"
-          echo "  echo 'x11docker: DBus: starting dbus system daemon'"
-          echo "  dbus-daemon --system --fork"
-          echo "  for Count in $(seq 15); do"
-          echo "    [ -e /run/dbus/system_bus_socket ] && break"
-          echo "    echo 'Waiting for DBus system daemon to be ready.'"
-          echo "    mysleep 0.1"
-          echo "  done"
-          echo "  [ -e /run/dbus/system_bus_socket ] || warning 'DBus startup seems to have failed. /run/dbus/system_bus_socket not found.'"
-          echo ""
-          echo '  [ "$Loginservice" ] && {'
-          echo '    debugnote "Starting login service $Loginservicecommand"'
-          echo '    echo $Loginservicecommand | grep -q elogind && {'
-          echo '      [ -x /lib/elogind/elogind ]         && ln -s /lib/elogind/elogind /usr/sbin/elogind'
-          echo '      [ -x /usr/lib/elogind/elogind ]     && ln -s /usr/lib/elogind/elogind /usr/sbin/elogind'
-          echo '      [ -x /usr/libexec/elogind/elogind ] && ln -s /usr/libexec/elogind/elogind /usr/sbin/elogind'
-          echo '      elogind --daemon'
-          echo '    } || eval $Loginservicecommand'
-          echo '    waitforservice $Loginservice'
-          echo '  }'
-          [ "$Nonewprivileges" = "yes" ] && {
-            echo "  # support for dbus daemon with no-new-privileges"
-            echo "  waitforservice() {"
-            echo "    # wait for dbus service \$1 to appear in dbus service list"
-            echo "    for Count in 1 2 3 4 5 6 7 8 9 10 ; do"
-            echo "      dbus-send --system --dest=org.freedesktop.DBus --type=method_call --print-reply /org/freedesktop/DBus org.freedesktop.DBus.ListNames | grep -q \$1 && break"
-            echo "      debugnote \"DBus: waiting for \$1 to be ready\""
-            echo "      mysleep 0.1"
-            echo "    done"
-            echo "  }"
-            echo "  # start polkitd as first service"
-            echo "  [ -x /usr/lib/policykit-1/polkitd ] && {"
-            echo "    debugnote 'DBus: starting PolicyKit'"
-            echo "    /usr/lib/policykit-1/polkitd &"
-            echo "    waitforservice org.freedesktop.PolicyKit1"
-            echo "  }"
-            echo "  [ -x /usr/lib/accountsservice/accounts-daemon ] && {"
-            echo "    debugnote 'DBus: starting Accounts daemon'"
-            echo "    /usr/lib/accountsservice/accounts-daemon &"
-            echo "    waitforservice org.freedesktop.Accounts"
-            echo "  }"
-            echo "  # start all other dbus system services"
-            echo "  for Line in /usr/share/dbus-1/system-services/*; do"
-            echo "    Name=\"\$(cat \$Line | grep Name= | cut -d= -f2)\""
-            echo "    Command=\"\$(cat \$Line | grep Exec= | cut -d= -f2)\""
-            echo "    case \$Name in"
-            echo "      org.freedesktop.PolicyKit1|org.freedesktop.Accounts) ;;"
-            echo "      org.freedesktop.login1) ;;"
-            echo '      *)'
-            echo '        debugnote "DBus: starting service $Name: $Command"'
-            echo '        $Command &'
-            echo '        [ "$Command" != "/bin/false" ] && waitforservice $Name'
-            echo '      ;;'
-            echo '    esac'
-            echo '  done'
-            echo ""
-          }
-          echo "  debugnote \"DBus: Running system services:
-\$(dbus-send --system         \
-  --dest=org.freedesktop.DBus \
-  --type=method_call          \
-  --print-reply               \
-  /org/freedesktop/DBus       \
-  org.freedesktop.DBus.ListNames)\""
-          echo ""
-        ;;
         systemd)
           echo "  # just assuming that a DBus service file will be present"
           echo "  systemctl unmask dbus"
@@ -5182,7 +5103,7 @@ reload() {
           echo "  rc-update add dbus default"
         ;;
       esac
-      echo "} || note 'Option --dbus-system: DBus not found.
+      echo "} || note 'DBus not found.
   Can not run DBus system daemon. Please install dbus in image.'"
     ;;
   esac
@@ -6249,9 +6170,9 @@ check_option_interferences() {  # check multiple option interferences, change se
     [ "$Initsystem" = "systemd" ] && {
       note "Option --init=systemd is not possible on MSYS2/Cygwin/WSL.
   systemd needs a running linux kernel with cgroup support.
-  Fallback: Disabling option --init=systemd, enabling option --dbus-system"
+  You can try another init option instead, e.g. --init=openrc.
+  Fallback: Disabling option --init=systemd"
       Initsystem="tini"
-      Dbussystem="yes"
     } 
     [ "$Sharecgroup" = "yes" ] && { 
       note "Option --sharecgroup is not possible on MSYS2/Cygwin/WSL.
@@ -7030,7 +6951,7 @@ declare_variables() {           # declare global variables
   Initsystem="tini"                               # option --init: Init system in container
   Sharecgroup="no"                                # options --init=systemd, --sharecgroup: share /sys/fs/cgroup
   Dbusrunsession="no"                             # option '--dbus': run image command with dbus-run-session / user session
-  Dbussystem="no"                                 # option '--dbus-system': set up dbus system daemon in container
+  Dbussystem="no"                                 # set up dbus system daemon in container
   Sharehostdbus="no"                              # option '--hostdbus'
   Tinibinary=""                                   # option --tini/default: binary for tini; either /usr/bin/docker-exec or provided by user in ...share/x11docker
 
@@ -7118,8 +7039,8 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,xhost:,clean-xhost,no-auth,vt:,display:,env:,showenv,showid,showpid1"                          # X and environment options
   Longoptions="$Longoptions,home::,clipboard,pulseaudio::,alsa::,lang::,printer::,webcam"                                  # comfort options
   Longoptions="$Longoptions,pw:,no-internet,workdir:,sharessh,limit::,pull::,runtime:"                                     # advanced options
-  Longoptions="$Longoptions,init::,sys-admin,sharecgroup,dbus,dbus-system,hostdbus"                                        # advanced options
-  Longoptions="$Longoptions,share:,cachebasedir:,homebasedir:"                                                    # host folders
+  Longoptions="$Longoptions,init::,sys-admin,sharecgroup,dbus,hostdbus"                                                    # advanced options
+  Longoptions="$Longoptions,share:,cachebasedir:,homebasedir:"                                                             # host folders
   Longoptions="$Longoptions,launcher,cleanup,license,licence,help,version,install,update,update-master,remove,wmlist"      # special options without starting X or container
   Longoptions="$Longoptions,verbose::,quiet,debug,stdin"                                                                   # verbose options
   Longoptions="$Longoptions,hostipc,hostnet,cap-default,sudouser,hostuser:,user:,group-add:,name:"                         # capabilities, users
@@ -7129,7 +7050,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,tini,no-init,runit,openrc,sysvinit"                                                            # removed
 
   Longoptions="$Longoptions,xtest,xcomposite,xorgconf:,xoverip,iglx"                                                       # experimental
-  Longoptions="$Longoptions,homedir:,sharedir:,systemd,no-xhost"                                                           # deprecated
+  Longoptions="$Longoptions,homedir:,sharedir:,systemd,no-xhost,dbus-system"                                               # deprecated
   
   Parsedoptions="$(getopt --options $Shortoptions --longoptions $Longoptions --name "$0" -- "$@" 2>/tmp/x11docker_parsererror)"
   [ -e /tmp/x11docker_parsererror ] && Parsererror=$(cat /tmp/x11docker_parsererror) && rm /tmp/x11docker_parsererror
@@ -7251,7 +7172,6 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
        ## init system
          --init)       Initsystem="${2:-tini}" ; shift ;;  # init in container
          --sharecgroup)Sharecgroup="yes" ;;                # share /sys/fs/cgroup. default for --init=systemd, possible use with --init=openrc
-         --dbus-system) Dbussystem="yes" ;;                # set up dbus system daemon
          --dbus)       Dbusrunsession="yes" ;;                 # run image command with dbus-launch or dbus-run-session
          --hostdbus)   Sharehostdbus="yes" ;;              # connect to host DBus
          --systemd)   Initsystem="systemd" ; note "Option --systemd is deprecated. Please use: --init=systemd" ;;
@@ -7307,6 +7227,12 @@ ${2:-}"                ; shift ;;        # add custom root command in container 
          --xorgconf)   Xorgconf="${2:-}" ; note "Option --xorgconf: eperimental only" ; shift ;;        # custom xorg.conf
          --iglx)       Iglx="yes" ; note "Option --iglx: experimental only." ;;
       
+     #### deprecated
+        --dbus-system) warning "Option --dbus-system is deprecated.
+  Please use option --init=INITSYSTEM, e.g. --init=systemd instead.
+  Fallback: Enabling option --init=systemd"
+                       Initsystem="systemd" ;;
+                       
      #### removed
          --vcxsrv)     error "Option --vcxsrv is no longer supported.
   Please use either option --xwin in Cygwin/X
@@ -7528,7 +7454,6 @@ todo() {
   # BUG --runtime=kata-runtime --nxagent: ALT-GR works wrong.
   # FIXME: myrealpath(): If realpath is missing, the path argument is returned without resolving.
   # CHECK: Xwayland with X over IP
-  # FIXME: --dbus-system: slow startup (90s timeout) in arch containers for unknown reasons.
   # FIXME: --interactive with --init=runit|openrc|sysvinit: no job control in shell
   # CHECK: --interactive not possible without winpty in WSL and Cygwin
   # BUG x11docker/fluxbox on arch host: background missing, sometimes no context menu. where is the difference?
