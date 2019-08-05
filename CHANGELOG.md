@@ -9,6 +9,9 @@ Project website: https://github.com/mviereck/x11docker
 ## [Unreleased]
 ### Deprecated
  - `--dbus-system`: Use one of `--init=systemd|openrc|runit|sysvinit` instead.
+   Current fallback: `--init=systemd`.
+### Fixed
+ - `--workdir`: Has been overwritten / no effect.
  
 ## [6.1.1](https://github.com/mviereck/x11docker/releases/tag/v6.1.1) - 2019-07-31
 ### Fixed
