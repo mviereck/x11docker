@@ -12,6 +12,9 @@ Project website: https://github.com/mviereck/x11docker
    Current fallback: `--init=systemd`.
 ### Fixed
  - `--workdir`: Has been overwritten / no effect.
+ - Fixed `tty` check if not running in a terminal.
+   [(#176)](https://github.com/mviereck/x11docker/issues/176)
+   [(#177)](https://github.com/mviereck/x11docker/issues/177)
  
 ## [6.1.1](https://github.com/mviereck/x11docker/releases/tag/v6.1.1) - 2019-07-31
 ### Fixed
