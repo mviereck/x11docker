@@ -791,7 +791,7 @@ escapestring() {                # escape special chars of $1
   echo "${1:-}" | LC_ALL=C sed -e 's/[^a-zA-Z0-9,._+@=:/-]/\\&/g; 1{$s/^$/""/}; 1!s/^/"/; $!s/$/"/'
 }
 mysleep() {                     # catch cases where sleep only supports integer
-  sleep "${1:-}" || sleep 1
+  sleep "${1:-}" 2>/dev/null || sleep 1
 }
 rmcr() {                        # remove carriage return to translate DOS/Windows newlines into UNIX newlines
   # convert stdin if $1 is empty. Otherwise convert file $1.
@@ -1589,11 +1589,13 @@ setup_sound_alsa() {            # option --alsa: share sound devices
   return 0
 }
 setup_clipboard() {             # option --clipboard: create shareclipboard script
-  # xpra and nxagent have their own clipboard management.
-  # only xpra supports image clips.
-  # Other X servers: A script is created to synchronize Clipboard between X servers.
-  # No clipboard support for Wayland yet.
-  # It uses xclip or xsel. It is executed in xinitrc.
+  # Clipboard sharing works different depending on the new X server
+  #  - xpra and nxagent have their own clipboard management.
+  #  - Only xpra supports image clips.
+  #  - --hostdisplay accesses the clipboard from host X directly
+  #  - Other X servers: A script is created to synchronize clipboard between X servers.
+  #  - No clipboard support for Wayland yet.
+  # The script uses xclip or xsel. It is executed in xinitrc.
   
   local Clipsend= Clipreceive=
   
@@ -1608,21 +1610,24 @@ setup_clipboard() {             # option --clipboard: create shareclipboard scri
     
     --xephyr|--xorg|--xdummy|--xdummy-xwayland|--xvfb|--xwayland|--weston-xwayland)
       # check for either xclip or xsel
+      command -v xsel >/dev/null && {
+        Clipsend="xsel --clipboard --input"
+        Clipreceive="xsel --clipboard --output"
+      }
       command -v xclip >/dev/null && {
         Clipsend="xclip -selection clipboard -in"
         Clipreceive="xclip -selection clipboard -out"
-      } || {
-        command -v xsel >/dev/null && {
-          Clipsend="xsel --clipboard --input"
-          Clipreceive="xsel --clipboard --output"
-        }
-      } || {
-        warning "Option --clipboard: Need either xclip or xsel
+      }
+      [ -z "$Clipsend" ] && {
+        note "Option --clipboard: Need either xclip or xsel
   for clipboard sharing with X server $Xserver.
   Fallback: Disabling option --clipboard."
         Shareclipboard="no"
-        Clipsend=""
-        Clipreceive=""
+      }
+      [ -z "$Hostdisplay" ] && {
+        note "Option --clipboard: No host display DISPLAY found
+  to share clipboard. Fallback: Disabling option --clipboard"
+        Shareclipboard="no"
       }
 
       echo "#! /usr/bin/env bash
@@ -1631,25 +1636,27 @@ setup_clipboard() {             # option --clipboard: create shareclipboard scri
 $(declare -f mysleep)
 
 while [ ! -s "$Timetosaygoodbye" ] ; do
-  # read content of clipboard of first X server
-  D1CLIP=\"\$(env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipreceive)\"
+  # read content of clipboard of first X server $Hostdisplay
+  X1clip=\"\$(env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipreceive)\"
+  
   # check if clipboard of first X server has changed; if yes, send new content to second X server
-  [ \"\$CLIP\" != \"\$D1CLIP\" ] && {
-    CLIP=\"\$D1CLIP\"
-    env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipreceive | env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipsend
+  [ \"\$Shareclip\" != \"\$X1clip\" ] && {
+    Shareclip=\"\$X1clip\"
+    env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipsend <<<  \"\$Shareclip\" 
   }
-  [ -z \"\$CLIP\" ] && CLIP=' '      # avoid empty string error
-  mysleep 0.3                          # sleep a bit to avoid high cpu usage
+  Shareclip=\"\${Shareclip:-' '}\"     # avoid empty string error
+  mysleep 0.3                       # sleep a bit to avoid high cpu usage
     
-  # read content of clipboard of second X server
-  D2CLIP=\"\$(env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipreceive)\"
+  # read content of clipboard of second X server $Newdisplay
+  X2clip=\"\$(env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipreceive)\"
+  
   # check if clipboard of second X server has changed; if yes, send new content to first X server
-  [ \"\$CLIP\" != \"\$D2CLIP\" ] && {
-    CLIP=\"\$D2CLIP\"
-    env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipreceive | env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipsend
+  [ \"\$Shareclip\" != \"\$X2clip\" ] && {
+    Shareclip=\"\$X2clip\"
+    env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipsend <<<  \"\$Shareclip\" 
   }
-  [ -z \"\$CLIP\" ] && CLIP=' '      # avoid empty string error
-  mysleep 0.3                          # sleep a bit to avoid high cpu usage
+  Shareclip=\"\${Shareclip:-' '}\"     # avoid empty string error
+  mysleep 0.3                       # sleep a bit to avoid high cpu usage
 done
 " >> $Shareclipboardscript
     ;;
@@ -4169,8 +4176,8 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
       [ "$Runsinterminal" = "yes" ] && {
         echo "grep -x -q '$Imagename' < $Imageslist || grep -x -q '$Imagename:latest' < $Imageslist || {"
         echo "  $Dockerexe inspect $Imagename >>$Containerlogfile 2>&1 || {"
-        echo "    echo 'Image $Imagename not found locally.'"
-        echo "    echo 'Do you want to pull it from docker hub?'"
+        echo "    echo 'Image $Imagename not found locally.' >&2"
+        echo "    echo 'Do you want to pull it from docker hub?' >&2"
         echo "    askyesno && Dockerpull=yes || error \"Image '$Imagename' not available locally and not pulled from docker hub.\""
         echo "  }"
         echo "}"
@@ -4570,9 +4577,9 @@ $Wmdockercommand"'
   echo ""
   
   echo "# Wait for container to be ready"
-  echo "for ((Count=1 ; Count<=30 ; Count++)); do"
+  echo "for ((Count=1 ; Count<=40 ; Count++)); do"
   echo "  $Dockerexe exec $Containername sh -c : 2>&1 | rmcr >>$Containerlogfile && { debugnote 'Container is up and running.' ; break ; } || debugnote \"Container not ready on \$Count. attempt, trying again.\""
-  echo "  mysleep 0.2"
+  echo "  mysleep 0.1"
   echo "done"
   echo ""
   
@@ -4580,11 +4587,11 @@ $Wmdockercommand"'
   echo ""
 
   echo "# Wait for pid 1 in container"
-  echo "for ((Count=1 ; Count<=20 ; Count++)); do"
+  echo "for ((Count=1 ; Count<=40 ; Count++)); do"
   echo "  Pid1pid=\"\$($Dockerexe inspect --format '{{.State.Pid}}' $Containername 2>>$Containerlogfile | rmcr)\""
   echo "  debugnote \"\$Count. check for PID 1: \$Pid1pid\""
   echo '  checkpid "$Pid1pid" && break'
-  echo "  mysleep 0.2"
+  echo "  mysleep 0.1"
   echo "done"
   echo "echo \$Pid1pid >> $Containerpid1pidfile"
   echo "debugnote \"Host PID of container PID 1: \$Pid1pid\""
@@ -7066,7 +7073,7 @@ declare_variables() {           # declare global variables
   Sharevolumes=""                                 # option --volume: host folders to share, array
   Sharevolumescount="0"                           # counts shared folders in array
   Shareclipboard="no"                             # option '-c, --clipboard' enable clipboard sharing
-  Shareclipboardscript=clipboard.bash             #    "              "      created script for text clipboard sharing
+  Shareclipboardscript=clipboard.sh               #    "              "      created script for text clipboard sharing
   Sharealsa="no"                                  # option --alsa: enable ALSA sound, share /dev/snd
   Alsacard="${ALSA_CARD:-}"                       # option --alsa: specified ALSA card
   Noentrypoint="no"                               # option --no-entrypoint: disable entrypoint in image
