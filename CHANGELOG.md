@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
+### Added
+ - `--enforce-i`: Run x11docker in interactive bash mode. Rather special option
+   to provide a fix for special issues, e.g. running `weston-launch`
+   on void linux that needs an interactive tty. Not recommended in general.
+   [(#166)](https://github.com/mviereck/x11docker/issues/166)
+   [(#176)](https://github.com/mviereck/x11docker/issues/176)
+ - `-F`: Shortcut for `--xfishtank`.
+ - `-l`: Shortcut for `--lang`.
+ - `-P`: Shortcut for `--printer`.
+ - `-V`: Same as `-v, --verbose`, but with colored output. 
+   Useful e.g. with `--init=systemd`.
+### Changed
+ - Short options do not accept optional arguments. Affects `-l -m -p -P -w -v`.
+ - `-m`: Does not accept optional argument `=PATH`. Use `--home=PATH` instead.
+ - `-v, --verbose`: Does not accept argument `=c` anymore. Use `-V` instead.
+ - `-w`: Does not accept argument anymore. Use `--wm=ARG` instead.
 ### Deprecated
  - `--dbus-system`: Use one of `--init=systemd|openrc|runit|sysvinit` instead.
    Current fallback: `--init=systemd`.
