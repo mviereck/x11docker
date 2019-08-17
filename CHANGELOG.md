@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [6.2.0](https://github.com/mviereck/x11docker/releases/tag/v6.2.0) - 2019-08-17
 ### Added
  - `--enforce-i`: Run x11docker in interactive bash mode. Rather special option
    to provide a fix for special issues, e.g. running `weston-launch`
@@ -23,6 +23,7 @@ Project website: https://github.com/mviereck/x11docker
  - `-m`: Does not accept optional argument `=PATH`. Use `--home=PATH` instead.
  - `-v, --verbose`: Does not accept argument `=c` anymore. Use `-V` instead.
  - `-w`: Does not accept argument anymore. Use `--wm=ARG` instead.
+ - `--xpra`: Runs on Wayland since xpra v3.0-r23305.
 ### Deprecated
  - `--dbus-system`: Use one of `--init=systemd|openrc|runit|sysvinit` instead.
    Current fallback: `--init=systemd`.

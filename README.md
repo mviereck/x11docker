@@ -94,14 +94,15 @@ Just type `x11docker IMAGENAME [COMMAND]`.
  
 General syntax:
 ```
-To run a Docker image with new X server:
+To run a Docker container on a new X server:
+  x11docker IMAGE
   x11docker [OPTIONS] IMAGE [COMMAND]
   x11docker [OPTIONS] -- IMAGE [COMMAND [ARG1 ARG2 ...]]
   x11docker [OPTIONS] -- DOCKER_RUN_OPTIONS -- IMAGE [COMMAND [ARG1 ARG2 ...]]
 To run a host application on a new X server:
   x11docker [OPTIONS] --exe COMMAND
   x11docker [OPTIONS] --exe -- COMMAND [ARG1 ARG2 ...]
-To run only a new empty X server:
+To run only an empty new X server:
   x11docker [OPTIONS] --xonly
 ```
 `DOCKER_RUN_OPTIONS` are just added to `docker run` command without a serious check by x11docker.
@@ -129,9 +130,10 @@ x11docker assumes that you want to run a single application in seamless mode, i.
    - If available, x11docker uses image `x11docker/openbox` to run a window manager in its own container. 
    - Another window manager image an be specified with e.g. `--wm=x11docker/lxde`.
    - As a fallback x11docker runs a window manager from host, either autodetected or specified with e.g. `--wm=xfwm4`. 
+   
 ### Shared folders and HOME in container
 Changes in a running Docker container system will be lost, the created Docker container will be discarded. For persistent data storage you can share host directories:
- - Option `-m, --home` creates a host directory in `~/.local/share/x11docker/IMAGENAME` that is shared with the container and mounted as its `HOME` directory. Files in container home and configuration changes will persist. 
+ - Option `-m, --home` creates a host directory in `~/.local/share/x11docker/IMAGENAME` that is shared with the container and mounted as its `HOME` directory. Files in container home and user configuration changes will persist. 
    x11docker creates a softlink from `~/.local/share/x11docker` to `~/x11docker`.
    - You can specify another host directory for container `HOME` with `--home=DIR`.
  - Option `--share PATH` mounts a host file or folder at the same location in container. `--share PATH:ro` restricts to read-only access. Device files in `/dev` are supported, too.
@@ -153,7 +155,7 @@ Clipboard sharing is possible with option `-c, --clipboard`.
  
 ### Sound
 Sound is possible with options `-p, --pulseaudio` and `--alsa`. 
- - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and `pulseaudio` libraries in image. 
+ - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and `pulseaudio` (at least the `pulseaudio` client libraries) in image. 
    Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
  - For ALSA sound with `--alsa` you might need to specify a sound card with e.g. `--alsa=Generic`. Get a list of available sound cards with `aplay -l`.
  
@@ -196,7 +198,7 @@ As default x11docker uses `tini` in`/usr/bin/docker-init`. Also available are `s
 Look at [wiki: Init systems in Docker](https://github.com/mviereck/x11docker/wiki/Init-systems).
 
 ### DBus
-Some desktop environments and applications need a running DBus daemon and/or DBus user session. DBus options need `dbus` in image.
+Some desktop environments and applications need a running DBus system daemon and/or DBus user session. DBus options need `dbus` in image.
  - use `--dbus` to run a DBus user session daemon.
  - A DBus system daemon will be started automatically with [init systems](#Init-system) `systemd`, `openrc`, `runit` and `sysvinit` (option `--init`).
  - use `--hostdbus` to connect to host DBus user session.
@@ -263,7 +265,7 @@ _Weaknesses:_
  - Possible SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. 
    A more restrictive solution is desirable.
    Compare: [SELinux and Docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
- - A possible user namespace remapping setup is disabled to allow options `--home`, `--homedir` and `--share` without file ownership issues. 
+ - A possible user namespace remapping setup is disabled to allow options `--home` and `--share` without file ownership issues. 
    - This is less an issue because x11docker already avoids root in container. 
    - Exception: User namespace remapping is not disabled for `--user=RETAIN`.
  - x11docker provides several different X server options. Each X server involved might have its individual vulnerabilities. x11docker only covers well-known X security leaks that result from X11 protocol design.
@@ -289,7 +291,7 @@ _Rather special options reducing security, but not needed for regular use:_
     `--init=systemd` also shares access to `/sys/fs/cgroup`. Some processes will run as root in container.
     If a root process somehow breaks out of container, it can harm your host system. Allows many container capabilties that x11docker would drop otherwise.
   - `--hostipc` sets docker run option `--ipc=host`. Allows MIT-SHM / shared memory. Disables IPC namespacing.
-  - `--hostnet` sets docker run option `--net=host`. Shares host network stack. Disables network namespacing. Container can spy on an maybe manipulate host network traffic.
+  - `--hostnet` sets docker run option `--network=host`. Shares host network stack. Disables network namespacing. Container can spy on an maybe manipulate host network traffic.
   - `--hostdbus` allows communication over DBus with host applications.
 
 ### Sandbox
@@ -392,8 +394,8 @@ For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal.
      - If `--cap-default` helps, container security is degraded to a reasonable level. It causes x11docker not to set `--security-opt=no-new-privileges` and allows Docker#s default capabilities.
        - List of capabilities allowed with `--cap-default`: `--cap-add=SETPCAP --cap-add=MKNOD --cap-add=AUDIT_WRITE --cap-add=CHOWN --cap-add=NET_RAW --cap-add=DAC_OVERRIDE --cap-add=FOWNER --cap-add=FSETID --cap-add=KILL --cap-add=SETGID --cap-add=SETUID --cap-add=NEW_BIND_SERVICE --cap-add=SYS_CHROOT --cap-add=SETFCAP`
    - You can run container applications as root with `--user=root`.
- - A few applications need [DBus](#dbus). Install `dbus` in image and try option `--dbus`.
- - A few applications need systemd. Install `systemd` in image and try option `--init=systemd`.
+ - A few applications need a [DBus](#dbus) user daemon. Install `dbus` in image and try option `--dbus`.
+ - A few applications need systemd and/or a running [DBus](#dbus) system daemon. Install `systemd` in image and try option `--init=systemd`.
    
    
 ## Contact
