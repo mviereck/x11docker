@@ -750,11 +750,20 @@ pspid() {                       # ps -p $1 --no-headers
   ps -p ${1:-} 2>/dev/null | tail -n+2
 }
 killpid() {                     # kill PID $1 with codename $2 [and process name $3]
+  # TERM
   debugnote "Terminating ${1:-} (${2:-}) ${3:-}: $(pspid ${1:-})"
-#  ps -p ${1:-} >/dev/null && kill ${1:-} 2>/dev/null
-  checkpid "${1:-}" && kill         ${1:-} 2>/dev/null
-  mysleep 0.1 
+  checkpid "${1:-}" && kill         ${1:-} 2>/dev/null || return 0
+  mysleep 0.1
+  checkpid "${1:-}" && mysleep 0.4                     || return 0
+  # KILL
+  debugnote "Killing ${1:-} (${2:-}) ${3:-}: $(pspid ${1:-})"
   checkpid "${1:-}" && kill -s KILL ${1:-} 2>/dev/null
+  mysleep 0.2 
+  checkpid "${1:-}" && {
+    note "Failed to terminate ${1:-} (${2:-}) ${3:-}: $(pspid ${1:-})"
+    return 1
+  }
+  return 0
 }
 
 #### more or less general routines
@@ -799,13 +808,6 @@ escapestring() {                # escape special chars of $1
 mysleep() {                     # catch cases where sleep only supports integer
   sleep "${1:-}" 2>/dev/null || sleep 1
 }
-rmcr() {                        # remove carriage return to translate DOS/Windows newlines into UNIX newlines
-  # convert stdin if $1 is empty. Otherwise convert file $1.
-  case "${1:-}" in
-    "") sed    "s/$(printf "\r")//g" ;;
-    *)  sed -i "s/$(printf "\r")//g"  "${1:-}" ;;
-  esac
-}
 download() {                    # download file at URL $1 and store it in file $2
   # Uses wget or curl. If both are missing, returns 1. Follows redirects. 
   # With no arguments it checks for curl/wget only.
@@ -824,6 +826,13 @@ timestamp() {                   # print HH:MM:SS,NNN
 }
 makecookie() {                  # bake a cookie
   mcookie 2>/dev/null || echo $RANDOM$RANDOM$RANDOM$RANDOM$RANDOM$RANDOM | cut -b1-32
+}
+rmcr() {                        # remove carriage return to translate DOS/Windows newlines into UNIX newlines
+  # convert stdin if $1 is empty. Otherwise convert file $1.
+  case "${1:-}" in
+    "") sed    "s/$(printf "\r")//g" ;;
+    *)  sed -i "s/$(printf "\r")//g"  "${1:-}" ;;
+  esac
 }
 wincmd() {                      # execute a command on MS Windows with cmd.exe
   cmd /C "${@//&/^&}" 2>&1 | rmcr
@@ -2114,6 +2123,110 @@ check_xdepends() {              # check dependencies on host for X server option
   
   return "$Return"
 }
+check_newxenv() {               # find free display, create $Newxenv
+  # find free display number
+  [ "$Newdisplaynumber" ] || {
+    case $Xserver in
+      --xwin)
+        Newdisplaynumber="$((RANDOM / 10 + 150))"
+        note "Using random X display number :$Newdisplaynumber.
+  If this display number is already in use, x11docker will fail.
+  You can specify a display number N with option '--display N'."
+      ;;
+      *)
+        for ((Newdisplaynumber=100 ; Newdisplaynumber <=1000 ; Newdisplaynumber++)); do
+          [ -n "$(find /tmp/.X11-unix/X$Newdisplaynumber /tmp/.X$Newdisplaynumber-lock $XDG_RUNTIME_DIR/wayland-$Newdisplaynumber 2>/dev/null)" ] || break
+        done
+      ;;
+    esac
+  }
+
+  # X over IP/TCP
+  [ "$Xoverip" ] || case $Xserver in
+    --xwin) Xoverip="yes" ;;
+  esac
+  case $Winsubsystem in
+    MSYS2|CYGWIN|WSL) Xoverip="yes" ;;
+  esac
+  [ "$Runtime" = "kata-runtime" ] && Xoverip="yes"
+  
+  # set $Newdisplay (DISPLAY of container) and $Newxsocket
+  case $Xserver in
+    --hostdisplay)
+      case $Xoverip in
+        yes) 
+          [ "$(cut -c1 <<< "$Hostdisplay")" = ":" ] && Newdisplay="${Hostip}${Hostdisplay}" || Newdisplay="$Hostdisplay"  ;;
+        no)
+          Newdisplay="$Hostdisplay"
+          Newdisplaynumber="$(echo $Newdisplay | cut -d: -f2 | cut -d. -f1)"
+          Newxsocket="$Hostxsocket"
+        ;;
+      esac
+    ;;
+    *)
+      case $Xoverip in
+        yes) Newdisplay="$Hostip:$Newdisplaynumber" ;;
+        no)
+          Newdisplay=":$Newdisplaynumber"
+          Newxsocket="/tmp/.X11-unix/X$Newdisplaynumber"
+          Newxlock="/tmp/.X$Newdisplaynumber-lock"
+          [ -n "$(find $Newxsocket $Newxlock 2>/dev/null)" ] && error "Display $Newdisplay is already in use."
+        ;;
+      esac
+    ;;
+  esac
+
+  # set $Newwaylandsocket
+  case $Xserver in
+    --weston|--weston-xwayland|--kwin|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland) Newwaylandsocket="wayland-$Newdisplaynumber" ;;
+    --hostwayland|--xwayland) Newwaylandsocket="$Hostwaylandsocket" ;;
+  esac
+  
+  #### create $Newxenv: collection of environment variables to access new X from host (e.g. in xinitrc)
+  case $Xserver in
+    --xpra|--xephyr|--xpra-xwayland|--weston-xwayland|--hostdisplay|--xorg|--xdummy|--xvfb|--xdummy-xwayland|--xwayland|--kwin-xwayland|--nxagent|--xwin)
+      Newxenv="DISPLAY=$Newdisplay"
+      [ "$Xauthentication" = "yes" ] && Newxenv="$Newxenv XAUTHORITY=$Xclientcookie"
+      Newxenv="$Newxenv XSOCKET=$Newxsocket"
+      Newxenv="$Newxenv $Xprashm"
+    ;;
+    --weston|--kwin|--hostwayland|--tty)
+      Newxenv="DISPLAY= XAUTHORITY="
+      Newdisplay=""
+      Newxsocket=""
+      Xclientcookie=""
+      Xservercookie=""
+    ;;
+  esac
+
+  [ "$Sharewayland" = "yes" ] && {
+    Newxenv="$Newxenv WAYLAND_DISPLAY=$Newwaylandsocket"
+    Newxenv="$Newxenv XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+  }
+  [ "$Setwaylandenv" = "yes" ] && for Line in $Waylandtoolkitenv ; do Newxenv="$Newxenv $Line" ; done
+  Newxenv="$Newxenv X11DOCKER_CACHE=$Cachefolder"
+
+  debugnote "New X environment:
+  $Newxenv"
+  
+  # X / Wayland environment variables for container
+  case $Xserver in
+    --xpra|--xephyr|--xpra-xwayland|--weston-xwayland|--hostdisplay|--xorg|--xdummy|--xvfb|--xdummy-xwayland|--xwayland|--kwin-xwayland|--nxagent|--xwin)
+      store_runoption env "DISPLAY=$Newdisplay"
+      store_runoption env "XAUTHORITY=$Cshare/Xclientcookie"
+    ;;
+    --weston|--kwin|--hostwayland|--tty)
+      store_runoption env "WAYLAND_DISPLAY=$Newwaylandsocket"
+    ;;
+  esac
+  
+  # Which X environment to use for password prompt (xtermrc) and for docker pull (pullrc)
+  case $Xserver in
+    --xorg) Terminalxenv="$Newxenv" ;;
+    --weston|--kwin|--weston-xwayland|--kwin-xwayland|--tty) [ "$Runsonconsole" = "yes" ] && Terminalxenv="$Newxenv" || Terminalxenv="$Hostxenv" ;;
+    *) Terminalxenv="$Hostxenv" ;;
+  esac
+}
 check_screensize() {            # check physical and virtual screen size (also option --size)
   local Line=
   
@@ -2230,136 +2343,6 @@ check_screensize() {            # check physical and virtual screen size (also o
   $(xrandr 2>/dev/null | grep Screen ||:)"
   return 0
 }
-disable_xhost() {               # remove any access to X server granted by xhost
-  local Line=
-  command -v xhost >/dev/null || {
-    warning "Command 'xhost' not found.
-  Can not check for possibly allowed network access to X.
-  Please install 'xhost'.
-  $Wikipackages"
-    return 1
-  }
-  xhost 2>&1 | tail -n +2  /dev/stdin | while read -r Line ; do  # read all but the first line (header)
-    debugnote "xhost: Removing entry $Line"
-    xhost -$Line                                  # disable every entry
-  done
-  xhost -                                         # enable access control
-  [ "$(xhost 2>&1 | wc -l)" -gt "1" ] && {
-    warning "Remaining xhost permissions found on display ${DISPLAY:-}
-$(xhost 2>&1 )"
-    return 1
-  }
-  xhost 2>&1 | grep "access control disabled" && {
-    warning "Failed to restrict xhost permissions.
-  Access to display ${DISPLAY:-} is allowed for everyone." 
-    return 1
-  }
-  return 0
-}
-check_newxenv() {               # find free display, create $Newxenv
-  # find free display number
-  [ "$Newdisplaynumber" ] || {
-    case $Xserver in
-      --xwin)
-        Newdisplaynumber="$((RANDOM / 10 + 150))"
-        note "Using random X display number :$Newdisplaynumber.
-  If this display number is already in use, x11docker will fail.
-  You can specify a display number N with option '--display N'."
-      ;;
-      *)
-        for ((Newdisplaynumber=100 ; Newdisplaynumber <=1000 ; Newdisplaynumber++)); do
-          [ -n "$(find /tmp/.X11-unix/X$Newdisplaynumber /tmp/.X$Newdisplaynumber-lock $XDG_RUNTIME_DIR/wayland-$Newdisplaynumber 2>/dev/null)" ] || break
-        done
-      ;;
-    esac
-  }
-
-  # X over IP/TCP
-  [ "$Xoverip" ] || case $Xserver in
-    --xwin) Xoverip="yes" ;;
-  esac
-  case $Winsubsystem in
-    MSYS2|CYGWIN|WSL) Xoverip="yes" ;;
-  esac
-  [ "$Runtime" = "kata-runtime" ] && Xoverip="yes"
-  
-  # set $Newdisplay (DISPLAY of container) and $Newxsocket
-  case $Xserver in
-    --hostdisplay)
-      case $Xoverip in
-        yes) 
-          [ "$(cut -c1 <<< "$Hostdisplay")" = ":" ] && Newdisplay="${Hostip}${Hostdisplay}" || Newdisplay="$Hostdisplay"  ;;
-        no)
-          Newdisplay="$Hostdisplay"
-          Newdisplaynumber="$(echo $Newdisplay | cut -d: -f2 | cut -d. -f1)"
-          Newxsocket="$Hostxsocket"
-        ;;
-      esac
-    ;;
-    *)
-      case $Xoverip in
-        yes) Newdisplay="$Hostip:$Newdisplaynumber" ;;
-        no)
-          Newdisplay=":$Newdisplaynumber"
-          Newxsocket="/tmp/.X11-unix/X$Newdisplaynumber"
-          Newxlock="/tmp/.X$Newdisplaynumber-lock"
-          [ -n "$(find $Newxsocket $Newxlock 2>/dev/null)" ] && error "Display $Newdisplay is already in use."
-        ;;
-      esac
-    ;;
-  esac
-
-  # set $Newwaylandsocket
-  case $Xserver in
-    --weston|--weston-xwayland|--kwin|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland) Newwaylandsocket="wayland-$Newdisplaynumber" ;;
-    --hostwayland|--xwayland) Newwaylandsocket="$Hostwaylandsocket" ;;
-  esac
-  
-  #### create $Newxenv: collection of environment variables to access new X from host (e.g. in xinitrc)
-  case $Xserver in
-    --xpra|--xephyr|--xpra-xwayland|--weston-xwayland|--hostdisplay|--xorg|--xdummy|--xvfb|--xdummy-xwayland|--xwayland|--kwin-xwayland|--nxagent|--xwin)
-      Newxenv="DISPLAY=$Newdisplay"
-      [ "$Xauthentication" = "yes" ] && Newxenv="$Newxenv XAUTHORITY=$Xclientcookie"
-      Newxenv="$Newxenv XSOCKET=$Newxsocket"
-      Newxenv="$Newxenv $Xprashm"
-    ;;
-    --weston|--kwin|--hostwayland|--tty)
-      Newxenv="DISPLAY= XAUTHORITY="
-      Newdisplay=""
-      Newxsocket=""
-      Xclientcookie=""
-      Xservercookie=""
-    ;;
-  esac
-
-  [ "$Sharewayland" = "yes" ] && {
-    Newxenv="$Newxenv WAYLAND_DISPLAY=$Newwaylandsocket"
-    Newxenv="$Newxenv XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
-  }
-  [ "$Setwaylandenv" = "yes" ] && for Line in $Waylandtoolkitenv ; do Newxenv="$Newxenv $Line" ; done
-  Newxenv="$Newxenv X11DOCKER_CACHE=$Cachefolder"
-
-  debugnote "New X environment:
-  $Newxenv"
-  
-  # X / Wayland environment variables for container
-  case $Xserver in
-    --xpra|--xephyr|--xpra-xwayland|--weston-xwayland|--hostdisplay|--xorg|--xdummy|--xvfb|--xdummy-xwayland|--xwayland|--kwin-xwayland|--nxagent|--xwin)
-      store_runoption env "DISPLAY=$Newdisplay"
-      store_runoption env "XAUTHORITY=$Cshare/Xclientcookie"
-    ;;
-    --weston|--kwin|--hostwayland|--tty)
-      store_runoption env "WAYLAND_DISPLAY=$Newwaylandsocket"
-    ;;
-  esac
-  
-  # Which X environment to use for password prompt (xtermrc) and for docker pull (pullrc)
-  case $Xserver in
-    --xorg) Terminalxenv="$Newxenv" ;;
-    --weston|--kwin|--weston-xwayland|--kwin-xwayland|--tty) [ "$Runsonconsole" = "yes" ] && Terminalxenv="$Newxenv" || Terminalxenv="$Hostxenv" ;;
-    *) Terminalxenv="$Hostxenv" ;;
-  esac
-}
 check_vt() {                    # option --xorg: find free vt / tty
   local Line= Ttyinuse=
   
@@ -2439,141 +2422,31 @@ check_xpraoption() {            # check if xpra option $1 is available
     return 1
   }
 }
-create_xdummyxorgconf() {       # options --xdummy, --xpra: create xorg.conf and Xorg wrapper
-  { echo '# This xorg configuration file is forked and changed from xpra to start a dummy X11 server.
-# For original and details, please see: https://xpra.org/Xdummy.html
-# Set of modelines for different resolutions is created in xinitrc.
-Section "ServerFlags"
-  Option "DontVTSwitch" "true"
-  Option "AllowMouseOpenFail" "true"
-  Option "PciForceNone" "true"
-  Option "AutoEnableDevices" "false"
-  Option "AutoAddDevices" "false"
-EndSection
-Section "Device"
-  Identifier "dummy_videocard"
-  Driver "dummy"
-  DacSpeed 600
-  Option "ConstantDPI" "true"
-  VideoRam '$(($Maxxaxis * $Maxyaxis * 2 * 32 / 8 / 1024))'
-EndSection
-Section "Monitor"
-  Identifier "dummy_monitor"
-  HorizSync   1.0 - 2000.0
-  VertRefresh 1.0 - 200.0
-  Modeline '$Modeline'
-EndSection
-Section "Screen"
-  Identifier "dummy_screen"
-  Device "dummy_videocard"
-  Monitor "dummy_monitor"
-  DefaultDepth 24
-  SubSection "Display"
-    Viewport 0 0
-    Depth 32
-    Modes '$(echo $Modeline | cut -d " " -f1)'
-    Virtual '$Xaxis' '$Yaxis'
-  EndSubSection
-EndSection
-Section "ServerLayout"
-  Identifier   "dummy_layout"
-  Screen       "dummy_screen"
-EndSection
-'
-} >> $Xdummyconf
-
-  # create startscript for Xdummy
-  echo '#!/bin/sh
-# fork of https://xpra.org/trac/browser/xpra/trunk/src/scripts/xpra_Xdummy
-find_ld_linux() {
-	arch="$(uname -m)"
-
-	if [ $arch = "x86_64" ]; then
-		LD_LINUX="/lib64/ld-linux-x86-64.so.2"
-	elif [ $arch = "i386" ]; then
-		LD_LINUX="/lib/ld-linux.so.2"
-	elif [ $arch = "i486" ]; then
-		LD_LINUX="/lib/ld-linux.so.2"
-	elif [ $arch = "i586" ]; then
-		LD_LINUX="/lib/ld-linux.so.2"
-	elif [ $arch = "i686" ]; then
-		LD_LINUX="/lib/ld-linux.so.2"
-	elif [ $arch = "armel" ]; then
-		LD_LINUX="/lib/ld-linux.so.3"
-	elif [ $arch = "armhfp" ]; then
-		LD_LINUX="/lib/ld-linux.so.3"
-	elif [ $arch = "armhf" ]; then
-		LD_LINUX="/lib/ld-linux-armhf.so.3"
-	elif [ $arch = "ppc64" ]; then
-		LD_LINUX="/lib64/ld64.so.1"
-	elif [ $arch = "s390x" ]; then
-		LD_LINUX="/lib64/ld64.so.1"
-	else
-		#suitable for: powerpc/ppc, mips/mipsel, s390 and others:
-		LD_LINUX="/lib/ld.so.1"
-	fi
-
-	if [ ! -x "$LD_LINUX" ]; then
-		# Musl C / Alpine Linux
-		ldmusl="$(ls /lib | grep ^ld-musl)"
-		if [ -n "$ldmusl" ]; then
-			LD_LINUX="/lib/$ldmusl"
-		else
-			LD_LINUX=""
-			echo "could not determine ld path for $arch, please file an xpra bug"
-		fi
-	fi
-}
-
-if [ -x "/usr/libexec/Xorg" ]; then
-	#Fedora 22+ workaround where /usr/bin/Xorg is not suid
-	#because it is a script, command -v calls /usr/libexec/Xorg.wrap
-	#command -v is setuid, and command -v eventually calls this one:
-	XORG_BIN="/usr/libexec/Xorg"
-elif [ -x "/usr/libexec/Xorg.bin" ]; then
-	#Fedora 21 workaround where /usr/bin/Xorg is not suid
-	#because it is a script, command -v calls /usr/libexec/Xorg.wrap
-	#command -v is setuid, and command -v eventually calls this one:
-	XORG_BIN="/usr/libexec/Xorg.bin"
-elif [ -x "/usr/lib/xorg-server/Xorg" ]; then
-	#Arch Linux:
-	exec "/usr/lib/xorg-server/Xorg" "$@"
-elif [ -x "/usr/lib/xorg/Xorg" ]; then
-	#Ubuntu 16.10:
-	exec "/usr/lib/xorg/Xorg" "$@"
-else
-	XORG_BIN="$(command -v Xorg)"
-fi
-if [ ! -x "$XORG_BIN" ]; then
-	echo "failed to locate Xorg binary to run"
-	exit 1
-fi
-if [ -u "$XORG_BIN" ]; then
-	# setuid is set, we need to do magic
-	find_ld_linux
-	if [ -n "$LD_LINUX" ]; then
-		if [ -n "$BASH" ]; then
-			#running in bash, can show a more helpful command name:
-			exec -a "Xorg-nosuid" "$LD_LINUX" "$XORG_BIN" "$@"
-		else
-			exec "$LD_LINUX" "$XORG_BIN" "$@"
-		fi
-	else
-		#fallback to making a copy of the binary:
-		DOTXPRA_DIR="$HOME/.xpra"
-		if [ ! -d "$DOTXPRA_DIR" ]; then
-	 		mkdir "$DOTXPRA_DIR"
-	 		chmod 700 "$DOTXPRA_DIR"
-	 	fi
-		NOSUID_XORG="$DOTXPRA_DIR/Xorg-nosuid"
-	 	cp -f "$XORG_BIN" "$NOSUID_XORG"
-	 	exec "$NOSUID_XORG" "$@"
-	 fi
-else
-	# setuid is not set on xorg_bin
-	exec "$XORG_BIN" "$@"
-fi
-' >> $Xorgwrapper
+disable_xhost() {               # remove any access to X server granted by xhost
+  local Line=
+  command -v xhost >/dev/null || {
+    warning "Command 'xhost' not found.
+  Can not check for possibly allowed network access to X.
+  Please install 'xhost'.
+  $Wikipackages"
+    return 1
+  }
+  xhost 2>&1 | tail -n +2  /dev/stdin | while read -r Line ; do  # read all but the first line (header)
+    debugnote "xhost: Removing entry $Line"
+    xhost -$Line                                  # disable every entry
+  done
+  xhost -                                         # enable access control
+  [ "$(xhost 2>&1 | wc -l)" -gt "1" ] && {
+    warning "Remaining xhost permissions found on display ${DISPLAY:-}
+$(xhost 2>&1 )"
+    return 1
+  }
+  xhost 2>&1 | grep "access control disabled" && {
+    warning "Failed to restrict xhost permissions.
+  Access to display ${DISPLAY:-} is allowed for everyone." 
+    return 1
+  }
+  return 0
 }
 create_xcommand() {             # create command to start X server and/or Wayland compositor
   local Xserveroptions= Xpraoptions= Nxagentoptions= Compositorpid= Weston= Westonoutput= Count= Envvar=
@@ -3151,6 +3024,143 @@ esac
   
   return 0
 }
+
+#### X helper scripts
+create_xdummyxorgconf() {       # options --xdummy, --xpra: create xorg.conf for Xdummy
+  echo '# This xorg configuration file is forked and changed from xpra to start a dummy X11 server.
+# For original and details, please see: https://xpra.org/Xdummy.html
+# Set of modelines for different resolutions is created in xinitrc.
+Section "ServerFlags"
+  Option "DontVTSwitch" "true"
+  Option "AllowMouseOpenFail" "true"
+  Option "PciForceNone" "true"
+  Option "AutoEnableDevices" "false"
+  Option "AutoAddDevices" "false"
+EndSection
+Section "Device"
+  Identifier "dummy_videocard"
+  Driver "dummy"
+  DacSpeed 600
+  Option "ConstantDPI" "true"
+  VideoRam '$(($Maxxaxis * $Maxyaxis * 2 * 32 / 8 / 1024))'
+EndSection
+Section "Monitor"
+  Identifier "dummy_monitor"
+  HorizSync   1.0 - 2000.0
+  VertRefresh 1.0 - 200.0
+  Modeline '$Modeline'
+EndSection
+Section "Screen"
+  Identifier "dummy_screen"
+  Device "dummy_videocard"
+  Monitor "dummy_monitor"
+  DefaultDepth 24
+  SubSection "Display"
+    Viewport 0 0
+    Depth 32
+    Modes '$(echo $Modeline | cut -d " " -f1)'
+    Virtual '$Xaxis' '$Yaxis'
+  EndSubSection
+EndSection
+Section "ServerLayout"
+  Identifier   "dummy_layout"
+  Screen       "dummy_screen"
+EndSection
+'
+} >> $Xdummyconf
+create_xdummywrapper() {        # options --xdummy, --xpra: create startscript for Xdummy
+  echo '#!/bin/sh
+# fork of https://xpra.org/trac/browser/xpra/trunk/src/scripts/xpra_Xdummy
+find_ld_linux() {
+	arch="$(uname -m)"
+
+	if [ $arch = "x86_64" ]; then
+		LD_LINUX="/lib64/ld-linux-x86-64.so.2"
+	elif [ $arch = "i386" ]; then
+		LD_LINUX="/lib/ld-linux.so.2"
+	elif [ $arch = "i486" ]; then
+		LD_LINUX="/lib/ld-linux.so.2"
+	elif [ $arch = "i586" ]; then
+		LD_LINUX="/lib/ld-linux.so.2"
+	elif [ $arch = "i686" ]; then
+		LD_LINUX="/lib/ld-linux.so.2"
+	elif [ $arch = "armel" ]; then
+		LD_LINUX="/lib/ld-linux.so.3"
+	elif [ $arch = "armhfp" ]; then
+		LD_LINUX="/lib/ld-linux.so.3"
+	elif [ $arch = "armhf" ]; then
+		LD_LINUX="/lib/ld-linux-armhf.so.3"
+	elif [ $arch = "ppc64" ]; then
+		LD_LINUX="/lib64/ld64.so.1"
+	elif [ $arch = "s390x" ]; then
+		LD_LINUX="/lib64/ld64.so.1"
+	else
+		#suitable for: powerpc/ppc, mips/mipsel, s390 and others:
+		LD_LINUX="/lib/ld.so.1"
+	fi
+
+	if [ ! -x "$LD_LINUX" ]; then
+		# Musl C / Alpine Linux
+		ldmusl="$(ls /lib | grep ^ld-musl)"
+		if [ -n "$ldmusl" ]; then
+			LD_LINUX="/lib/$ldmusl"
+		else
+			LD_LINUX=""
+			echo "could not determine ld path for $arch, please file an xpra bug"
+		fi
+	fi
+}
+
+if [ -x "/usr/libexec/Xorg" ]; then
+	#Fedora 22+ workaround where /usr/bin/Xorg is not suid
+	#because it is a script, command -v calls /usr/libexec/Xorg.wrap
+	#command -v is setuid, and command -v eventually calls this one:
+	XORG_BIN="/usr/libexec/Xorg"
+elif [ -x "/usr/libexec/Xorg.bin" ]; then
+	#Fedora 21 workaround where /usr/bin/Xorg is not suid
+	#because it is a script, command -v calls /usr/libexec/Xorg.wrap
+	#command -v is setuid, and command -v eventually calls this one:
+	XORG_BIN="/usr/libexec/Xorg.bin"
+elif [ -x "/usr/lib/xorg-server/Xorg" ]; then
+	#Arch Linux:
+	exec "/usr/lib/xorg-server/Xorg" "$@"
+elif [ -x "/usr/lib/xorg/Xorg" ]; then
+	#Ubuntu 16.10:
+	exec "/usr/lib/xorg/Xorg" "$@"
+else
+	XORG_BIN="$(command -v Xorg)"
+fi
+if [ ! -x "$XORG_BIN" ]; then
+	echo "failed to locate Xorg binary to run"
+	exit 1
+fi
+if [ -u "$XORG_BIN" ]; then
+	# setuid is set, we need to do magic
+	find_ld_linux
+	if [ -n "$LD_LINUX" ]; then
+		if [ -n "$BASH" ]; then
+			#running in bash, can show a more helpful command name:
+			exec -a "Xorg-nosuid" "$LD_LINUX" "$XORG_BIN" "$@"
+		else
+			exec "$LD_LINUX" "$XORG_BIN" "$@"
+		fi
+	else
+		#fallback to making a copy of the binary:
+		DOTXPRA_DIR="$HOME/.xpra"
+		if [ ! -d "$DOTXPRA_DIR" ]; then
+	 		mkdir "$DOTXPRA_DIR"
+	 		chmod 700 "$DOTXPRA_DIR"
+	 	fi
+		NOSUID_XORG="$DOTXPRA_DIR/Xorg-nosuid"
+	 	cp -f "$XORG_BIN" "$NOSUID_XORG"
+	 	exec "$NOSUID_XORG" "$@"
+	 fi
+else
+	# setuid is not set on xorg_bin
+	exec "$XORG_BIN" "$@"
+fi
+'
+} >> $Xorgwrapper
 create_xinitrc() {              # create xinitrc: set up X environment, create cookies
   echo "#! /bin/sh"
   #[ "$Debugmode" = "yes" ] && echo "set -x"
@@ -5442,91 +5452,6 @@ create_xtermrc() {              # create xtermrc: script to prompt for password 
 } >> $Xtermrc
 
 #### final startup routines
-waitfor_xserver() {             # wait for X server to be ready
-  local Zeit=$(date +%s) Count=0 Dauer=0
-  local Xinitpid= Xserverpid= Line=
-
-  debugnote "Waiting for X server $Xserver to be ready."
-  
-  # sign is creation of $Cachefolder/Xready in xinitrc
-  while [ ! -e "$Cachefolder/Xready" ] ; do
-    Count=$(( Count + 1 ))
-    Dauer=$(( $(date +%s) - $Zeit ))
-    mysleep $(awk "BEGIN { print $Count * 0.05 }")
-    [ $Dauer -gt 40 ] && error "X server $Xserver not ready after 40s.
-  Last lines of xinit log:
-$(tail $Xinitlogfile)"
-    verbose "Waiting since ${Dauer}s for $Xserver to be ready."
-    
-    rocknroll || { debugnote "Stopped waiting for $Xserver due to terminating signal." ; break ; }
-    
-    # check for common error messages in log
-    grep -q -E 'xinit: giving up|unable to connect to X server|Connection refused|server error|Only console users are allowed' <$Xinitlogfile && error "Error during startup of X server $Xserver.
-  Last lines of xinit log:
-$(tail $Xinitlogfile)
-
-  $( [ -s "$Compositorlogfile" ] && echo "Last lines of compositor log:
-$(tail $Compositorlogfile)")"
-  done
-  
-  rocknroll && debugnote "$Xserver is ready" || return 1
-
-  # check pids of xinit and X server, set them on watchpidlist
-  case $Xserver in
-    --tty|--hostdisplay|--hostwayland|--weston|--kwin) ;;
-    *)
-      Xinitpid="$(pgrep -a xinit 2>/dev/null | grep "xinit $Xinitrc" | awk '{print $1}')"
-      checkpid "$Xinitpid"   && setonwatchpidlist $Xinitpid xinit
-      echo $Xcommand | grep -q Xorgwrapper && Line="Xorg $Newdisplay" || Line="$(echo "$Xcommand" | head -n1)"
-      Xserverpid=$(ps aux | rmcr| grep "$(echo "${Line:-nothingtolookfor}" | cut -d' ' -f1-2)" | grep -v grep | grep -v xinit | awk '{print $2}')
-      checkpid "$Xserverpid" && setonwatchpidlist $Xserverpid Xserver
-    ;;
-  esac
-  return 0
-}
-start_xpra() {                  # options --xpra / --xpra-xwayland: start and watch xpra server and xpra client
-  local Xpraserverpid Xpraclientpid
-  
-  debugnote "Starting Xpra server"
-  
-  echo "x11docker [$(timestamp)]: Starting Xpra server" >> $Xpraserverlogfile
-  unpriv "env $Newxenv GDK_BACKEND=x11 XPRA_UINPUT=0 $Xpraservercommand" >> $Xpraserverlogfile 2>&1 & 
-  Xpraserverpid=$!
-  storepid $! xpraserver
-  verlt "$Xprarelease" "r23060" && {
-    waitforlogentry "xpra server" $Xpraserverlogfile 'xpra is ready' || {
-      rocknroll && error "Xpra server startup failed.
-  Last lines of Xpra server log:
-$(tail $Xpraserverlogfile)"
-      return 1
-    }
-  }
-  
-  debugnote "Starting Xpra client"
-  
-  echo "x11docker [$(timestamp)]: Starting Xpra client" >> $Xpraclientlogfile
-  #  
-  unpriv "env $Hostxenv NO_AT_BRIDGE=1 XPRA_EXPORT_ICON_DATA=0 XPRA_ICON_OVERLAY=0 XPRA_MENU_ICONS=0 $(verlt $Xpraversion v2.1 && echo XPRA_OPENGL_DOUBLE_BUFFERED=1 ||:)   $Xpraclientcommand" >> $Xpraclientlogfile 2>&1 & 
-  Xpraclientpid=$!
-  storepid $! xpraclient
-
-  { # catch possible xpra crashes
-    while rocknroll; do
-      ps -p $Xpraserverpid >/dev/null || break
-      ps -p $Xpraclientpid >/dev/null || break
-      sleep 1
-    done
-    sleep 1 && rocknroll && note "Option $Xserver: xpra terminated unexpectedly.
-  Last lines of xpra server log:
-$(tail $Xpraserverlogfile)
----------------------------------
-  Last lines of xpra client log:
-$(tail $Xpraclientlogfile)"
-    saygoodbye xpra
-  } & storepid $! xpraloop
-
-  return 0
-}
 start_docker() {                # start docker container
   local Containerid= Containerpid1=
   
@@ -5635,6 +5560,49 @@ start_pulseaudiotcp() {         # option --pulseaudio=tcp: load Pulseaudio TCP m
   unpriv "pactl load-module module-native-protocol-tcp  port=$Pulseaudioport auth-ip-acl=${Containerip:-"127.0.0.1"} 2>&1" >>$Messagelogfile 
   return 0
 }
+start_xpra() {                  # options --xpra / --xpra-xwayland: start and watch xpra server and xpra client
+  local Xpraserverpid Xpraclientpid
+  
+  debugnote "Starting Xpra server"
+  
+  echo "x11docker [$(timestamp)]: Starting Xpra server" >> $Xpraserverlogfile
+  unpriv "env $Newxenv GDK_BACKEND=x11 XPRA_UINPUT=0 $Xpraservercommand" >> $Xpraserverlogfile 2>&1 & 
+  Xpraserverpid=$!
+  storepid $! xpraserver
+  verlt "$Xprarelease" "r23060" && {
+    waitforlogentry "xpra server" $Xpraserverlogfile 'xpra is ready' || {
+      rocknroll && error "Xpra server startup failed.
+  Last lines of Xpra server log:
+$(tail $Xpraserverlogfile)"
+      return 1
+    }
+  }
+  
+  debugnote "Starting Xpra client"
+  
+  echo "x11docker [$(timestamp)]: Starting Xpra client" >> $Xpraclientlogfile
+  #  
+  unpriv "env $Hostxenv NO_AT_BRIDGE=1 XPRA_EXPORT_ICON_DATA=0 XPRA_ICON_OVERLAY=0 XPRA_MENU_ICONS=0 $(verlt $Xpraversion v2.1 && echo XPRA_OPENGL_DOUBLE_BUFFERED=1 ||:)   $Xpraclientcommand" >> $Xpraclientlogfile 2>&1 & 
+  Xpraclientpid=$!
+  storepid $! xpraclient
+
+  { # catch possible xpra crashes
+    while rocknroll; do
+      ps -p $Xpraserverpid >/dev/null || break
+      ps -p $Xpraclientpid >/dev/null || break
+      sleep 1
+    done
+    sleep 1 && rocknroll && note "Option $Xserver: xpra terminated unexpectedly.
+  Last lines of xpra server log:
+$(tail $Xpraserverlogfile)
+---------------------------------
+  Last lines of xpra client log:
+$(tail $Xpraclientlogfile)"
+    saygoodbye xpra
+  } & storepid $! xpraloop
+
+  return 0
+}
 start_compositor() {            # start Wayland compositor Weston or KWin
   local Compositorkeyword Compositorpid 
   
@@ -5680,6 +5648,48 @@ $(tail $Xinitlogfile)
 
   $( [ -s "$Compositorlogfile" ] && echo "Last lines of compositor log:
 $(tail $Compositorlogfile)")"
+  return 0
+}
+waitfor_xserver() {             # wait for X server to be ready
+  local Zeit=$(date +%s) Count=0 Dauer=0
+  local Xinitpid= Xserverpid= Line=
+
+  debugnote "Waiting for X server $Xserver to be ready."
+  
+  # sign is creation of $Cachefolder/Xready in xinitrc
+  while [ ! -e "$Cachefolder/Xready" ] ; do
+    Count=$(( Count + 1 ))
+    Dauer=$(( $(date +%s) - $Zeit ))
+    mysleep $(awk "BEGIN { print $Count * 0.05 }")
+    [ $Dauer -gt 40 ] && error "X server $Xserver not ready after 40s.
+  Last lines of xinit log:
+$(tail $Xinitlogfile)"
+    verbose "Waiting since ${Dauer}s for $Xserver to be ready."
+    
+    rocknroll || { debugnote "Stopped waiting for $Xserver due to terminating signal." ; break ; }
+    
+    # check for common error messages in log
+    grep -q -E 'xinit: giving up|unable to connect to X server|Connection refused|server error|Only console users are allowed' <$Xinitlogfile && error "Error during startup of X server $Xserver.
+  Last lines of xinit log:
+$(tail $Xinitlogfile)
+
+  $( [ -s "$Compositorlogfile" ] && echo "Last lines of compositor log:
+$(tail $Compositorlogfile)")"
+  done
+  
+  rocknroll && debugnote "$Xserver is ready" || return 1
+
+  # check pids of xinit and X server, set them on watchpidlist
+  case $Xserver in
+    --tty|--hostdisplay|--hostwayland|--weston|--kwin) ;;
+    *)
+      Xinitpid="$(pgrep -a xinit 2>/dev/null | grep "xinit $Xinitrc" | awk '{print $1}')"
+      checkpid "$Xinitpid"   && setonwatchpidlist $Xinitpid xinit
+      echo $Xcommand | grep -q Xorgwrapper && Line="Xorg $Newdisplay" || Line="$(echo "$Xcommand" | head -n1)"
+      Xserverpid=$(ps aux | rmcr| grep "$(echo "${Line:-nothingtolookfor}" | cut -d' ' -f1-2)" | grep -v grep | grep -v xinit | awk '{print $2}')
+      checkpid "$Xserverpid" && setonwatchpidlist $Xserverpid Xserver
+    ;;
+  esac
   return 0
 }
 
@@ -5917,88 +5927,6 @@ check_hostxenv() {              # check environment variables for host X display
     [ -z "$Hostdisplay$Hostwaylandsocket" ] && unset GDK_BACKEND
   }
   
-  return 0
-}
-create_cachefiles() {           # create empty cache files owned by unprivileged user
-  # create base cache folder
-  [ "$Cachebasefolder" ] || {
-    Cachebasefolder="$Hostuserhome/.cache/x11docker"    ### FIXME really a good idea for Windows? WSL cache provides performance, but maybe must not be shared with container to avoid file access errors.
-#    case $Winsubsystem in
-#      "") Cachebasefolder="$Hostuserhome/.cache/x11docker" ;;
-#      *)  Cachebasefolder="$(convertpath --subsystem "$(cmd.exe /C "echo %userprofile%")" | rmcr)/x11docker/cache" ;;
-#    esac
-  }
-  Cachebasefolder="$(convertpath --subsystem "$Cachebasefolder")"
-  [ "$Cachebasefolder" != "$(echo $Cachebasefolder | sed -e 's/ *//g')" ] && error "Cache root folder must not contain whitespaces.
-  $Cachebasefolder"
-  unpriv "mkdir -p $Cachebasefolder"                                       || error "Could not create cache folder
-  $Cachebasefolder"
-  writeaccess $Hostuseruid $Cachebasefolder                               || error "User $Hostuser does not have write access to cache folder
-  $Cachebasefolder"                                # can happen with --cachebasedir
-  Logbackup="$Cachebasefolder/x11docker.log"       # afterward copy of $Logfile in $Cachebasefolder
-  Imagelistfile="$Cachebasefolder/$Imagelistfile"                         && mkfile $Imagelistfile
-
-  
-  # create cache subfolder
-  Cachefolder="$Cachebasefolder/$Codename-$Cachenumber"
-  [ -d "$Cachefolder" ] && error "Cache folder already exists:
-  $Cachefolder"
-
-  [ "$Cachefolder" != "$(escapestring "$Cachefolder")" ] && error "Invalid name created for cache folder:
-    $Cachefolder
-  Most probably provided image name (or --exe command) is invalid in some way:
-    $(escapestring "$Imagename")
-  For special setups like command chains use a syntax like:
-    x11docker IMAGENAME  --  sh -c \"cd /etc && xterm\""
-
-  Sharefolder="$Cachefolder/$Sharefolder"
-  unpriv "mkdir -p $Sharefolder"
-  export Cachefolder Sharefolder
-
-  Logfile="$Sharefolder/x11docker.log"                              && mkfile $Logfile
-  Messagelogfile="$Cachefolder/$Messagelogfile"                     && mkfile $Messagelogfile
-  Timetosaygoodbye="$Sharefolder/$Timetosaygoodbye"                 && mkfile $Timetosaygoodbye
-  Dockerinfofile="$Cachefolder/$Dockerinfofile"                     && mkfile $Dockerinfofile
-  Xinitrc="$Cachefolder/$Xinitrc"                                   && mkfile $Xinitrc
-  Xinitlogfile="$Cachefolder/$Xinitlogfile"                         && mkfile $Xinitlogfile
-  Xtermrc="$Cachefolder/$Xtermrc"                                   && mkfile $Xtermrc
-  Pullrc="$Cachefolder/$Pullrc"                                     && mkfile $Pullrc
-  Containerlogfile="$Cachefolder/$Containerlogfile"                 && mkfile $Containerlogfile
-  Containeridfile="$Cachefolder/$Containeridfile"                   && mkfile $Containeridfile
-  Containerpid1pidfile="$Cachefolder/$Containerpid1pidfile"         && mkfile $Containerpid1pidfile
-  Containeruserfile="$Sharefolder/$Containeruserfile"               && mkfile $Containeruserfile
-  Dockerrc="$Cachefolder/$Dockerrc"                                 && mkfile $Dockerrc
-  Dockercommandfile="$Cachefolder/$Dockercommandfile"               && mkfile $Dockercommandfile
-  Containerrootrc="$Sharefolder/$Containerrootrc"                   && mkfile $Containerrootrc
-  Containeripfile="$Cachefolder/$Containeripfile"                   && mkfile $Containeripfile
-  Xservercookie="$Cachefolder/$Xservercookie"                       && mkfile $Xservercookie
-  Xclientcookie="$Sharefolder/$Xclientcookie"                       && mkfile $Xclientcookie
-  Hostxauthority="$Cachefolder/$Hostxauthority"                     && mkfile $Hostxauthority
-  Xpraserverlogfile="$Cachefolder/$Xpraserverlogfile"               && mkfile $Xpraserverlogfile
-  Xpraclientlogfile="$Cachefolder/$Xpraclientlogfile"               && mkfile $Xpraclientlogfile
-  Compositorlogfile="$Cachefolder/$Compositorlogfile"               && mkfile $Compositorlogfile
-  Compositorpidfile="$Cachefolder/$Compositorpidfile"               && mkfile $Compositorpidfile
-  Pulseaudioconf="$Cachefolder/$Pulseaudioconf"                     && mkfile $Pulseaudioconf
-  Bgpidfile="$Cachefolder/$Bgpidfile"                               && mkfile $Bgpidfile
-  Imagecommandscript="$Sharefolder/$Imagecommandscript"             && mkfile $Imagecommandscript
-  Shareclipboardscript="$Cachefolder/$Shareclipboardscript"         && mkfile $Shareclipboardscript
-  Westonini="$Cachefolder/$Westonini"                               && mkfile $Westonini
-  Xdummyconf="$Cachefolder/$Xdummyconf"                             && mkfile $Xdummyconf
-  Xorgwrapper="$Cachefolder/$Xorgwrapper"                           && mkfile $Xorgwrapper
-  Xkbkeymapfile="$Cachefolder/$Xkbkeymapfile"                       && mkfile $Xkbkeymapfile
-  
-  Systemdtarget=$Cachefolder/x11docker.target                       && mkfile $Systemdtarget
-  Systemdstartcmd=$Cachefolder/console-getty.service                && mkfile $Systemdstartcmd
-  Systemdwatch=$Cachefolder/x11docker-watch.service                 && mkfile $Systemdwatch
-  Systemdjournal=$Cachefolder/x11docker-journal.service             && mkfile $Systemdjournal
-  Journallogfile=$Sharefolder/journalctl.log                        && mkfile $Journallogfile
-  Systemdenvironment=$Cachefolder/systemd.env.conf                  && mkfile $Systemdenvironment
-
-  # standard streams for container
-  Cmdstdoutlogfile="$Sharefolder/$Cmdstdoutlogfile"                 && mkfile $Cmdstdoutlogfile 666
-  Cmdstderrlogfile="$Sharefolder/$Cmdstderrlogfile"                 && mkfile $Cmdstderrlogfile 666
-
-  mkfile "$Sharefolder/environment" 666
   return 0
 }
 check_runmode() {               # check run/--exe/--xonly
@@ -6881,6 +6809,88 @@ check_terminalemulator() {      # check terminal for password prompt of su or su
 
   return 0
 }
+create_cachefiles() {           # create empty cache files owned by unprivileged user
+  # create base cache folder
+  [ "$Cachebasefolder" ] || {
+    Cachebasefolder="$Hostuserhome/.cache/x11docker"    ### FIXME really a good idea for Windows? WSL cache provides performance, but maybe must not be shared with container to avoid file access errors.
+#    case $Winsubsystem in
+#      "") Cachebasefolder="$Hostuserhome/.cache/x11docker" ;;
+#      *)  Cachebasefolder="$(convertpath --subsystem "$(cmd.exe /C "echo %userprofile%")" | rmcr)/x11docker/cache" ;;
+#    esac
+  }
+  Cachebasefolder="$(convertpath --subsystem "$Cachebasefolder")"
+  [ "$Cachebasefolder" != "$(echo $Cachebasefolder | sed -e 's/ *//g')" ] && error "Cache root folder must not contain whitespaces.
+  $Cachebasefolder"
+  unpriv "mkdir -p $Cachebasefolder"                                       || error "Could not create cache folder
+  $Cachebasefolder"
+  writeaccess $Hostuseruid $Cachebasefolder                               || error "User $Hostuser does not have write access to cache folder
+  $Cachebasefolder"                                # can happen with --cachebasedir
+  Logbackup="$Cachebasefolder/x11docker.log"       # afterward copy of $Logfile in $Cachebasefolder
+  Imagelistfile="$Cachebasefolder/$Imagelistfile"                         && mkfile $Imagelistfile
+
+  
+  # create cache subfolder
+  Cachefolder="$Cachebasefolder/$Codename-$Cachenumber"
+  [ -d "$Cachefolder" ] && error "Cache folder already exists:
+  $Cachefolder"
+
+  [ "$Cachefolder" != "$(escapestring "$Cachefolder")" ] && error "Invalid name created for cache folder:
+    $Cachefolder
+  Most probably provided image name (or --exe command) is invalid in some way:
+    $(escapestring "$Imagename")
+  For special setups like command chains use a syntax like:
+    x11docker IMAGENAME  --  sh -c \"cd /etc && xterm\""
+
+  Sharefolder="$Cachefolder/$Sharefolder"
+  unpriv "mkdir -p $Sharefolder"
+  export Cachefolder Sharefolder
+
+  Logfile="$Sharefolder/x11docker.log"                              && mkfile $Logfile
+  Messagelogfile="$Cachefolder/$Messagelogfile"                     && mkfile $Messagelogfile
+  Timetosaygoodbye="$Sharefolder/$Timetosaygoodbye"                 && mkfile $Timetosaygoodbye
+  Dockerinfofile="$Cachefolder/$Dockerinfofile"                     && mkfile $Dockerinfofile
+  Xinitrc="$Cachefolder/$Xinitrc"                                   && mkfile $Xinitrc
+  Xinitlogfile="$Cachefolder/$Xinitlogfile"                         && mkfile $Xinitlogfile
+  Xtermrc="$Cachefolder/$Xtermrc"                                   && mkfile $Xtermrc
+  Pullrc="$Cachefolder/$Pullrc"                                     && mkfile $Pullrc
+  Containerlogfile="$Cachefolder/$Containerlogfile"                 && mkfile $Containerlogfile
+  Containeridfile="$Cachefolder/$Containeridfile"                   && mkfile $Containeridfile
+  Containerpid1pidfile="$Cachefolder/$Containerpid1pidfile"         && mkfile $Containerpid1pidfile
+  Containeruserfile="$Sharefolder/$Containeruserfile"               && mkfile $Containeruserfile
+  Dockerrc="$Cachefolder/$Dockerrc"                                 && mkfile $Dockerrc
+  Dockercommandfile="$Cachefolder/$Dockercommandfile"               && mkfile $Dockercommandfile
+  Containerrootrc="$Sharefolder/$Containerrootrc"                   && mkfile $Containerrootrc
+  Containeripfile="$Cachefolder/$Containeripfile"                   && mkfile $Containeripfile
+  Xservercookie="$Cachefolder/$Xservercookie"                       && mkfile $Xservercookie
+  Xclientcookie="$Sharefolder/$Xclientcookie"                       && mkfile $Xclientcookie
+  Hostxauthority="$Cachefolder/$Hostxauthority"                     && mkfile $Hostxauthority
+  Xpraserverlogfile="$Cachefolder/$Xpraserverlogfile"               && mkfile $Xpraserverlogfile
+  Xpraclientlogfile="$Cachefolder/$Xpraclientlogfile"               && mkfile $Xpraclientlogfile
+  Compositorlogfile="$Cachefolder/$Compositorlogfile"               && mkfile $Compositorlogfile
+  Compositorpidfile="$Cachefolder/$Compositorpidfile"               && mkfile $Compositorpidfile
+  Pulseaudioconf="$Cachefolder/$Pulseaudioconf"                     && mkfile $Pulseaudioconf
+  Bgpidfile="$Cachefolder/$Bgpidfile"                               && mkfile $Bgpidfile
+  Imagecommandscript="$Sharefolder/$Imagecommandscript"             && mkfile $Imagecommandscript
+  Shareclipboardscript="$Cachefolder/$Shareclipboardscript"         && mkfile $Shareclipboardscript
+  Westonini="$Cachefolder/$Westonini"                               && mkfile $Westonini
+  Xdummyconf="$Cachefolder/$Xdummyconf"                             && mkfile $Xdummyconf
+  Xorgwrapper="$Cachefolder/$Xorgwrapper"                           && mkfile $Xorgwrapper
+  Xkbkeymapfile="$Cachefolder/$Xkbkeymapfile"                       && mkfile $Xkbkeymapfile
+  
+  Systemdtarget=$Cachefolder/x11docker.target                       && mkfile $Systemdtarget
+  Systemdstartcmd=$Cachefolder/console-getty.service                && mkfile $Systemdstartcmd
+  Systemdwatch=$Cachefolder/x11docker-watch.service                 && mkfile $Systemdwatch
+  Systemdjournal=$Cachefolder/x11docker-journal.service             && mkfile $Systemdjournal
+  Journallogfile=$Sharefolder/journalctl.log                        && mkfile $Journallogfile
+  Systemdenvironment=$Cachefolder/systemd.env.conf                  && mkfile $Systemdenvironment
+
+  # standard streams for container
+  Cmdstdoutlogfile="$Sharefolder/$Cmdstdoutlogfile"                 && mkfile $Cmdstdoutlogfile 666
+  Cmdstderrlogfile="$Sharefolder/$Cmdstderrlogfile"                 && mkfile $Cmdstderrlogfile 666
+
+  mkfile "$Sharefolder/environment" 666
+  return 0
+}
 setup_fifo() {                  # set up fifo channels (also option --stdin)
   # setup fifos to allow messages from within container, dockerrc and xinitrc
   # and to send pids to watch to watchpidlist() thread
@@ -7624,7 +7634,7 @@ Parsed options:    $Parsedoptions"
   #### Create command to run X server [and/or Wayland compositor]
   [ "$Xserver" != "--xorg" ]     && [ -n "$Newxvt" ]              && note "Option --vt only takes effect with option --xorg."
   [ "$Xserver" = "--xorg" ]      && [ -z "$Newxvt" ]              && check_vt    # --vt: find free tty/virtual terminal for Xorg
-  { [ "$Xserver" = "--xdummy" ]  || [ "$Xpravfb" = "Xdummy" ] ; } && create_xdummyxorgconf
+  { [ "$Xserver" = "--xdummy" ]  || [ "$Xpravfb" = "Xdummy" ] ; } && create_xdummyxorgconf && create_xdummywrapper
   check_newxenv                  # find free display, create $Newxenv
   create_xcommand                # set up start command for X server             # all X server and Wayland options
   [ "$Xcommand" ]                && debugnote "X server command:
