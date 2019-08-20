@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Changed
+ - `--xdummy --gpu`/`--xvfb --gpu`: Supported only in host X.
+ - `--xephyr`: enabled `-glamor`.
+
 ## [6.2.0](https://github.com/mviereck/x11docker/releases/tag/v6.2.0) - 2019-08-17
 ### Added
  - `--enforce-i`: Run x11docker in interactive bash mode. Rather special option
