@@ -2448,6 +2448,28 @@ $(xhost 2>&1 )"
   }
   return 0
 }
+create_modelinefile() {         # generate a set of smaller modelines for screen size $1 and store them in a cache file
+  local Modelinefile Modeline Size X Y Xcount Ycount
+  
+  Size="${1:-}"
+  X="$(echo "$Size" | cut -dx -f1)"
+  Y="$(echo "$Size" | cut -dx -f2)"
+  Modelinefile="$Cachebasefolder/modelines.$Size"
+  
+  [ -e "$Modelinefile" ] || {
+    mkfile "$Modelinefile"
+    debugnote "Generating modelines for $Size"
+    for Ycount in 25 30 40 45 50 55 60 65 70 75 80 85 90 95 100; do
+      for Xcount in 25 30 40 45 50 55 60 65 70 75 80 85 90 95 100; do
+        Modeline="$(cvt "$(awk -v a="$X" -v b=$Xcount 'BEGIN {print (a * b / 100)}')" "$(awk -v a="$Y" -v b=$Ycount 'BEGIN {print (a * b / 100)}' )" | tail -n1)"
+        Modeline="$(echo "$Modeline" | sed s/_60.00//g)"
+        echo "$Modeline" >> "$Modelinefile"
+      done
+    done
+  }
+  
+  echo "$Modelinefile"
+}
 create_xcommand() {             # create command to start X server and/or Wayland compositor
   local Xserveroptions= Xpraoptions= Nxagentoptions= Compositorpid= Weston= Westonoutput= Count= Envvar=
 
@@ -3027,6 +3049,7 @@ esac
 
 #### X helper scripts
 create_xdummyxorgconf() {       # options --xdummy, --xpra: create xorg.conf for Xdummy
+  local Modelinefile
   echo '# This xorg configuration file is forked and changed from xpra to start a dummy X11 server.
 # For original and details, please see: https://xpra.org/Xdummy.html
 # Set of modelines for different resolutions is created in xinitrc.
@@ -3048,7 +3071,13 @@ Section "Monitor"
   Identifier "dummy_monitor"
   HorizSync   1.0 - 2000.0
   VertRefresh 1.0 - 200.0
-  Modeline '$Modeline'
+' >> $Xdummyconf
+  # Modeline for desired virtual screen size
+  echo "Modeline $Modeline" >> $Xdummyconf
+  # Subset of smaller Modelines
+  Modelinefile="$(create_modelinefile "${Maxxaxis}x${Maxyaxis}")"
+  cat "$Modelinefile" >> $Xdummyconf
+  echo '
 EndSection
 Section "Screen"
   Identifier "dummy_screen"
@@ -3066,8 +3095,8 @@ Section "ServerLayout"
   Identifier   "dummy_layout"
   Screen       "dummy_screen"
 EndSection
-'
-} >> $Xdummyconf
+' >> $Xdummyconf
+}
 create_xdummywrapper() {        # options --xdummy, --xpra: create startscript for Xdummy
   echo '#!/bin/sh
 # fork of https://xpra.org/trac/browser/xpra/trunk/src/scripts/xpra_Xdummy
@@ -3165,11 +3194,13 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   echo "#! /bin/sh"
   #[ "$Debugmode" = "yes" ] && echo "set -x"
   
-  # declaring functions echoes them into xinitrc
-  declare -f storepid rocknroll waitfortheend saygoodbye
+  declare -f create_modelinefile
   declare -f disable_xhost
-  declare -f wincmd rmcr
-
+  declare -f mkfile
+  declare -f rocknroll 
+  declare -f saygoodbye
+  declare -f storepid 
+  declare -f waitfortheend 
   echo "$Messagefifofuncs"
 
   echo "getscreensize() {"
@@ -3189,6 +3220,9 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   echo ""
 
   echo "Bgpidfile='$Bgpidfile'"
+  echo "Cachebasefolder='$Cachebasefolder'"
+  echo "Hostuser='$Hostuser'"
+  echo "Hostusergid='$Hostusergid'"
   echo "Messagefile='$Messagefifo'"
   echo "Output=\"\$(getprimary)\""
   echo "Sharefolder='$Sharefolder'"
@@ -3359,22 +3393,21 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   esac
   
   case $Xserver in
-    --xpra|--xdummy|--xvfb) 
-      echo           "# create set of different screen resolutions"
-      echo           "xrandr --newmode $Modeline"
-      echo           "xrandr --addmode \$Output $(echo $Modeline | cut -d " " -f1)"
-      [ "$Xserver" = "--xpra" ] && [ "$Desktopmode" = "yes" ] && echo "xrandr --output  \$Output --mode $(echo $Modeline | cut -d " " -f1)"
-
-      { [ "$Desktopmode" = "yes" ] || [ "$Xserver" = "--xdummy" ] || [ "$Xserver" = "--xvfb" ] ; } && {
-        echo         "for Ycount in 25 30 40 45 50 55 60 65 70 75 80 85 90 95 100; do"
-        echo         "  for Xcount in 25 30 40 45 50 55 60 65 70 75 80 85 90 95 100; do"
-        echo         "    Modeline=\"\$(cvt \"\$(awk -v a=\"$Maxxaxis\" -v b=\$Xcount 'BEGIN {print (a * b / 100)}')\" \"\$(awk -v a=\"$Maxyaxis\" -v b=\$Ycount 'BEGIN {print (a * b / 100)}')\" | tail -n1 | cut -d' ' -f2- | tr -d '\"')\""
-        echo         "    Modeline=\"\$(echo \$Modeline | cut -d_ -f1) \$(echo \$Modeline | cut -d_ -f2- | cut -d' ' -f2-)\""
-        echo         "    xrandr --newmode \$Modeline"
-        echo         "    xrandr --addmode \"\$Output\" \"\$(echo \$Modeline | cut -d' ' -f1)\""
-        echo         "  done"
-        echo         "done 2>&1 | uniq"
+    --xpra|--xvfb) 
+      { [ "$Xserver" = "--xpra" ] && [ "$Xpravfb" = "Xvfb" ] && [ "$Desktopmode" = "yes" ] ; } || [ "$Xserver" = "--xvfb" ] && {
+        echo         "# create set of different screen resolutions"
+        echo         "xrandr --newmode $Modeline"
+        echo         "xrandr --addmode \$Output $(echo $Modeline | cut -d " " -f1)"
+        echo         "Modelinefile=\"\$(create_modelinefile ${Maxxaxis}x${Maxyaxis})\""
+        echo         "while read Line; do"
+        echo         "  Line=\"\$(echo \"\$Line\" | sed 's/Modeline//g')\""
+        echo         "  Line=\"\$(echo \"\$Line\" | sed 's/\"//g')\""
+        echo         "  xrandr --newmode \$Line 2>/dev/null"
+        echo         "  xrandr --addmode \"\$Output\" \$(echo \$Line | cut -d' ' -f1) 2>/dev/null"
+        echo         "done < \"\$Modelinefile\""
       }
+      echo           ""
+      [ "$Xserver" = "--xpra" ] && [ "$Desktopmode" = "yes" ] && echo "xrandr --output  \$Output --mode $(echo $Modeline | cut -d " " -f1)"
       echo           ""
     ;;
     --xorg) # --xorg: --scale, --size, --rotate
@@ -7213,7 +7246,7 @@ declare_variables() {           # declare global variables
   Runfromhost=""                                  # --runfromhost: Add host command to xinitrc
   
   # Miscellanous
-  Cachenumber="$(date +%s%N | cut -c6-12)"        # Number to use for cache folder
+  Cachenumber="$(date +%s%N | cut -c6-16)"        # Number to use for cache folder
   [ -z "$Cachenumber" ] && Cachenumber="$(makecookie)"
   Codename=""                                     # created from image name and command without special chars for use with container name and cache folder
   Dockerexe="docker"                              # Can be docker.exe on MS Windows
@@ -7735,10 +7768,13 @@ finish
 #### ToDo notes for development
 todo() {
   # CHECK:
+  # BUG --wayland --xpra: Fallback disabling --wayland fails
   # --weston-xwayland: Weston is resizeable now, but Xwayland root window does not draw new area
   # --xpra-xwayland, --weston-xwayland: Xwayland does not fit Weston window size if parts of weston window are offscreen
-  # --xpra --desktop: redraw issues on resize
-  # --xpra --desktop --xdummy: resize issues
+  # --xpra-xwayland --desktop: resize & redraw issues
+  # --xpra-xwayland --desktop --size: wrong size
+  # --xpra --desktop: sometimes redraw issues on resize
+  # --xpra --desktop --xdummy: --size modeline does not work, might not even appear in xrandr although set in xdummy.xorg.conf
   # --printer: regard CUPS_SERVER
   # --env: check escapestring in cmd.sh
   # --pw terminal on new X?
