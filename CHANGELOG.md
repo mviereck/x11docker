@@ -8,7 +8,10 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Changed
- - `--xdummy --gpu`/`--xvfb --gpu`: Supported only in host X.
+ - `--weston`, `--kwin`, `--hostwayland`: Always set all Wayland environment
+   variables and run with DBus user daemon. Previously needed `--wayland`.
+ - `--xdummy --gpu`/`--xvfb --gpu`: Supported only in host X, 
+   no longer on console or on Wayland.
  - `--xephyr`: enabled `-glamor`.
 
 ## [6.2.0](https://github.com/mviereck/x11docker/releases/tag/v6.2.0) - 2019-08-17

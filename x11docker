@@ -1834,9 +1834,9 @@ check_xserver() {               # check chosen X server, auto-choose X server
   [ "$Xserver" = "--xwin" ]            && { check_xdepends --xwin            || { [ "$Desktopmode" = "no" ]  && Xserver="--hostdisplay" ; } ;}
 
   case $Xserver in
-    --weston|--kwin|--hostwayland) Sharewayland="yes" ;;
+    --weston|--kwin|--hostwayland) Setupwayland="yes" ;;
   esac
-  [ "$Sharewayland" = "yes" ]          && { check_xdepends $Xserver || error "Failed to set up a Wayland environment.
+  [ "$Setupwayland" = "yes" ]          && { check_xdepends $Xserver || error "Failed to set up a Wayland environment.
   Please install 'weston' or 'kwin_wayland'.
   Wayland is not possible with proprietary NVIDIA driver
   or with --runtime=kata-runtime." ; }
@@ -2199,11 +2199,11 @@ check_newxenv() {               # find free display, create $Newxenv
     ;;
   esac
 
-  [ "$Sharewayland" = "yes" ] && {
+  [ "$Setupwayland" = "yes" ] && {
     Newxenv="$Newxenv WAYLAND_DISPLAY=$Newwaylandsocket"
     Newxenv="$Newxenv XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+    for Line in $Waylandtoolkitenv ; do Newxenv="$Newxenv $Line" ; done
   }
-  [ "$Setwaylandenv" = "yes" ] && for Line in $Waylandtoolkitenv ; do Newxenv="$Newxenv $Line" ; done
   Newxenv="$Newxenv X11DOCKER_CACHE=$Cachefolder"
 
   debugnote "New X environment:
@@ -3234,7 +3234,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   echo "export PATH='${PATH:-}'"
   echo "export $Newxenv"
   echo ""
-
+  
   echo "debugnote 'Running xinitrc'"
   echo ""
 
@@ -3374,10 +3374,6 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
       }
     ;;
   esac
-
-  [ "$Setwaylandenv" = "yes" ] && for Line in $Waylandtoolkitenv ; do echo "export $Line" ;  done
-  [ "$Sharewayland"  = "yes" ] &&       [ -n "$Newwaylandsocket" ] && echo "export WAYLAND_DISPLAY=$Newwaylandsocket"
-  echo ""
 
   case $Xserver in
     --xpra|--xpra-xwayland)
@@ -3607,6 +3603,10 @@ check_containeruser() {         # check container user and shared home folder (a
     Containeruserhome="/root"
     Sudouser="yes" && note "Option --user=root: Enabling option --sudouser."
   }
+  case $X11dockermode in
+   run) store_runoption env "XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR" ;;
+   exe) store_runoption env "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" ;;
+  esac
   return 0
 }
 check_containerhome() {         # options --home, --homedir, --homebasedir: check HOME of container user.
@@ -4117,7 +4117,7 @@ create_dockercommand() {        # create command to run docker
   }
   
   # Wayland socket will be softlinked to XDG_RUNTIME_DIR in container.CMD.sh
-  [ "$Sharewayland" = "yes" ] && Dockercommand="$Dockercommand \\
+  [ "$Setupwayland" = "yes" ] && Dockercommand="$Dockercommand \\
   --volume $(convertpath --volume "$XDG_RUNTIME_DIR/$Newwaylandsocket" "/$Newwaylandsocket")"
 
   ## options --hostipc and --hostnet
@@ -4437,6 +4437,11 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   esac
   echo     "  echo 'export USER=\"\$Containeruser\"'"
   echo     "  echo 'export HOME=\"\$Containeruserhome\"'"
+  
+  echo     "  echo '# XDG_RUNTIME_DIR'"
+  echo     "  echo 'Containeruseruid=\$(id -u \$Containeruser)'"
+  echo     "  echo 'export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR'"
+  echo     "  echo '[ -e /run/user/\$Containeruseruid ] && ln -s /run/user/\$Containeruseruid \$XDG_RUNTIME_DIR || mkdir -v -p -m700 \$XDG_RUNTIME_DIR'"
   echo     "  echo ''"
       
   [ "$Sharehosthome" = "no" ] && echo   "  echo 'mkdir -p \$Containeruserhome'"
@@ -4480,14 +4485,6 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   }
   echo     "  echo ''"
   
-  echo     "  echo '# check [and create] XDG_RUNTIME_DIR. Needed by some applications and for Wayland.'"
-  echo     '  echo "[ -e \"\$XDG_RUNTIME_DIR\" ] || {"'
-  echo     "  echo '  export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR'"
-  echo     "  echo '  mkdir -m 700 -p \$XDG_RUNTIME_DIR'"
-  echo     "  echo '  export XDG_RUNTIME_DIR'"
-  echo     "  echo '}'"
-  echo     "  echo ''"
-  
   case $Xserver in
     --tty)
       echo "  echo 'unset DISPLAY WAYLAND_DISPLAY XAUTHORITY'" ;;
@@ -4497,20 +4494,13 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
       echo "  echo 'unset WAYLAND_DISPLAY'" ;;
   esac
   echo     "  echo ''"
-  
-  [ "$Sharewayland" = "yes" ] && {
+  [ "$Setupwayland" = "yes" ] && {
     echo   "  echo '# Wayland environment'"
     echo   "  echo 'export WAYLAND_DISPLAY=$Newwaylandsocket'"
     echo   "  echo 'ln -s /$Newwaylandsocket \$XDG_RUNTIME_DIR/$Newwaylandsocket'"
-    echo   "  echo ''"
+  } || {
+    echo   "  echo 'export XDG_SESSION_TYPE=x11'"
   }
-  [ "$Setwaylandenv" = "yes" ] && {
-    for Line in $Waylandtoolkitenv ; do echo "  echo \"export '$Line'\"" ; done
-  } || case $Xserver in
-    --weston|--kwin|--hostwayland)      echo "  echo 'export XDG_SESSION_TYPE=wayland'" ;;
-    --tty) ;;
-    *)                                  echo "  echo 'export XDG_SESSION_TYPE=x11'" ;;
-  esac
   echo     "  echo ''"
 
   [ "$Switchcontaineruser" = "yes" ] && echo "  echo 'export TINI_SUBREAPER=1'"
@@ -4743,7 +4733,7 @@ create_containerrootrc() {      # create container root setup script: This scrip
   echo "# - Set up init system services and DBus for --init=systemd|openrc|runit|sysvinit"
   echo ""
     
-#  [ "$Debugmode" = "yes" ] && echo "set -x"
+#  echo "set -x"
   echo "$Messagefifofuncs"
   echo "Messagefile=$Cshare/message.fifo"
   echo ""
@@ -4797,6 +4787,7 @@ create_containerrootrc() {      # create container root setup script: This scrip
   case $Createcontaineruser in
     yes)
       [ "$Sharehosthome" = "no" ] && echo "mkdir -v -m 777 /fakehome"
+      echo "Containeruserhome='$Containeruserhome'"
       echo ""
       
       # create container user
@@ -4875,17 +4866,6 @@ create_containerrootrc() {      # create container root setup script: This scrip
     ;;
   esac
   
-  echo "[ -e '$Containeruserhome' ] || {"
-  echo "  # only create HOME here if capability CHOWN is allowed."
-  echo "  :>/tmp/chowntestfile"
-  echo "  chown \"\$Containeruser\" /tmp/chowntestfile && {"
-  echo "    mkdir -v -p '$Containeruserhome'"
-  echo "    chown \"\$Containeruser\" '$Containeruserhome'"
-  echo "  }"
-  echo "  rm /tmp/chowntestfile"
-  echo "}"
-  echo ""
-  
   echo "# Set up container user groups"
   for Line in $Containerusergroups ; do
     echo "Groupname=\"$(cat /etc/group 2>/dev/null | grep "$Line" | cut -d: -f1)\""
@@ -4899,6 +4879,17 @@ create_containerrootrc() {      # create container root setup script: This scrip
     echo "} || note 'Failed to add container user to group $Line.'"
     echo ""
   done
+
+  echo "[ -e \"\$Containeruserhome\" ] || {"
+  echo "  # only create HOME here if capability CHOWN is allowed."
+  echo "  :>/tmp/chowntestfile"
+  echo "  chown \"\$Containeruser\" /tmp/chowntestfile && {"
+  echo "    mkdir -v -p \"\$Containeruserhome\""
+  echo "    chown \"\$Containeruser\" \"\$Containeruserhome\""
+  echo "  }"
+  echo "  rm /tmp/chowntestfile"
+  echo "}"
+  echo ""
 
   # --gpu with closed source nvidia driver
   [ "$Nvidiainstallerfile" ] && {
@@ -5539,12 +5530,10 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
     [ "$Dbusrunsession" = "yes" ] && echo "Dbus='$(command -v dbus-run-session >/dev/null)'"
     
     echo "export $Newxenv"
-    [ "$Sharewayland" = "yes" ] || {
+    [ "$Setupwayland" = "no" ] && {
       echo "unset WAYLAND_DISPLAY"
       echo "unset $Waylandtoolkitvars"
     }
-    
-    [ "$Setwaylandenv" = "yes" ] && echo "export $Waylandtoolkitenv"
     echo ""
     
     [ "$Sharehosthome" = "yes" ] && {
@@ -6401,10 +6390,10 @@ check_option_interferences() {  # check multiple option interferences, change se
   # check XDG_RUNTIME_DIR
   case $Xserver in
     --weston|--kwin|--weston-xwayland|--kwin-xwayland) 
-      [ -z "$XDG_RUNTIME_DIR" ] && [ -e "/run/user/${Hostuseruid:-unknownuid}" ] && export XDG_RUNTIME_DIR="/run/user/${Hostuseruid:-"unknownuid"}"
+      [ -z "$XDG_RUNTIME_DIR" ] && [ -e "/run/user/${Hostuseruid:-unknownuid}" ] && export XDG_RUNTIME_DIR="/run/user/$Hostuseruid"
       [ -z "$XDG_RUNTIME_DIR" ] && {
-        export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR.x11docker.$Cachenumber
-        unpriv "mkdir -p $XDG_RUNTIME_DIR"
+        export XDG_RUNTIME_DIR="$Cachefolder/XDG_RUNTIME_DIR"
+        unpriv "mkdir -p  $XDG_RUNTIME_DIR"
         unpriv "chmod 700 $XDG_RUNTIME_DIR"
       }
     ;;
@@ -6422,9 +6411,10 @@ check_option_interferences() {  # check multiple option interferences, change se
     ;;
   esac
   [ "$Setupwayland" = "yes" ] && {
-    Sharewayland="yes"
-    Setwaylandenv="yes" 
     Dbusrunsession="yes"
+    for Line in $Waylandtoolkitenv; do
+      store_runoption env $Line
+    done
   }
 
   # check --westonini
@@ -6814,7 +6804,7 @@ check_terminalemulator() {      # check terminal for password prompt of su or su
   option $Xserver. Please install one of:
   ${Terminallist%"NOLUCK"}"
 
-  [ -z "$Hostdisplay" ] && [ "$Sharewayland" = "yes" ] && {
+  [ -z "$Hostdisplay" ] && [ "$Setupwayland" = "yes" ] && {
     case $Passwordterminal in
       qterminal) Passwordterminal="env QT_QPA_PLATFORM=wayland $Passwordterminal -e" ;;
       konsole) Passwordterminal="env QT_QPA_PLATFORM=wayland dbus-run-session $Passwordterminal --nofork -e" ;;
@@ -7146,9 +7136,7 @@ declare_variables() {           # declare global variables
   Rotation=""                                     # --rotate: Rotation for --weston, --weston-xwayland or --xorg: 0/90/180/270/flipped/flipped-90/..
   Scaling=""                                      # --scale: Scaling factor for xpra and weston
   Screensize=""                                   # --size XxY: Display size
-  Setupwayland="no"                               # --wayland: Provide a Wayland environment
-  Setwaylandenv="no"                              # Set environment variables $Waylandtoolkitenv
-  Sharewayland="no"                               # Share wayland socket and WAYLAND_DISPLAY
+  Setupwayland="no"                               # --wayland, --kwin, --weston --hostwayland: Provide a Wayland environment
   Trusted="yes"                                   # Create trusted or untrusted cookies,  --hostdisplay uses untrusted cookies by default
   Waylandtoolkitenv="XDG_SESSION_TYPE=wayland GDK_BACKEND=wayland QT_QPA_PLATFORM=wayland CLUTTER_BACKEND=wayland SDL_VIDEODRIVER=wayland ELM_DISPLAY=wl ELM_ACCEL=opengl ECORE_EVAS_ENGINE=wayland_egl"
   Waylandtoolkitvars="XDG_SESSION_TYPE GDK_BACKEND QT_QPA_PLATFORM CLUTTER_BACKEND SDL_VIDEODRIVER ELM_DISPLAY ELM_ACCEL ECORE_EVAS_ENGINE"
