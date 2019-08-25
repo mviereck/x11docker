@@ -15,6 +15,9 @@ Project website: https://github.com/mviereck/x11docker
  - `--xephyr`: enabled `-glamor`.
  - Startup: Wait for `dockerrc` to be ready for `docker run` before starting X.
    Avoids hidden password prompts or pull request below X server window.
+### Fixed
+ - Enable X extension `X-Resource` to allow Gnome 3 in container.
+   [(#16)](https://github.com/mviereck/x11docker/issues/16)
 
 ## [6.2.0](https://github.com/mviereck/x11docker/releases/tag/v6.2.0) - 2019-08-17
 ### Added
