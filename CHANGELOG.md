@@ -13,6 +13,8 @@ Project website: https://github.com/mviereck/x11docker
  - `--xdummy --gpu`/`--xvfb --gpu`: Supported only in host X, 
    no longer on console or on Wayland.
  - `--xephyr`: enabled `-glamor`.
+ - Startup: Wait for `dockerrc` to be ready for `docker run` before starting X.
+   Avoids hidden password prompts or pull request below X server window.
 
 ## [6.2.0](https://github.com/mviereck/x11docker/releases/tag/v6.2.0) - 2019-08-17
 ### Added

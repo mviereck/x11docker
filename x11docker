@@ -186,10 +186,9 @@ Special X server options:
                        Xwayland and xdotool is used (instead of Xdummy or Xvfb).
      --xwin            X server to run in Cygwin/X on MS Windows.
 
-Wayland without X:
+Wayland instead of X:
  -W, --wayland         Automatically set up a Wayland environment.
                        Chooses one of following options and regards --desktop.
-                       Sets some Wayland environment variables.
  -T, --weston          Weston without X for pure Wayland applications.
                        Runs in X, in Wayland or from console.
  -K, --kwin            KWin without X for pure Wayland applications.
@@ -437,8 +436,8 @@ debugnote() {                   # show debug output $*
 }
 logentry() {                    # write into logfile
   [ "$Logfile" ] && {
-    [ "$Logmessages" ] && echo "$Logmessages" >>$Messagelogfile && Logmessages=""
-    echo "$*" >>$Messagelogfile
+    [ "$Logmessages" ] && echo "$Logmessages" >>$Messagelogfile 2>/dev/null && Logmessages=""
+    echo "$*" >>$Messagelogfile 2>/dev/null || echo "[not in log] $*" >&2
   } || Logmessages="$Logmessages
 $*" 
 }
@@ -3511,7 +3510,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
     echo           ""
   }
 
-  echo             "touch $Cachefolder/Xready"
+  echo             "touch $Cachefolder/Xisready"
   echo             "waitfortheend"
   return 0
 } >> $Xinitrc
@@ -4189,17 +4188,23 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   declare -f rmcr
   declare -f rocknroll
   declare -f storepid
+  declare -f unpriv
   declare -f waitforfilecreation
+  declare -f waitfor_xserver
   echo "$Messagefifofuncs"
   echo ""
   
   echo "Bgpidfile='$Bgpidfile'"
+  echo "Compositorlogfile='$Compositorlogfile'"
   echo "Hostuser='$Hostuser'"
   echo "Hostusergid='$Hostusergid'"
   echo "Imagecommand=\"$Imagecommand\""
   echo "Imagename=\"$Imagename\""
   echo "Messagefile='$Messagefifo'"
   echo "Timetosaygoodbye='$Timetosaygoodbye'"
+  echo "Unpriv='$Unpriv'"
+  echo "Xinitlogfile='$Xinitlogfile'"
+  echo "Xserver='$Xserver'"
   echo "Workdir='$Workdir'"
   echo "export PATH='$PATH'"
   echo ""
@@ -4600,6 +4605,13 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
     echo "export MSYS2_ARG_CONV_EXCL='*'"
     echo ""
   }
+  
+  echo "# Send signal to run X and wait for X to be ready"
+  echo "unpriv 'touch $Cachefolder/ReadyforX'"
+  echo "waitfor_xserver"
+  echo "rm $Cachefolder/ReadyforX"
+  echo "rm $Cachefolder/Xisready"
+  echo ""
   
   [ "$Windowmanager" = "none" ] || {
     echo "# run window manager (in image or from host)"
@@ -5453,7 +5465,7 @@ create_xtermrc() {              # create xtermrc: script to prompt for password 
   echo ""
   echo "trap touchxtermready EXIT"
   echo ""  
-  echo "debugnote 'Running xtermrc: Ask for password if needed'"
+  echo "debugnote 'Running xtermrc: Ask for password if needed ($Passwordneeded)'"
   echo ""
   [ "$Passwordneeded" = "yes" ] && case $Passwordfrontend in
     su|sudo)
@@ -5565,6 +5577,12 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
   } >> $Imagecommandscript
   nl -ba <$Imagecommandscript >> $Containerlogfile
 
+  # Send signal to run X and wait for X to be ready
+  touch $Cachefolder/ReadyforX
+  waitfor_xserver
+  rm $Cachefolder/ReadyforX
+  rm $Cachefolder/Xisready
+  
   # run start script
   unpriv "/usr/bin/env bash $Imagecommandscript"
   Hostexepid="$(cat $Containerpid1pidfile)"
@@ -5674,12 +5692,11 @@ $(tail $Compositorlogfile)")"
 }
 waitfor_xserver() {             # wait for X server to be ready
   local Zeit=$(date +%s) Count=0 Dauer=0
-  local Xinitpid= Xserverpid= Line=
 
   debugnote "Waiting for X server $Xserver to be ready."
   
   # sign is creation of $Cachefolder/Xready in xinitrc
-  while [ ! -e "$Cachefolder/Xready" ] ; do
+  while [ ! -e "$Cachefolder/Xisready" ] ; do
     Count=$(( Count + 1 ))
     Dauer=$(( $(date +%s) - $Zeit ))
     mysleep $(awk "BEGIN { print $Count * 0.05 }")
@@ -5701,17 +5718,24 @@ $(tail $Compositorlogfile)")"
   
   rocknroll && debugnote "$Xserver is ready" || return 1
 
-  # check pids of xinit and X server, set them on watchpidlist
-  case $Xserver in
-    --tty|--hostdisplay|--hostwayland|--weston|--kwin) ;;
-    *)
-      Xinitpid="$(pgrep -a xinit 2>/dev/null | grep "xinit $Xinitrc" | awk '{print $1}')"
-      checkpid "$Xinitpid"   && setonwatchpidlist $Xinitpid xinit
-      echo $Xcommand | grep -q Xorgwrapper && Line="Xorg $Newdisplay" || Line="$(echo "$Xcommand" | head -n1)"
-      Xserverpid=$(ps aux | rmcr| grep "$(echo "${Line:-nothingtolookfor}" | cut -d' ' -f1-2)" | grep -v grep | grep -v xinit | awk '{print $2}')
-      checkpid "$Xserverpid" && setonwatchpidlist $Xserverpid Xserver
-    ;;
-  esac
+  return 0
+}
+waitfor_dockerrc() {
+  local Zeit=$(date +%s) Count=0 Dauer=0
+
+  debugnote "Waiting for dockerrc to be ready for 'docker run'."
+  
+  # sign is creation of $Cachefolder/ReadyforX in xinitrc
+  while [ ! -e "$Cachefolder/ReadyforX" ] ; do
+    Count=$(( Count + 1 ))
+    Dauer=$(( $(date +%s) - $Zeit ))
+    mysleep $(awk "BEGIN { print $Count * 0.05 }")
+    verbose "Waiting since ${Dauer}s for dockerrc to be ready."
+    rocknroll || { debugnote "Stopped waiting for dockerrc due to terminating signal." ; break ; }
+  done
+  
+  rocknroll && debugnote "dockerrc is ready" || return 1
+
   return 0
 }
 
@@ -7727,7 +7751,7 @@ $(nl -ba <$Westonini)"
     #   --xorg on tty only works if xinit runs in foreground to grab the tty.
     #   Otherwise, Xwrapper.config must be edited to 'allowed_users=anybody' even on console.
     # Thus docker runs in this subshell after X server is ready to accept connections
-    waitfor_xserver
+   # waitfor_xserver
     [ "$Showdisplayenvironment" = "yes" ] && echo $Newxenv                      # --showenv
     [ "$Xpraservercommand" ] && start_xpra                                      # --xpra, --xpra-xwayland
     case $X11dockermode in
@@ -7737,11 +7761,24 @@ $(nl -ba <$Westonini)"
     
     [ "$Pulseaudiomode" = "tcp" ] && start_pulseaudiotcp                        # --pulseaudio=tcp
     
+    # check pids of xinit and X server, set them on watchpidlist
+    case $Xserver in
+      --tty|--hostdisplay|--hostwayland|--weston|--kwin) ;;
+      *)
+        Xinitpid="$(pgrep -a xinit 2>/dev/null | grep "xinit $Xinitrc" | awk '{print $1}')"
+        checkpid "$Xinitpid"   && setonwatchpidlist $Xinitpid xinit
+        echo $Xcommand | grep -q Xorgwrapper && Line="Xorg $Newdisplay" || Line="$(echo "$Xcommand" | head -n1)"
+        Xserverpid=$(ps aux | rmcr| grep "$(echo "${Line:-nothingtolookfor}" | cut -d' ' -f1-2)" | grep -v grep | grep -v xinit | awk '{print $2}')
+        checkpid "$Xserverpid" && setonwatchpidlist $Xserverpid Xserver
+      ;;
+    esac
+    
     debugnote "Process tree of x11docker:
   $(pstree -p $$ 2>&1 ||:)"
   } <&0 & storepid $! containershell
   
-  #### Start X server [and/or Wayland compositor]  
+  #### Start X server [and/or Wayland compositor]
+  waitfor_dockerrc
   [ "$Compositorcommand" ] && start_compositor
   start_xserver
   saygoodbye main
@@ -7755,7 +7792,6 @@ finish
 todo() {
   # CHECK:
   # docker stop in dockerrc? background process with waitfortheend()
-  # BUG --wayland --xpra: Fallback disabling --wayland fails
   # --weston-xwayland: Weston is resizeable now, but Xwayland root window does not draw new area
   # --xpra-xwayland, --weston-xwayland: Xwayland does not fit Weston window size if parts of weston window are offscreen
   # --xpra-xwayland --desktop: resize & redraw issues
