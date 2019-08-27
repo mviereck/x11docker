@@ -620,6 +620,7 @@ $(pspid $Pid)"
   }
 
   # close additional file descriptors
+  mysleep 0.2
   for i in 3 4 6 7 8 9; do
     { >&$i ;} 2>/dev/null && exec >&$i-
   done
@@ -716,7 +717,7 @@ watchmessagefifo() {            # watch for messages coming from container or do
 $Line"
     grep -q -E ":WARNING|:NOTE|:DEBUGNOTE|:VERBOSE|:ERROR|:STDOUT" <<< "$Line" && {
       Messagetype=":$(echo $Line | rev | cut -d: -f1  | rev)"
-      Message="${Message%$Messagetype}"
+      Message="${Message%$Messagetype }"
       Message="$(tail -n +2 <<< "$Message")" # remove leading newline
       case "$Messagetype" in
         :WARNING)   warning   "$Message" ;;
@@ -4188,9 +4189,11 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   declare -f pspid
   declare -f rmcr
   declare -f rocknroll
+  declare -f saygoodbye
   declare -f storepid
   declare -f unpriv
   declare -f waitforfilecreation
+  declare -f waitfortheend
   declare -f waitfor_xserver
   echo "$Messagefifofuncs"
   echo ""
@@ -4211,7 +4214,9 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo "Newxenv='$Newxenv'"
   echo "Showdisplayenvironment='$Showdisplayenvironment'"
   echo "Timetosaygoodbye='$Timetosaygoodbye'"
+  echo "Timetosaygoodbyefifo='$Timetosaygoodbyefifo'"
   echo "Unpriv='$Unpriv'"
+  echo "Usemkfifo='$Usemkfifo'"
   echo "Xinitlogfile='$Xinitlogfile'"
   echo "Xserver='$Xserver'"
   echo "Workdir='$Workdir'"
@@ -4451,11 +4456,12 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   esac
   echo     "  echo 'export USER=\"\$Containeruser\"'"
   echo     "  echo 'export HOME=\"\$Containeruserhome\"'"
+  echo     "  echo ''"
   
   echo     "  echo '# XDG_RUNTIME_DIR'"
   echo     "  echo 'Containeruseruid=\$(id -u \$Containeruser)'"
   echo     "  echo 'export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR'"
-  echo     "  echo '[ -e /run/user/\$Containeruseruid ] && ln -s /run/user/\$Containeruseruid \$XDG_RUNTIME_DIR || mkdir -v -p -m700 \$XDG_RUNTIME_DIR'"
+  echo     "  echo '[ -e /run/user/\$Containeruseruid ] && ln -s /run/user/\$Containeruseruid \$XDG_RUNTIME_DIR || mkdir -p -m700 \$XDG_RUNTIME_DIR'"
   echo     "  echo ''"
       
   [ "$Sharehosthome" = "no" ] && echo   "  echo 'mkdir -p \$Containeruserhome'"
@@ -4694,7 +4700,9 @@ $Wmdockercommand"'
   echo "done"
   echo ""
   
-  echo "$Dockerexe logs -f \$Containerid 2>&1 > >(rmcr >> $Containerlogfile) & storepid \$! dockerlogs"  
+  echo "$Dockerexe logs -f \$Containerid 2>&1 > >(rmcr >> $Containerlogfile) &"
+  echo "Dockerlogspid=\$!"
+  echo "storepid \$Dockerlogspid dockerlogs"  
   echo ""
 
   echo "# Wait for pid 1 in container"
@@ -4730,6 +4738,14 @@ $Wmdockercommand"'
     echo "$Dockerexe exec --tty -u root $Containername /bin/sh /tmp/containerrootrc 2>&1 | rmcr >>$Containerlogfile"
     echo ""
   }
+  
+  #echo '[ "$Containerid" ] && {'
+  #echo '  waitfortheend'
+  #echo "  debugnote \"Terminating container in dockerrc\""
+  #echo "  $Dockerexe stop \$Containerid           >> $Containerlogfile 2>&1"
+  #echo "  kill \$Dockerlogspid                    >> $Containerlogfile 2>&1"
+  #echo "} &"
+  
   echo "exit 0"
   return 0
 } >> $Dockerrc
@@ -5000,8 +5016,11 @@ debugnote 'Running x11docker-watch'
 read Dummy <$Cshare/timetosaygoodbye.fifo
 echo timetosaygoodbye >$Cshare/timetosaygoodbye.fifo
 debugnote 'x11docker-watch: $Initsystem shutdown now'
-shutdown now
+shutdown 0
+systemctl poweroff
+openrc-shutdown --poweroff 0
 halt
+halt -f
 \" >/usr/local/bin/x11docker-watch"
     echo "chmod +x /usr/local/bin/x11docker-watch"
     echo ""
@@ -5121,9 +5140,10 @@ depend() {
 start() {
   ebegin 'Starting container.CMD.sh'
   /usr/local/bin/x11docker-agetty
-  openrc-shutdown --poweroff
-  shutdown
+  openrc-shutdown --poweroff 0
+  shutdown 0
   halt
+  halt -f
   eend \$?
 }
 \" > /etc/init.d/x11docker.service"
@@ -5710,7 +5730,7 @@ $(tail $Xinitlogfile)"
     grep -q -E 'xinit: giving up|unable to connect to X server|Connection refused|server error|Only console users are allowed' <$Xinitlogfile && error "Error during startup of X server $Xserver.
   Last lines of xinit log:
 $(tail $Xinitlogfile)
-
+  
   $( [ -s "$Compositorlogfile" ] && echo "Last lines of compositor log:
 $(tail $Compositorlogfile)")"
   done
@@ -6762,6 +6782,7 @@ check_passwordfrontend() {      # check password prompt frontend (pkexec, su, su
   [ -z "$Passwordfrontend" ] && { sudo -ln $Dockerexe >/dev/null 2>&1  ||  id | grep -q '(sudo)'  ||  id | grep -q '(wheel)' ; } && command -v sudo >/dev/null && {
     [ -z "$Hostdisplay$Newdisplay" ] && Passwordfrontend="sudo"
     sudo -ln env >/dev/null 2>&1  ||  id | grep -q '(sudo)'  ||  id | grep -q '(wheel)'  && {
+      [ -z "$Passwordfrontend" ] && [ "$Runsinterminal" = "yes" ] && Passwordfrontend="sudo"
       [ -z "$Passwordfrontend" ] && command -v gksudo  >/dev/null && Passwordfrontend="gksudo"
       [ -z "$Passwordfrontend" ] && command -v lxsudo  >/dev/null && Passwordfrontend="lxsudo"
       [ -z "$Passwordfrontend" ] && command -v kdesudo >/dev/null && Passwordfrontend="kdesudo"
@@ -6771,10 +6792,11 @@ check_passwordfrontend() {      # check password prompt frontend (pkexec, su, su
 
   # check su
   [ -n "$Hostdisplay$Newdisplay" ] && {
-    [ -z "$Passwordfrontend" ] && command -v gksu  >/dev/null && Passwordfrontend="gksu"
-    [ -z "$Passwordfrontend" ] && command -v lxsu  >/dev/null && Passwordfrontend="lxsu"
-    [ -z "$Passwordfrontend" ] && command -v kdesu >/dev/null && Passwordfrontend="kdesu"
-    [ -z "$Passwordfrontend" ] && command -v beesu >/dev/null && Passwordfrontend="beesu"
+    [ -z "$Passwordfrontend" ] && [ "$Runsinterminal" = "yes" ] && Passwordfrontend="su"
+    [ -z "$Passwordfrontend" ] && command -v gksu  >/dev/null   && Passwordfrontend="gksu"
+    [ -z "$Passwordfrontend" ] && command -v lxsu  >/dev/null   && Passwordfrontend="lxsu"
+    [ -z "$Passwordfrontend" ] && command -v kdesu >/dev/null   && Passwordfrontend="kdesu"
+    [ -z "$Passwordfrontend" ] && command -v beesu >/dev/null   && Passwordfrontend="beesu"
   }
   [ -z "$Passwordfrontend" ] && Passwordfrontend="su" # default if everything else fails
 
@@ -7315,43 +7337,43 @@ declare_variables() {           # declare global variables
   # x11docker communication functions to integrate into generated scripts
   Messagefifofuncs='
 warning() {
-  echo "$*:WARNING"   >>$Messagefile
+  echo "$*:WARNING"   | sed "s/\$/ /" >>$Messagefile
 }
 note() {
-  echo "$*:NOTE"      >>$Messagefile
+  echo "$*:NOTE"      | sed "s/\$/ /" >>$Messagefile
 }
 verbose() {
-  echo "$*:VERBOSE"   >>$Messagefile
+  echo "$*:VERBOSE"   | sed "s/\$/ /" >>$Messagefile
 }
 debugnote() {
-  echo "$*:DEBUGNOTE" >>$Messagefile
+  echo "$*:DEBUGNOTE" | sed "s/\$/ /" >>$Messagefile
 }
 error() {
-  echo "$*:ERROR"     >>$Messagefile
+  echo "$*:ERROR"     | sed "s/\$/ /" >>$Messagefile
   exit 1
 }
 stdout() {
-  echo "$*:STDOUT"    >>$Messagefile
+  echo "$*:STDOUT"    | sed "s/\$/ /" >>$Messagefile
 }'
   Messagefifofuncs_escaped='
 warning() {
-  echo \"\$*:WARNING\"   >>\$Messagefile
+  echo \"\$*:WARNING\"   | sed \"s/\\\$/ /\"  >>\$Messagefile
 }
 note() {
-  echo \"\$*:NOTE\"      >>\$Messagefile
+  echo \"\$*:NOTE\"      | sed \"s/\\\$/ /\" >>\$Messagefile
 }
 verbose() {
-  echo \"\$*:VERBOSE\"   >>\$Messagefile
+  echo \"\$*:VERBOSE\"   | sed \"s/\\\$/ /\" >>\$Messagefile
 }
 debugnote() {
-  echo \"\$*:DEBUGNOTE\" >>\$Messagefile
+  echo \"\$*:DEBUGNOTE\" | sed \"s/\\\$/ /\" >>\$Messagefile
 }
 error() {
-  echo \"\$*:ERROR\"     >>\$Messagefile
+  echo \"\$*:ERROR\"     | sed \"s/\\\$/ /\" >>\$Messagefile
   exit 1
 }
 stdout() {
-  echo \"\$*:STDOUT\"    >>\$Messagefile
+  echo \"\$*:STDOUT\"    | sed \"s/\\\$/ /\" >>\$Messagefile
 }'
 }
 parse_options() {               # parse cli options
@@ -7717,7 +7739,7 @@ Parsed options:    $Parsedoptions"
     create_dockercommand        # create 'docker run' command #time0,631
     echo "$Dockercommand" >> $Dockercommandfile
     
-    debugnote "Generated docker command:
+    debugnote "Docker command:
   $Dockercommand"
     
     #### Create helper scripts to set up container
@@ -7750,7 +7772,8 @@ $(nl -ba <$Westonini)"
     # For technical reasons, xinit must not run in a subshell:
     #   --xorg on tty only works if xinit runs in foreground to grab the tty.
     #   Otherwise, Xwrapper.config must be edited to 'allowed_users=anybody' even on console.
-    # Thus docker runs in this subshell after X server is ready to accept connections
+    # Thus docker runs in this subshell after X server is ready to accept connections.
+    # Waiting for X is done in dockerrc.
     
     case $X11dockermode in
       run) start_docker ;;                                                      # (default)
