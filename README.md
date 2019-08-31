@@ -1,5 +1,8 @@
 # Screenshots of GUI applications and desktop environments running with x11docker 
 
+`x11docker --desktop --gpu --init=systemd -- x11docker/gnome`
+![screenshot](screenshot-gnome.png "Gnome 3 desktop")
+
 `x11docker --wm --gpu x11docker/check`
 ![screenshot](screenshot-check.png "Checking container isolation with x11docker/check")
 
