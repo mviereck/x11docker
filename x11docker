@@ -805,6 +805,12 @@ escapestring() {                # escape special chars of $1
   # escape all characters except those described in [^a-zA-Z0-9,._+@=:/-]
   echo "${1:-}" | LC_ALL=C sed -e 's/[^a-zA-Z0-9,._+@=:/-]/\\&/g; 1{$s/^$/""/}; 1!s/^/"/; $!s/$/"/'
 }
+unspecialstring() {             # replace special chars of $1 with _
+  # Replace all characters except those described in [^a-zA-Z0-9_] with a '-'. 
+  # Replace double '--' with single '-'
+  # Remove leading and trailing '-'
+  echo "${1:-}" | LC_ALL=C sed -e 's/[^a-zA-Z0-9_]/\-/g; 1{$s/^$/""/}; 1!s/^/"/; $!s/$/"/ ; s/\([-]\)\1\+/\1/g ; s/-$//g ; s/^-//g'
+}
 mysleep() {                     # catch cases where sleep only supports integer
   sleep "${1:-}" 2>/dev/null || sleep 1
 }
@@ -2657,7 +2663,7 @@ create_xcommand() {             # create command to start X server and/or Waylan
   $(check_xpraoption --opengl=noprobe) \\
   $(check_xpraoption --mdns=no) \\
   $(check_xpraoption --printing=no) \\
-  $(check_xpraoption --session-name="'$Codename '") \\
+  $(check_xpraoption --session-name="'$Codename'") \\
   $(check_xpraoption --start-new-commands=no) \\
   $(check_xpraoption --systemd-run=no)"
       debugnote "Xpra server command:
@@ -3951,7 +3957,7 @@ create_dockercommand() {        # create command to run docker
     no)  Dockercommand="$Dockercommand --detach" ;;
   esac
 
-  [ -z "$Containername" ] && Containername="x11docker_X${Newdisplaynumber}_${Cachenumber}_$Codename"
+  [ -z "$Containername" ] && Containername="x11docker_X${Newdisplaynumber}_${Codename}_${Cachenumber}"
   Dockercommand="$Dockercommand \\
   --name $Containername"
   Wmdockercommand="$Wmdockercommand \\
@@ -4563,7 +4569,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   
   [ "$Initsystem" = "systemd" ] && {
     echo   "  echo 'systemctl --user start  dbus'"
-    echo   "  echo 'systemctl --user status dbus'"
+#    echo   "  echo 'systemctl --user status dbus'"
     echo   "  echo ''"
   }
   
@@ -5045,15 +5051,18 @@ halt -f
       echo "systemctl enable systemd-logind"
       echo "# disable cgproxy.service, can cause failing startup."
       echo "systemctl mask cgproxy"
-      echo "# disable useless plymouth"
+      echo "# disable plymouth"
       echo "systemctl mask plymouth-start plymouth-read-write plymouth-quit plymouth-quit-wait"
-      echo "# disable useless NetworkManager"
+      echo "# disable NetworkManager"
       echo "systemctl mask NetworkManager"
-#      echo "systemctl mask systemd-localed.service"
+      echo "# disable display manager"
+      echo "systemctl mask display-manager.service lightdm.service gdm3.service sddm.service"
+      #echo "systemctl mask systemd-localed.service" #ignored by systemd, loads it nonetheless
+      echo "# disable unattended upgrades"
+      echo "systemctl mask apt-daily.service apt-daily-upgrade.service"
       echo "# disable realtimekit, fails in container"
       echo "systemctl mask rtkit-daemon.service"
-      echo ""
-      echo "# disable deepin update service"
+      echo "# disable deepin update & other services"
       echo "systemctl mask lastore-daemon lastore-update-metadata-info"
       echo "systemctl mask deepin-anything-monitor.service"
       echo "systemctl mask deepin-sync-daemon.service"
@@ -6017,15 +6026,8 @@ check_runmode() {               # check run/--exe/--xonly
   case $X11dockermode in
     run)
       Imagebasename="$(echo $Imagename | tr / - | cut -d: -f1)"
-      case "$Imagecommand" in
-        "") Codename="$Imagebasename" ;;
-        *)
-          Codename="$(echo $Imagecommand | cut -d' ' -f1 | tr -d "'" | tr / _ )"
-          [[ "$Codename" =~ [^a-zA-Z0-9-_] ]] && Codename="$Imagebasename" || {
-            [ "$(cut -c1 <<< "$Codename")" = "-" ] || Codename="${Imagebasename}-${Codename}"
-          }
-        ;;
-      esac
+      Codename="$Imagename $Imagecommand"
+      
       command -v $Dockerexe >/dev/null || error "docker is not installed.
   To run docker images, you need to install docker.
   $Dockerexe"
@@ -6037,7 +6039,8 @@ check_runmode() {               # check run/--exe/--xonly
       [ "$Customdockeroptions" ] && Hostexe="$Customdockeroptions -- $Hostexe" # might be a command like 'grep -- 'expr'
       Imagename=""
       Imagecommand=""
-      Codename="$(basename $(echo $Hostexe | cut -d' ' -f1) | tr -cd '[:alpha:][:digit:][:blank:]-_.')"
+      Imagebasename="$(basename "$Hostexe" | cut -d' ' -f1)"
+      Codename="$Hostexe"
       command -v $Hostexe >/dev/null || error "Command '$Hostexe' not found."
       verbose "Host application to execute: $Hostexe"
     ;;
@@ -6047,9 +6050,16 @@ check_runmode() {               # check run/--exe/--xonly
       Imagename=""
       Imagecommand=""
       Codename="xonly"
+      Imagebasename="xonly"
       Showdisplayenvironment="yes"
     ;;
   esac
+  
+  Codename="$(unspecialstring "$Codename")"
+  Codename="${Codename:-noname}"
+  Imagebasename="$(unspecialstring "$Imagebasename")"  # must be - for backwards compatibility of --home
+  Imagebasename="${Imagebasename:-noname}"
+  
   return 0
 }
 check_option_interferences() {  # check multiple option interferences, change settings if needed
@@ -7146,7 +7156,7 @@ declare_variables() {           # declare global variables
   Hostsystem=""                                   # $ID from /etc/os-release
   Hostutctime=""                                  # Time zone from host as offset to UTC
   Hostwaylandsocket="$WAYLAND_DISPLAY"            # Store host wayland socket name
-  Hostxauthority="Xauthority-$(tr .: - <<< "${DISPLAY:-host}")"   # File to store copy of $XAUTHORITY
+  Hostxauthority="$(unspecialstring "Xauthority-${DISPLAY:-host}")"   # File to store copy of $XAUTHORITY
   Hostxenv=""                                     # Collection of host X environment variables
   Hostxsocket=""                                  # Socket of DISPLAY in /tmp/.X11-unix
   Nvidiaversion=""                                # --gpu: Proprietary nvidia driver version on host
