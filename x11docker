@@ -356,7 +356,7 @@ $Message" | gxmessage -file - -default okay ||:
       xterm -title "$Title" -e "echo '$(echo "$Message" | sed "s/'/\"/g")' ; read -n1" ||:
     }
   } || {
-    [ -n "$Passwordterminal" ] && [ -e "$Cachefolder" ] && [ "$Xserver" != "--tty" ] && {
+    [ -n "$Passwordterminal" ] && [ "$Passwordterminal" != "eval" ] && [ -e "$Cachefolder" ] && {
       mkfile $Cachefolder/message
       echo "#! /usr/bin/env bash
 echo '$Title
@@ -364,9 +364,9 @@ echo '$Title
 $Message
 (Press any key to close window)'
 read -n1
+:
 " >> $Cachefolder/message
       $Passwordterminal /usr/bin/env bash $Cachefolder/message
-      :
     }
   } || {
     notify-send "$Title:
@@ -408,7 +408,7 @@ ${Colredbg}x11docker ERROR:${Colnorm} $Message
   [ -d "$Cachefolder" ] && mkfile "$Cachefolder/error" # also regarded by finish() for exit code
 
   # output to X dialogbox if not running in terminal
-  [ "$Runsinterminal" = "no" ] && [ "$Silent" = "no" ] && export ${Terminalxenv:-DISPLAY} && alertbox "x11docker ERROR" "$Message" &
+  [ "$Runsinterminal" = "no" ] && [ "$Silent" = "no" ] && export ${Hostxenv:-DISPLAY} && alertbox "x11docker ERROR" "$Message" &
   
   finish 1
 }
@@ -2225,13 +2225,7 @@ check_newxenv() {               # find free display, create $Newxenv
       store_runoption env "WAYLAND_DISPLAY=$Newwaylandsocket"
     ;;
   esac
-  
-  # Which X environment to use for password prompt (xtermrc) and for docker pull (pullrc)
-  case $Xserver in
-    --xorg) Terminalxenv="$Newxenv" ;;
-    --weston|--kwin|--weston-xwayland|--kwin-xwayland|--tty) [ "$Runsonconsole" = "yes" ] && Terminalxenv="$Newxenv" || Terminalxenv="$Hostxenv" ;;
-    *) Terminalxenv="$Hostxenv" ;;
-  esac
+  return 0
 }
 check_screensize() {            # check physical and virtual screen size (also option --size)
   local Line=
@@ -5528,7 +5522,6 @@ start_docker() {                # start docker container
   local Containerid= Containerpid1=
   
   # run docker in xtermrc, ask for password if needed
-  export $Terminalxenv
   case $Passwordfrontend in
     su|sudo)
       case $Passwordneeded in
@@ -6055,7 +6048,7 @@ check_runmode() {               # check run/--exe/--xonly
     ;;
   esac
   
-  Codename="$(unspecialstring "$Codename")"
+  Codename="$(unspecialstring "$Codename" | cut -c1-40)"
   Codename="${Codename:-noname}"
   Imagebasename="$(unspecialstring "$Imagebasename")"  # must be - for backwards compatibility of --home
   Imagebasename="${Imagebasename:-noname}"
@@ -6854,30 +6847,22 @@ check_terminalemulator() {      # check terminal for password prompt of su or su
   # Not working: pangoterm lilyterm fbterm
   # Makes problems if X and Wayland are independently available at same time: xfce4-terminal
   # Works, but does not appear: 'guake -te'
+  
+  local Terminallist
 
-  Terminallist="xterm mintty lxterm lxterminal stterm sakura termit pterm terminator terminology Eterm konsole qterminal gnome-terminal mate-terminal mrxvt rxvt xvt kterm mlterm xfce4-terminal NOLUCK"
-  [ -z "$Hostdisplay" ] && {
-    case $Xserver in
-      --weston|--hostwayland)    Terminallist="konsole qterminal gnome-terminal NOLUCK" ;;
-      --kwin)                    Terminallist="konsole NOLUCK" ;;
-      --tty|--xdummy|--xvfb)     Terminallist="bash NOLUCK" ;;
-      *) ;;
-    esac
-  }
-  [ "$Runsinterminal" = "yes" ] && Terminallist="bash NOLUCK"
-  [ "$Xserver" = "--tty" ]      && Terminallist="bash NOLUCK"
+  Terminallist="xterm mintty lxterm lxterminal stterm sakura termit pterm terminator terminology Eterm konsole qterminal gnome-terminal mate-terminal mrxvt rxvt xvt kterm mlterm xfce4-terminal bash"
+  [ -z "$Hostdisplay" ] && [ -n "$Hostwaylandsocket" ] && Terminallist="konsole qterminal gnome-terminal bash"
+  [ "$Runsinterminal" = "yes" ] && Terminallist="bash"
 
   for Passwordterminal in $Terminallist ; do command -v $Passwordterminal >/dev/null && break ; done
-  [ "$Passwordterminal" = "NOLUCK" ] && warning "Can not find a terminal emulator that works for
-  option $Xserver. Please install one of:
-  ${Terminallist%"NOLUCK"}"
 
-  [ -z "$Hostdisplay" ] && [ "$Setupwayland" = "yes" ] && {
+  [ -z "$Hostdisplay" ] && [ -n "$Hostwaylandsocket" ] && {
     case $Passwordterminal in
       qterminal) Passwordterminal="env QT_QPA_PLATFORM=wayland $Passwordterminal -e" ;;
       konsole) Passwordterminal="env QT_QPA_PLATFORM=wayland dbus-run-session $Passwordterminal --nofork -e" ;;
     esac
   }
+  [ -z "$Hostdisplay$Hostwaylandsocket" ] && Passwordterminal="bash"
   
   case $Passwordterminal in
     xfce4-terminal) Passwordterminal="$Passwordterminal --disable-server -x" ;;
@@ -6885,17 +6870,9 @@ check_terminalemulator() {      # check terminal for password prompt of su or su
     gnome-terminal) Passwordterminal="dbus-launch $Passwordterminal --" ;;
     terminator)     Passwordterminal="dbus-run-session $Passwordterminal --no-dbus -x" ;;
     konsole)        Passwordterminal="dbus-run-session $Passwordterminal --nofork -e" ;;
-    bash)           Passwordterminal="bash -c" ;;
+    bash)           Passwordterminal="eval" ;;
     *)              Passwordterminal="$Passwordterminal -e" ;;
   esac
-
-  [ -z "$Hostdisplay$Newdisplay" ] && {
-    case $Xserver in
-      --weston|--kwin|--hostwayland) ;;
-      *) Passwordterminal="bash -c";;
-    esac
-  }
-  [ "$Passwordterminal" = "bash -c" ] && Passwordterminal="eval"
 
   return 0
 }
@@ -7309,7 +7286,6 @@ declare_variables() {           # declare global variables
   Hostexe=""                                      # --exe: Host command
   Passwordterminal=""                             # Terminal emulator to use for password prompt (if no terminal emulator is needed, it will be 'bash -c')
   Imagebasename=""                                # Image name without tags and / replaced with -. For use of --home folders.
-  Terminallist=""                                 # List of possible terminal emulators. Only a few work on Wayland yet.
   Preservecachefiles="no"                         # If yes, don't delete cache files on exit. For few failure cases only.
   Pullimage="ask"                                 # --pull: Allow 'docker pull' yes|no|always|ask
   X11dockermode="run"                             # --exe, --xonly: Can be either "run" (default), "exe", or "xonly".
@@ -7836,7 +7812,6 @@ finish
 todo() {
   # CHECK:
   # docker stop in dockerrc? background process with waitfortheend()
-  # xpra: how to show application tray icon?
   # --weston-xwayland: Weston is resizeable now, but Xwayland root window does not draw new area
   # --xpra-xwayland, --weston-xwayland: Xwayland does not fit Weston window size if parts of weston window are offscreen
   # --xpra-xwayland --desktop: resize & redraw issues
@@ -7845,7 +7820,6 @@ todo() {
   # --xpra --desktop --xdummy: --size modeline does not work, might not even appear in xrandr although set in xdummy.xorg.conf
   # --printer: regard CUPS_SERVER
   # --env: check escapestring in cmd.sh
-  # --pw terminal on new X?
 
   # dependeny wiki: Cygwin packages
   # x11docker/check: palinopsia: check video RAM size with glxinfo
@@ -7886,7 +7860,6 @@ todo() {
 
   ### BUG collection: 3rd party bugs
   # BUG --iglx --gpu fails since X.org 1.18.4: https://gitlab.freedesktop.org/xorg/xserver/issues/211
-  # BUG segmentation faults in gnome3 based desktops: pantheon budgie gnome3
   # BUG Xwayland does not always sit at 0.0 on multiple outputs. Bugreport: https://bugzilla.redhat.com/show_bug.cgi?id=1498665
   # BUG --kwin*: wrong fullscreen and crashes in gnome-wayland, strange in weston, WAYLAND_DISPLAY="" does not help, probably bug in kwin
   # BUG scale>1 Xwayland in Weston is too large (Xwayland bug), rendering issues on tty (switching scaled/unscaled Xwayland on keyboard/mouse events). Bugreport: https://bugzilla.redhat.com/show_bug.cgi?id=1498669
