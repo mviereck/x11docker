@@ -18,6 +18,9 @@ Project website: https://github.com/mviereck/x11docker
 ### Fixed
  - Enable X extension `X-Resource` to allow Gnome 3 in container.
    [(#16)](https://github.com/mviereck/x11docker/issues/16)
+ - Avoid double IP address while checking `docker0` interface.
+   [(#182)](https://github.com/mviereck/x11docker/issues/182)
+ - Avoid possible race condition of display number on simultuanous starts.
 
 ## [6.2.0](https://github.com/mviereck/x11docker/releases/tag/v6.2.0) - 2019-08-17
 ### Added
