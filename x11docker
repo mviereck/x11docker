@@ -287,6 +287,12 @@ Installation options (need root permissions):
      --remove          Remove x11docker from your system.
                        Preserves ~/.local/share/x11docker from option --home.
 
+Exit codes:
+  0:     Success
+  64:    x11docker error
+  130:   Terminated by ctrl-c
+  other: Exit code of command in container
+
 x11docker version: $Version
 Please report issues and get help at: https://github.com/mviereck/x11docker
 "
@@ -404,13 +410,13 @@ ${Colredbg}x11docker ERROR:${Colnorm} $Message
   # output to logfile
   logentry "x11docker ERROR: $Message
 "
-  [ -e "$Cachefolder/error" ] && waitfortheend         # Avoid double alert boxes
-  [ -d "$Cachefolder" ] && mkfile "$Cachefolder/error" # also regarded by finish() for exit code
+  [ -s "$X11dockererrorfile" ] && waitfortheend             # Avoid double alert boxes
+  [ -d "$Cachefolder" ] && echo 64 >> "$X11dockererrorfile" # also regarded by finish() for exit code
 
   # output to X dialogbox if not running in terminal
   [ "$Runsinterminal" = "no" ] && [ "$Silent" = "no" ] && export ${Hostxenv:-DISPLAY} && alertbox "x11docker ERROR" "$Message" &
   
-  finish 1
+  finish 64
 }
 warning() {                     # show warning messages
   [ "$Verbose" = "no" ] && echo "${Colyellow}x11docker WARNING:${Colnorm} $*
@@ -488,7 +494,8 @@ setup_verbosity() {             # options --verbose, --stdout, --stderr
 finish_sigint() {               # trap SIGINT to activate debug mode on finish()
   Debugmode="yes"
   debugnote "Received SIGINT"
-  finish
+  [ -d "$Cachefolder" ] && echo 130 >> "$X11dockererrorfile"
+  finish 130
 }
 finish() {                      # trap EXIT routine to clean up background processes and cache
   local Pid= Name= Zeit= Catlogfilepid= Exitcode Pid1pid=
@@ -609,8 +616,14 @@ $(pspid $Pid)"
 
   # check for possible error
   Exitcode="${1:-0}"
-  [ -e "$Cachefolder/error" ] && Exitcode=1
-  debugnote "Exitcode $Exitcode"
+  [ -s "$X11dockererrorfile" ] && Exitcode="$(cat $X11dockererrorfile | tail -n1)"
+  debugnote "x11docker exit code: $Exitcode"
+  [ -s "$Exitcodefile" ] && {
+    Exitcode="$(cat $Exitcodefile)"
+    debugnote "CMD exit code: $Exitcode"
+  }
+  Exitcode="${Exitcode:-0}"
+  
   
   # backup of logfile in $Cachebasefolder
   [ -e "$Logfile" ] && {
@@ -643,8 +656,9 @@ saygoodbye() {                  # create file signaling watching processes to te
 
 #### watching processes and messages
 rocknroll() {                   # check whether x11docker session is still running
-  [ -s "$Timetosaygoodbye" ] && return 1
-  [ -e "$Timetosaygoodbye" ] || return 1
+  [ -s "$Timetosaygoodbye" ]   && return 1
+  [ -e "$Timetosaygoodbye" ]   || return 1
+  [ -s "$X11dockererrorfile" ] && return 1
   return 0
 }
 waitfortheend() {               # wait for end of x11docker session
@@ -2137,13 +2151,13 @@ check_xdepends() {              # check dependencies on host for X server option
 check_newxenv() {               # find free display, create $Newxenv
   # find free display number
   [ "$Newdisplaynumber" ] || {
-    Newdisplaynumber=100
+    Newdisplaynumber="100"
     while :; do
       case $Xserver in
         --xwin) Newdisplaynumber="$((RANDOM / 10 + 200))" ;;
-        *)      Newdisplaynumber=$((Newdisplaynumber + 1)) ;;
+        *)      Newdisplaynumber="$((Newdisplaynumber + 1))" ;;
       esac
-      grep -q -x "$Newdisplaynumber" < "$Numbersinusefile" || [ -n "$(find /tmp/.X11-unix/X$Newdisplaynumber /tmp/.X$Newdisplaynumber-lock $XDG_RUNTIME_DIR/wayland-$Newdisplaynumber 2>/dev/null)" ] || break
+      grep -q -x "$Newdisplaynumber" < "$Numbersinusefile" || [ -n "$(find "/tmp/.X11-unix/X$Newdisplaynumber" "/tmp/.X$Newdisplaynumber-lock" "$XDG_RUNTIME_DIR/wayland-$Newdisplaynumber" 2>/dev/null)" ] || break
     done
   }
   echo "$Newdisplaynumber" >> "$Numbersinusefile"
@@ -2186,7 +2200,7 @@ check_newxenv() {               # find free display, create $Newxenv
   # set $Newwaylandsocket
   case $Xserver in
     --weston|--weston-xwayland|--kwin|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland) Newwaylandsocket="wayland-$Newdisplaynumber" ;;
-    --hostwayland|--xwayland) Newwaylandsocket="$Hostwaylandsocket" ;;
+    --hostwayland|--xwayland)                                                            Newwaylandsocket="$Hostwaylandsocket" ;;
   esac
   
   #### create $Newxenv: collection of environment variables to access new X from host (e.g. in xinitrc)
@@ -4498,14 +4512,6 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
     echo   "  echo ''"
   }
   
-  echo     "  echo '# Use exec for image command to replace this shell'"
-  echo     "  echo 'Exec=exec'"
-  [ "$Initsystem" = "none" ] && [ "$Desktopmode" = "yes" ] && [ "$Switchcontaineruser" = "no" ] && {
-    echo   "  echo '# disable exec in this setup to have sh as a fake init for desktop environments. Allows logout.'"
-    echo   "  echo '[ \"\$Dbus\" ] || Exec=' "
-  }
-  echo     "  echo ''"
-  
   case $Xserver in
     --tty)
       echo "  echo 'unset DISPLAY WAYLAND_DISPLAY XAUTHORITY'" ;;
@@ -4571,10 +4577,12 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo     "  echo \"debugnote \\\"Running image command: \$Tini \\\$Dbus \$Entrypoint \$Imagecommand\\\"\""
   case $Interactive in
     no)
-      echo "  echo \"\\\$Exec \$Tini \\\$Dbus \$Entrypoint \$Imagecommand $( [ "$Forwardstdin" = "yes" ] && echo "<$Cshare/stdin") >>$Cshare/stdout 2>>$Cshare/stderr\""
+      echo "  echo \"\$Tini \\\$Dbus \$Entrypoint \$Imagecommand $( [ "$Forwardstdin" = "yes" ] && echo "<$Cshare/stdin") >>$Cshare/stdout 2>>$Cshare/stderr\""
+      echo "  echo \"echo \\\$? >> $Cshare/exitcode\""
     ;;
     yes)
-      echo "  echo \"\\\$Exec \$Tini \\\$Dbus \$Entrypoint \$Imagecommand\""
+      echo "  echo \"\$Tini \\\$Dbus \$Entrypoint \$Imagecommand\""
+      echo "  echo \"echo \\\$? >> $Cshare/exitcode\""
     ;;
   esac
   echo     "} >> $Imagecommandscript"
@@ -6914,50 +6922,54 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Sharefolder="$Cachefolder/$Sharefolder"
   unpriv "mkdir -p $Sharefolder"
   export Cachefolder Sharefolder
-
-  Logfile="$Sharefolder/x11docker.log"                              && mkfile $Logfile
-  Messagelogfile="$Cachefolder/$Messagelogfile"                     && mkfile $Messagelogfile
-  Timetosaygoodbye="$Sharefolder/$Timetosaygoodbye"                 && mkfile $Timetosaygoodbye
-  Dockerinfofile="$Cachefolder/$Dockerinfofile"                     && mkfile $Dockerinfofile
-  Xinitrc="$Cachefolder/$Xinitrc"                                   && mkfile $Xinitrc
-  Xinitlogfile="$Cachefolder/$Xinitlogfile"                         && mkfile $Xinitlogfile
-  Xtermrc="$Cachefolder/$Xtermrc"                                   && mkfile $Xtermrc
-  Pullrc="$Cachefolder/$Pullrc"                                     && mkfile $Pullrc
-  Containerlogfile="$Cachefolder/$Containerlogfile"                 && mkfile $Containerlogfile
-  Containeridfile="$Cachefolder/$Containeridfile"                   && mkfile $Containeridfile
-  Containerpid1pidfile="$Cachefolder/$Containerpid1pidfile"         && mkfile $Containerpid1pidfile
-  Containeruserfile="$Sharefolder/$Containeruserfile"               && mkfile $Containeruserfile
-  Dockerrc="$Cachefolder/$Dockerrc"                                 && mkfile $Dockerrc
-  Dockercommandfile="$Cachefolder/$Dockercommandfile"               && mkfile $Dockercommandfile
-  Containerrootrc="$Sharefolder/$Containerrootrc"                   && mkfile $Containerrootrc
-  Containeripfile="$Cachefolder/$Containeripfile"                   && mkfile $Containeripfile
-  Xservercookie="$Cachefolder/$Xservercookie"                       && mkfile $Xservercookie
-  Xclientcookie="$Sharefolder/$Xclientcookie"                       && mkfile $Xclientcookie
-  Hostxauthority="$Cachefolder/$Hostxauthority"                     && mkfile $Hostxauthority
-  Xpraserverlogfile="$Cachefolder/$Xpraserverlogfile"               && mkfile $Xpraserverlogfile
-  Xpraclientlogfile="$Cachefolder/$Xpraclientlogfile"               && mkfile $Xpraclientlogfile
+  
+  # host only access
+  Bgpidfile="$Cachefolder/$Bgpidfile"                               && mkfile $Bgpidfile
   Compositorlogfile="$Cachefolder/$Compositorlogfile"               && mkfile $Compositorlogfile
   Compositorpidfile="$Cachefolder/$Compositorpidfile"               && mkfile $Compositorpidfile
+  Containeridfile="$Cachefolder/$Containeridfile"                   && mkfile $Containeridfile
+  Containerlogfile="$Cachefolder/$Containerlogfile"                 && mkfile $Containerlogfile
+  Containeripfile="$Cachefolder/$Containeripfile"                   && mkfile $Containeripfile
+  Containerpid1pidfile="$Cachefolder/$Containerpid1pidfile"         && mkfile $Containerpid1pidfile
+  Dockercommandfile="$Cachefolder/$Dockercommandfile"               && mkfile $Dockercommandfile
+  Dockerinfofile="$Cachefolder/$Dockerinfofile"                     && mkfile $Dockerinfofile
+  Dockerrc="$Cachefolder/$Dockerrc"                                 && mkfile $Dockerrc
+  Hostxauthority="$Cachefolder/$Hostxauthority"                     && mkfile $Hostxauthority
+  Messagelogfile="$Cachefolder/$Messagelogfile"                     && mkfile $Messagelogfile
+  Pullrc="$Cachefolder/$Pullrc"                                     && mkfile $Pullrc
   Pulseaudioconf="$Cachefolder/$Pulseaudioconf"                     && mkfile $Pulseaudioconf
-  Bgpidfile="$Cachefolder/$Bgpidfile"                               && mkfile $Bgpidfile
-  Imagecommandscript="$Sharefolder/$Imagecommandscript"             && mkfile $Imagecommandscript
   Shareclipboardscript="$Cachefolder/$Shareclipboardscript"         && mkfile $Shareclipboardscript
   Westonini="$Cachefolder/$Westonini"                               && mkfile $Westonini
+  X11dockererrorfile="$Cachefolder/$X11dockererrorfile"             && mkfile $X11dockererrorfile
   Xdummyconf="$Cachefolder/$Xdummyconf"                             && mkfile $Xdummyconf
-  Xorgwrapper="$Cachefolder/$Xorgwrapper"                           && mkfile $Xorgwrapper
+  Xinitlogfile="$Cachefolder/$Xinitlogfile"                         && mkfile $Xinitlogfile
+  Xinitrc="$Cachefolder/$Xinitrc"                                   && mkfile $Xinitrc
   Xkbkeymapfile="$Cachefolder/$Xkbkeymapfile"                       && mkfile $Xkbkeymapfile
+  Xorgwrapper="$Cachefolder/$Xorgwrapper"                           && mkfile $Xorgwrapper
+  Xpraclientlogfile="$Cachefolder/$Xpraclientlogfile"               && mkfile $Xpraclientlogfile
+  Xpraserverlogfile="$Cachefolder/$Xpraserverlogfile"               && mkfile $Xpraserverlogfile
+  Xservercookie="$Cachefolder/$Xservercookie"                       && mkfile $Xservercookie
+  Xtermrc="$Cachefolder/$Xtermrc"                                   && mkfile $Xtermrc
   
+  # systemd files
   Systemdtarget=$Cachefolder/x11docker.target                       && mkfile $Systemdtarget
   Systemdstartcmd=$Cachefolder/console-getty.service                && mkfile $Systemdstartcmd
   Systemdwatch=$Cachefolder/x11docker-watch.service                 && mkfile $Systemdwatch
   Systemdjournal=$Cachefolder/x11docker-journal.service             && mkfile $Systemdjournal
   Journallogfile=$Sharefolder/journalctl.log                        && mkfile $Journallogfile
   Systemdenvironment=$Cachefolder/systemd.env.conf                  && mkfile $Systemdenvironment
-
-  # standard streams for container
-  Cmdstdoutlogfile="$Sharefolder/$Cmdstdoutlogfile"                 && mkfile $Cmdstdoutlogfile 666
+  
+  # shared to /x11docker
   Cmdstderrlogfile="$Sharefolder/$Cmdstderrlogfile"                 && mkfile $Cmdstderrlogfile 666
-
+  Cmdstdoutlogfile="$Sharefolder/$Cmdstdoutlogfile"                 && mkfile $Cmdstdoutlogfile 666
+  Containerrootrc="$Sharefolder/$Containerrootrc"                   && mkfile $Containerrootrc
+  Containeruserfile="$Sharefolder/$Containeruserfile"               && mkfile $Containeruserfile
+  Exitcodefile="$Sharefolder/$Exitcodefile"                         && mkfile $Exitcodefile
+  Imagecommandscript="$Sharefolder/$Imagecommandscript"             && mkfile $Imagecommandscript
+  Logfile="$Sharefolder/x11docker.log"                              && mkfile $Logfile
+  Timetosaygoodbye="$Sharefolder/$Timetosaygoodbye"                 && mkfile $Timetosaygoodbye
+  Xclientcookie="$Sharefolder/$Xclientcookie"                       && mkfile $Xclientcookie
+  
   mkfile "$Sharefolder/environment" 666
   
   Numbersinusefile="$Cachebasefolder/$Numbersinusefile"
@@ -7076,6 +7088,7 @@ declare_variables() {           # declare global variables
   Timetosaygoodbyefifo="timetosaygoodbye.fifo"    # Message channel for --init=openrc|runit|sysvinit to shut down on x11docker signal
   Usemkfifo="yes"                                 # Not on Windows nor with kata-runtime
   Watchpidfifo="watchpid.fifo"                    # Message channel to transfer pids to watchpidlist()
+  X11dockererrorfile="x11docker.error"            # Store error exit code
   
   # Logfiles
   Compositorlogfile="compositor.log"              # Logfile for weston or kwin_wayland
@@ -7094,6 +7107,7 @@ declare_variables() {           # declare global variables
   Containeruserfile="container.user"              # File to store container user name
   Dockercommandfile="dockercommand"               # File to store generated docker command, needed for --interactive
   Dockerinfofile="docker.info"                    # File to store outpu of 'docker info'
+  Exitcodefile="exitcode"
   Imagelistfile="images.list"                     # File with list of local images.Used by x11docker-gui, too
   
   # Generated scripts

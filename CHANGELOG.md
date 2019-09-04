@@ -8,6 +8,7 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Changed
+ - Return exit code of container command. x11docker errors return code `64`.
  - `--weston`, `--kwin`, `--hostwayland`: Always set all Wayland environment
    variables and run with DBus user daemon. Previously needed `--wayland`.
  - `--xdummy --gpu`/`--xvfb --gpu`: Supported only in host X, 
