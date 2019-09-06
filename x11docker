@@ -823,6 +823,18 @@ unspecialstring() {             # replace special chars of $1 with _
   # Remove leading and trailing '-'
   echo "${1:-}" | LC_ALL=C sed -e 's/[^a-zA-Z0-9_]/\-/g; 1{$s/^$/""/}; 1!s/^/"/; $!s/$/"/ ; s/\([-]\)\1\+/\1/g ; s/-$//g ; s/^-//g'
 }
+envvarstring() {                # allow only chars in strings that can be exspected in used environment variables
+  local Newvar
+
+  Newvar="$(echo "${1:-}" | LC_ALL=C sed -e 's/[^a-zA-Z0-9_:/.-]/\X/g')"
+  echo "$Newvar"
+  
+  [ "$Newvar" = "${1:-}" ] && return 0 || {
+    debugnote "envvarstring(): Input string has been changed. Result:
+  $Newvar"
+    return 1
+  }
+}
 mysleep() {                     # catch cases where sleep only supports integer
   sleep "${1:-}" 2>/dev/null || sleep 1
 }
@@ -989,6 +1001,7 @@ convertpath() {                 # convert unix and windows pathes
   
   # --share: Replace $Sharefolder with $Cshare
   [ "$Mode" = "--share" ] && {
+    [ -z "$Path" ] && echo "" && return 0
     case $X11dockermode in
       run) echo "${Cshare}${Path#$Sharefolder}" ;;
       exe) echo "$Path" ;;
@@ -1496,10 +1509,12 @@ setup_webcam() {                # option --webcam: share webcam devices
   # Unprivileged users need to be in group video (x11docker default).
   # (This works only if webcam is plugged in before container starts.
   # Hotplug support would have to be different.)
-  local Webcamdevice=
+  local Webcamdevice
+  
   while read -r Webcamdevice ; do
     store_runoption volume "$Webcamdevice"
   done < <(find /dev/video* -maxdepth 0 2>/dev/null)
+  
   # at least cheese and gnome-ring need some device information from udev.
   store_runoption volume "/run/udev/data:ro"
 }
@@ -1516,10 +1531,12 @@ setup_printer() {               # option --printer: connect to cups printer serv
     Sharecupsmode=""
     return 1
   }
+  
   case $Sharecupsmode in
     tcp)    Cupsserver="$Hostip:631" ;;
     socket) Cupsserver="$(lpstat -H)" ;;
   esac
+  
   grep -q ":" <<<$Cupsserver && {
     [ "$(cut -d: -f1 <<<$Cupsserver)" = "localhost" ] && Cupsserver="$Hostip:$(cut -d: -f2 <<<$Cupsserver)"
     [ "$(cut -d: -f1 <<<$Cupsserver)" = "127.0.0.1" ] && Cupsserver="$Hostip:$(cut -d: -f2 <<<$Cupsserver)"
@@ -1592,12 +1609,6 @@ $(nl -ba <$Pulseaudioconf)"
   $Hostuserhome/.config/pulse/cookie"
       store_runoption env "PULSE_SERVER=tcp:$Hostip:$Pulseaudioport"
     ;;
-    *)
-      warning "Option --pulseaudio: Unknown pulseaudio mode: $Pulseaudiomode
-  Allowed are --pulseaudio=socket or --pulseaudio=tcp
-  Fallback: disabling option --pulseaudio"
-      Pulseaudiomode=""
-    ;;  
   esac
   return 0
 }
@@ -4225,6 +4236,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo "Hostuser='$Hostuser'"
   echo "Hostusergid='$Hostusergid'"
   echo "Containercommand=\"$Containercommand\""
+  echo "Exec=''"
   echo "Imagename=\"$Imagename\""
   echo "Messagefile='$Messagefifo'"
   echo "Newxenv='$Newxenv'"
@@ -4370,7 +4382,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
           echo "  note \"There seems to be an init system in ENTRYPOINT of image:
     \$Entrypoint
   Will disable it as x11docker already runs an init with option --$Initsystem.
-  To allow this ENTRYPOINT, run x11docker with option --no-init.\""
+  To allow this ENTRYPOINT, run x11docker with option --init=none.\""
           echo "  Entrypoint="
           echo "}"
         ;;
@@ -4385,13 +4397,19 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
           echo "  note \"There seems to be an init system in ENTRYPOINT of image:
     \$Entrypoint
   x11docker will try to run this instead of tini from host.
+  Returning exit code of container command will fail.
   You can disable this ENTRYPOINT with option --no-entrypoint.\""
           echo "  Tini="
+          echo "  Exec=exec"
           echo "}"
         ;;
         none)
-          echo "echo \"\$Entrypoint\" | grep -qE 'tini|init|systemd' && note \"There seems to be an init system in ENTRYPOINT of image:
-  \$Entrypoint \""
+          echo "echo \"\$Entrypoint\" | grep -qE 'tini|init|systemd' && {"
+          echo "  note \"There seems to be an init system in ENTRYPOINT of image:
+  \$Entrypoint 
+  Returning exit code of container command will fail.\""
+          echo "  Exec=exec"
+          echo "}"
         ;;
       esac
     ;;
@@ -4579,11 +4597,11 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo     "  echo \"debugnote \\\"Running image command: \$Tini \\\$Dbus \$Entrypoint \$Containercommand\\\"\""
   case $Interactive in
     no)
-      echo "  echo \"\$Tini \\\$Dbus \$Entrypoint \$Containercommand $( [ "$Forwardstdin" = "yes" ] && echo "<$(convertpath --share $Cmdstdinfifo)") >>$(convertpath --share $Cmdstdoutlogfile) 2>>$(convertpath --share $Cmdstderrlogfile)\""
+      echo "  echo \"\$Exec \$Tini \\\$Dbus \$Entrypoint \$Containercommand $( [ "$Forwardstdin" = "yes" ] && echo "<$(convertpath --share $Cmdstdinfifo)") >>$(convertpath --share $Cmdstdoutlogfile) 2>>$(convertpath --share $Cmdstderrlogfile)\""
       echo "  echo \"echo \\\$? >> $(convertpath --share $Exitcodefile)\""
     ;;
     yes)
-      echo "  echo \"\$Tini \\\$Dbus \$Entrypoint \$Containercommand\""
+      echo "  echo \"\$Exec \$Tini \\\$Dbus \$Entrypoint \$Containercommand\""
       echo "  echo \"echo \\\$? >> $(convertpath --share $Exitcodefile)\""
     ;;
   esac
@@ -5202,7 +5220,7 @@ exit 0\" >> /etc/rc.local"
       echo     '    debugnote "DBus: Checking $Name: $Command"'
       echo     ""
       echo     "    case \$Name in"
-      echo     "      org.bluez)"
+      echo     "      org.bluez|org.bluez.obex)"
       echo     "        rm -v \"\$Line\""
       echo     "      ;;"
       echo     "      org.freedesktop.UPower|org.freedesktop.resolve1|org.freedesktop.network1|org.freedesktop.timedate1|org.freedesktop.secrets)"
@@ -6273,6 +6291,7 @@ check_option_interferences() {  # check multiple option interferences, change se
   [ "$Trusted" = "no" ] && warning "Clipboard isolation may fail."
 
 
+  # --hostipc: Check auto-enabling
   [ "$Xserver" = "--hostdisplay" ] && [ "$Trusted" = "yes" ] && [ "$Hostmitshm" = "yes" ] && [ "$Sharehostipc" = "no" ] && [ "$Hostssh" = "no" ] && {
     note "Option --hostdisplay: To allow --hostdisplay with trusted cookies,
   x11docker must share host IPC namespace with container (option --hostipc)
@@ -6567,6 +6586,17 @@ check_option_interferences() {  # check multiple option interferences, change se
   in docker's container partition or in shared folders.
   It only restricts memory and CPU usage."
   }
+  
+  # --pulseaudio
+  case $Pulseaudiomode in
+    auto|tcp|socket) ;;
+    *) 
+      note "Option --pulseaudio: Unknown pulseaudio mode: $Pulseaudiomode
+  Allowed are --pulseaudio=socket, --pulseaudio=tcp or --pulseaudio=auto.
+  Fallback: Enabling --pulseaudio=auto"
+      Pulseaudiomode="auto"
+    ;;
+  esac
   
   # --printer
   case $Sharecupsmode in
@@ -6936,15 +6966,14 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Compositorlogfile="$Cachefolder/$Compositorlogfile"               && mkfile $Compositorlogfile
   Compositorpidfile="$Cachefolder/$Compositorpidfile"               && mkfile $Compositorpidfile
   Containeridfile="$Cachefolder/$Containeridfile"                   && mkfile $Containeridfile
-  Containerlogfile="$Cachefolder/$Containerlogfile"                 && mkfile $Containerlogfile
   Containeripfile="$Cachefolder/$Containeripfile"                   && mkfile $Containeripfile
+  Containerlogfile="$Cachefolder/$Containerlogfile"                 && mkfile $Containerlogfile
   Containerpid1pidfile="$Cachefolder/$Containerpid1pidfile"         && mkfile $Containerpid1pidfile
   Dockercommandfile="$Cachefolder/$Dockercommandfile"               && mkfile $Dockercommandfile
   Dockerinfofile="$Cachefolder/$Dockerinfofile"                     && mkfile $Dockerinfofile
   Dockerrc="$Cachefolder/$Dockerrc"                                 && mkfile $Dockerrc
   Hostxauthority="$Cachefolder/$Hostxauthority"                     && mkfile $Hostxauthority
   Messagelogfile="$Cachefolder/$Messagelogfile"                     && mkfile $Messagelogfile
-  Pullrc="$Cachefolder/$Pullrc"                                     && mkfile $Pullrc
   Pulseaudioconf="$Cachefolder/$Pulseaudioconf"                     && mkfile $Pulseaudioconf
   Shareclipboardscript="$Cachefolder/$Shareclipboardscript"         && mkfile $Shareclipboardscript
   Watchpidfifo="$Cachefolder/$Watchpidfifo"
@@ -6985,7 +7014,8 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Timetosaygoodbye="$Sharefolder/$Timetosaygoodbye"                 && mkfile $Timetosaygoodbye
   Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo"
   Xclientcookie="$Sharefolder/$Xclientcookie"                       && mkfile $Xclientcookie
-    
+  
+  # file to store display numbers in use today
   Numbersinusefile="$Cachebasefolder/$Numbersinusefile"
   for Line in $(find $Cachebasefolder/displaynumbers.* 2>/dev/null) ; do
     [ "$Line" != "$Numbersinusefile" ] && rm "$Line"
@@ -7055,16 +7085,20 @@ setup_fifo() {                  # set up fifo channels (also option --stdin)
 #### main
 declare_variables() {           # declare global variables
   export IFS=$' \n\t'                             # set IFS to default
-  
+
   # Global environment variables used in x11docker
-  ALSA_CARD="${ALSA_CARD:-}"
-  DISPLAY="${DISPLAY:-}"
-  GDK_BACKEND="${GDK_BACKEND:-}"
-  HOME="${HOME:-}"
-  WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}"
-  XAUTHORITY="${XAUTHORITY:-}"
-  XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}"
-  XDG_VTNR="${XDG_VTNR:-}"
+  ALSA_CARD=$(envvarstring "${ALSA_CARD:-}")
+  CUPS_SERVER=$(envvarstring "${CUPS_SERVER:-}")
+  DISPLAY=$(envvarstring "${DISPLAY:-}")
+  GDK_BACKEND=$(envvarstring "${GDK_BACKEND:-}")
+  HOME=$(envvarstring "${HOME:-}")
+  LANG=$(envvarstring "${LANG:-}")
+  LC_ALL=$(envvarstring "${LC_ALL:-}")
+  #PATH=$(envvarstring "${PATH:-}")  ### FIXME whitespaces on MS Windows in $PATH
+  WAYLAND_DISPLAY=$(envvarstring "${WAYLAND_DISPLAY:-}")
+  XAUTHORITY=$(envvarstring "${XAUTHORITY:-}")
+  XDG_RUNTIME_DIR=$(envvarstring "${XDG_RUNTIME_DIR:-}")
+  XDG_VTNR=$(envvarstring "${XDG_VTNR:-}")
   
   # Add possibly missing PATH entries
   PATH="${PATH:-"/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/games:/usr/games"}"
@@ -7072,7 +7106,7 @@ declare_variables() {           # declare global variables
   grep -q ':/usr/sbin:'        <<< ":$PATH:" || PATH="$PATH:/usr/sbin"
   grep -q ':/usr/local/bin:'   <<< ":$PATH:" || PATH="$PATH:/usr/local/bin"
   grep -q ':/usr/bin:'         <<< ":$PATH:" || PATH="$PATH:/usr/bin"
-  grep -q ':/usr/local/games:' <<< ":$PATH:" || PATH="$PATH:/usr/games"
+  grep -q ':/usr/local/games:' <<< ":$PATH:" || PATH="$PATH:/usr/local/games"
   grep -q ':/usr/games:'       <<< ":$PATH:" || PATH="$PATH:/usr/games"
   export PATH
   
@@ -7127,7 +7161,7 @@ declare_variables() {           # declare global variables
   Containercommandscript="container.CMD.sh"       # Generated script starting image command in container
   Containerrootrc="containerrootrc"               # Generated script to set up container, e.g. user creation. Runs as root in container.
   Dockerrc="dockerrc"                             # Generated script to check image, set up host and create $Containercommandscript
-  Pullrc="pullrc"                                 # Generated script for pull dialog
+  Shareclipboardscript="clipboard.sh"             # --clipboard: Generated script for text clipboard sharing
   Xinitrc="xinitrc"                               # Generated script to set up X, e.g. cookie and xrandr
   Xtermrc="xtermrc"                               # Generated script for password prompt
   
@@ -7270,7 +7304,6 @@ declare_variables() {           # declare global variables
   Pulseaudiosocket="pulseaudio.socket"            # --pulseaudio: unix socket for --pulseaudio=socket
   Sharealsa="no"                                  # --alsa: enable ALSA sound, share /dev/snd
   Shareclipboard="no"                             # --clipboard: Enable clipboard sharing
-  Shareclipboardscript="clipboard.sh"             # --clipboard: Generated script for text clipboard sharing
   Sharecupsmode=""                                # --printer: Share access to CUPS printer server: socket|tcp|""
   Sharegpu="no"                                   # --gpu: Use hardware accelerated OpenGL, share files in /dev/dri
   Sharehosthome="no"                              # --home: Share a folder ~/.local/share/x11docker/Imagename with created container
@@ -7530,9 +7563,11 @@ parse_options() {               # parse cli options
                               Alsacard="${2:-$Alsacard}" ; shift ;;
       -c|--clipboard)         Shareclipboard="yes"  ;;               # Clipboard sharing
       -l)                     Langwunsch="${LANG:-}" ;               # Locale/language setting
+                              Langwunsch="${Langwunsch:-$LC_ALL}"
                               [ "$Langwunsch" ] || note "Option --lang: Environment variable \$LANG is empty.
   Please specify desired language locale with e.g. --lang=en_US or --lang=zh_CN." ;;
          --lang)              Langwunsch="${2:-${LANG:-}}" ; shift   # Locale/language setting
+                              Langwunsch="${Langwunsch:-$LC_ALL}"
                               [ "$Langwunsch" ] || note "Option --lang: Environment variable \$LANG is empty.
   Please specify desired language locale with e.g. --lang=en_US or --lang=zh_CN." ;;
       -P|--printer)           Sharecupsmode="${2:-socket}" ; shift ;;    # Printer sharing with CUPS
@@ -7853,10 +7888,10 @@ finish
   
 #### ToDo notes for development
 todo() {
-  # check init in ENTRYPOINT - interferes with sh. need exec again?
   # check Cshare/timezone, something is wrong, no timezone file
   # support --exe --user
-  # remove some remaining $Cshare
+  # --nxagent -d kdeneon/plasma:user-lts leads to black fullscreen
+  
   # CHECK:
   # docker stop in dockerrc? background process with waitfortheend()
   # --weston-xwayland: Weston is resizeable now, but Xwayland root window does not draw new area
@@ -7867,6 +7902,7 @@ todo() {
   # --xpra --desktop --xdummy: --size modeline does not work, might not even appear in xrandr although set in xdummy.xorg.conf
   # --printer: regard CUPS_SERVER
   # --env: check escapestring in cmd.sh
+  # remove some remaining $Cshare
 
   # dependeny wiki: Cygwin packages
   # x11docker/check: palinopsia: check video RAM size with glxinfo
