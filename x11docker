@@ -323,7 +323,7 @@ SOFTWARE.'
 
 #### messages
 alertbox() {                    # X alert box with title $1 and message $2
-  local Title= Message=
+  local Title Message
   Title="${1:-}"
   Message="${2:-}"
 
@@ -391,7 +391,7 @@ traperror() {                   # trap ERR: --debug: Output for 'set -o errtrace
   ${3:-} - ${5:-}"
 }
 error() {                       # show error message and exit
-  local Message=
+  local Message
 
   Message="$*
 
@@ -410,8 +410,8 @@ ${Colredbg}x11docker ERROR:${Colnorm} $Message
   # output to logfile
   logentry "x11docker ERROR: $Message
 "
-  [ -s "$X11dockererrorfile" ] && waitfortheend             # Avoid double alert boxes
-  [ -d "$Cachefolder" ] && echo 64 >> "$X11dockererrorfile" # also regarded by finish() for exit code
+  [ -s "$X11dockererrorfile" ] && waitfortheend                    # Avoid double alert boxes
+  [ -e "$X11dockererrorfile" ] && echo 64 >> "$X11dockererrorfile" # also regarded by finish() for exit code
 
   # output to X dialogbox if not running in terminal
   [ "$Runsinterminal" = "no" ] && [ "$Silent" = "no" ] && export ${Hostxenv:-DISPLAY} && alertbox "x11docker ERROR" "$Message" &
@@ -431,28 +431,35 @@ note() {                        # show notice messages
 "
 }
 verbose() {                     # show verbose messages
-  # only logfile notes here, terminal output is done with tail in part:verbose
+  # only logfile notes here, terminal output is done with tail in setup_verbosity()
   logentry "x11docker[$(timestamp)]: $*
 "
 }
 debugnote() {                   # show debug output $*
-  logentry "DEBUGNOTE[$(timestamp)]: $*"
   [ "$Debugmode" = "yes" ] && [ "$Verbose" = "no" ] && echo "${Colblue}DEBUGNOTE[$(timestamp)]:${Colnorm} $*" >&3
+  logentry "DEBUGNOTE[$(timestamp)]: $*"
   return 0
 }
 logentry() {                    # write into logfile
-  [ "$Logfile" ] && {
+  [ -e "$Logfile" ] && {
     [ "$Logmessages" ] && echo "$Logmessages" >>$Messagelogfile 2>/dev/null && Logmessages=""
-    echo "$*" >>$Messagelogfile 2>/dev/null || echo "[not in log] $*" >&2
+    echo "$*" >>$Messagelogfile 2>/dev/null 
   } || Logmessages="$Logmessages
 $*" 
 }
 setup_verbosity() {             # options --verbose, --stdout, --stderr
   # create summary logfile
-  tail --pid="$$" --retry -n +1 -F $Messagelogfile $Containerlogfile \
-                                   $Cmdstdoutlogfile $Cmdstderrlogfile ${Journallogfile:-} \
-                                   $Xpraserverlogfile $Xpraclientlogfile \
-                                   $Xinitlogfile $Compositorlogfile 2>/dev/null >>$Logfile &
+  tail --pid="$$" --retry -n +1 -F \
+      $Cmdstderrlogfile \
+      $Cmdstdoutlogfile \
+      $Compositorlogfile \
+      $Containerlogfile \
+      ${Journallogfile:-} \
+      $Messagelogfile \
+      $Xinitlogfile \
+      $Xpraclientlogfile \
+      $Xpraserverlogfile \
+    2>/dev/null >>$Logfile &
 
   # option --verbose
   [ "$Verbose" = "yes" ] && {
@@ -479,13 +486,17 @@ setup_verbosity() {             # options --verbose, --stdout, --stderr
 
   # options --stdout, --stderr
   [ "$Showstdout" = "yes" ] && {
-    { waitforfilecontent $Containerpid1pidfile infinity
+    { 
+      trap '' SIGINT
+      waitforfilecontent $Containerpid1pidfile infinity
       tail --pid="$$" --retry -n +1 -F $Cmdstdoutlogfile     2>/dev/null
-    } & storepid $! tailstdout
+    } &
   }
   [ "$Showstderr" = "yes" ] && {
-    { tail --pid="$$" --retry -n +1 -F $Cmdstderrlogfile >&4 2>/dev/null
-    } & storepid $! tailstderr
+    { 
+      trap '' SIGINT
+      tail --pid="$$" --retry -n +1 -F $Cmdstderrlogfile >&2 2>/dev/null
+    } &
   }
   return 0
 }
@@ -498,97 +509,87 @@ finish_sigint() {               # trap SIGINT to activate debug mode on finish()
   finish 130
 }
 finish() {                      # trap EXIT routine to clean up background processes and cache
-  local Pid= Name= Zeit= Catlogfilepid= Exitcode Pid1pid=
-  trap - EXIT
+  local Pid Name Zeit Exitcode Pid1pid= Dockerlogspid= Dockerstopshellpid= Wmcontainerpid1= Watchmessagefifopid= i
 
-  debugnote "Terminating x11docker."
-  debugnote "List of stored background processes:
-$(cat $Bgpidfile 2>/dev/null)"
-
-  [ "$$" = "$BASHPID" ] || saygoodbye finish-subshell
-  [ "$Sudo" ] && Sudo="sudo -n" # no password prompt here, rather fail
-
-  # check for background processes stored in $Bgpidfile
-  [ -s "$Bgpidfile" ] && {
-    while read -r Line ; do
-      Pid="$(echo $Line  | awk '{print $1}')"
-      Name="$(echo $Line | awk '{print $2}')"
-      debugnote "Checking: $Pid ($Name): $(pspid $Pid ||:)"
-      checkpid $Pid && {        
-        case $Name in
-          xinit)                  killpid $Pid $Name xinit ;;
-          Xserver)                killpid $Pid $Name 'Xorg|Xephyr|Xvfb|Xwayland|nxagent|XWin' ;;
-          containershell)         killpid $Pid $Name x11docker ;;
-          windowmanager)          killpid $Pid $Name ;;
-          xpraserver|xpraclient)  killpid $Pid $Name xpra ;;
-          compositor)             killpid $Pid $Name 'weston|kwin_wayland' ;;
-          waitfortheend|xpraloop|watchpidlist)
-                                  killpid $Pid $Name x11docker ;;
-          watchmessagefifo)       [ "$$" = "$BASHPID" ] && killpid $Pid $Name x11docker || Pid= ;;
-          tailstdout|tailstderr)  Pid= ;;     # tail terminates itself after exit of $$
-          catstdin)               killpid $Pid $Name ;;
-          hostexe|shareclipboard) killpid $Pid $Name bash ;;
-          xfishtank)              killpid $Pid $Name xfishtank ;;
-          dockerlogs)             $Sudo killpid $Pid $Name ;;
-          containerpid1)
-            Pid1pid="$Pid"
-            Pid=
-            # Send TERM to PID1 of container
-            checkpid  $Pid1pid 2>&1 && {
-              debugnote "Sending TERM to PID 1 of container: $(pspid $Pid1pid)"
-              killpid $Pid1pid containerPID1 2>/dev/null || {
-                note "Could not terminate PID 1 of container: $(pspid $Pid1pid)"
-                Debugmode="yes"
-              }
-              # Give container a bit time for graceful shutdown
-              case $Initsystem in
-                systemd) ;;
-                *)
-                  for Count in 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0; do
-                    checkpid $Pid1pid || break
-                    mysleep $( awk "BEGIN { print $Count * 0.1 }")
-                    debugnote "Waiting for container PID 1: $Pid1pid to terminate"
-                  done
-                ;;
-              esac
-            }
-            # Try 'docker stop' if TERM failed
-            checkpid $Pid1pid && {
-              debugnote "Container still running. Executing 'docker stop'."
-              $Sudo $Dockerexe stop $Containername >>$Containerlogfile 2>&1 || debugnote "docker stop failed"
-            }
-          ;;
-          *) # should never happen (tm)
-            note "Found remaining background process $Line ($Pid)
-$(pspid $Pid)"
-            killpid $Pid $Name
-          ;;
-        esac
-        checkpid $Pid && {
-          sleep 1
-          checkpid $Pid && debugnote "Issue terminating $Line: $(pspid $Pid)" && kill -s KILL $Pid
-        }
-      }
-    done < <(tac $Bgpidfile)
+  # do not finish() in subshell, just give signal to all other processes and terminate subshell
+  [ "$$" = "$BASHPID" ] || {
+    saygoodbye finish-subshell
+    exit 0
   }
 
+  debugnote "Terminating x11docker."
   saygoodbye "finish"
+  trap - EXIT
+  trap - ERR
+  trap - SIGINT
+  Exitcode="${1:-0}"
+  
+  # --pw=sudo: no password prompt here, rather fail ### FIXME
+  [ "$Sudo" ] && {
+    sudo -n echo 2>/dev/null && Sudo="sudo -n" || Sudo=""
+  }
 
-  # Check if container is still running.
-  # if kill of PID 1 failed in loop above, most times terminating X server will already have stopped GUI applications.
+  # check for background processes stored in $Bgpidfile
+  debugnote "List of stored background processes:
+$(cat $Bgpidfile 2>/dev/null)"
+  while read -r Line ; do
+    
+    Pid="$(echo $Line  | awk '{print $1}')"
+    Name="$(echo $Line | awk '{print $2}')"
+    debugnote "Checking: $Pid ($Name): $(pspid $Pid ||:)"
+      
+    checkpid $Pid && {
+      case $Name in
+        watchmessagefifo)
+          Watchmessagefifopid="$Pid"
+        ;;
+        dockerstopshell)
+          Dockerstopshellpid="$Pid"
+        ;;
+        dockerlogs)
+          Dockerlogspid=$Pid
+          [ "$Winsubsystem" ] && Dockerlogspid=""
+        ;;
+        containerpid1)
+          Pid1pid="$Pid"
+          [ "$Winsubsystem" ] && Pid1pid=""
+          killpid "$Pid1pid" "$Name" || Debugmode="yes"
+          # Give container time for graceful shutdown
+          for Count in 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0; do
+            checkpid $Pid1pid || break
+            mysleep $(awk "BEGIN { print $Count * 0.1 }")
+            debugnote "Waiting for container PID 1: $Pid1pid to terminate."
+          done
+        ;;
+        wmcontainerpid1)
+          Wmcontainerpid1="$Pid"
+          [ "$Winsubsystem" ] && Wmcontainerpid1=""
+          killpid "$Wmcontainerpid1" "$Name" 
+        ;;
+        *) 
+          killpid "$Pid" "$Name" 
+        ;;
+      esac
+    }
+  done < <(tac "$Bgpidfile" 2>/dev/null)
+
+  # Check if container is still running -> docker stop
   checkpid $Pid1pid && {
-    $Sudo $Dockerexe stop $Containername >>$Containerlogfile 2>&1 || {
-      note "Found remaining container process. Most probably the X session was
-  interrupted. Can not stop container because x11docker does not run as root.
-  Will wait up to 10 seconds for docker to finish."
-      Zeit="$(date +%s)"
-      while checkpid $Pid1pid ; do
-        note "Waiting for container to terminate ..."
-        sleep 1
-        [ 10 -lt $(($(date +%s) - $Zeit)) ] && break
-      done
-      if checkpid $Pid1pid ; then
-        note "Container did not terminate as it should.
+    Debugmode="yes"
+    debugnote "Container still running. Executing 'docker stop'.
+  Will wait up to 15 seconds for docker to finish."
+    echo "stop" >> "$Dockerstopsignalfifo"
+    
+    Zeit="$(date +%s)"
+    while checkpid $Pid1pid ; do
+      debugnote "Waiting for container to terminate ..."
+      sleep 1
+      [ 15 -lt $(($(date +%s) - $Zeit)) ] && break
+    done
+      
+    checkpid $Pid1pid && {
+      Exitcode="64"
+      debugnote "Container did not terminate as it should.
   Will not clean cache to avoid file permission issues.
   You can remove the new container with command:
     docker rm -f $Containername
@@ -596,34 +597,40 @@ $(pspid $Pid)"
     rm -R $Cachefolder
   or let x11docker do the cleanup work for you:
     x11docker --cleanup"
-        Preservecachefiles="yes"
-      else
-        note "Container terminated successfully"
-      fi
-    }
+      Preservecachefiles="yes"
+    } || debugnote "Container terminated successfully"
   }
-  # different stop behaviour on Windows because $Pid1pid is not in ps.
+  # Check if 'docker logs' is still running
+  checkpid $Dockerlogspid      && echo "stop" >> "$Dockerstopsignalfifo"
+  # Check if window manager container is still running
+  checkpid $Wmcontainerpid1    && echo "stop" >> "$Dockerstopsignalfifo"
+  # Terminate watching subshell in dockerrc
+  echo "exit" >> "$Dockerstopsignalfifo"
+  checkpid $Dockerstopshellpid && sleep 1
+  
+  # MS Windows: different container stop procedure because $Pid1pid is not in ps.
   [ "$Winsubsystem" ] && [ "$Containername" ] && {
     $Dockerexe ps -a | grep -q $Containername && {
       debugnote "Container still running. Executing 'docker stop'."
       $Dockerexe stop $Containername >>$Containerlogfile 2>&1 || {
+        Exitcode="64"
         warning "Failed to stop container $Containername.
   Will not clean cache to avoid file permission issues."
         Preservecachefiles="yes"
       }
     }
   }
+  
+  # Stop watching for messages
+  checkpid "$Watchmessagefifopid" && killpid "$Watchmessagefifopid" watchmessagefifo
 
-  # check for possible error
-  Exitcode="${1:-0}"
+  # check for possible error exit codes. Prefer CMD exit code over x11docker exit code.
   [ -s "$X11dockererrorfile" ] && Exitcode="$(cat $X11dockererrorfile | tail -n1)"
   debugnote "x11docker exit code: $Exitcode"
   [ -s "$Exitcodefile" ] && {
     Exitcode="$(cat $Exitcodefile)"
     debugnote "CMD exit code: $Exitcode"
   }
-  Exitcode="${Exitcode:-0}"
-  
   
   # backup of logfile in $Cachebasefolder
   [ -e "$Logfile" ] && {
@@ -632,18 +639,18 @@ $(pspid $Pid)"
     unpriv "rmcr '$Logbackup'"
   }
 
-  # close additional file descriptors
-  mysleep 0.2
-  for i in 3 4 6 7 8 9; do
-    { >&$i ;} 2>/dev/null && exec >&$i-
-  done
+#  # close additional file descriptors
+#  mysleep 0.2
+#  for i in 3 4 6 7 8 9; do
+#    { >&$i ;} 2>/dev/null && exec >&$i-
+#  done
   
   # remove cache files
-  [ "$Preservecachefiles" = "no" ] && grep -q cache <<<$Cachefolder && grep -q x11docker <<<$Cachefolder && [ "x11docker" != "$(basename "$Cachefolder")" ] && unpriv "rm -f -R '$Cachefolder'"
+  [ "$Preservecachefiles" = "no" ] && grep -q cache <<<$Cachefolder && grep -q x11docker <<<$Cachefolder && [ "x11docker" != "$(basename "$Cachefolder")" ] && sleep 1 && unpriv "rm -f -R '$Cachefolder'"
 
   case "$Sourced" in
     yes) return $Exitcode ;;
-    *)   exit   $Exitcode ;;
+    "")  exit   $Exitcode ;;
   esac
 }
 saygoodbye() {                  # create file signaling watching processes to terminate
@@ -680,6 +687,8 @@ watchpidlist() {                # watch list of important pids
   # serves mainly watching X server, Wayland compositor, container and hostexe
   # echo PIDs to watch into >&9 (setonwatchpidlist())
   local Pid= Containername= Line= Watchpidlist=
+  trap '' SIGINT
+  
   while rocknroll ; do
     # check for new Pid once a second
     read -t1 Pid <&9 ||:
@@ -722,7 +731,8 @@ setonwatchpidlist() {           # add PID $1 to watchpidlist()
 watchmessagefifo() {            # watch for messages coming from container or dockerrc
   # message in fifo must end with :$Messagetype
   local Line= Message= Messagetype=
-  while rocknroll ; do
+  trap '' SIGINT
+  while [ -e "$Cachefolder" ]; do
     IFS= read -r Line <&6 ||:
     [ "$Line" ] || sleep 2  # sleep for MSYS2/CYGWIN workaround
     [ "$Line" ] && Message="$Message
@@ -758,28 +768,33 @@ checkpid() {                    # check if PID $1 is active
 }
 pspid() {                       # ps -p $1 --no-headers
   # On some systems ps does not have option --no-headers.
-  # On some systems (busybox) ps -p is not supported
+  # On some systems (busybox) ps -p is not supported  ### FIXME
   ps -p ${1:-} 2>/dev/null | tail -n+2
 }
-killpid() {                     # kill PID $1 with codename $2 [and process name $3]
+killpid() {                     # kill PID $1 with codename $2
   # TERM
-  debugnote "Terminating ${1:-} (${2:-}) ${3:-}: $(pspid ${1:-})"
-  checkpid "${1:-}" && kill         ${1:-} 2>/dev/null || return 0
+  debugnote "Terminating ${1:-} (${2:-}): $(pspid ${1:-})"
+  checkpid "${1:-}" && {
+    kill         ${1:-} 2>/dev/null
+    :
+  } || return 0
   mysleep 0.1
-  checkpid "${1:-}" && mysleep 0.4                     || return 0
+  checkpid "${1:-}" && mysleep 0.4 || return 0
+  
   # KILL
-  debugnote "Killing ${1:-} (${2:-}) ${3:-}: $(pspid ${1:-})"
+  debugnote "Killing ${1:-} (${2:-}): $(ps ${1:-})"
   checkpid "${1:-}" && kill -s KILL ${1:-} 2>/dev/null
   mysleep 0.2 
   checkpid "${1:-}" && {
-    note "Failed to terminate ${1:-} (${2:-}) ${3:-}: $(pspid ${1:-})"
+    note "Failed to terminate ${1:-} (${2:-}): $(ps -u -p ${1:-} 2>/dev/null | tail -n1)"
     return 1
   }
+  
   return 0
 }
 
 #### more or less general routines
-askyesno() {                    # ask Yes/no question. Default yes for ENTER, timeout with no after 60s
+askyesno() {                    # ask Yes/no question. Default 'yes' for ENTER, timeout with 'no' after 60s
   read -t60 -n1 -p "(timeout after 60s assuming no) [Y|n]" Choice
   [ "$?" = '0' ] && {
     [[ "$Choice" == [YyJj]* ]] || [ -z "$Choice" ] && return 0
@@ -3539,7 +3554,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
     echo           ""
   }
 
-  echo             "touch $Cachefolder/Xisready"
+  echo             "echo Xisready >> $Xisreadyfile"
   echo             "waitfortheend"
   return 0
 } >> $Xinitrc
@@ -4010,8 +4025,7 @@ create_dockercommand() {        # create command to run docker
       Dockercommand="$Dockercommand \\
   --user root" ;;
   esac
-#  Wmdockercommand="$Wmdockercommand \\
-#  --user $Hostuseruid:$Hostusergid"
+  
   Wmdockercommand="$Wmdockercommand \\
   --user 1999:1999"
   
@@ -4040,8 +4054,8 @@ create_dockercommand() {        # create command to run docker
   [ "$Runtime" ] && {
     Dockercommand="$Dockercommand \\
   --runtime='$Runtime'"
-    Wmdockercommand="$Wmdockercommand \\
-  --runtime=$Runtime"
+#    Wmdockercommand="$Wmdockercommand \\
+#  --runtime=$Runtime"
   }
       
   # capabilities
@@ -4130,7 +4144,7 @@ create_dockercommand() {        # create command to run docker
     esac
   done < <(store_runoption dump volume)
   [ "$Xauthentication" = "yes" ] && Wmdockercommand="$Wmdockercommand \\
-  --volume $(convertpath volume "$Xclientcookie" "$(convertpath path $Xclientcookie)")"
+  --volume $(convertpath volume "$Xclientcookie" "$(convertpath share $Xclientcookie)")"
   
   # --gpu: share NVIDIDA driver installer
   [ -e "$Nvidiainstallerfile" ] && Dockercommand="$Dockercommand \\
@@ -4207,6 +4221,8 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo "#  - set up systemd/elogind cgroup if needed"
   echo "#  - run window manager in container or from host if needed"
   echo ""
+  echo "trap '' SIGINT"
+  echo ""
 
   declare -f askyesno
   declare -f checkpid
@@ -4216,11 +4232,8 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   declare -f pspid
   declare -f rmcr
   declare -f rocknroll
-  declare -f saygoodbye
   declare -f storepid
-  declare -f unpriv
   declare -f waitforfilecreation
-  declare -f waitfortheend
   declare -f waitfor_xserver
   echo "$Messagefifofuncs"
   echo ""
@@ -4241,13 +4254,15 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo "Messagefile='$Messagefifo'"
   echo "Newxenv='$Newxenv'"
   echo "Showdisplayenvironment='$Showdisplayenvironment'"
+  echo "Tini=''"
   echo "Timetosaygoodbye='$Timetosaygoodbye'"
   echo "Timetosaygoodbyefifo='$Timetosaygoodbyefifo'"
-  echo "Unpriv='$Unpriv'"
   echo "Usemkfifo='$Usemkfifo'"
   echo "X11dockererrorfile='$X11dockererrorfile'"
   echo "Xinitlogfile='$Xinitlogfile'"
+  echo "Xisreadyfile='$Xisreadyfile'"
   echo "Xserver='$Xserver'"
+  echo "Wmcontainerid=''"
   echo "Workdir='$Workdir'"
   echo "export PATH='$PATH'"
   echo ""
@@ -4651,7 +4666,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   }
   
   echo "# Send signal to run X and wait for X to be ready"
-  echo "unpriv 'touch $Cachefolder/ReadyforX'"
+  echo "echo ReadyforX >> $Readyforxfile"
   echo "waitfor_xserver"
   echo ""
   
@@ -4676,8 +4691,8 @@ $Wmdockercommand"'
     echo "        mysleep 0.2"
     echo "      done"
     echo '    }'
-    echo '    checkpid "$Pid1pid" && storepid "$Pid1pid" windowcontainerpid1'
-    echo '    [ -z "$Wmcontainerid" ] && note "Option --wm: Failed to run window manager image: $Windowmanagercommand." && Windowmanager=host ||:'
+    echo '    checkpid "$Pid1pid" && storepid "$Pid1pid" wmcontainerpid1'
+    echo '    checkpid "$Pid1pid" || { note "Option --wm: Failed to run window manager image: $Windowmanagercommand." && Windowmanager=host ; }'
     echo '  } || {'
     echo "    note \"Option --wm: Did not find window manager image
       \$(cut -d' ' -f1 <<<\"\$Windowmanagercommand\")
@@ -4774,12 +4789,17 @@ $Wmdockercommand"'
     echo ""
   }
   
-  #echo '[ "$Containerid" ] && {'
-  #echo '  waitfortheend'
-  #echo "  debugnote \"Terminating container in dockerrc\""
-  #echo "  $Dockerexe stop \$Containerid           >> $Containerlogfile 2>&1"
-  #echo "  kill \$Dockerlogspid                    >> $Containerlogfile 2>&1"
-  #echo "} &"
+  [ -z "$Winsubsystem" ] && {
+    echo '[ "$Containerid" ] || [ "$Wmcontainerid" ] && {'
+    echo "  # wait for signal of finish()"
+    echo "  read Signal <$Dockerstopsignalfifo"
+    echo '  [ "$Signal" = "stop" ] && {'
+    echo "    $Dockerexe stop \$Containerid                                >> $Containerlogfile 2>&1 &"
+    echo "    [ \"\$Wmcontainerid\" ] && $Dockerexe stop \$Wmcontainerid   >> $Containerlogfile 2>&1 &"
+    echo "    kill \$Dockerlogspid                                         >> $Containerlogfile 2>&1 &"
+    echo "  }"
+    echo "} & storepid \$! dockerstopshell"
+  }
   
   echo "exit 0"
   return 0
@@ -5510,19 +5530,17 @@ create_xtermrc() {              # create xtermrc: script to prompt for password 
   echo "# Runs in terminal or in an additional terminal window"
   echo ""
   echo "$Messagefifofuncs"
-  echo "touchxtermready() {"
-  echo "  unpriv 'touch $Cachefolder/xtermready'"
+  echo "sendxtermready() {"
+  echo "  echo xtermready >> $Xtermreadyfile"
   echo "  trap - EXIT"
   echo "  exit"
   echo "}"
-  declare -f unpriv
   echo ""
   #[ "$Debugmode" = "yes" ] && echo "set -x"
-  echo "Unpriv='$Unpriv'"
   echo "Messagefile='$Messagefifo'"
   echo "export TERM=xterm SHELL=/bin/bash"
   echo ""
-  echo "trap touchxtermready EXIT"
+  echo "trap sendxtermready EXIT"
   echo ""  
   echo "debugnote 'Running xtermrc: Ask for password if needed ($Passwordneeded)'"
   echo ""
@@ -5560,7 +5578,7 @@ start_docker() {                # start docker container
     ;;
     *)       $Passwordterminal "/usr/bin/env bash $Xtermrc" ;;
   esac
-  waitforfilecreation $Cachefolder/xtermready infinity
+  waitforfilecontent $Xtermreadyfile infinity
 
   Containerid=$(cat $Containeridfile)
   Containerip=$(cat $Containeripfile)         # used by start_pulseaudiotcp()
@@ -5642,7 +5660,7 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
   nl -ba <$Containercommandscript >> $Containerlogfile
 
   # Send signal to run X and wait for X to be ready
-  touch $Cachefolder/ReadyforX
+  touch $Readyforxfile
   waitfor_xserver
   
   # run start script
@@ -5758,7 +5776,7 @@ waitfor_xserver() {             # wait for X server to be ready
   debugnote "Waiting for X server $Xserver to be ready."
   
   # sign is creation of $Cachefolder/Xready in xinitrc
-  while [ ! -e "$Cachefolder/Xisready" ] ; do
+  while [ ! -s "$Xisreadyfile" ] ; do
     Count=$(( Count + 1 ))
     Dauer=$(( $(date +%s) - $Zeit ))
     mysleep $(awk "BEGIN { print $Count * 0.05 }")
@@ -5780,24 +5798,6 @@ $(tail $Compositorlogfile)")"
   
   [ "$Showdisplayenvironment" = "yes" ] && echo $Newxenv     # --showenv
   rocknroll && debugnote "$Xserver is ready" || return 1
-
-  return 0
-}
-waitfor_dockerrc() {
-  local Zeit=$(date +%s) Count=0 Dauer=0
-
-  debugnote "Waiting for dockerrc to be ready for 'docker run'."
-  
-  # sign is creation of $Cachefolder/ReadyforX in xinitrc
-  while [ ! -e "$Cachefolder/ReadyforX" ] ; do
-    Count=$(( Count + 1 ))
-    Dauer=$(( $(date +%s) - $Zeit ))
-    mysleep $(awk "BEGIN { print $Count * 0.05 }")
-    verbose "Waiting since ${Dauer}s for dockerrc to be ready."
-    rocknroll || { debugnote "Stopped waiting for dockerrc due to terminating signal." ; break ; }
-  done
-  
-  rocknroll && debugnote "dockerrc is ready" || return 1
 
   return 0
 }
@@ -6732,6 +6732,8 @@ option_messages() {             # some messages depending on options, but not ch
   Xpra version v3.0-r23066 and higher starts up faster."
       [ "$Sharegpu" = "yes" ] && note "If performance of GPU acceleration with $Xserver
   is not satisfying, you can try insecure '--hostdisplay --gpu'."
+      note "Option --xpra: If you encounter issues with xpra, 
+  you can try --nxagent instead."
     ;;
 
     --xephyr) note "Xephyr is a quite stable nested X server.
@@ -6747,8 +6749,7 @@ option_messages() {             # some messages depending on options, but not ch
   --hostdisplay (insecure), or run --nxagent in desktop mode with a
   host window manager (--wm=WINDOWMANAGER or --wm=auto or short -wm)."
       }
-      note "A few applications do not work well with --nxagent
-  or do not appear at all (e.g. atom editor, kodi, cinnamon).
+      note "A few applications do not work well with --nxagent.
   In that case, please try another X server option like --xephyr or --xpra."
     ;;
 
@@ -6972,14 +6973,17 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Dockercommandfile="$Cachefolder/$Dockercommandfile"               && mkfile $Dockercommandfile
   Dockerinfofile="$Cachefolder/$Dockerinfofile"                     && mkfile $Dockerinfofile
   Dockerrc="$Cachefolder/$Dockerrc"                                 && mkfile $Dockerrc
+  Dockerstopsignalfifo="$Cachefolder/$Dockerstopsignalfifo"
   Hostxauthority="$Cachefolder/$Hostxauthority"                     && mkfile $Hostxauthority
   Messagelogfile="$Cachefolder/$Messagelogfile"                     && mkfile $Messagelogfile
   Pulseaudioconf="$Cachefolder/$Pulseaudioconf"                     && mkfile $Pulseaudioconf
+  Readyforxfile="$Cachefolder/$Readyforxfile"                       && mkfile $Readyforxfile
   Shareclipboardscript="$Cachefolder/$Shareclipboardscript"         && mkfile $Shareclipboardscript
   Watchpidfifo="$Cachefolder/$Watchpidfifo"
   Westonini="$Cachefolder/$Westonini"                               && mkfile $Westonini
   X11dockererrorfile="$Cachefolder/$X11dockererrorfile"             && mkfile $X11dockererrorfile
   Xdummyconf="$Cachefolder/$Xdummyconf"                             && mkfile $Xdummyconf
+  Xisreadyfile="$Cachefolder/$Xisreadyfile"                         && mkfile $Xisreadyfile
   Xinitlogfile="$Cachefolder/$Xinitlogfile"                         && mkfile $Xinitlogfile
   Xinitrc="$Cachefolder/$Xinitrc"                                   && mkfile $Xinitrc
   Xkbkeymapfile="$Cachefolder/$Xkbkeymapfile"                       && mkfile $Xkbkeymapfile
@@ -6988,6 +6992,7 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Xpraserverlogfile="$Cachefolder/$Xpraserverlogfile"               && mkfile $Xpraserverlogfile
   Xservercookie="$Cachefolder/$Xservercookie"                       && mkfile $Xservercookie
   Xtermrc="$Cachefolder/$Xtermrc"                                   && mkfile $Xtermrc
+  Xtermreadyfile="$Cachefolder/$Xtermreadyfile"                     && mkfile $Xtermreadyfile
   
   # systemd files
   Systemdtarget=$Cachefolder/x11docker.target                       && mkfile $Systemdtarget
@@ -7061,6 +7066,7 @@ setup_fifo() {                  # set up fifo channels (also option --stdin)
       unpriv "mkfifo $Watchpidfifo"
       unpriv "mkfifo $Messagefifo && chmod 666 $Messagefifo"
       unpriv "mkfifo $Timetosaygoodbyefifo"
+      unpriv "mkfifo $Dockerstopsignalfifo"
     ;;
     no) # Windows, kata
       mkfile $Watchpidfifo
@@ -7079,6 +7085,10 @@ setup_fifo() {                  # set up fifo channels (also option --stdin)
   # start watching for messages out of container or dockerrc
   exec 6<>$Messagefifo
   watchmessagefifo & storepid $! watchmessagefifo
+  
+  # used by finish() and dockerrc
+  exec 4<>$Dockerstopsignalfifo
+  
   return 0
 }
 
@@ -7129,13 +7139,17 @@ declare_variables() {           # declare global variables
     
   # Internal messages and pid storage
   Bgpidfile="backgroundpids"                      # File to store pids and names of background processes that should be killed on exit
+  Dockerstopsignalfifo="dockerstop"               # finish() send 'docker stop' signal to dockerrc
   Logmessages=""                                  # Stores messages until logfile is available, needed by logentry()
   Messagefifo="message.fifo"                      # Message channel for warning/verbose/debugnote/note/error within container, dockerrc, containerrootrc and others
+  Readyforxfile="dockersetup.ready"               # Signal of dockerrc that it is ready for X
   Timetosaygoodbye="timetosaygoodbye"             # File giving term signal to all parties
   Timetosaygoodbyefifo="timetosaygoodbye.fifo"    # Message channel for --init=openrc|runit|sysvinit to shut down on x11docker signal
   Usemkfifo="yes"                                 # Not on Windows nor with kata-runtime
   Watchpidfifo="watchpid.fifo"                    # Message channel to transfer pids to watchpidlist()
   X11dockererrorfile="x11docker.error"            # Store error exit code
+  Xisreadyfile="X.ready"                          # content signals that X startup is ready
+  Xtermreadyfile="xterm.ready"
   
   # Logfiles
   Compositorlogfile="compositor.log"              # Logfile for weston or kwin_wayland
@@ -7715,7 +7729,6 @@ main() {
   trap finish_sigint SIGINT
   
   exec 3>&2                     # stderr channel for warning(), error(), note(), debugnote() and --verbose
-  exec 4>&2                     # stderr channel for --stderr
   
   declare_variables
   parse_options "$@"
@@ -7851,6 +7864,8 @@ $(nl -ba <$Westonini)"
     # Thus docker runs in this subshell after X server is ready to accept connections.
     # Waiting for X is done in dockerrc.
     
+    trap '' SIGINT
+    
     case $X11dockermode in
       run) start_docker ;;                                                      # (default)
       exe) start_hostexe ;;                                                     # --exe, --xonly
@@ -7876,7 +7891,7 @@ $(nl -ba <$Westonini)"
   } <&0 & storepid $! containershell
   
   #### Start X server [and/or Wayland compositor]
-  waitfor_dockerrc
+  waitforfilecontent $Readyforxfile
   [ "$Compositorcommand" ] && start_compositor
   start_xserver
   saygoodbye main
@@ -7884,16 +7899,19 @@ $(nl -ba <$Westonini)"
 }
 
 main "$@"
-finish
   
 #### ToDo notes for development
 todo() {
-  # check Cshare/timezone, something is wrong, no timezone file
+  # BUG --wm=x11docker/openbox: does not run
+  # BUG Cshare/timezone, something is wrong, no timezone file
   # support --exe --user
   # --nxagent -d kdeneon/plasma:user-lts leads to black fullscreen
+  # cleanup(): avoid hardcoded pathes
+  
+  # bug report startplasmacompositor: --libinput
+  # bug report: kwin_wayland SYS_RESOURCE
   
   # CHECK:
-  # docker stop in dockerrc? background process with waitfortheend()
   # --weston-xwayland: Weston is resizeable now, but Xwayland root window does not draw new area
   # --xpra-xwayland, --weston-xwayland: Xwayland does not fit Weston window size if parts of weston window are offscreen
   # --xpra-xwayland --desktop: resize & redraw issues
@@ -7903,6 +7921,7 @@ todo() {
   # --printer: regard CUPS_SERVER
   # --env: check escapestring in cmd.sh
   # remove some remaining $Cshare
+  # pspid(): On some systems (busybox) ps -p is not supported
 
   # dependeny wiki: Cygwin packages
   # x11docker/check: palinopsia: check video RAM size with glxinfo
