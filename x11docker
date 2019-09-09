@@ -412,6 +412,7 @@ ${Colredbg}x11docker ERROR:${Colnorm} $Message
   # output to logfile
   logentry "x11docker ERROR: $Message
 "
+  saygoodbye error
   [ -s "$X11dockererrorfile" ] && waitfortheend                    # Avoid double alert boxes
   [ -e "$X11dockererrorfile" ] && echo 64 >> "$X11dockererrorfile" # also regarded by finish() for exit code
 
@@ -490,7 +491,7 @@ setup_verbosity() {             # options --verbose, --stdout, --stderr
   [ "$Showstdout" = "yes" ] && {
     { 
       trap '' SIGINT
-      waitforfilecontent $Containerpid1pidfile infinity ||:
+      waitforfilecontent $Containerpid1pidfile ||:
       tail --pid="$$" --retry -n +1 -F $Cmdstdoutlogfile     2>/dev/null
     } &
   }
@@ -507,7 +508,7 @@ setup_verbosity() {             # options --verbose, --stdout, --stderr
 finish_sigint() {               # trap SIGINT to activate debug mode on finish()
   Debugmode="yes"
   debugnote "Received SIGINT"
-  [ -d "$Cachefolder" ] && echo 130 >> "$X11dockererrorfile"
+  [ -e "$X11dockererrorfile" ] && echo 130 >> "$X11dockererrorfile"
   finish 130
 }
 finish() {                      # trap EXIT routine to clean up background processes and cache
@@ -629,8 +630,8 @@ $(cat $Bgpidfile 2>/dev/null)"
   # check for possible error exit codes. Prefer CMD exit code over x11docker exit code.
   [ -s "$X11dockererrorfile" ] && Exitcode="$(cat $X11dockererrorfile | tail -n1)"
   debugnote "x11docker exit code: $Exitcode"
-  [ -s "$Exitcodefile" ] && {
-    Exitcode="$(cat $Exitcodefile)"
+  [ -s "$Cmdexitcodefile" ] && {
+    Exitcode="$(cat $Cmdexitcodefile)"
     debugnote "CMD exit code: $Exitcode"
   }
   
@@ -665,7 +666,6 @@ saygoodbye() {                  # create file signaling watching processes to te
 rocknroll() {                   # check whether x11docker session is still running
   [ -s "$Timetosaygoodbye" ]   && return 1
   [ -e "$Timetosaygoodbye" ]   || return 1
-  [ -s "$X11dockererrorfile" ] && return 1
   return 0
 }
 waitfortheend() {               # wait for end of x11docker session
@@ -918,25 +918,31 @@ waitforfilecreation() {         # similar to inotify-wait: wait up to 15s for fi
 }
 waitforfilecontent() {          # wait for file $1 to be not empty
   # $1 file to look at
-  local Zeit= Warten= Dauer= Count=
-  Zeit="$(date +%s)"
+  # $2 time to wait in seconds. default: infinity
+  local Startzeit Uhrzeit Warten Dauer Count=0 Schlaf
+  Startzeit="$(date +%s ||:)"
+  Startzeit="${Startzeit:-0}"
   case "${2:-}" in
-    infinity) Warten=32000 ;;
-    "")       Warten=15 ;;
+    ""|infinity) Warten=32000 ;;
     *)        Warten="${2:-}" ;;
   esac
   debugnote "Waiting for file content in ${1:-}"
   while [ ! -s "${1:-}" ] ; do
-    Count="$(( Count + 1 ))"
-    Dauer="$(( $(date +%s) - $Zeit ))"
-    mysleep $(awk "BEGIN { print $Count * 0.1 }")
-    [ $Warten -lt $Dauer ]  && return 1
+    Count="$(( $Count + 1 ))"
+    Uhrzeit="$(date +%s ||:)"
+    Uhrzeit="${Uhrzeit:-0}"
+    Dauer="$(( $Uhrzeit - $Startzeit ))"
+    Schlaf="$(( $Count / 10 ))"
+    [ "$Schlaf" = "0" ] && Schlaf="0.5"
+    mysleep "$Schlaf"
+    [ "$Dauer" -gt "$Warten" ] && return 1
     verbose "Waiting since ${Dauer}s for ${1:-} to have content, will wait up to $Warten seconds."
     rocknroll || {
       debugnote "Stopped waiting for file content of ${1:-} due to terminating signal."
       return 1
-    }  done
-  verbose "Found file content in ${1:-}"
+    }
+  done
+  debugnote "Found file content in ${1:-}"
   return 0
 }
 waitforlogentry() {             # wait for entry $3 in logfile $2 of application $1
@@ -3275,7 +3281,6 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   echo "Timetosaygoodbyefifo='$Timetosaygoodbyefifo'"
   echo "Usemkfifo='$Usemkfifo'"
   echo "Winsubsystem='$Winsubsystem'"
-  echo "X11dockererrorfile='$X11dockererrorfile'"
   echo ""
   echo "export PATH='${PATH:-}'"
   echo "export $Newxenv"
@@ -3557,7 +3562,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
     echo           ""
   }
 
-  echo             "echo Xisready >> $Xisreadyfile"
+  echo             "echo Xisready >> $Xinitrcreadyfile"
   echo             "waitfortheend"
   return 0
 } >> $Xinitrc
@@ -4264,7 +4269,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo "Usemkfifo='$Usemkfifo'"
   echo "X11dockererrorfile='$X11dockererrorfile'"
   echo "Xinitlogfile='$Xinitlogfile'"
-  echo "Xisreadyfile='$Xisreadyfile'"
+  echo "Xinitrcreadyfile='$Xinitrcreadyfile'"
   echo "Xserver='$Xserver'"
   echo "Wmcontainerid=''"
   echo "Workdir='$Workdir'"
@@ -4282,7 +4287,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   ${4:-}
   ${3:-} - ${5:-}"'
     echo "  saygoodbye dockerrc-traperror"
-    echo "  exit 1"
+    echo "  exit 64"
     echo "}"
     echo "set -Eu"
     echo "trap 'traperror \$? \$LINENO \$BASH_LINENO \"\$BASH_COMMAND\" \$(printf \"::%s\" \${FUNCNAME[@]})'  ERR"
@@ -4351,6 +4356,9 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
     ;;
   esac
   echo ""
+  
+  echo "rocknroll || exit 64"
+  echo ""
 
   echo "[ \"\$Dockerpull\" = 'yes' ] && {"
   echo "  note \"Pulling image '$Imagename' from docker hub\""
@@ -4360,7 +4368,11 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   esac
   echo "  $Sudo $Dockerexe pull $Imagename 1>&2 || error \"Pulling docker image '$Imagename' seems to have failed!\""
   echo "}"
+  echo ""
 
+  echo "rocknroll || exit 64"
+  echo ""
+  
   [ "$Tinibinaryfile" ] && [ "$Switchcontaineruser" = "no" ] && echo "Tini=\"$Cshare/tini --\"" || echo "Tini="
   echo ""
   
@@ -4454,32 +4466,32 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo "[ -z \"\$Containercommand\$Entrypoint\" ] && error 'No image command specified and no CMD or ENTRYPOINT found in image.'"
   echo ""
 
-  echo     "######## Create container.CMD.sh ########"
+  echo     "######## Create $(basename $Containercommandscript) ########"
   echo     ""
   echo     "{ echo '#! /bin/sh'"
 #  [ "$Debugmode" = "yes" ] && echo "echo 'set -x'"
   echo     "  echo ''"
-  echo     "  echo '# container.CMD.sh'"
+  echo     "  echo '# $(basename $Containercommandscript)'"
   echo     "  echo '# Created startscript for docker run used as image command.'"
   echo     "  echo '# Runs as unprivileged user in container.'"
   echo     "  echo ''"
 
+  echo     "  echo '$(declare -f rocknroll)'"
+  echo     "  echo '$(declare -f saygoodbye)'"
   echo     "  echo '$(declare -f mysleep)'"
+  echo     "  echo '$(declare -f waitforfilecontent)'"
   echo     "  echo 'calculate() {'"
   echo     "  echo '  LC_ALL=C printf %.3f\\\\n \"\$((10**9 * \$@))e-9\"'"
   echo     "  echo '}'"
   echo     "  echo '$Messagefifofuncs'"
   echo     "  echo 'Messagefile=$(convertpath share $Messagefifo)'"
+  echo     "  echo 'Timetosaygoodbye=$(convertpath share $Timetosaygoodbye)'"
+  echo     "  echo 'Timetosaygoodbyefifo=$(convertpath share $Timetosaygoodbyefifo)'"
   echo     "  echo ''"
+  
+  echo     "  echo 'waitforfilecontent $(convertpath share $Containerrootrcreadyfile)'"
 
-  echo     "  echo '# wait for container setup script do be ready'"
-  echo     "  echo 'for Count in $(seq -s' ' 50); do'"
-  echo     "  echo '  verbose \"Waiting since \$((\$Count / 5))s for container root setup to be ready\"'"
-  echo     "  echo '  [ -e /x11docker.setupready ] && break || mysleep 0.2'"
-  echo     "  echo 'done'"
-  echo     "  echo ''"
-
-  echo     "  echo 'debugnote \"Running container.CMD.sh: Unprivileged user commands in container\"'"
+  echo     "  echo 'debugnote \"Running $(basename $Containercommandscript): Unprivileged user commands in container\"'"
   echo     "  echo ''"
 
   echo     '  echo "Containercommand=\"$Containercommand\""'
@@ -4624,11 +4636,11 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   case $Interactive in
     no)
       echo "  echo \"\$Exec \$Tini \\\$Dbus \$Entrypoint \$Containercommand $( [ "$Forwardstdin" = "yes" ] && echo "<$(convertpath share $Cmdstdinfifo)") >>$(convertpath share $Cmdstdoutlogfile) 2>>$(convertpath share $Cmdstderrlogfile)\""
-      echo "  echo \"echo \\\$? >> $(convertpath share $Exitcodefile)\""
+      echo "  echo \"echo \\\$? >> $(convertpath share $Cmdexitcodefile)\""
     ;;
     yes)
       echo "  echo \"\$Exec \$Tini \\\$Dbus \$Entrypoint \$Containercommand\""
-      echo "  echo \"echo \\\$? >> $(convertpath share $Exitcodefile)\""
+      echo "  echo \"echo \\\$? >> $(convertpath share $Cmdexitcodefile)\""
     ;;
   esac
   echo     "} >> $Containercommandscript"
@@ -4677,8 +4689,11 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   }
   
   echo "# Send signal to run X and wait for X to be ready"
-  echo "echo ReadyforX >> $Readyforxfile"
+  echo "echo ReadyforX >> $Dockerrcreadyfile"
   echo "waitfor_xserver"
+  echo ""
+  
+  echo "rocknroll || exit 64"
   echo ""
   
   [ "$Windowmanager" = "none" ] || {
@@ -4699,6 +4714,7 @@ $Wmdockercommand"'
     echo "        Pid1pid=\"\$($Dockerexe inspect --format '{{.State.Pid}}' \$Wmcontainerid 2>>$Containerlogfile | rmcr)\""
     echo "        debugnote \"\$Count. check for PID 1 of window manager container: \$Pid1pid\""
     echo '        checkpid "$Pid1pid" && break'
+    echo "        rocknroll || exit 64"
     echo "        mysleep 0.2"
     echo "      done"
     echo '    }'
@@ -4726,6 +4742,9 @@ $Wmdockercommand"'
     echo "                                               env $Newxenv ${Hostwindowmanager:-NO_WM_FOUND} >>$Xinitlogfile 2>&1 & storepid \$! windowmanager"
     echo '}'
   }
+  echo ""
+  
+  echo "rocknroll || exit 64"
   echo ""
   
   echo ""
@@ -4757,6 +4776,7 @@ $Wmdockercommand"'
   echo "# Wait for container to be ready"
   echo "for ((Count=1 ; Count<=40 ; Count++)); do"
   echo "  $Dockerexe exec $Containername sh -c : 2>&1 | rmcr >>$Containerlogfile && { debugnote 'Container is up and running.' ; break ; } || debugnote \"Container not ready on \$Count. attempt, trying again.\""
+  echo "  rocknroll || exit 64"
   echo "  mysleep 0.1"
   echo "done"
   echo ""
@@ -4771,6 +4791,7 @@ $Wmdockercommand"'
   echo "  Pid1pid=\"\$($Dockerexe inspect --format '{{.State.Pid}}' $Containername 2>>$Containerlogfile | rmcr)\""
   echo "  debugnote \"\$Count. check for PID 1: \$Pid1pid\""
   echo '  checkpid "$Pid1pid" && break'
+  echo "  rocknroll || exit 64"
   echo "  mysleep 0.1"
   echo "done"
   echo "echo \$Pid1pid >> $Containerpid1pidfile"
@@ -4829,8 +4850,10 @@ create_containerrootrc() {      # create container root setup script: This scrip
   echo ""
     
 #  echo "set -x"
+  declare -f rocknroll
   echo "$Messagefifofuncs"
   echo "Messagefile=$(convertpath share $Messagefifo)"
+  echo "Timetosaygoodbye=$(convertpath share $Timetosaygoodbye)"
   echo ""
 
   echo "debugnote 'Running containerrootrc: Setup as root in container'"
@@ -5031,6 +5054,9 @@ create_containerrootrc() {      # create container root setup script: This scrip
     echo "esac"
     echo ""
   }
+  
+  echo "rocknroll || exit 64"
+  echo ""
   
   [ "$Switchcontaineruser" = "yes" ] && {
     echo "# Create some helper scripts scripts"
@@ -5426,7 +5452,10 @@ reload() {
     ;;
   esac
   echo ""
-
+  
+  echo "rocknroll || exit 64"
+  echo ""
+  
   [ "$Langwunsch" ] && {
     echo "# --lang: Language locale"
     echo "verbose \"Searching for language locale matching $Langwunsch\""
@@ -5479,8 +5508,10 @@ reload() {
     echo "debugnote \"Output of locale -a:"
     echo "\$(locale -a)\""
     echo ""
+    echo "rocknroll || exit 64"
+    echo ""
   }
-
+  
   # --runasroot command added here
   [ "$Runasroot" ] && {
     echo "# Custom setup root command added with option --runasroot"
@@ -5491,7 +5522,7 @@ reload() {
   # message to container.CMD.sh
   echo "# Ready."
   echo "debugnote 'Container root setup is ready'"
-  echo ":> /x11docker.setupready"
+  echo "echo ready >> $(convertpath share $Containerrootrcreadyfile)"
   echo ""
   
   [ "$Switchcontaineruser" = "yes" ] && {   # if "no", container.CMD.sh is executed in command line $Dockercommand
@@ -5589,7 +5620,7 @@ start_docker() {                # start docker container
     ;;
     *)       $Passwordterminal "/usr/bin/env bash $Xtermrc" ;;
   esac
-  waitforfilecontent $Xtermreadyfile infinity
+  waitforfilecontent $Xtermreadyfile
 
   Containerid=$(cat $Containeridfile)
   Containerip=$(cat $Containeripfile)         # used by start_pulseaudiotcp()
@@ -5671,7 +5702,7 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
   nl -ba <$Containercommandscript >> $Containerlogfile
 
   # Send signal to run X and wait for X to be ready
-  echo ready >> $Readyforxfile
+  echo ready >> $Dockerrcreadyfile
   waitfor_xserver
   
   # run start script
@@ -5786,7 +5817,7 @@ waitfor_xserver() {             # wait for X server to be ready
   debugnote "Waiting for X server $Xserver to be ready."
   
   # sign is creation of $Cachefolder/Xready in xinitrc
-  while [ ! -s "$Xisreadyfile" ] ; do
+  while [ ! -s "$Xinitrcreadyfile" ] ; do
     Count=$(( Count + 1 ))
     Dauer=$(( $(date +%s) - $Zeit ))
     mysleep $(awk "BEGIN { print $Count * 0.05 }")
@@ -6982,19 +7013,19 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Dockercommandfile="$Cachefolder/$Dockercommandfile"               && mkfile $Dockercommandfile
   Dockerinfofile="$Cachefolder/$Dockerinfofile"                     && mkfile $Dockerinfofile
   Dockerrc="$Cachefolder/$Dockerrc"                                 && mkfile $Dockerrc
+  Dockerrcreadyfile="$Cachefolder/$Dockerrcreadyfile"               && mkfile $Dockerrcreadyfile
   Dockerstopsignalfifo="$Cachefolder/$Dockerstopsignalfifo"
   Hostxauthority="$Cachefolder/$Hostxauthority"                     && mkfile $Hostxauthority
   Messagelogfile="$Cachefolder/$Messagelogfile"                     && mkfile $Messagelogfile
   Pulseaudioconf="$Cachefolder/$Pulseaudioconf"                     && mkfile $Pulseaudioconf
-  Readyforxfile="$Cachefolder/$Readyforxfile"                       && mkfile $Readyforxfile
   Shareclipboardscript="$Cachefolder/$Shareclipboardscript"         && mkfile $Shareclipboardscript
   Watchpidfifo="$Cachefolder/$Watchpidfifo"
   Westonini="$Cachefolder/$Westonini"                               && mkfile $Westonini
   X11dockererrorfile="$Cachefolder/$X11dockererrorfile"             && mkfile $X11dockererrorfile
   Xdummyconf="$Cachefolder/$Xdummyconf"                             && mkfile $Xdummyconf
-  Xisreadyfile="$Cachefolder/$Xisreadyfile"                         && mkfile $Xisreadyfile
   Xinitlogfile="$Cachefolder/$Xinitlogfile"                         && mkfile $Xinitlogfile
   Xinitrc="$Cachefolder/$Xinitrc"                                   && mkfile $Xinitrc
+  Xinitrcreadyfile="$Cachefolder/$Xinitrcreadyfile"                 && mkfile $Xinitrcreadyfile
   Xkbkeymapfile="$Cachefolder/$Xkbkeymapfile"                       && mkfile $Xkbkeymapfile
   Xorgwrapper="$Cachefolder/$Xorgwrapper"                           && mkfile $Xorgwrapper
   Xpraclientlogfile="$Cachefolder/$Xpraclientlogfile"               && mkfile $Xpraclientlogfile
@@ -7013,6 +7044,7 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   
   
   # shared to /x11docker in container
+  Cmdexitcodefile="$Sharefolder/$Cmdexitcodefile"                   && mkfile $Cmdexitcodefile
   Cmdstderrlogfile="$Sharefolder/$Cmdstderrlogfile"                 && mkfile $Cmdstderrlogfile 666
   Cmdstdinfifo="$Sharefolder/$Cmdstdinfifo"
   Cmdstdoutlogfile="$Sharefolder/$Cmdstdoutlogfile"                 && mkfile $Cmdstdoutlogfile 666
@@ -7020,7 +7052,7 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Containerenvironmentfile="$Sharefolder/$Containerenvironmentfile" && mkfile $Containerenvironmentfile 666
   Containerrootrc="$Sharefolder/$Containerrootrc"                   && mkfile $Containerrootrc
   Containeruserfile="$Sharefolder/$Containeruserfile"               && mkfile $Containeruserfile
-  Exitcodefile="$Sharefolder/$Exitcodefile"                         && mkfile $Exitcodefile
+  Containerrootrcreadyfile="$Sharefolder/$Containerrootrcreadyfile" && mkfile $Containerrootrcreadyfile 666
   Logfile="$Sharefolder/x11docker.log"                              && mkfile $Logfile
   Messagefifo="$Sharefolder/$Messagefifo"
   Pulseaudiocookie="$Sharefolder/$Pulseaudiocookie"
@@ -7148,20 +7180,31 @@ declare_variables() {           # declare global variables
   Runsinterminal=""                               # x11docker runs in a terminal yes/no
   Runsonconsole=""                                # x11docker runs on tty yes/no
   Sourced=""                                      # x11docker has been sourced yes/no
+  
+  # Generated scripts
+  Containercommandscript="container.CMD"          # Generated script starting image command in container
+  Containerrootrc="containerrootrc"               # Generated script to set up container, e.g. user creation. Runs as root in container.
+  Dockerrc="dockerrc"                             # Generated script to check image, set up host and create $Containercommandscript
+  Shareclipboardscript="clipboard.sh"             # --clipboard: Generated script for text clipboard sharing
+  Xinitrc="xinitrc"                               # Generated script to set up X, e.g. cookie and xrandr
+  Xtermrc="xtermrc"                               # Generated script for password prompt
     
   # Internal messages and pid storage
-  Bgpidfile="backgroundpids"                      # File to store pids and names of background processes that should be killed on exit
-  Dockerstopsignalfifo="dockerstop"               # finish() send 'docker stop' signal to dockerrc
+  Bgpidfile="backgroundpids"                      # File to store pids and names of background processes that should be terminated on exit
   Logmessages=""                                  # Stores messages until logfile is available, needed by logentry()
   Messagefifo="message.fifo"                      # Message channel for warning/verbose/debugnote/note/error within container, dockerrc, containerrootrc and others
-  Readyforxfile="dockersetup.ready"               # Signal of dockerrc that it is ready for X
   Timetosaygoodbye="timetosaygoodbye"             # File giving term signal to all parties
   Timetosaygoodbyefifo="timetosaygoodbye.fifo"    # Message channel for --init=openrc|runit|sysvinit to shut down on x11docker signal
   Usemkfifo="yes"                                 # Not on Windows nor with kata-runtime
   Watchpidfifo="watchpid.fifo"                    # Message channel to transfer pids to watchpidlist()
   X11dockererrorfile="x11docker.error"            # Store error exit code
-  Xisreadyfile="X.ready"                          # content signals that X startup is ready
-  Xtermreadyfile="xterm.ready"
+  
+  Containerrootrcreadyfile="$Containerrootrc.ready"
+  Dockerrcreadyfile="$Dockerrc.readyforX"         # Signal of dockerrc that it is ready for X
+  Dockerstopsignalfifo="$Dockerrc.stop"           # finish() send 'docker stop' signal to dockerrc
+  Cmdexitcodefile="$Containercommandscript.exitcode"
+  Xinitrcreadyfile="$Xinitrc.ready"               # content signals that X startup is ready
+  Xtermreadyfile="$Xtermrc.ready"
   
   # Logfiles
   Compositorlogfile="compositor.log"              # Logfile for weston or kwin_wayland
@@ -7178,18 +7221,9 @@ declare_variables() {           # declare global variables
   Containeripfile="container.ip"                  # File to store container IP
   Containerpid1pidfile="container.pid1pid"        # File to store host PID of container PID 1
   Containeruserfile="container.user"              # File to store container user name
-  Dockercommandfile="dockercommand"               # File to store generated docker command, needed for --interactive
+  Dockercommandfile="docker.command"              # File to store generated docker command, needed for --interactive
   Dockerinfofile="docker.info"                    # File to store outpu of 'docker info'
-  Exitcodefile="exitcode"
-  Imagelistfile="images.list"                     # File with list of local images.Used by x11docker-gui, too
-  
-  # Generated scripts
-  Containercommandscript="container.CMD.sh"       # Generated script starting image command in container
-  Containerrootrc="containerrootrc"               # Generated script to set up container, e.g. user creation. Runs as root in container.
-  Dockerrc="dockerrc"                             # Generated script to check image, set up host and create $Containercommandscript
-  Shareclipboardscript="clipboard.sh"             # --clipboard: Generated script for text clipboard sharing
-  Xinitrc="xinitrc"                               # Generated script to set up X, e.g. cookie and xrandr
-  Xtermrc="xtermrc"                               # Generated script for password prompt
+  Imagelistfile="docker.imagelist"                # File with list of local images.Used by x11docker-gui, too
   
   # Generated commands
   Compositorcommand=""                            # Command to start Weston or KWin
@@ -7449,7 +7483,7 @@ debugnote() {
 }
 error() {
   echo "$*:ERROR"     | sed "s/\$/ /" >>$Messagefile
-  exit 1
+  exit 64
 }
 stdout() {
   echo "$*:STDOUT"    | sed "s/\$/ /" >>$Messagefile
@@ -7469,7 +7503,7 @@ debugnote() {
 }
 error() {
   echo \"\$*:ERROR\"     | sed \"s/\\\$/ /\" >>\$Messagefile
-  exit 1
+  exit 64
 }
 stdout() {
   echo \"\$*:STDOUT\"    | sed \"s/\\\$/ /\" >>\$Messagefile
@@ -7903,7 +7937,7 @@ $(nl -ba <$Westonini)"
   } <&0 & storepid $! containershell
   
   #### Start X server [and/or Wayland compositor]
-  waitforfilecontent $Readyforxfile infinity ||:
+  waitforfilecontent $Dockerrcreadyfile ||:
   rocknroll && [ "$Compositorcommand" ] && start_compositor
   rocknroll && start_xserver
 
@@ -7915,10 +7949,6 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
-  # BUG x11docker -d -D wine --init=systemd --runtime=kata-runtime
-
-  # --debug: trap unknown vars in dockerrc
-  # start_xserver, start_compositor: script with trap '' SiGINT
   # BUG Cshare/timezone, something is wrong, no timezone file
   # support --exe --user
   # --nxagent -d kdeneon/plasma:user-lts leads to black fullscreen
@@ -7936,7 +7966,6 @@ todo() {
   # --xpra --desktop --xdummy: --size modeline does not work, might not even appear in xrandr although set in xdummy.xorg.conf
   # --printer: regard CUPS_SERVER
   # --env: check escapestring in cmd.sh
-  # remove some remaining $Cshare
   # pspid(): On some systems (busybox) ps -p is not supported
 
   # dependeny wiki: Cygwin packages
