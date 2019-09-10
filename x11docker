@@ -152,7 +152,7 @@ Special options:
                          read xenv < <(x11docker --showenv [...])
      --showid          Echo container ID on stdout.
      --showpid1        Echo host PID of container PID 1 on stdout.
-     --stdin           Forward stdin of x11docker to image command.
+     --stdin           Forward stdin of x11docker to container command.
      --workdir DIR     Set working directory DIR.
 
 X server options:
@@ -240,11 +240,11 @@ Init system, elogind and DBus daemon:
      --init [=INITSYSTEM] Run an init system as PID 1 in container. Solves the
                        zombie reaping issue. INITSYSTEM can be:
                          tini: Default. Mostly present as docker-init on host.
-                         none: No init system, image command will be PID 1.
+                         none: No init system, container command will be PID 1.
                        Others: systemd, sysvinit, runit, openrc, s6-overlay.
      --sharecgroup     Share /sys/fs/cgroup. Allows elogind in container if
                        used with one of --init=openrc|runit|sysvinit
-     --dbus            Run DBus user session daemon for image command.
+     --dbus            Run DBus user session daemon for container command.
                        To also run a DBus system daemon in container, 
                        use one of --init=systemd|openrc|runit|sysvinit
      --hostdbus        Connect to DBus user session from host.
@@ -387,7 +387,7 @@ $Message"
   return 0
 }
 traperror() {                   # trap ERR: --debug: Output for 'set -o errtrace'
-  debugnote "Command at Line ${2:-} returned with error code ${1:-}:
+  debugnote "traperror: Command at Line ${2:-} returned with error code ${1:-}:
   ${4:-}
   ${3:-} - ${5:-}"
   echo 64 >> $X11dockererrorfile
@@ -534,13 +534,13 @@ finish() {                      # trap EXIT routine to clean up background proce
   }
 
   # check for background processes stored in $Bgpidfile
-  debugnote "List of stored background processes:
-$(cat $Bgpidfile 2>/dev/null)"
+#  debugnote "finish(): List of stored background processes:
+#$(cat $Bgpidfile 2>/dev/null)"
   while read -r Line ; do
     
     Pid="$(echo $Line  | awk '{print $1}')"
     Name="$(echo $Line | awk '{print $2}')"
-    debugnote "Checking: $Pid ($Name): $(pspid $Pid ||:)"
+    debugnote "finish(): Checking pid $Pid ($Name): $(pspid $Pid ||:)"
       
     checkpid $Pid && {
       case $Name in
@@ -557,21 +557,21 @@ $(cat $Bgpidfile 2>/dev/null)"
         containerpid1)
           Pid1pid="$Pid"
           [ "$Winsubsystem" ] && Pid1pid=""
-          killpid "$Pid1pid" "$Name" || Debugmode="yes"
+          termpid "$Pid1pid" "$Name" || Debugmode="yes"
           # Give container time for graceful shutdown
           for Count in 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0; do
             checkpid $Pid1pid || break
             mysleep $(awk "BEGIN { print $Count * 0.1 }")
-            debugnote "Waiting for container PID 1: $Pid1pid to terminate."
+            debugnote "finish(): Waiting for container PID 1: $Pid1pid to terminate."
           done
         ;;
         wmcontainerpid1)
           Wmcontainerpid1="$Pid"
           [ "$Winsubsystem" ] && Wmcontainerpid1=""
-          killpid "$Wmcontainerpid1" "$Name" 
+          termpid "$Wmcontainerpid1" "$Name" 
         ;;
         *) 
-          killpid "$Pid" "$Name" 
+          termpid "$Pid" "$Name" 
         ;;
       esac
     }
@@ -580,20 +580,20 @@ $(cat $Bgpidfile 2>/dev/null)"
   # Check if container is still running -> docker stop
   checkpid $Pid1pid && {
     Debugmode="yes"
-    debugnote "Container still running. Executing 'docker stop'.
+    debugnote "finish(): Container still running. Executing 'docker stop'.
   Will wait up to 15 seconds for docker to finish."
     echo "stop" >> "$Dockerstopsignalfifo"
     
     Zeit="$(date +%s)"
     while checkpid $Pid1pid ; do
-      debugnote "Waiting for container to terminate ..."
+      debugnote "finish(): Waiting for container to terminate ..."
       sleep 1
       [ 15 -lt $(($(date +%s) - $Zeit)) ] && break
     done
       
     checkpid $Pid1pid && {
       Exitcode="64"
-      debugnote "Container did not terminate as it should.
+      debugnote "finish(): Container did not terminate as it should.
   Will not clean cache to avoid file permission issues.
   You can remove the new container with command:
     docker rm -f $Containername
@@ -602,7 +602,7 @@ $(cat $Bgpidfile 2>/dev/null)"
   or let x11docker do the cleanup work for you:
     x11docker --cleanup"
       Preservecachefiles="yes"
-    } || debugnote "Container terminated successfully"
+    } || debugnote "finish(): Container terminated successfully"
   }
   # Check if 'docker logs' is still running
   checkpid $Dockerlogspid      && echo "stop" >> "$Dockerstopsignalfifo"
@@ -615,7 +615,7 @@ $(cat $Bgpidfile 2>/dev/null)"
   # MS Windows: different container stop procedure because $Pid1pid is not in ps.
   [ "$Winsubsystem" ] && [ "$Containername" ] && {
     $Dockerexe ps -a | grep -q $Containername && {
-      debugnote "Container still running. Executing 'docker stop'."
+      debugnote "finish(): Container still running. Executing 'docker stop'."
       $Dockerexe stop $Containername >>$Containerlogfile 2>&1 || {
         Exitcode="64"
         warning "Failed to stop container $Containername.
@@ -626,7 +626,7 @@ $(cat $Bgpidfile 2>/dev/null)"
   }
   
   # Stop watching for messages
-  checkpid "$Watchmessagefifopid" && killpid "$Watchmessagefifopid" watchmessagefifo
+  checkpid "$Watchmessagefifopid" && termpid "$Watchmessagefifopid" watchmessagefifo
 
   # check for possible error exit codes. Prefer CMD exit code over x11docker exit code.
   [ -s "$X11dockererrorfile" ] && Exitcode="$(cat $X11dockererrorfile | tail -n1)"
@@ -702,24 +702,24 @@ watchpidlist() {                # watch list of important pids
       [ "${Pid:0:9}" = "CONTAINER" ] && {
         # Workaround for MS Windows where the pid cannot be watched
         Containername="${Pid#CONTAINER}"
-        debugnote "Watching Container: $Containername"
+        debugnote "watchpidlist(): Watching Container: $Containername"
       } || {
         Watchpidlist="$Watchpidlist $Pid"
-        debugnote "Watching pids: 
+        debugnote "watchpidlist(): Watching pids: 
 $(for Line in $Watchpidlist; do pspid $Line ; done)"
       }
     }
     # check all stored pids
     for Pid in $Watchpidlist; do
       [ -e /proc/$Pid ] || {
-        debugnote  "watchpidlist: PID $Pid has terminated"
+        debugnote  "watchpidlist(): PID $Pid has terminated"
         saygoodbye "watchpidlist $Pid"
       }
     done
     # Container PID not watchable in MSYS2/Cygwin/WSL.
     [ "$Containername" ] && {
       $Dockerexe inspect $Containername >/dev/null 2>&1 || {
-        debugnote "watchpidlist: Container $Containername has terminated"
+        debugnote "watchpidlist(): Container $Containername has terminated"
         saygoodbye "watchpidlist $Containername"
       }
     }
@@ -727,7 +727,7 @@ $(for Line in $Watchpidlist; do pspid $Line ; done)"
   saygoodbye "watchpidlist"
 }
 setonwatchpidlist() {           # add PID $1 to watchpidlist()
-  debugnote "Setting pid ${1:-} on watchlist: ${2:-}"
+  debugnote "watchpidlist(): Setting pid ${1:-} on watchlist: ${2:-}"
   echo "${1:-}" >>$Watchpidfifo
   # add to list of background processes
   storepid "${1:-}" "${2:-}"
@@ -763,7 +763,7 @@ storepid () {                   # store pid $1 and name $2 of background process
   # for use on exit / with trap to clean up with background processes
   # this subroutine has a twin in xinitrc
   echo ${1:-} ${2:-} >> $Bgpidfile
-  debugnote "Stored background pid ${1:-} of ${2:-}: $(pspid ${1:-})" 2>/dev/null
+  debugnote "storepid(): Stored background pid ${1:-} of ${2:-}: $(pspid ${1:-})"
   disown ${1:-} 2>/dev/null ||:
 }
 checkpid() {                    # check if PID $1 is active
@@ -775,9 +775,9 @@ pspid() {                       # ps -p $1 --no-headers
   # On some systems (busybox) ps -p is not supported  ### FIXME
   ps -p ${1:-} 2>/dev/null | tail -n+2
 }
-killpid() {                     # kill PID $1 with codename $2
+termpid() {                     # kill PID $1 with codename $2
   # TERM
-  debugnote "Terminating ${1:-} (${2:-}): $(pspid ${1:-})"
+  debugnote "termpid(): Terminating ${1:-} (${2:-}): $(pspid ${1:-})"
   checkpid "${1:-}" && {
     kill         ${1:-} 2>/dev/null
     :
@@ -786,7 +786,7 @@ killpid() {                     # kill PID $1 with codename $2
   checkpid "${1:-}" && mysleep 0.4 || return 0
   
   # KILL
-  debugnote "Killing ${1:-} (${2:-}): $(pspid ${1:-})"
+  debugnote "termpid(): Killing ${1:-} (${2:-}): $(pspid ${1:-})"
   checkpid "${1:-}" && kill -s KILL ${1:-} 2>/dev/null
   mysleep 0.2 
   checkpid "${1:-}" && {
@@ -1027,7 +1027,7 @@ convertpath() {                 # convert unix and windows pathes
 
   [ "$Winsubsystem" = "WSL" ] && [ -z "$Drive" ] && case $Mode in
     windows|unix|volume)
-      debugnote "Request of WSL path: $Path"
+      debugnote "convertpath(): Request of WSL path: $Path"
       grep -q "$Cachefolder" <<< "$Path" || {
         [ "$Readwritemode" = ":rw" ] && warning "Request of Windows path to path within WSL:
   $Path
@@ -1436,7 +1436,7 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
 
   # check for closed source nvidia driver on host, provide automated installation, warn about disadvantages
   [ "$Nvidiaversion" ] && {
-    debugnote "Detected NVIDIA driver version $Nvidiaversion on host."
+    debugnote "NVIDIA: Detected driver version $Nvidiaversion on host."
     Nvidiainstallerfile="$(find /usr/local/share/x11docker/NVIDIA*$Nvidiaversion*.run $Hostuserhome/.local/share/x11docker/NVIDIA*$Nvidiaversion*.run 2>/dev/null | tail -n1 )"
     Nvidiainstallerfile="$(myrealpath "$Nvidiainstallerfile" 2>/dev/null)"
     case "$Runtime" in
@@ -1446,7 +1446,7 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
       ;;
       *)
         [ -e "$Nvidiainstallerfile" ] && {
-          debugnote "Found proprietary closed source NVIDIA driver installer
+          debugnote "NVIDIA: Found proprietary closed source NVIDIA driver installer
   $Nvidiainstallerfile"
 
           [ "$Capdropall" = "yes" ] && warning "To install proprietary closed source NVIDIA driver,
@@ -3303,7 +3303,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
         echo         "}"
         echo         "[ -s '$Xclientcookie' ] || { "
         echo         "  # still no cookie? try to create one without extension security"
-        echo         "  debugnote 'Failed to retrieve trusted cookie from X server. Will bake one myself.'"
+        echo         "  debugnote 'xinitrc: Failed to retrieve trusted cookie from X server. Will bake one myself.'"
         echo         "  echo 'Failed to retrieve trusted cookie from X server. Will bake one myself.'"
         echo         "  xauth -v -i -f Xclientcookie add :$Newdisplaynumber . $(makecookie)"
         echo         "  ls -l $Xclientcookie"
@@ -3313,7 +3313,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
         echo         "Cookie=\"\$(xauth -i -f Xclientcookie nlist | sed -e 's/^..../ffff/')\""
         echo         "echo \"\$Cookie\" | xauth -v -i -f Xclientcookie nmerge -"
         echo         ""
-        echo         "debugnote \"Created cookie: \$(xauth -f Xclientcookie list 2>&1)\""
+        echo         "debugnote \"xinitrc: Created cookie: \$(xauth -f Xclientcookie list 2>&1)\""
         echo         "ls -l $Xclientcookie"
         echo         "cp $Xclientcookie $Xservercookie"
         echo         "chmod 644 $Xclientcookie"
@@ -3338,7 +3338,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
             ;;
           esac
           [ -n "$Xhost" ] && {
-            echo     "debugnote 'Option --xhost: Custom xhost setting on $Newdisplay: xhost $Xhost'"
+            echo     "debugnote 'xinitrc: Option --xhost: Custom xhost setting on $Newdisplay: xhost $Xhost'"
             echo     "xhost $Xhost"
           }
           echo       ""
@@ -4268,7 +4268,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   # transfer DOCKER_* environment variables, e.g. DOCKER_HOST.
   # can get lost e.g. if using --pw=sudo or --pw=pkexec
   while read Line; do
-    debugnote "Found docker environment variable: $Line"
+    debugnote "dockerrc:  Found docker environment variable: $Line"
     echo "export '$Line'"
   done < <(env | grep -e '^DOCKER_' ||:)
   echo ""
@@ -4286,17 +4286,21 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   
   echo "# Check default runtime"
   echo "Runtime=\"\$(grep 'Default Runtime' < '$Dockerinfofile' | awk '{print \$3}')\""
-  echo "debugnote \"Found default runtime: \$Runtime\""
-  echo "debugnote \"All \$(grep 'Runtimes' < '$Dockerinfofile')\""
-  echo "[ \"\$Runtime\" != '$Runtime' ] && case \$Runtime in"
-  echo "  kata-runtime)  warning 'Found default docker runtime kata-runtime.
+  echo "debugnote \"dockerrc: Found default Runtime: \$Runtime\""
+  echo "debugnote \"dockerrc: All \$(grep 'Runtimes' < '$Dockerinfofile')\""
+  echo "[ \"\$Runtime\" != '$Runtime' ] && {"
+  echo "  case \$Runtime in"
+  echo "    kata-runtime)  warning 'Found default docker runtime kata-runtime.
   Please run x11docker with --runtime=kata-runtime to avoid issues.' ;;"
-  echo "  nvidia) [ '$Sharegpu' = 'yes' ] &&  warning 'Option --gpu: Found default docker runtime nvidia.
+  echo "    nvidia) [ '$Sharegpu' = 'yes' ] &&  warning 'Option --gpu: Found default docker runtime nvidia.
   Please run x11docker with --runtime=nvidia to avoid issues.' ;;"
-  echo "  runc|crun) ;;"
-  echo "  *) warning \"Found unknown container runtime: \$Runtime
+  echo "    runc|crun) ;;"
+  echo "    *) warning \"Found unknown container runtime: \$Runtime
   Please report at:  https://github.com/mviereck/x11docker\" ;;"
-  echo "esac"
+  echo "  esac"
+  [ "$Runtime" ] && echo "  Runtime='$Runtime'"
+  echo "}"
+  echo "debugnote \"Container Runtime: \$Runtime\""
   echo ""
   
   echo "# Refresh images.list for x11docker-gui"
@@ -4348,24 +4352,23 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo ""
   
   echo "Inspect=\"\$($Dockerexe inspect $Imagename --format='{{.Config.Entrypoint}}{{.Config.Cmd}}[{{.Config.User}}][{{.Config.WorkingDir}}]')\""
-  echo "debugnote \"INSPECT: \$Inspect\""
   echo ""
 
   echo "# Check CMD"
   echo "[ -z \"\$Containercommand\" ] && {"
   echo "  # extract image command from image if not given on cli"
   echo "  Containercommand=\"\$(cut -d] -f2 <<< \"\$Inspect\" | cut -d[ -f2)\""
-  echo "  debugnote \"CMD: \$Containercommand\""
+  echo "  debugnote \"Image CMD: \$Containercommand\""
   echo "  echo \"\$Containercommand\" | grep -q $(convertpath share $Containercommandscript) && error 'Recursion error: Found CMD $(convertpath share $Containercommandscript) in image.
   Did you use docker commit with an x11docker container?
   Please build new images with a Dockerfile instead of using docker commit,
-  or provide a different image command.'"
+  or provide a different container command.'"
   echo "}"
   echo ""
   
   echo "# Check USER"
   echo "Imageuser=\"\$(cut -d[ -f4 <<< \"\$Inspect\" | cut -d] -f1)\""
-  echo "debugnote \"USER: \$Imageuser\""
+  echo "debugnote \"Image USER: \$Imageuser\""
   case $Createcontaineruser in
     yes)
       echo "[ \"\$Imageuser\" ] && note \"Found 'USER \$Imageuser' in image."
@@ -4384,7 +4387,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
     no)
       echo     "# Check ENTRYPOINT"
       echo     "Entrypoint=\"\$(cut -d] -f1 <<< \"\$Inspect\" | cut -d[ -f2)\""
-      echo     "debugnote \"ENTRYPOINT: \$Entrypoint\""
+      echo     "debugnote \"Image ENTRYPOINT: \$Entrypoint\""
       case $Initsystem in
         systemd|sysvinit|runit|openrc)
           echo "echo \"\$Entrypoint\" | grep -qE 'tini|init|systemd' && {"
@@ -4428,13 +4431,13 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   [ -z "$Workdir" ] && {
     echo "# Check WORKDIR"
     echo "Workdir=\"\$(cut -d[ -f5 <<< \"\$Inspect\" | cut -d] -f1)\""
-    echo "debugnote \"WORKDIR: \$Workdir\""
+    echo "debugnote \"Image WORKDIR: \$Workdir\""
     echo "[ \"\$Workdir\" ] && note \"Found 'WORKDIR \$Workdir' in image. 
   You can change it with option --workdir=DIR.\""
     echo ""
   }
 
-  echo "[ -z \"\$Containercommand\$Entrypoint\" ] && error 'No image command specified and no CMD or ENTRYPOINT found in image.'"
+  echo "[ -z \"\$Containercommand\$Entrypoint\" ] && error 'No container command specified and no CMD or ENTRYPOINT found in image.'"
   echo ""
 
   echo     "######## Create $(basename $Containercommandscript) ########"
@@ -4443,7 +4446,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
 #  [ "$Debugmode" = "yes" ] && echo "echo 'set -x'"
   echo     "  echo ''"
   echo     "  echo '# $(basename $Containercommandscript)'"
-  echo     "  echo '# Created startscript for docker run used as image command.'"
+  echo     "  echo '# Created startscript for docker run used as container command.'"
   echo     "  echo '# Runs as unprivileged user in container.'"
   echo     "  echo ''"
 
@@ -4463,7 +4466,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo     "  echo 'Timetosaygoodbyefifo=$(convertpath share $Timetosaygoodbyefifo)'"
   echo     "  echo ''"
   
-  echo     "  echo 'waitforlogentry $(basename $Containercommandscript) $(convertpath share $Containerlogfile) \"containerrootrc is ready\" "" infinity'"
+  echo     "  echo 'waitforlogentry $(basename $Containercommandscript) $(convertpath share $Containerlogfile) \"$(basename $Containerrootrc) is ready\" "" infinity'"
 
   echo     "  echo 'debugnote \"Running $(basename $Containercommandscript): Unprivileged user commands in container\"'"
   echo     "  echo ''"
@@ -4471,7 +4474,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo     '  echo "Containercommand=\"$Containercommand\""'
   echo     '  echo "Entrypoint=\"$Entrypoint\""'
   echo     "  echo ''"
-  echo     "  echo 'verbose \"Container system:'"
+  echo     "  echo 'verbose \"$(basename $Containercommandscript): Container system:'"
   echo     "  echo '\$(cat /etc/os-release 2>&1)\"'"
   echo     "  echo ''"
 
@@ -4512,11 +4515,11 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   [ "$Sharehosthome" = "no" ] && echo   "  echo 'mkdir -p \$Containeruserhome'"
   echo     "  echo '# Copy files from /etc/skel into empty HOME'"
   echo     "  echo '[ -d /etc/skel ] && [ -z \"\$(ls -A \"$Containeruserhome\" 2>/dev/null | grep -v gnupg)\" ] && {'"
-  echo     "  echo '  debugnote \"HOME is empty. Copying from /etc/skel\"'"
+  echo     "  echo '  debugnote \"$(basename $Containercommandscript): HOME is empty. Copying from /etc/skel\"'"
   echo     "  echo '  cp -n -R /etc/skel/. \$Containeruserhome'"
   echo     "  echo '  :'"
   echo     "  echo '} || {'"
-  echo     "  echo '  debugnote \"HOME not empty. Not copying from /etc/skel\"'"
+  echo     "  echo '  debugnote \"$(basename $Containercommandscript): HOME not empty. Not copying from /etc/skel\"'"
   echo     "  echo '}'"
   echo     "  echo ''"
   
@@ -4603,7 +4606,10 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
     echo   "  echo ''"
   }
   
-  echo     "  echo \"debugnote \\\"Running image command: \$Tini \\\$Dbus \$Entrypoint \$Containercommand\\\"\""
+  echo     "  echo \"debugnote \\\"$(basename $Containercommandscript): Running container command: 
+  \$Tini \\\$Dbus \$Entrypoint \$Containercommand
+  \\\"\""
+  
   case $Interactive in
     no)
       echo "  echo \"\$Exec \$Tini \\\$Dbus \$Entrypoint \$Containercommand $( [ "$Forwardstdin" = "yes" ] && echo "<$(convertpath share $Cmdstdinfifo)") >>$(convertpath share $Cmdstdoutlogfile) 2>>$(convertpath share $Cmdstderrlogfile)\""
@@ -4676,14 +4682,14 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
     echo "  $Dockerexe inspect \"\$(cut -d' ' -f1 <<<\"\$Windowmanagercommand\")\" >>$Containerlogfile 2>&1 && {"
     echo '    Wmdockercommand="$Wmdockercommand \
   -- $Windowmanagercommand"'
-    echo '    debugnote "Generated docker command for window manager:
+    echo '    debugnote "dockerrc: Window manager container: Generated docker command:
 $Wmdockercommand"'
     echo '    Wmcontainerid="$(eval $Wmdockercommand)"'
     echo '    [ "$Wmcontainerid" ] && {'
-    echo '      debugnote "Window manager container: $Wmcontainerid"'
+    echo '      debugnote "dockerrc: Window manager container: $Wmcontainerid"'
     echo "      for ((Count=1 ; Count<=10 ; Count++)); do"
     echo "        Pid1pid=\"\$($Dockerexe inspect --format '{{.State.Pid}}' \$Wmcontainerid 2>>$Containerlogfile | rmcr)\""
-    echo "        debugnote \"\$Count. check for PID 1 of window manager container: \$Pid1pid\""
+    echo "        debugnote \"dockerrc: Window manager container: \$Count. check for PID 1: \$Pid1pid\""
     echo '        checkpid "$Pid1pid" && break'
     echo "        rocknroll || exit 64"
     echo "        mysleep 0.2"
@@ -4762,13 +4768,13 @@ $Wmdockercommand"'
   echo "# Wait for pid 1 in container"
   echo "for ((Count=1 ; Count<=40 ; Count++)); do"
   echo "  Pid1pid=\"\$($Dockerexe inspect --format '{{.State.Pid}}' $Containername 2>>$Containerlogfile | rmcr)\""
-  echo "  debugnote \"\$Count. check for PID 1: \$Pid1pid\""
+  echo "  debugnote \"dockerrc: \$Count. check for PID 1: \$Pid1pid\""
   echo '  checkpid "$Pid1pid" && break'
   echo "  rocknroll || exit 64"
   echo "  mysleep 0.1"
   echo "done"
   echo "echo \$Pid1pid >> $Containerpid1pidfile"
-  echo "debugnote \"Host PID of container PID 1: \$Pid1pid\""
+  echo "debugnote \"Container PID 1: \$Pid1pid\""
   [ "$Showcontainerpid1pid" = "yes" ] && echo "stdout \$Pid1pid  # --showpid1"
   echo "echo 'x11docker: container pid check is ready' >>$Containerlogfile"
   echo ""
@@ -4834,7 +4840,7 @@ create_containerrootrc() {      # create container root setup script: This scrip
   echo "Timetosaygoodbye=$(convertpath share $Timetosaygoodbye)"
   echo ""
 
-  echo "debugnote 'Running containerrootrc: Setup as root in container'"
+  echo "debugnote 'Running $(basename $Containerrootrc): Setup as root in container'"
   echo ""
 
   echo "# Check type of libc"
@@ -4956,7 +4962,7 @@ create_containerrootrc() {      # create container root setup script: This scrip
       echo "Containeruserhome=\"\$(cat /etc/passwd | grep '\$Containeruser:.:' | cut -d: -f6)\""
       echo "Containeruserhome=\"\${Containeruserhome:-/tmp/\$Containeruser}\""
       echo ""
-      echo "debugnote \"User in container: \$(id \$Containeruser)
+      echo "debugnote \"Container user: \$(id \$Containeruser)
 \$(cat /etc/passwd | grep '\$Containeruser:.:')\""
       echo ""
     ;;
@@ -5037,7 +5043,7 @@ create_containerrootrc() {      # create container root setup script: This scrip
   echo ""
   
   [ "$Switchcontaineruser" = "yes" ] && {
-    echo "# Create some helper scripts scripts"
+    echo "# Create some helper scripts"
 
     echo "mkdir -p /usr/local/bin"
     echo ""
@@ -5143,7 +5149,7 @@ halt -f
     ;;
     runit)
       echo "# --init=runit"
-      echo "# create and enable x11docker service containing image command"
+      echo "# create and enable x11docker service containing container command"
       echo "mkdir -p /etc/sv/x11docker"
       echo "mkdir -p /etc/runit/runsvdir/default"
       echo "mkdir -p /etc/runit/1.d"
@@ -5220,7 +5226,7 @@ done
     ;;
     openrc)
       echo "# --init=openrc"
-      echo "# Create and enable x11docker service containing image command"
+      echo "# Create and enable x11docker service containing container command"
       echo "printf \"#!/sbin/openrc-run
 name=x11docker
 depend() {
@@ -5488,8 +5494,8 @@ reload() {
     echo "  Langcontainer=\"\$Langland.utf8\""
     echo "  note \"Option --lang: Generating language locale \$Langcontainer\"."
     echo ""
-    echo "  command -v localedef >/dev/null || note 'Command localedef not found in image.
-  Need it for language locale creation (--lang).
+    echo "  command -v localedef >/dev/null || note 'Option --lang: Command localedef not found in image.
+  Need it for language locale creation.
   Look here to find a package for your image system:
   https://github.com/mviereck/x11docker/wiki/dependencies#dependencies-in-image'"
     echo "  localedef --verbose --force -i \"\$Langland\" -f UTF-8 \$Langcontainer || verbose \"localedef exit code: \$?\""
@@ -5507,7 +5513,7 @@ reload() {
     echo "  echo \"LANG=\$Langcontainer\" > /etc/default/locale"
     echo "} || note 'Option --lang: Desired locale for '$Langwunsch' not found and not generated.'"
     echo ""
-    echo "debugnote \"Output of locale -a:"
+    echo "debugnote \"Option --lang: Output of locale -a:"
     echo "\$(locale -a)\""
     echo ""
     echo "rocknroll || exit 64"
@@ -5523,8 +5529,8 @@ reload() {
 
   # message to container.CMD.sh
   echo "# Ready."
-  echo "debugnote 'Container root setup is ready'"
-  echo "echo 'x11docker: containerrootrc is ready' >> $(convertpath share $Containerlogfile)"
+  echo "debugnote '$(basename $Containerrootrc) is ready'"
+  echo "echo 'x11docker: $(basename $Containerrootrc) is ready' >> $(convertpath share $Containerlogfile)"
   echo ""
   
   [ "$Switchcontaineruser" = "yes" ] && {   # if "no", container.CMD.sh is executed in command line $Dockercommand
@@ -5633,7 +5639,7 @@ start_docker() {                # start docker container
   Last lines of log:
 $(tail $Containerlogfile)"
 
-      [ "$Containerpid1" ] && sleep 1 && debugnote "Process tree of container:
+      [ "$Containerpid1" ] && sleep 1 && debugnote "Process tree of container: (maybe not complete yet)
 $(pstree -cp $Containerpid1 2>&1 ||:)"
     ;;
     *) [ "$Containerid" ] && setonwatchpidlist "CONTAINER$Containerid" ;;
@@ -5726,7 +5732,7 @@ start_pulseaudiotcp() {         # option --pulseaudio=tcp: load Pulseaudio TCP m
 start_xpra() {                  # options --xpra / --xpra-xwayland: start and watch xpra server and xpra client
   local Xpraserverpid Xpraclientpid
   
-  debugnote "Starting Xpra server"
+  debugnote "Running Xpra server"
   
   echo "x11docker [$(timestamp)]: Starting Xpra server" >> $Xpraserverlogfile
   unpriv "env $Newxenv GDK_BACKEND=x11 XPRA_UINPUT=0 $Xpraservercommand" >> $Xpraserverlogfile 2>&1 & 
@@ -5735,7 +5741,7 @@ start_xpra() {                  # options --xpra / --xpra-xwayland: start and wa
   verlt "$Xprarelease" "r23060" && waitforlogentry "xpra server" $Xpraserverlogfile 'xpra is ready' 
   rocknroll || return 1
   
-  debugnote "Starting Xpra client"
+  debugnote "Running Xpra client"
   
   echo "x11docker [$(timestamp)]: Starting Xpra client" >> $Xpraclientlogfile
   #  
@@ -5883,7 +5889,7 @@ check_host() {                  # check host environment
   [ "$Winsubsystem"   ]                       && Runsonconsole="no"
   [ -z "$Runsonconsole" ] && {
     [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && Runsonconsole="no"  || Runsonconsole="yes"
-    debugnote "Command tty failed. Guess if running on console: $Runsonconsole"
+    debugnote "check_host(): Command tty failed. Guess if running on console: $Runsonconsole"
   }
 
   # Check whether x11docker runs in a terminal
@@ -5898,7 +5904,7 @@ check_host() {                  # check host environment
   # Check whether ps can watch processes of other users
   mount | grep "^proc" | grep -q "hidepid=2" && {
     Hosthidepid="yes"
-    debugnote "/proc is mounted with hidepid=2."
+    debugnote "check_host(): /proc is mounted with hidepid=2."
   } || {
     Hosthidepid="no"
   }
@@ -5908,7 +5914,7 @@ check_host() {                  # check host environment
     Hostcanwatchroot="no"
     [ "$Winsubsystem" ] && Hostcanwatchroot="yes"
   }
-  debugnote "ps can watch root processes: $Hostcanwatchroot"
+  debugnote "check_host(): ps can watch root processes: $Hostcanwatchroot"
   
   # Check if host uses proprietary NVIDIA driver
   Nvidiaversion=$(head -n1 2>/dev/null </proc/driver/nvidia/version | awk '{ print $8 }')
@@ -6061,7 +6067,7 @@ check_runmode() {               # check run/--exe/--xonly
   To run docker images, you need to install docker.
   $Dockerexe"
       verbose "Image name: $Imagename
-  Image command: $Containercommand"
+  Container command: $Containercommand"
     ;;
     exe)
       Hostexe="$Imagename $Containercommand"
@@ -6829,7 +6835,7 @@ option_messages() {             # some messages depending on options, but not ch
     grep -q -- '--entrypoint' <<< "$Customdockeroptions" && warning "Found option --entrypoint
   in custom docker run options. x11docker uses this option, too.
   This setup will probably fail. Use x11docker option --no-entrypoint instead
-  and add desired command as image command after the image name."
+  and add desired command as container command after the image name."
   }
   
   return 0
@@ -7049,7 +7055,7 @@ setup_fifo() {                  # set up fifo channels (also option --stdin)
     WSL)          Usemkfifo="no" ;;      ### FIXME: Better performance in WSL if using real mkfifo. But maybe file system damage due to shared cache files?
   esac
 
-  # redirect stdin to named pipe. Named pipe is shared with container and used as stdin of image command in container.CMD.sh
+  # redirect stdin to named pipe. Named pipe is shared with container and used as stdin of container command in container.CMD.sh
   [ "$Forwardstdin" = "yes" ] && {
     case $Usemkfifo in
       yes) unpriv "mkfifo $Cmdstdinfifo" ;;
@@ -7140,7 +7146,7 @@ declare_variables() {           # declare global variables
   Sourced=""                                      # x11docker has been sourced yes/no
   
   # Generated scripts
-  Containercommandscript="container.CMD"          # Generated script starting image command in container
+  Containercommandscript="container.CMD"          # Generated script starting container command
   Containerrootrc="containerrootrc"               # Generated script to set up container, e.g. user creation. Runs as root in container.
   Dockerrc="dockerrc"                             # Generated script to check image, set up host and create $Containercommandscript
   Shareclipboardscript="clipboard.sh"             # --clipboard: Generated script for text clipboard sharing
@@ -7160,7 +7166,7 @@ declare_variables() {           # declare global variables
   
   # Logfiles
   Compositorlogfile="compositor.log"              # Logfile for weston or kwin_wayland
-  Containerlogfile="container.log"                # Logfile for container output other than image command output
+  Containerlogfile="container.log"                # Logfile for container output other than container command output
   Logbackup=""                                    # $Cachebasefolder/x11docker.log (running log)
   Logfile=""                                      # $Cachefolder/x11docker.log (latest terminated log)
   Messagelogfile="message.log"                    # Logfile for warning/verbose/debugnote/note/error
@@ -7237,10 +7243,10 @@ declare_variables() {           # declare global variables
   Sharefolder="share"                             # Subfolder of $Cachefolder for cache files shared with container
   
   # stdin stdout stderr
-  Cmdstdinfifo="stdin"                            # stdin for image command. fifo/named pipe to forward stdin of x11docker to image command
-  Cmdstderrlogfile="stderr"                       # stderr for image command
-  Cmdstdoutlogfile="stdout"                       # stdout for image command
-  Forwardstdin="no"                               # --stdin: forward stdin to image command yes/no
+  Cmdstdinfifo="stdin"                            # stdin for container command. fifo/named pipe to forward stdin of x11docker to container command
+  Cmdstderrlogfile="stderr"                       # stderr for container command
+  Cmdstdoutlogfile="stdout"                       # stdout for container command
+  Forwardstdin="no"                               # --stdin: forward stdin to container command yes/no
 
   # X and Wayland configuration
   Autochooseserver="yes"                          # --auto: automatical choice of X server (default)
@@ -7330,7 +7336,7 @@ declare_variables() {           # declare global variables
   Adminusercaps="no"                              # --cap-default, --sudouser, --user=root, --init=systemd: add capabilities for general container system administration
   Capabilities=""                                 # Capabilities to add. Default: none, exceptions for --init, --sudouser
   Capdropall="yes"                                # --cap-default: Drop all container capabilities and set --securty-opt=no-new-privileges yes/no
-  Containercommand=""                             # Image command [+args]
+  Containercommand=""                             # Container command [+args]
   Containerenvironment=""                         # --env: Environment variables
   Containerenvironmentcount="0"
   Containerenvironmentfile="environment"          # file to store final container environment
@@ -7351,7 +7357,7 @@ declare_variables() {           # declare global variables
   Workdir=""                                      # --workdir: Set working directory in container
   
   # Init and DBus
-  Dbusrunsession="no"                             # --dbus, --wayland, --init=systemd|openrc|runit|sysvinit: Run image command with dbus-run-session / DBus user session
+  Dbusrunsession="no"                             # --dbus, --wayland, --init=systemd|openrc|runit|sysvinit: Run container command with dbus-run-session / DBus user session
   Dbussystem="no"                                 # --init=systemd|openrc|runit|sysvinit: Run DBus system daemon in container
   Initsystem="tini"                               # --init: Init system in container
   Sharecgroup="no"                                # --sharecgroup, --init=systemd: share /sys/fs/cgroup. Also needed for elogind
@@ -7382,8 +7388,8 @@ declare_variables() {           # declare global variables
   
   # Verbosity options
   Verbose="no"                                    # --verbose: Be verbose yes/no
-  Showstdout="yes"                                # Show image command stdout
-  Showstderr="yes"                                # Show image command stderr
+  Showstdout="yes"                                # Show container command stdout
+  Showstderr="yes"                                # Show container command stderr
   Silent="no"                                     # --quiet: Do not show x11docker messages
   Showdisplayenvironment="no"                     # --showenv: Output of environment variables of new display on stdout
   Showcontainerid="no"                            # --showid: Output of container ID on stdout
@@ -7630,7 +7636,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
          --no-internet)       Internetaccess="no" ;;                 # Disallow internet access
          --runtime)           Runtime="${2:-}" ; shift               # Runtime=runc|nvidia|kata-runtime|crun
                               [ "$Runtime" = "kata" ] && Runtime="kata-runtime" ;;
-         --stdin)             Forwardstdin="yes" ;;                  # Forward stdin to image command
+         --stdin)             Forwardstdin="yes" ;;                  # Forward stdin to container command
          --workdir)           Workdir="${2:-}" ; shift ;;            # Set working directory
 
      #### host folders
@@ -7686,7 +7692,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
   Please have a look at 'x11docker --help' for possible replacements
   or search for '${1:-}' in /usr/share/doc/x11docker/CHANGELOG.md." ;;
   
-     ##### Custom docker options / image name + image command. Everything after --
+     ##### Custom docker options / image name + container command. Everything after --
       --) shift
         [ "$(cut -c1 <<< "${1:-}")"  = "-" ] && grep -q " -- "  <<< " $*" && {
           while [ $# -gt 0 ] ; do
@@ -7834,7 +7840,7 @@ Parsed options:    $Parsedoptions"
     
     #### Create helper scripts to set up container
     ## dockerrc runs as root (or member of group docker) on host.
-    # Main jobs: check image, pull image if needed, create script x11docker.CMD.sh to run image command in container
+    # Main jobs: check image, pull image if needed, create script x11docker.CMD.sh to run container command
     create_dockerrc             
     verbose "Generated dockerrc:
 $(nl -ba <$Dockerrc)"
@@ -7887,8 +7893,8 @@ $(nl -ba <$Westonini)"
       ;;
     esac
     
-    debugnote "Process tree of x11docker:
-  $(pstree -p $$ 2>&1 ||:)"
+#    debugnote "Process tree of x11docker:
+#  $(pstree -p $$ 2>&1 ||:)"
   } <&0 & storepid $! containershell
   
   #### Start X server [and/or Wayland compositor]
