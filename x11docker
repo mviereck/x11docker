@@ -452,18 +452,23 @@ logentry() {                    # write into logfile
 $*" 
 }
 setup_verbosity() {             # options --verbose, --stdout, --stderr
+  local Line Logfiles
   # create summary logfile
-  tail --pid="$$" --retry -n +1 -F \
-      $Cmdstderrlogfile \
-      $Cmdstdoutlogfile \
-      $Compositorlogfile \
-      $Containerlogfile \
-      ${Journallogfile:-} \
-      $Messagelogfile \
-      $Xinitlogfile \
-      $Xpraclientlogfile \
-      $Xpraserverlogfile \
-    2>/dev/null >>$Logfile &
+  Logfiles="
+    $Cmdstderrlogfile
+    $Cmdstdoutlogfile
+    $Compositorlogfile
+    $Containerlogfile
+    $Systemdjournallogfile
+    $Messagelogfile
+    $Xinitlogfile
+    $Xpraclientlogfile
+    $Xpraserverlogfile
+    "
+  for Line in $Logfiles; do
+    [ -e "$Line" ] && grep -q "/" <<< "$Line" && Logfiles="$Logfiles $Line"
+  done
+  tail --pid="$$" --retry -n +1 -F $Logfiles 2>/dev/null >>$Logfile &
 
   # option --verbose
   [ "$Verbose" = "yes" ] && {
@@ -764,7 +769,7 @@ storepid () {                   # store pid $1 and name $2 of background process
   # this subroutine has a twin in xinitrc
   echo ${1:-} ${2:-} >> $Bgpidfile
   debugnote "storepid(): Stored background pid ${1:-} of ${2:-}: $(pspid ${1:-})"
-  disown ${1:-} 2>/dev/null ||:
+#  disown ${1:-} 2>/dev/null ||:
 }
 checkpid() {                    # check if PID $1 is active
   #ps -p ${1:-} >/dev/null 2>&1
@@ -1422,7 +1427,7 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
   #   The image is not portable anymore.
   # - x11docker can install NVIDIA driver on the fly in running container. See notes below.
   #
-  # g  $Nvidiainstallerfile   nvidia driver file to install in container in containerrootrc
+  # g  $Nvidiainstallerfile   nvidia driver file to install in container in container.rootrc
   # g  $Nividaversion  nvidia driver version on host
 
   local Gpudevice=
@@ -3667,7 +3672,7 @@ check_containerhome() {         # options --home, --homedir, --homebasedir: chec
   return 0
 }
 setup_initsystem() {            # option init: set up capabilities, check or create files
-  # some init system setup also in containerrootrc
+  # some init system setup also in container.rootrc
   local Message=
 
   store_runoption env "container=docker"   # At least OpenRC and systemd regard this hint
@@ -3767,7 +3772,7 @@ SendSIGHUP=yes
 WantedBy=x11docker.target
 WantedBy=getty.target
 WantedBy=multi-user.target
-" >> $Systemdstartcmd
+" >> $Systemdconsoleservice
 
       echo "[Unit]
 Description=x11docker watch service
@@ -3777,18 +3782,18 @@ Type=simple
 ExecStart=/bin/sh -c 'while sleep 1; do systemctl is-active console-getty >/dev/null || { echo timetosaygoodbye >>$(convertpath share $Timetosaygoodbye) ; systemctl halt ; } ; [ -s $(convertpath share $Timetosaygoodbye) ] && systemctl halt ; done'
 [Install]
 WantedBy=x11docker.target
-" >> $Systemdwatch
+" >> $Systemdwatchservice
 
       echo "[Unit]
 Description=x11docker journal log service
 # get systemd log to transfer it into x11docker.log 
 [Service]
 Type=simple
-ExecStart=/bin/sh -c '/bin/journalctl --follow --no-tail --merge >> $(convertpath share $Journallogfile) 2>&1'
+ExecStart=/bin/sh -c '/bin/journalctl --follow --no-tail --merge >> $(convertpath share $Systemdjournallogfile) 2>&1'
 #ExecStart=/bin/sh -c '/bin/journalctl --follow --no-tail --merge >> $(convertpath share $Containerlogfile) 2>&1'
 [Install]
 WantedBy=x11docker.target
-" >> $Systemdjournal
+" >> $Systemdjournalservice
 
       echo "[Manager]
 DefaultEnvironment=$(while read -r Line; do echo -n "$Line " ; done < <(store_runoption dump env))
@@ -4061,9 +4066,9 @@ create_dockercommand() {        # create command to run docker
     systemd)
       Dockercommand="$Dockercommand \\
   -v $Systemdtarget:/etc/systemd/system/x11docker.target:ro \\
-  -v $Systemdstartcmd:/lib/systemd/system/console-getty.service:ro \\
-  -v $Systemdwatch:/etc/systemd/system/x11docker-watch.service:ro \\
-  -v $Systemdjournal:/etc/systemd/system/x11docker-journal.service \\
+  -v $Systemdconsoleservice:/lib/systemd/system/console-getty.service:ro \\
+  -v $Systemdwatchservice:/etc/systemd/system/x11docker-watch.service:ro \\
+  -v $Systemdjournalservice:/etc/systemd/system/x11docker-journal.service \\
   -v $Systemdenvironment:/etc/systemd/system.conf.d/x11docker.conf"
     ;;
   esac
@@ -4162,8 +4167,8 @@ create_dockercommand() {        # create command to run docker
   Dockercommand="$Dockercommand \\
   --"
   case $Switchcontaineruser in
-    no)  Dockercommand="$Dockercommand $Imagename /bin/sh - $(convertpath share $Containercommandscript)" ;;  # dockerrc runs containerrootrc with 'docker exec'
-    yes) Dockercommand="$Dockercommand $Imagename /bin/sh - $(convertpath share $Containerrootrc)"  ;;    # containerrootrc runs container.CMD.sh
+    no)  Dockercommand="$Dockercommand $Imagename /bin/sh - $(convertpath share $Containercommandscript)" ;;  # dockerrc runs container.rootrc with 'docker exec'
+    yes) Dockercommand="$Dockercommand $Imagename /bin/sh - $(convertpath share $Containerrootrc)"  ;;    # container.rootrc runs container.CMD.sh
   esac
 
   return 0
@@ -4227,7 +4232,6 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo "Workdir='$Workdir'"
   echo "export PATH='$PATH'"
   echo ""
-  echo "Containercommand="
   echo "Containerid="
   echo "Dockerlogspid=''"
   echo "Dockerpull="
@@ -4794,10 +4798,10 @@ $Wmdockercommand"'
   echo ""
   
   [ "$Switchcontaineruser" = "no" ] && {
-    echo "# copy containerrootrc inside of container to avoid possible noexec of host home."
-    echo "$Dockerexe exec --tty $Containername sh -c 'cp $(convertpath share $Containerrootrc) /tmp/containerrootrc ; chmod 644 /tmp/containerrootrc' 2>&1 | rmcr >>$Containerlogfile"
+    echo "# copy $(basename $Containerrootrc) inside of container to avoid possible noexec of host home."
+    echo "$Dockerexe exec --tty $Containername sh -c 'cp $(convertpath share $Containerrootrc) /tmp/$(basename $Containerrootrc) ; chmod 644 /tmp/$(basename $Containerrootrc)' 2>&1 | rmcr >>$Containerlogfile"
     echo "# run container root setup. container.CMD.sh will wait until setup script is ready."
-    echo "$Dockerexe exec --tty -u root $Containername /bin/sh /tmp/containerrootrc 2>&1 | rmcr >>$Containerlogfile"
+    echo "$Dockerexe exec --tty -u root $Containername /bin/sh /tmp/$(basename $Containerrootrc) 2>&1 | rmcr >>$Containerlogfile"
     echo ""
   }
   
@@ -4821,7 +4825,7 @@ create_containerrootrc() {      # create container root setup script: This scrip
 
   echo "#! /bin/sh"
   echo ""
-  echo "# containerrootrc"
+  echo "# $(basename $Containerrootrc)"
   echo "# This Script is executed as root in container."
   echo "# - Create container user"
   echo "# - Time zone"
@@ -5057,7 +5061,7 @@ Messagefile=$(convertpath share $Messagefifo)
     echo ""
     
     echo "echo \"#! /bin/sh
-# User switch from root in containerrootrc to unprivileged user in container.CMD.sh.
+# User switch from root in $(basename $Containerrootrc) to unprivileged user in container.CMD.sh.
 # Additionally, su triggers logind and elogind. (Except su from busybox?)
 # Called by x11docker-agetty.
 . /usr/local/bin/x11docker-message
@@ -6998,13 +7002,14 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Xtermrc="$Cachefolder/$Xtermrc"                                   && mkfile $Xtermrc
   
   # systemd files
-  Systemdtarget=$Cachefolder/x11docker.target                       && mkfile $Systemdtarget
-  Systemdstartcmd=$Cachefolder/console-getty.service                && mkfile $Systemdstartcmd
-  Systemdwatch=$Cachefolder/x11docker-watch.service                 && mkfile $Systemdwatch
-  Systemdjournal=$Cachefolder/x11docker-journal.service             && mkfile $Systemdjournal
-  Journallogfile=$Sharefolder/journalctl.log                        && mkfile $Journallogfile
-  Systemdenvironment=$Cachefolder/systemd.env.conf                  && mkfile $Systemdenvironment
-  
+  [ "$Initsystem" = "systemd" ] && {
+    Systemdtarget=$Cachefolder/$Systemdtarget                       && mkfile $Systemdtarget
+    Systemdconsoleservice=$Cachefolder/$Systemdconsoleservice       && mkfile $Systemdconsoleservice
+    Systemdwatchservice=$Cachefolder/$Systemdwatchservice           && mkfile $Systemdwatchservice
+    Systemdjournalservice=$Cachefolder/$Systemdjournalservice       && mkfile $Systemdjournalservice
+    Systemdjournallogfile=$Sharefolder/$Systemdjournallogfile       && mkfile $Systemdjournallogfile
+    Systemdenvironment=$Cachefolder/$Systemdenvironment             && mkfile $Systemdenvironment
+  }
   
   # shared to /x11docker in container
   Cmdexitcodefile="$Sharefolder/$Cmdexitcodefile"                   && mkfile $Cmdexitcodefile
@@ -7147,7 +7152,7 @@ declare_variables() {           # declare global variables
   
   # Generated scripts
   Containercommandscript="container.CMD"          # Generated script starting container command
-  Containerrootrc="containerrootrc"               # Generated script to set up container, e.g. user creation. Runs as root in container.
+  Containerrootrc="container.rootrc"              # Generated script to set up container, e.g. user creation. Runs as root in container.
   Dockerrc="dockerrc"                             # Generated script to check image, set up host and create $Containercommandscript
   Shareclipboardscript="clipboard.sh"             # --clipboard: Generated script for text clipboard sharing
   Xinitrc="xinitrc"                               # Generated script to set up X, e.g. cookie and xrandr
@@ -7157,7 +7162,7 @@ declare_variables() {           # declare global variables
   Bgpidfile="backgroundpids"                      # File to store pids and names of background processes that should be terminated on exit
   Dockerstopsignalfifo="$Dockerrc.stop"           # finish() send 'docker stop' signal to dockerrc
   Logmessages=""                                  # Stores messages until logfile is available, needed by logentry()
-  Messagefifo="message.fifo"                      # Message channel for warning/verbose/debugnote/note/error within container, dockerrc, containerrootrc and others
+  Messagefifo="message.fifo"                      # Message channel for warning/verbose/debugnote/note/error within container, dockerrc, container.rootrc and others
   Timetosaygoodbye="timetosaygoodbye"             # File giving term signal to all parties
   Timetosaygoodbyefifo="timetosaygoodbye.fifo"    # Message channel for --init=openrc|runit|sysvinit to shut down on x11docker signal
   Usemkfifo="yes"                                 # Not on Windows nor with kata-runtime
@@ -7171,8 +7176,8 @@ declare_variables() {           # declare global variables
   Logfile=""                                      # $Cachefolder/x11docker.log (latest terminated log)
   Messagelogfile="message.log"                    # Logfile for warning/verbose/debugnote/note/error
   Xinitlogfile="xinit.log"                        # Logfile for xinit/X server
-  Xpraclientlogfile="xpraclient.log"              # Logfile for xpra client
-  Xpraserverlogfile="xpraserver.log"              # Logfile for xpra server
+  Xpraclientlogfile="xpra.client.log"             # Logfile for xpra client
+  Xpraserverlogfile="xpra.server.log"             # Logfile for xpra server
   
   # Storage of some container info
   Cmdexitcodefile="container.CMD.exitcode"
@@ -7180,6 +7185,7 @@ declare_variables() {           # declare global variables
   Containeripfile="container.ip"                  # File to store container IP
   Containerpid1pidfile="container.pid1pid"        # File to store host PID of container PID 1
   Containeruserfile="container.user"              # File to store container user name
+  
   Dockercommandfile="docker.command"              # File to store generated docker command, needed for --interactive
   Dockerinfofile="docker.info"                    # File to store outpu of 'docker info'
   Imagelistfile="docker.imagelist"                # File with list of local images.Used by x11docker-gui, too
@@ -7301,12 +7307,12 @@ declare_variables() {           # declare global variables
   # X and Wayland config and cookie files
   Customwestonini=""                              # --westonini: Custom config file for weston
   Westonini="weston.ini"                          # Generated config file for weston
-  Xdummyconf="xdummy.xorg.conf"                   # --xdummy, --xpra: Generated xorg.conf for dummy video driver
+  Xdummyconf="xorg.xdummy.conf"                   # --xdummy, --xpra: Generated xorg.conf for dummy video driver
   Xclientcookie="Xclientcookie"                   # Generated X client cookie. Normally same as $Xservercookie, except for --hostdisplay and --nxagent
-  Xkbkeymapfile="xkb_keymap"                      # --keymap: File to store output of host keymap in xinitrc
+  Xkbkeymapfile="xorg.xkb.keymap"                 # --keymap: File to store output of host keymap in xinitrc
   Xorgconf=""                                     # --xorgconf: custom xorg.conf
   Xservercookie="Xservercookie"                   # Generated X server cookie
-  Xorgwrapper="Xorgwrapper"                       # --xpra, --xdummy: Fork from xpra to wrap Xorg for Xdummy
+  Xorgwrapper="Xorg.xdummy.wrapper"               # --xpra, --xdummy: Fork from xpra to wrap Xorg for Xdummy
   
   # Window manager
   Windowmanager=""                                # --wm: Window manager to use: container/host/auto
@@ -7339,7 +7345,7 @@ declare_variables() {           # declare global variables
   Containercommand=""                             # Container command [+args]
   Containerenvironment=""                         # --env: Environment variables
   Containerenvironmentcount="0"
-  Containerenvironmentfile="environment"          # file to store final container environment
+  Containerenvironmentfile="container.environment" # file to store final container environment
   Containername=""                                # --name: Container name
   Customdockeroptions=""                          # -- [...] -- : Custom options for "docker run".
   Imagename=""                                    # Image to run
@@ -7354,6 +7360,12 @@ declare_variables() {           # declare global variables
   Sudouser="no"                                   # --sudouser: Create user with sudo permissions and root user with password 'x11docker'
   Switchcontaineruser="no"                        # --init=systemd|openrc|runit|sysvinit: User switching to trigger login services yes/no
   Switchcontainerusercaps="no"                    # --init=systemd|openrc|runit|sysvinit, --sudouser, --user=root: Add capabilities for su/sudo user switching
+  Systemdconsoleservice="systemd.console-getty.service" # --init=systemd
+  Systemdenvironment="systemd.environment.conf"
+  Systemdjournallogfile="systemd.journal.log"
+  Systemdjournalservice="systemd.journal.service"
+  Systemdtarget="systemd.x11docker.target"
+  Systemdwatchservice="systemd.watch.service"
   Workdir=""                                      # --workdir: Set working directory in container
   
   # Init and DBus
@@ -7844,11 +7856,11 @@ Parsed options:    $Parsedoptions"
     create_dockerrc             
     verbose "Generated dockerrc:
 $(nl -ba <$Dockerrc)"
-    ## containerrootrc runs as root in container.
+    ## container.rootrc runs as root in container.
     # Main jobs: create unprivileged container user, disable possible privilege leaks, set local time.
     # Optional jobs: run init system, run DBus daemon, install nvidia driver, create language locale.
     create_containerrootrc
-    verbose "Generated containerrootrc:
+    verbose "Generated $(basename $Containerrootrc):
 $(nl -ba <$Containerrootrc)"
     create_xtermrc              # xtermrc to prompt for password if needed.
   }
@@ -7910,6 +7922,9 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
+  # Reduce number of files
+  #  - Store container info like ID, PID etc in one file
+
   # BUG Cshare/timezone, something is wrong, no timezone file
   # support --exe --user
   # --nxagent -d kdeneon/plasma:user-lts leads to black fullscreen
