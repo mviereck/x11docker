@@ -390,7 +390,7 @@ traperror() {                   # trap ERR: --debug: Output for 'set -o errtrace
   debugnote "traperror: Command at Line ${2:-} returned with error code ${1:-}:
   ${4:-}
   ${3:-} - ${5:-}"
-  echo 64 >> $X11dockererrorfile
+  storeinfo error 64
   saygoodbye traperror
 }
 error() {                       # show error message and exit
@@ -414,8 +414,8 @@ ${Colredbg}x11docker ERROR:${Colnorm} $Message
   logentry "x11docker ERROR: $Message
 "
   saygoodbye error
-  [ -s "$X11dockererrorfile" ] && waitfortheend                    # Avoid double alert boxes
-  [ -e "$X11dockererrorfile" ] && echo 64 >> "$X11dockererrorfile" # also regarded by finish() for exit code
+  storeinfo dump error >/dev/null && waitfortheend
+  storeinfo error 64
 
   # output to X dialogbox if not running in terminal
   [ "$Runsinterminal" = "no" ] && [ "$Silent" = "no" ] && export ${Hostxenv:-DISPLAY} && alertbox "x11docker ERROR" "$Message" &
@@ -514,7 +514,7 @@ setup_verbosity() {             # options --verbose, --stdout, --stderr
 finish_sigint() {               # trap SIGINT to activate debug mode on finish()
   Debugmode="yes"
   debugnote "Received SIGINT"
-  [ -e "$X11dockererrorfile" ] && echo 130 >> "$X11dockererrorfile"
+  storeinfo error 130
   finish 130
 }
 finish() {                      # trap EXIT routine to clean up background processes and cache
@@ -634,10 +634,11 @@ finish() {                      # trap EXIT routine to clean up background proce
   checkpid "$Watchmessagefifopid" && termpid "$Watchmessagefifopid" watchmessagefifo
 
   # check for possible error exit codes. Prefer CMD exit code over x11docker exit code.
-  [ -s "$X11dockererrorfile" ] && Exitcode="$(cat $X11dockererrorfile | tail -n1)"
+  Exitcode=$(storeinfo dump error ||:)
+  Exitcode="${Exitcode:-0}"
   debugnote "x11docker exit code: $Exitcode"
-  [ -s "$Cmdexitcodefile" ] && {
-    Exitcode="$(cat $Cmdexitcodefile)"
+  storeinfo dump cmdexitcode >/dev/null &&{
+    Exitcode=$(storeinfo dump cmdexitcode)
     debugnote "CMD exit code: $Exitcode"
   }
   
@@ -876,6 +877,23 @@ download() {                    # download file at URL $1 and store it in file $
   case $Downloader in
     wget) wget    "${1:-}" -O       "${2:-}" ;;
     curl) curl -L "${1:-}" --output "${2:-}" ;;
+  esac
+}
+storeinfo() {
+  # store and provide pieces of information
+  # stored as codeword=string
+  #  $1 codeword
+  #  $2 string to store
+  #    or dump stored string:
+  #  $1 dump
+  #  #2 codeword
+  case "${1:-}" in
+    dump) grep "^${2:-}="  $Infostorefile | sed "s/^${2:-}=//" ;;
+    *) 
+      sed -i "/^${1:-}=/d" $Infostorefile
+      echo "${1:-}=${2:-}" >> $Infostorefile
+      debugnote "storeinfo(): ${1:-}=${2:-}"
+    ;;
   esac
 }
 timestamp() {                   # print HH:MM:SS,NNN
@@ -1427,7 +1445,7 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
   #   The image is not portable anymore.
   # - x11docker can install NVIDIA driver on the fly in running container. See notes below.
   #
-  # g  $Nvidiainstallerfile   nvidia driver file to install in container in container.rootrc
+  # g  $Nvidiainstallerfile   nvidia driver file to install in container in containerrootrc
   # g  $Nividaversion  nvidia driver version on host
 
   local Gpudevice=
@@ -2739,14 +2757,13 @@ startup-animation=fade
         ;;
         yes)  # short start&stop of Weston to grep name of monitor. Needed instead of WL or X prefix
           [ -n "$Screensize" ] || [ "$Scaling" ] || [ -n "$Rotation" ] && {
-            unpriv "$Weston --no-config --backend=drm-backend.so >> $Compositorlogfile 2>&1 & echo \$! >>$Compositorpidfile"
-            Compositorpid="$(cat $Compositorpidfile)"
+            unpriv "$Weston --no-config --backend=drm-backend.so >> $Compositorlogfile 2>&1 & storeinfo compositorpid \$!"
+            Compositorpid="$(storeinfo dump compositorpid)"
             waitforlogentry "weston-screencheck" "$Compositorlogfile" "connector" "$Compositorerrorcodes"
             Westonoutput="$(grep Output <$Compositorlogfile | grep connector | head -n1 | cut -d ' ' -f3 | rev | cut -c2- | rev)"
             debugnote "Screen output for weston: $Westonoutput"
             kill $Compositorpid
             mkfile "$Compositorlogfile"
-            mkfile "$Compositorpidfile"
           }
         ;;
       esac
@@ -3350,6 +3367,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
       
       case $Xserver in
         --hostdisplay|--xwin|--nxagent) ;;
+        --hostwayland|--weston|--kwin|--tty) ;;
         *)
           echo       "# Keyboard layout"
           command -v setxkbmap >/dev/null && {
@@ -3670,7 +3688,7 @@ check_containerhome() {         # options --home, --homedir, --homebasedir: chec
   return 0
 }
 setup_initsystem() {            # option init: set up capabilities, check or create files
-  # some init system setup also in container.rootrc
+  # some init system setup also in containerrootrc
   local Message=
 
   store_runoption env "container=docker"   # At least OpenRC and systemd regard this hint
@@ -4165,8 +4183,8 @@ create_dockercommand() {        # create command to run docker
   Dockercommand="$Dockercommand \\
   --"
   case $Switchcontaineruser in
-    no)  Dockercommand="$Dockercommand $Imagename /bin/sh - $(convertpath share $Containercommandscript)" ;;  # dockerrc runs container.rootrc with 'docker exec'
-    yes) Dockercommand="$Dockercommand $Imagename /bin/sh - $(convertpath share $Containerrootrc)"  ;;    # container.rootrc runs container.CMD.sh
+    no)  Dockercommand="$Dockercommand $Imagename /bin/sh - $(convertpath share $Containercommandscript)" ;;  # dockerrc runs containerrootrc with 'docker exec'
+    yes) Dockercommand="$Dockercommand $Imagename /bin/sh - $(convertpath share $Containerrootrc)"  ;;    # containerrootrc runs container.CMD.sh
   esac
 
   return 0
@@ -4200,6 +4218,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   declare -f rmcr
   declare -f rocknroll
   declare -f saygoodbye
+  declare -f storeinfo
   declare -f storepid
   declare -f waitforlogentry
   echo "$Messagefifofuncs"
@@ -4217,6 +4236,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo "Hostuser='$Hostuser'"
   echo "Hostusergid='$Hostusergid'"
   echo "Imagename=\"$Imagename\""
+  echo "Infostorefile='$Infostorefile'"
   echo "Messagefile='$Messagefifo'"
   echo "Newxenv='$Newxenv'"
   echo "export PATH='$PATH'"
@@ -4224,13 +4244,13 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo "Timetosaygoodbye='$Timetosaygoodbye'"
   echo "Timetosaygoodbyefifo='$Timetosaygoodbyefifo'"
   echo "Usemkfifo='$Usemkfifo'"
-  echo "X11dockererrorfile='$X11dockererrorfile'"
   echo "Xiniterrorcodes='$Xiniterrorcodes'"
   echo "Xinitlogfile='$Xinitlogfile'"
   echo "Xserver='$Xserver'"
   echo "Workdir='$Workdir'"
   echo ""
   echo "Containerid="
+  echo "Containerip="
   echo "Dockerlogspid=''"
   echo "Dockerpull="
   echo "Exec="
@@ -4302,7 +4322,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo "  esac"
   [ "$Runtime" ] && echo "  Runtime='$Runtime'"
   echo "}"
-  echo "debugnote \"Container Runtime: \$Runtime\""
+  echo "debugnote \"dockerrc: Container Runtime: \$Runtime\""
   echo ""
   
   echo "# Refresh images.list for x11docker-gui"
@@ -4360,7 +4380,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo "[ -z \"\$Containercommand\" ] && {"
   echo "  # extract image command from image if not given on cli"
   echo "  Containercommand=\"\$(cut -d] -f2 <<< \"\$Inspect\" | cut -d[ -f2)\""
-  echo "  debugnote \"Image CMD: \$Containercommand\""
+  echo "  debugnote \"dockerrc: Image CMD: \$Containercommand\""
   echo "  echo \"\$Containercommand\" | grep -q $(convertpath share $Containercommandscript) && error 'Recursion error: Found CMD $(convertpath share $Containercommandscript) in image.
   Did you use docker commit with an x11docker container?
   Please build new images with a Dockerfile instead of using docker commit,
@@ -4370,16 +4390,16 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   
   echo "# Check USER"
   echo "Imageuser=\"\$(cut -d[ -f4 <<< \"\$Inspect\" | cut -d] -f1)\""
-  echo "debugnote \"Image USER: \$Imageuser\""
+  echo "debugnote \"dockerrc: Image USER: \$Imageuser\""
   case $Createcontaineruser in
     yes)
       echo "[ \"\$Imageuser\" ] && note \"Found 'USER \$Imageuser' in image."
       echo "  If you want to run with user \$Imageuser instead of host user $Containeruser,"
       echo "  than run with --user=RETAIN.\""
-      echo "echo \"$Containeruser\" >> $Containeruserfile"
+      echo "storeinfo containeruser \"$Containeruser\""
     ;;
     no)
-      echo "echo \"\${Imageuser:-root}\" >> $Containeruserfile"
+      echo 'storeinfo containeruser "${Imageuser:-root}"'
     ;;
   esac
   echo ""
@@ -4389,7 +4409,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
     no)
       echo     "# Check ENTRYPOINT"
       echo     "Entrypoint=\"\$(cut -d] -f1 <<< \"\$Inspect\" | cut -d[ -f2)\""
-      echo     "debugnote \"Image ENTRYPOINT: \$Entrypoint\""
+      echo     "debugnote \"dockerrc: Image ENTRYPOINT: \$Entrypoint\""
       case $Initsystem in
         systemd|sysvinit|runit|openrc)
           echo "echo \"\$Entrypoint\" | grep -qE 'tini|init|systemd' && {"
@@ -4433,7 +4453,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   [ -z "$Workdir" ] && {
     echo "# Check WORKDIR"
     echo "Workdir=\"\$(cut -d[ -f5 <<< \"\$Inspect\" | cut -d] -f1)\""
-    echo "debugnote \"Image WORKDIR: \$Workdir\""
+    echo "debugnote \"dockerrc: Image WORKDIR: \$Workdir\""
     echo "[ \"\$Workdir\" ] && note \"Found 'WORKDIR \$Workdir' in image. 
   You can change it with option --workdir=DIR.\""
     echo ""
@@ -4457,14 +4477,16 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo     "  echo 'exec >>$(convertpath share $Containerlogfile) 2>&1'"
   echo     "  echo ''"
 
+  echo     "  echo '$(declare -f mysleep)'"
   echo     "  echo '$(declare -f rocknroll)'"
   echo     "  echo '$(declare -f saygoodbye)'"
-  echo     "  echo '$(declare -f mysleep)'"
+  echo     "  echo '$(declare -f storeinfo)'"
   echo     "  echo '$(declare -f waitforlogentry)'"
   echo     "  echo 'calculate() {'"
   echo     "  echo '  LC_ALL=C printf %.3f\\\\n \"\$((10**9 * \$@))e-9\"'"
   echo     "  echo '}'"
   echo     "  echo '$Messagefifofuncs'"
+  echo     "  echo 'Infostorefile=$(convertpath share $Infostorefile)'"
   echo     "  echo 'Messagefile=$(convertpath share $Messagefifo)'"
   echo     "  echo 'Timetosaygoodbye=$(convertpath share $Timetosaygoodbye)'"
   echo     "  echo 'Timetosaygoodbyefifo=$(convertpath share $Timetosaygoodbyefifo)'"
@@ -4496,7 +4518,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo     "{"
   echo     "  echo ''"
   echo     "  echo '# USER and HOME'"
-  echo     "  echo 'Containeruser=\"\$(cat $(convertpath share $Containeruserfile))\"'"
+  echo     "  echo 'Containeruser=\"\$(storeinfo dump containeruser)\"'"
   case $Createcontaineruser in
     yes)
       echo "  echo 'Containeruserhome=\"$Containeruserhome\"'"
@@ -4574,7 +4596,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo     "  echo 'bash --version >/dev/null 2>&1 && export SHELL=/bin/bash || export SHELL=/bin/sh'"
   echo     "  echo 'export TERM=xterm'"
 
-  echo     "  echo '[ -e /x11docker.LANG ] && export LANG=\"\$(cat /x11docker.LANG)\"'"
+  echo     "  echo 'storeinfo dump locale && export LANG=\"\$(storeinfo dump locale)\"'"
 
   echo     "  echo '[ -e \"$Hostlocaltime\" ] || export TZ=$Hostutctime'"
   echo     "  echo '[ \"\$(date -Ihours)\" != \"$(date -Ihours)\" ] && export TZ=$Hostutctime'"
@@ -4618,14 +4640,13 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   case $Interactive in
     no)
       echo "  echo \"\$Exec \$Tini \\\$Dbus \$Entrypoint \$Containercommand $( [ "$Forwardstdin" = "yes" ] && echo "<$(convertpath share $Cmdstdinfifo)") >>$(convertpath share $Cmdstdoutlogfile) 2>>$(convertpath share $Cmdstderrlogfile)\""
-      echo "  echo \"echo \\\$? >> $(convertpath share $Cmdexitcodefile)\""
     ;;
     yes)
       echo "  echo 'exec >/dev/stdout 2>/dev/stderr'"
       echo "  echo \"\$Exec \$Tini \\\$Dbus \$Entrypoint \$Containercommand\""
-      echo "  echo \"echo \\\$? >> $(convertpath share $Cmdexitcodefile)\""
     ;;
   esac
+  echo     "  echo \"storeinfo cmdexitcode \\\$?\""
   echo     "} >> $Containercommandscript"
   echo     "######## End of container.CMD.sh ########"
   echo ""
@@ -4745,20 +4766,19 @@ $Wmdockercommand"'
   echo ""
   echo ""
 
-  echo "debugnote \"Container ID: \$Containerid\""
   echo "[ \"\$Containerid\" ] || {
     error \"Startup of docker failed. Did not receive a container ID.
     
   Last lines of container log:
 \$(rmcr < $Containerlogfile | tail)\"
 }"
-  echo "echo \$Containerid >> $Containeridfile"
-  [ "$Showcontainerid" = "yes" ] && echo "stdout \"\$(cat $Containeridfile)\""
+  echo ' storeinfo containerid "$Containerid"'
+  [ "$Showcontainerid" = "yes" ] && echo 'stdout "$Containerid"'
   echo ""
   
   echo "# Wait for container to be ready"
   echo "for ((Count=1 ; Count<=40 ; Count++)); do"
-  echo "  $Dockerexe exec $Containername sh -c : 2>&1 | rmcr >>$Containerlogfile && { debugnote 'Container is up and running.' ; break ; } || debugnote \"Container not ready on \$Count. attempt, trying again.\""
+  echo "  $Dockerexe exec $Containername sh -c : 2>&1 | rmcr >>$Containerlogfile && { debugnote 'dockerrc: Container is up and running.' ; break ; } || debugnote \"dockerrc: Container not ready on \$Count. attempt, trying again.\""
   echo "  rocknroll || exit 64"
   echo "  mysleep 0.1"
   echo "done"
@@ -4779,15 +4799,14 @@ $Wmdockercommand"'
   echo "  rocknroll || exit 64"
   echo "  mysleep 0.1"
   echo "done"
-  echo "echo \$Pid1pid >> $Containerpid1pidfile"
-  echo "debugnote \"Container PID 1: \$Pid1pid\""
+  echo 'storeinfo pid1pid "$Pid1pid"'
   [ "$Showcontainerpid1pid" = "yes" ] && echo "stdout \$Pid1pid  # --showpid1"
   echo "echo 'x11docker: container pid check is ready' >>$Containerlogfile"
   echo ""
 
   echo "# Get IP of container"
-  echo "$Dockerexe inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername 2>>$Containerlogfile | rmcr >> $Containeripfile"
-  echo "debugnote \"Container IP: \$(cat $Containeripfile)\""
+  echo "Containerip=\"\$($Dockerexe inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername 2>>$Containerlogfile)\""
+  echo 'storeinfo containerip $Containerip'
   echo ""
   
   echo "# Check log for startup failure"
@@ -4795,7 +4814,10 @@ $Wmdockercommand"'
   echo "[ \"\$Failure\" ] && {"
   echo "  echo \"\$Failure\" >>$Containerlogfile"
   echo "  error \"Got error message from docker daemon:
-\$Failure\""
+\$Failure
+
+  Last lines of logfile:
+$(tail $Containerlogfile)\""
   echo "}"
   echo ""
   
@@ -4840,8 +4862,10 @@ create_containerrootrc() {      # create container root setup script: This scrip
   echo "exec 1>>$(convertpath share $Containerlogfile) 2>&1"
   echo ""
   
+  declare -f storeinfo
   declare -f rocknroll
   echo "$Messagefifofuncs"
+  echo "Infostorefile='$(convertpath share $Infostorefile)'"
   echo "Messagefile=$(convertpath share $Messagefifo)"
   echo "Timetosaygoodbye=$(convertpath share $Timetosaygoodbye)"
   echo ""
@@ -4852,7 +4876,7 @@ create_containerrootrc() {      # create container root setup script: This scrip
   echo "# Check type of libc"
   echo "ldd --version 2>&1 | grep -q 'musl libc' && Containerlibc='musl'"
   echo "ldd --version 2>&1 | grep -q -E 'GLIBC|GNU libc'  && Containerlibc='glibc'"
-  echo 'debugnote "Container libc: $Containerlibc"'
+  echo 'debugnote "containerrootrc: Container libc: $Containerlibc"'
   echo ""
 
   echo "# Prepare X environment"
@@ -4890,7 +4914,7 @@ create_containerrootrc() {      # create container root setup script: This scrip
   echo ""
 
   echo "# Check container user"
-  echo "Containeruser=\"\$(cat $(convertpath share $Containeruserfile))\""
+  echo "Containeruser=\"\$(storeinfo dump containeruser)\""
   echo ""
   case $Createcontaineruser in
     yes)
@@ -4968,7 +4992,7 @@ create_containerrootrc() {      # create container root setup script: This scrip
       echo "Containeruserhome=\"\$(cat /etc/passwd | grep '\$Containeruser:.:' | cut -d: -f6)\""
       echo "Containeruserhome=\"\${Containeruserhome:-/tmp/\$Containeruser}\""
       echo ""
-      echo "debugnote \"Container user: \$(id \$Containeruser)
+      echo "debugnote \"containerrootrc: Container user: \$(id \$Containeruser)
 \$(cat /etc/passwd | grep '\$Containeruser:.:')\""
       echo ""
     ;;
@@ -5515,7 +5539,7 @@ reload() {
     echo "}"
     echo ""
     echo "[ \"\$Langcontainer\" ] && {"
-    echo "  echo \"\$Langcontainer\" > /x11docker.LANG"
+    echo '  storeinfo locale "$Langcontainer"'
     echo "  echo \"LANG=\$Langcontainer\" > /etc/default/locale"
     echo "} || note 'Option --lang: Desired locale for '$Langwunsch' not found and not generated.'"
     echo ""
@@ -5632,9 +5656,9 @@ start_docker() {                # start docker container
 
   rocknroll || return 64
   
-  Containerid=$(cat $Containeridfile)
-  Containerip=$(cat $Containeripfile)         # used by start_pulseaudiotcp()
-  Containerpid1=$(cat $Containerpid1pidfile)
+  Containerid=$(storeinfo dump containerid)
+  Containerip=$(storeinfo dump containerip)         # used by start_pulseaudiotcp()
+  Containerpid1=$(storeinfo dump pid1pid)
 
   # watch container
   case $Winsubsystem in
@@ -5663,9 +5687,11 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
     #[ "$Debugmode" = "yes" ] && echo "set -Eux"
     echo "$Messagefifofuncs"
     declare -f pspid
+    declare -f storeinfo
     declare -f storepid
     echo ""
     echo "Bgpidfile='$Bgpidfile'"
+    echo "Infostorefile='$Infostorefile'"
     echo "Messagefile='$Messagefifo'"
     [ "$Dbusrunsession" = "yes" ] && echo "Dbus='$(command -v dbus-run-session >/dev/null)'"
     
@@ -5707,7 +5733,7 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
     echo ""
     
     echo "\$Dbus $Hostexe $( [ "$Forwardstdin" = "yes" ] && echo "<$Cmdstdinfifo") >>$Cmdstdoutlogfile 2>>$Cmdstderrlogfile &"
-    echo "echo \$! >> $Containerpid1pidfile"
+    echo 'storeinfo pid1pid $!'
   } >> $Containercommandscript
   nl -ba <$Containercommandscript >> $Containerlogfile
 
@@ -5718,7 +5744,7 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
   
   # run start script
   unpriv "/usr/bin/env bash $Containercommandscript"
-  Hostexepid="$(cat $Containerpid1pidfile)"
+  Hostexepid="$(storeinfo dump pid1pid)"
 
   [ "$Showcontainerid" = "yes" ]      && echo ""             # --showid: empty here, no container ID
   [ "$Showcontainerpid1pid" = "yes" ] && echo $Hostexepid    # --showpid1
@@ -5780,11 +5806,11 @@ start_compositor() {            # start Wayland compositor Weston or KWin
     --kwin|--kwin-xwayland)                                       Compositorkeyword="X-Server" ;;
   esac
   
-  unpriv "$(command -v dbus-launch) $Compositorcommand  >> $Compositorlogfile  2>&1 & echo \$! >>$Compositorpidfile"
+  unpriv "$(command -v dbus-launch) $Compositorcommand  >> $Compositorlogfile  2>&1 & storeinfo compositorpid \$!"
   
   waitforlogentry "start_compositor()" "$Compositorlogfile" "$Compositorkeyword" "$Compositorerrorcodes"
 
-  Compositorpid="$(cat $Compositorpidfile)"
+  Compositorpid="$(storeinfo dump compositorpid)"
   setonwatchpidlist $Compositorpid compositor
 
   case $Xserver in
@@ -6951,7 +6977,7 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Cachebasefolder="$(convertpath subsystem "$Cachebasefolder")"
   [ "$Cachebasefolder" != "$(echo $Cachebasefolder | sed -e 's/ *//g')" ] && error "Cache root folder must not contain whitespaces.
   $Cachebasefolder"
-  unpriv "mkdir -p $Cachebasefolder"                                       || error "Could not create cache folder
+  unpriv "mkdir -p $Cachebasefolder"                                      || error "Could not create cache folder
   $Cachebasefolder"
   writeaccess $Hostuseruid $Cachebasefolder                               || error "User $Hostuser does not have write access to cache folder
   $Cachebasefolder"                                # can happen with --cachebasedir
@@ -6978,10 +7004,6 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   # host only access
   Bgpidfile="$Cachefolder/$Bgpidfile"                               && mkfile $Bgpidfile
   Compositorlogfile="$Cachefolder/$Compositorlogfile"               && mkfile $Compositorlogfile
-  Compositorpidfile="$Cachefolder/$Compositorpidfile"               && mkfile $Compositorpidfile
-  Containeridfile="$Cachefolder/$Containeridfile"                   && mkfile $Containeridfile
-  Containeripfile="$Cachefolder/$Containeripfile"                   && mkfile $Containeripfile
-  Containerpid1pidfile="$Cachefolder/$Containerpid1pidfile"         && mkfile $Containerpid1pidfile
   Dockercommandfile="$Cachefolder/$Dockercommandfile"               && mkfile $Dockercommandfile
   Dockerinfofile="$Cachefolder/$Dockerinfofile"                     && mkfile $Dockerinfofile
   Dockerrc="$Cachefolder/$Dockerrc"                                 && mkfile $Dockerrc
@@ -6990,9 +7012,14 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Messagelogfile="$Cachefolder/$Messagelogfile"                     && mkfile $Messagelogfile
   Pulseaudioconf="$Cachefolder/$Pulseaudioconf"                     && mkfile $Pulseaudioconf
   Shareclipboardscript="$Cachefolder/$Shareclipboardscript"         && mkfile $Shareclipboardscript
+  Systemdconsoleservice=$Cachefolder/$Systemdconsoleservice         && mkfile $Systemdconsoleservice
+  Systemdenvironment=$Cachefolder/$Systemdenvironment               && mkfile $Systemdenvironment
+  Systemdjournallogfile=$Sharefolder/$Systemdjournallogfile         && mkfile $Systemdjournallogfile
+  Systemdjournalservice=$Cachefolder/$Systemdjournalservice         && mkfile $Systemdjournalservice
+  Systemdtarget=$Cachefolder/$Systemdtarget                         && mkfile $Systemdtarget
+  Systemdwatchservice=$Cachefolder/$Systemdwatchservice             && mkfile $Systemdwatchservice
   Watchpidfifo="$Cachefolder/$Watchpidfifo"
   Westonini="$Cachefolder/$Westonini"                               && mkfile $Westonini
-  X11dockererrorfile="$Cachefolder/$X11dockererrorfile"             && mkfile $X11dockererrorfile
   Xdummyconf="$Cachefolder/$Xdummyconf"                             && mkfile $Xdummyconf
   Xinitlogfile="$Cachefolder/$Xinitlogfile"                         && mkfile $Xinitlogfile
   Xinitrc="$Cachefolder/$Xinitrc"                                   && mkfile $Xinitrc
@@ -7003,16 +7030,7 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Xservercookie="$Cachefolder/$Xservercookie"                       && mkfile $Xservercookie
   Xtermrc="$Cachefolder/$Xtermrc"                                   && mkfile $Xtermrc
   
-  # systemd files
-  Systemdconsoleservice=$Cachefolder/$Systemdconsoleservice         && mkfile $Systemdconsoleservice
-  Systemdenvironment=$Cachefolder/$Systemdenvironment               && mkfile $Systemdenvironment
-  Systemdjournallogfile=$Sharefolder/$Systemdjournallogfile         && mkfile $Systemdjournallogfile
-  Systemdjournalservice=$Cachefolder/$Systemdjournalservice         && mkfile $Systemdjournalservice
-  Systemdtarget=$Cachefolder/$Systemdtarget                         && mkfile $Systemdtarget
-  Systemdwatchservice=$Cachefolder/$Systemdwatchservice             && mkfile $Systemdwatchservice
-  
   # shared to /x11docker in container
-  Cmdexitcodefile="$Sharefolder/$Cmdexitcodefile"                   && mkfile $Cmdexitcodefile
   Cmdstderrlogfile="$Sharefolder/$Cmdstderrlogfile"                 && mkfile $Cmdstderrlogfile 666
   Cmdstdinfifo="$Sharefolder/$Cmdstdinfifo"
   Cmdstdoutlogfile="$Sharefolder/$Cmdstdoutlogfile"                 && mkfile $Cmdstdoutlogfile 666
@@ -7020,7 +7038,7 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Containerenvironmentfile="$Sharefolder/$Containerenvironmentfile" && mkfile $Containerenvironmentfile 666
   Containerlogfile="$Sharefolder/$Containerlogfile"                 && mkfile $Containerlogfile 666
   Containerrootrc="$Sharefolder/$Containerrootrc"                   && mkfile $Containerrootrc
-  Containeruserfile="$Sharefolder/$Containeruserfile"               && mkfile $Containeruserfile
+  Infostorefile="$Sharefolder/$Infostorefile"                       && mkfile $Infostorefile 666
   Logfile="$Sharefolder/x11docker.log"                              && mkfile $Logfile
   Messagefifo="$Sharefolder/$Messagefifo"
   Pulseaudiocookie="$Sharefolder/$Pulseaudiocookie"
@@ -7049,7 +7067,7 @@ drop_cachefiles() {             # remove some cache files that are not needed in
   esac
   case $Xserver in
     --weston|--weston-xwayland|--kwin|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland) ;;
-    *) rm $Compositorlogfile $Compositorpidfile $Westonini ;;
+    *) rm $Compositorlogfile $Westonini ;;
   esac
   case $Xserver in
     --weston|--kwin|--hostwayland|--tty) rm $Xclientcookie $Xservercookie ;;
@@ -7070,6 +7088,9 @@ drop_cachefiles() {             # remove some cache files that are not needed in
     --xephyr|--xorg|--xdummy|--xdummy-xwayland|--xvfb|--xwayland|--weston-xwayland) 
       [ "$Shareclipboard" = "no" ] && rm $Shareclipboardscript ;;
     *)                                rm $Shareclipboardscript ;;
+  esac
+  case $Xserver in
+    --hostdisplay|--xwin|--nxagent|--hostwayland|--weston|--kwin|--tty) rm $Xkbkeymapfile ;;
   esac
 }
 setup_fifo() {                  # set up fifo channels (also option --stdin)
@@ -7186,7 +7207,7 @@ declare_variables() {           # declare global variables
   
   # Generated scripts
   Containercommandscript="container.CMD"          # Generated script starting container command
-  Containerrootrc="container.rootrc"              # Generated script to set up container, e.g. user creation. Runs as root in container.
+  Containerrootrc="containerrootrc"               # Generated script to set up container, e.g. user creation. Runs as root in container.
   Dockerrc="dockerrc"                             # Generated script to check image, set up host and create $Containercommandscript
   Shareclipboardscript="clipboard.sh"             # --clipboard: Generated script for text clipboard sharing
   Xinitrc="xinitrc"                               # Generated script to set up X, e.g. cookie and xrandr
@@ -7195,8 +7216,9 @@ declare_variables() {           # declare global variables
   # Internal messages and pid storage
   Bgpidfile="backgroundpids"                      # File to store pids and names of background processes that should be terminated on exit
   Dockerstopsignalfifo="$Dockerrc.stop"           # finish() send 'docker stop' signal to dockerrc
+  Infostorefile="info.store"                      # File to store some info like id, pid, name, exit code
   Logmessages=""                                  # Stores messages until logfile is available, needed by logentry()
-  Messagefifo="message.fifo"                      # Message channel for warning/verbose/debugnote/note/error within container, dockerrc, container.rootrc and others
+  Messagefifo="message.fifo"                      # Message channel for warning/verbose/debugnote/note/error within container, dockerrc, containerrootrc and others
   Timetosaygoodbye="timetosaygoodbye"             # File giving term signal to all parties
   Timetosaygoodbyefifo="timetosaygoodbye.fifo"    # Message channel for --init=openrc|runit|sysvinit to shut down on x11docker signal
   Usemkfifo="yes"                                 # Not on Windows nor with kata-runtime
@@ -7212,14 +7234,7 @@ declare_variables() {           # declare global variables
   Xinitlogfile="xinit.log"                        # Logfile for xinit/X server
   Xpraclientlogfile="xpra.client.log"             # Logfile for xpra client
   Xpraserverlogfile="xpra.server.log"             # Logfile for xpra server
-  
-  # Storage of some container info
-  Cmdexitcodefile="container.CMD.exitcode"
-  Containeridfile="container.id"                  # File to store container ID
-  Containeripfile="container.ip"                  # File to store container IP
-  Containerpid1pidfile="container.pid1pid"        # File to store host PID of container PID 1
-  Containeruserfile="container.user"              # File to store container user name
-  
+    
   Dockercommandfile="docker.command"              # File to store generated docker command, needed for --interactive
   Dockerinfofile="docker.info"                    # File to store outpu of 'docker info'
   Imagelistfile="docker.imagelist"                # File with list of local images.Used by x11docker-gui, too
@@ -7292,7 +7307,6 @@ declare_variables() {           # declare global variables
   Autochooseserver="yes"                          # --auto: automatical choice of X server (default)
   Cleanxhost="no"                                 # --clean-xhost: remove xhost access policies on host X
   Compositorerrorcodes="Failed to process Wayland|failed to create display|] fatal:"
-  Compositorpidfile="compositor.pid"              # File to store pid of compositor
   Desktopmode="no"                                # --desktop: image contains a desktop enironment.
   Dpi=""                                          # --dpi: dots per inch. Influenxes font size
   Fullscreen="no"                                 # --fullscreen: Fullscreen mode
@@ -7892,7 +7906,7 @@ Parsed options:    $Parsedoptions"
     create_dockerrc             
     verbose "Generated dockerrc:
 $(nl -ba <$Dockerrc)"
-    ## container.rootrc runs as root in container.
+    ## containerrootrc runs as root in container.
     # Main jobs: create unprivileged container user, disable possible privilege leaks, set local time.
     # Optional jobs: run init system, run DBus daemon, install nvidia driver, create language locale.
     create_containerrootrc
