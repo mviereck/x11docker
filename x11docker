@@ -516,11 +516,6 @@ finish_sigint() {               # trap SIGINT to activate debug mode on finish()
   Debugmode="yes"
   debugnote "Received SIGINT"
   storeinfo error 130
-#  Pid1pid=$(storeinfo dump pid1pid ||:)
-#  checkpid $Pid1pid && {
-#    kill -s SIGINT "$Pid1pid" ||:
-#    kill -s SIGINT $(childpid "$Pid1pid" ||:)
-#  }
   finish
 }
 finish() {                      # trap EXIT routine to clean up background processes and cache
@@ -807,9 +802,6 @@ termpid() {                     # kill PID $1 with codename $2
   }
   
   return 0
-}
-childpid() {
-  pgrep -P "${1:-}"
 }
 
 #### more or less general routines
@@ -3892,7 +3884,7 @@ setup_capabilities() {          # check linux capabilities needed by container
   }
   
   case $Initsystem in
-    none|tini) ;;
+    none|tini|dockerinit) ;;
     systemd)
       Switchcontaineruser="yes"
       Sharecgroup="yes"
@@ -4082,14 +4074,14 @@ create_dockercommand() {        # create command to run docker
   [ "$Stopsignal" ] &&  Dockercommand="$Dockercommand \\
   --stop-signal $Stopsignal"
   
-  # shared files for some init systems
+  # setup and shared files for some init systems
   case $Initsystem in
     dockerinit)
       Dockercommand="$Dockercommand \\
   --init"
     ;;
     tini) 
-#      Tini="$Tinicontainerpath --"
+      Tini="$Tinicontainerpath --"
       Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$Tinibinaryfile:ro" "$Tinicontainerpath")" 
     ;;
@@ -4099,7 +4091,7 @@ create_dockercommand() {        # create command to run docker
   -v $Systemdconsoleservice:/lib/systemd/system/console-getty.service:ro \\
   -v $Systemdwatchservice:/etc/systemd/system/x11docker-watch.service:ro \\
   -v $Systemdjournalservice:/etc/systemd/system/x11docker-journal.service \\
-  -v $Systemdenvironment:/etc/systemd/system.conf.d/x11docker.conf"
+  -v $Systemdenvironment:/etc/systemd/system.conf.d/x11docker.environment.conf"
     ;;
   esac
 
@@ -4277,7 +4269,6 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo "Pid1pid="
   echo "Runtime="
   echo "Signal="
-  echo "Tini="
   echo "Windowmanager="
   echo "Windowmanagercommand="
   echo "Wmcontainerid="
@@ -4383,10 +4374,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
 
   echo "rocknroll || exit 64"
   echo ""
-  
-  [ "$Tinibinaryfile" ] && [ "$Switchcontaineruser" = "no" ] && echo "Tini=\"$Tinicontainerpath --\"" || echo "Tini="
-  echo ""
-  
+    
   echo "Inspect=\"\$($Dockerexe inspect $Imagename --format='{{.Config.Entrypoint}}{{.Config.Cmd}}[{{.Config.User}}][{{.Config.WorkingDir}}]')\""
   echo ""
 
@@ -4425,7 +4413,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
       echo     "Entrypoint=\"\$(cut -d] -f1 <<< \"\$Inspect\" | cut -d[ -f2)\""
       echo     "debugnote \"dockerrc: Image ENTRYPOINT: \$Entrypoint\""
       case $Initsystem in
-        systemd|sysvinit|runit|openrc)
+        systemd|sysvinit|runit|openrc|tini)
           echo "echo \"\$Entrypoint\" | grep -qE 'tini|init|systemd' && {"
           echo "  note \"There seems to be an init system in ENTRYPOINT of image:
     \$Entrypoint
@@ -4438,17 +4426,6 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
           echo "[ \"\$Entrypoint\" = '/init' ] && {"
           echo "  Entrypoint="
           echo "  [ \"\$Containercommand\" ] || Containercommand=\"sh -c 'while :; do sleep 10; done'\""
-          echo "}"
-        ;;
-        tini)
-          echo "echo \"\$Entrypoint\" | grep -qE 'tini|init|systemd' && {"
-          echo "  note \"There seems to be an init system in ENTRYPOINT of image:
-    \$Entrypoint
-  x11docker will try to run this instead of tini from host.
-  Returning exit code of container command will fail.
-  You can disable this ENTRYPOINT with option --no-entrypoint.\""
-          echo "  Tini="
-          echo "  Exec=exec"
           echo "}"
         ;;
         none)
@@ -4603,9 +4580,6 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   }
   echo     "  echo ''"
 
-#  [ "$Switchcontaineruser" = "yes" ] && echo "  echo 'export TINI_SUBREAPER=1'"
-  [ "$Initsystem" = "tini" ] && echo "  echo 'export TINI_SUBREAPER=1'"
-
   echo     "  echo ''"
   echo     "  echo 'bash --version >/dev/null 2>&1 && export SHELL=/bin/bash || export SHELL=/bin/sh'"
   echo     "  echo 'export TERM=xterm'"
@@ -4646,18 +4620,18 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   }
   
   echo     "  echo \"debugnote \\\"$(basename $Containercommandscript): Running container command: 
-  \$Tini \\\$Dbus \$Entrypoint \$Containercommand
+  \\\$Dbus \$Entrypoint \$Containercommand
   \\\"\""
   echo     "  echo ''"
   
   echo     "  echo 'exec 1>&6 2>&7 6>&- 7>&-'"
   case $Interactive in
     no)
-      echo "  echo \"\$Exec \$Tini \\\$Dbus \$Entrypoint \$Containercommand $( [ "$Forwardstdin" = "yes" ] && echo "<$(convertpath share $Cmdstdinfifo)") >>$(convertpath share $Cmdstdoutlogfile) 2>>$(convertpath share $Cmdstderrlogfile)\""
+      echo "  echo \"\$Exec \\\$Dbus \$Entrypoint \$Containercommand $( [ "$Forwardstdin" = "yes" ] && echo "<$(convertpath share $Cmdstdinfifo)") >>$(convertpath share $Cmdstdoutlogfile) 2>>$(convertpath share $Cmdstderrlogfile)\""
     ;;
     yes)
       echo "  echo 'exec >/dev/stdout 2>/dev/stderr'"
-      echo "  echo \"\$Exec \$Tini \\\$Dbus \$Entrypoint \$Containercommand\""
+      echo "  echo \"\$Exec \\\$Dbus \$Entrypoint \$Containercommand\""
     ;;
   esac
   echo     "  echo \"storeinfo cmdexitcode \\\$?\""
@@ -5581,7 +5555,8 @@ reload() {
         echo "exec /usr/local/bin/x11docker-agetty"
       ;;
       tini)
-        echo "exec $Tinicontainerpath -- /usr/local/bin/x11docker-agetty"
+#        echo "exec $Tinicontainerpath -- /usr/local/bin/x11docker-agetty"
+        echo "exec /usr/local/bin/x11docker-agetty"
       ;;
       sysvinit)
         echo "/usr/local/bin/x11docker-watch &"
