@@ -420,7 +420,7 @@ ${Colredbg}x11docker ERROR:${Colnorm} $Message
   # output to X dialogbox if not running in terminal
   [ "$Runsinterminal" = "no" ] && [ "$Silent" = "no" ] && export ${Hostxenv:-DISPLAY} && alertbox "x11docker ERROR" "$Message" &
   
-  finish 64
+  finish
 }
 warning() {                     # show warning messages
   [ "$Verbose" = "no" ] && echo "${Colyellow}x11docker WARNING:${Colnorm} $*
@@ -497,7 +497,7 @@ setup_verbosity() {             # options --verbose, --stdout, --stderr
   [ "$Showstdout" = "yes" ] && {
     { 
       trap '' SIGINT
-      waitforlogentry 'tailstdout' $Containerlogfile 'pid check is ready' "" infinity
+      waitforlogentry 'tailstdout' $Storeinfofile 'pid1pid=' "" infinity
       tail --pid="$$" --retry -n +1 -F $Cmdstdoutlogfile     2>/dev/null
     } &
   }
@@ -512,10 +512,16 @@ setup_verbosity() {             # options --verbose, --stdout, --stderr
 
 #### exit
 finish_sigint() {               # trap SIGINT to activate debug mode on finish()
+  local Pid1pid
   Debugmode="yes"
   debugnote "Received SIGINT"
   storeinfo error 130
-  finish 130
+#  Pid1pid=$(storeinfo dump pid1pid ||:)
+#  checkpid $Pid1pid && {
+#    kill -s SIGINT "$Pid1pid" ||:
+#    kill -s SIGINT $(childpid "$Pid1pid" ||:)
+#  }
+  finish
 }
 finish() {                      # trap EXIT routine to clean up background processes and cache
   local Pid Name Zeit Exitcode Pid1pid= Dockerlogspid= Dockerstopshellpid= Wmcontainerpid1= Watchmessagefifopid= i
@@ -531,21 +537,20 @@ finish() {                      # trap EXIT routine to clean up background proce
   trap - EXIT
   trap - ERR
   trap - SIGINT
-  Exitcode="${1:-0}"
   
   # --pw=sudo: no password prompt here, rather fail ### FIXME
   [ "$Sudo" ] && {
     sudo -n echo 2>/dev/null && Sudo="sudo -n" || Sudo=""
   }
 
-  # check for background processes stored in $Bgpidfile
+  # check for background processes stored in $Storepidfile
 #  debugnote "finish(): List of stored background processes:
-#$(cat $Bgpidfile 2>/dev/null)"
+#$(cat $Storepidfile 2>/dev/null)"
   while read -r Line ; do
     
     Pid="$(echo $Line  | awk '{print $1}')"
     Name="$(echo $Line | awk '{print $2}')"
-    debugnote "finish(): Checking pid $Pid ($Name): $(pspid $Pid ||:)"
+    debugnote "finish(): Checking pid $Pid ($Name): $(pspid $Pid || echo '(already gone)')"
       
     checkpid $Pid && {
       case $Name in
@@ -580,7 +585,7 @@ finish() {                      # trap EXIT routine to clean up background proce
         ;;
       esac
     }
-  done < <(tac "$Bgpidfile" 2>/dev/null)
+  done < <(tac "$Storepidfile" 2>/dev/null)
 
   # Check if container is still running -> docker stop
   checkpid $Pid1pid && {
@@ -637,7 +642,7 @@ finish() {                      # trap EXIT routine to clean up background proce
   Exitcode=$(storeinfo dump error ||:)
   Exitcode="${Exitcode:-0}"
   debugnote "x11docker exit code: $Exitcode"
-  storeinfo dump cmdexitcode >/dev/null &&{
+  storeinfo dump cmdexitcode >/dev/null && {
     Exitcode=$(storeinfo dump cmdexitcode)
     debugnote "CMD exit code: $Exitcode"
   }
@@ -764,12 +769,12 @@ $Line"
     }
   done
 }
-storepid () {                   # store pid $1 and name $2 of background process in file $Bgpidfile.
+storepid() {                    # store pid $1 and name $2 of process in file $Storepidfile.
   # store Pid and process name of background processes in file
   # for use on exit / with trap to clean up with background processes
   # this subroutine has a twin in xinitrc
-  echo ${1:-} ${2:-} >> $Bgpidfile
-  debugnote "storepid(): Stored background pid ${1:-} of ${2:-}: $(pspid ${1:-})"
+  echo ${1:-} ${2:-} >> $Storepidfile
+  debugnote "storepid(): Stored pid ${1:-} of ${2:-}: $(pspid ${1:-})"
 #  disown ${1:-} 2>/dev/null ||:
 }
 checkpid() {                    # check if PID $1 is active
@@ -779,7 +784,8 @@ checkpid() {                    # check if PID $1 is active
 pspid() {                       # ps -p $1 --no-headers
   # On some systems ps does not have option --no-headers.
   # On some systems (busybox) ps -p is not supported  ### FIXME
-  ps -p ${1:-} 2>/dev/null | tail -n+2
+  # return 1 if not found
+  LC_ALL=C ps -p "${1:-}" 2>/dev/null | grep -v 'TIME' | grep .
 }
 termpid() {                     # kill PID $1 with codename $2
   # TERM
@@ -801,6 +807,9 @@ termpid() {                     # kill PID $1 with codename $2
   }
   
   return 0
+}
+childpid() {
+  pgrep -P "${1:-}"
 }
 
 #### more or less general routines
@@ -879,19 +888,20 @@ download() {                    # download file at URL $1 and store it in file $
     curl) curl -L "${1:-}" --output "${2:-}" ;;
   esac
 }
-storeinfo() {
+storeinfo() {                   # store some information for later use
   # store and provide pieces of information
+  # replace entry if codeword is already present
   # stored as codeword=string
   #  $1 codeword
   #  $2 string to store
-  #    or dump stored string:
+  #    or dump stored string: (return 1 if not found)
   #  $1 dump
   #  #2 codeword
   case "${1:-}" in
-    dump) grep "^${2:-}="  $Infostorefile | sed "s/^${2:-}=//" ;;
+    dump) grep "^${2:-}="  $Storeinfofile | sed "s/^${2:-}=//" | grep . ;;
     *) 
-      sed -i "/^${1:-}=/d" $Infostorefile
-      echo "${1:-}=${2:-}" >> $Infostorefile
+      sed -i "/^${1:-}=/d" $Storeinfofile
+      echo "${1:-}=${2:-}" >> $Storeinfofile
       debugnote "storeinfo(): ${1:-}=${2:-}"
     ;;
   esac
@@ -3229,6 +3239,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   declare -f mkfile
   declare -f rocknroll 
   declare -f saygoodbye
+  declare -f storeinfo
   declare -f storepid 
   declare -f waitfortheend 
   echo "$Messagefifofuncs"
@@ -3249,12 +3260,13 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   echo "}"
   echo ""
 
-  echo "Bgpidfile='$Bgpidfile'"
   echo "Cachebasefolder='$Cachebasefolder'"
   echo "Hostuser='$Hostuser'"
   echo "Hostusergid='$Hostusergid'"
   echo "Messagefile='$Messagefifo'"
   echo "Output=\"\$(getprimary)\""
+  echo "Storeinfofile='$Storeinfofile'"
+  echo "Storepidfile='$Storepidfile'"
   echo "Timetosaygoodbye='$Timetosaygoodbye'"
   echo "Timetosaygoodbyefifo='$Timetosaygoodbyefifo'"
   echo "Usemkfifo='$Usemkfifo'"
@@ -3298,7 +3310,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
         case "$Hostssh" in
           no)
             echo     "echo 'Requesting $Trusted cookie from X server'"
-            echo     "xauth -v -i -f Xclientcookie generate $Newdisplay . $Trusted timeout 3600"
+            echo     "xauth -v -i -f $Xclientcookie generate $Newdisplay . $Trusted timeout 3600"
           ;;
           yes)
             echo     "verbose 'Can not use cookies created over SSH. Will bake one myself.'"
@@ -3325,15 +3337,15 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
         echo         "  # still no cookie? try to create one without extension security"
         echo         "  debugnote 'xinitrc: Failed to retrieve trusted cookie from X server. Will bake one myself.'"
         echo         "  echo 'Failed to retrieve trusted cookie from X server. Will bake one myself.'"
-        echo         "  xauth -v -i -f Xclientcookie add :$Newdisplaynumber . $(makecookie)"
+        echo         "  xauth -v -i -f $Xclientcookie add :$Newdisplaynumber . $(makecookie)"
         echo         "  ls -l $Xclientcookie"
         echo         "}"
         echo         ""
         echo         "# Prepare cookie with localhost identification disabled by ffff, needed if X socket is shared. ffff means 'familiy wild'"
-        echo         "Cookie=\"\$(xauth -i -f Xclientcookie nlist | sed -e 's/^..../ffff/')\""
-        echo         "echo \"\$Cookie\" | xauth -v -i -f Xclientcookie nmerge -"
+        echo         "Cookie=\"\$(xauth -i -f $Xclientcookie nlist | sed -e 's/^..../ffff/')\""
+        echo         "echo \"\$Cookie\" | xauth -v -i -f $Xclientcookie nmerge -"
         echo         ""
-        echo         "debugnote \"xinitrc: Created cookie: \$(xauth -f Xclientcookie list 2>&1)\""
+        echo         "debugnote \"xinitrc: Created cookie: \$(xauth -f $Xclientcookie list 2>&1)\""
         echo         "ls -l $Xclientcookie"
         echo         "cp $Xclientcookie $Xservercookie"
         echo         "chmod 644 $Xclientcookie"
@@ -3542,7 +3554,8 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   }
   
   [ "$Showdisplayenvironment" = "yes" ] && echo "stdout '$Newxenv'"     # --showenv
-  echo             "echo 'x11docker: xinitrc is ready'"
+  echo             "echo 'xinitrc: xinitrc is ready'"
+  echo             "storeinfo xinitrc ready"
   echo             "waitfortheend"
   return 0
 } >> $Xinitrc
@@ -3969,7 +3982,7 @@ setup_hostdbus() {              # option --hostdbus: connect to host DBus sessio
   return 0
 }
 create_dockercommand() {        # create command to run docker
-  local Line= Memory
+  local Line= Memory Tini=
   
   Dockercommand="$Dockerexe run --tty"
   Wmdockercommand="$Dockerexe run --rm --detach"
@@ -4076,6 +4089,7 @@ create_dockercommand() {        # create command to run docker
   --init"
     ;;
     tini) 
+#      Tini="$Tinicontainerpath --"
       Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$Tinibinaryfile:ro" "$Tinicontainerpath")" 
     ;;
@@ -4182,9 +4196,10 @@ create_dockercommand() {        # create command to run docker
   $Customdockeroptions"
   Dockercommand="$Dockercommand \\
   --"
+  
   case $Switchcontaineruser in
-    no)  Dockercommand="$Dockercommand $Imagename /bin/sh - $(convertpath share $Containercommandscript)" ;;  # dockerrc runs containerrootrc with 'docker exec'
-    yes) Dockercommand="$Dockercommand $Imagename /bin/sh - $(convertpath share $Containerrootrc)"  ;;    # containerrootrc runs container.CMD.sh
+    no)  Dockercommand="$Dockercommand $Imagename $Tini /bin/sh - $(convertpath share $Containercommandscript)" ;;  # dockerrc runs containerrootrc with 'docker exec'
+    yes) Dockercommand="$Dockercommand $Imagename $Tini /bin/sh - $(convertpath share $Containerrootrc)"  ;;    # containerrootrc runs container.CMD.sh
   esac
 
   return 0
@@ -4230,17 +4245,17 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
     echo ""
   }
   
-  echo "Bgpidfile='$Bgpidfile'"
   echo "Compositorlogfile='$Compositorlogfile'"
   echo "Containercommand=\"$Containercommand\""
   echo "Hostuser='$Hostuser'"
   echo "Hostusergid='$Hostusergid'"
   echo "Imagename=\"$Imagename\""
-  echo "Infostorefile='$Infostorefile'"
   echo "Messagefile='$Messagefifo'"
   echo "Newxenv='$Newxenv'"
   echo "export PATH='$PATH'"
   echo "Showdisplayenvironment='$Showdisplayenvironment'"
+  echo "Storeinfofile='$Storeinfofile'"
+  echo "Storepidfile='$Storepidfile'"
   echo "Timetosaygoodbye='$Timetosaygoodbye'"
   echo "Timetosaygoodbyefifo='$Timetosaygoodbyefifo'"
   echo "Usemkfifo='$Usemkfifo'"
@@ -4273,8 +4288,7 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   [ "$Debugmode" = "yes" ] && {
     echo "PS4='+ dockerrc: \$(date +%S+%3N) '"
     #echo "set -x"
-#    declare -f traperror | sed 's/Command/dockerrc: Command/'
-    #echo "set -o errtrace"
+    #declare -f traperror | sed 's/Command/dockerrc: Command/'
     echo "traperror() {                   # trap ERR: --debug: Output for 'set -o errtrace'"
     echo '  debugnote "dockerrc: Command at Line ${2:-} returned with error code ${1:-}:
   ${4:-}
@@ -4486,13 +4500,13 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   echo     "  echo '  LC_ALL=C printf %.3f\\\\n \"\$((10**9 * \$@))e-9\"'"
   echo     "  echo '}'"
   echo     "  echo '$Messagefifofuncs'"
-  echo     "  echo 'Infostorefile=$(convertpath share $Infostorefile)'"
   echo     "  echo 'Messagefile=$(convertpath share $Messagefifo)'"
+  echo     "  echo 'Storeinfofile=$(convertpath share $Storeinfofile)'"
   echo     "  echo 'Timetosaygoodbye=$(convertpath share $Timetosaygoodbye)'"
   echo     "  echo 'Timetosaygoodbyefifo=$(convertpath share $Timetosaygoodbyefifo)'"
   echo     "  echo ''"
   
-  echo     "  echo 'waitforlogentry $(basename $Containercommandscript) $(convertpath share $Containerlogfile) \"$(basename $Containerrootrc) is ready\" "" infinity'"
+  echo     "  echo 'waitforlogentry $(basename $Containercommandscript) \$Storeinfofile containerrootrc=ready "" infinity'"
 
   echo     "  echo 'debugnote \"Running $(basename $Containercommandscript): Unprivileged user commands in container\"'"
   echo     "  echo ''"
@@ -4693,8 +4707,8 @@ create_dockerrc() {             # create dockerrc: This script runs as root (or 
   }
   
   echo "# Send signal to run X and wait for X to be ready"
-  echo "echo 'x11docker: dockerrc is ready for docker run' >>'$Containerlogfile'"
-  echo "waitforlogentry 'dockerrc' '$Xinitlogfile' 'xinitrc is ready' '$Xiniterrorcodes'"
+  echo 'storeinfo readyforX ready'
+  echo "waitforlogentry 'dockerrc' $Xinitlogfile 'xinitrc is ready' '$Xiniterrorcodes'"
   echo ""
   
   echo "rocknroll || exit 64"
@@ -4801,7 +4815,6 @@ $Wmdockercommand"'
   echo "done"
   echo 'storeinfo pid1pid "$Pid1pid"'
   [ "$Showcontainerpid1pid" = "yes" ] && echo "stdout \$Pid1pid  # --showpid1"
-  echo "echo 'x11docker: container pid check is ready' >>$Containerlogfile"
   echo ""
 
   echo "# Get IP of container"
@@ -4822,10 +4835,10 @@ $(tail $Containerlogfile)\""
   echo ""
   
   [ "$Switchcontaineruser" = "no" ] && {
-    echo "# copy $(basename $Containerrootrc) inside of container to avoid possible noexec of host home."
-    echo "$Dockerexe exec --tty $Containername sh -c 'cp $(convertpath share $Containerrootrc) /tmp/$(basename $Containerrootrc) ; chmod 644 /tmp/$(basename $Containerrootrc)' 2>&1 | rmcr >>$Containerlogfile"
+    echo "# copy containerrootrc inside of container to avoid possible noexec of host home."
+    echo "$Dockerexe exec --tty $Containername sh -c 'cp $(convertpath share $Containerrootrc) /tmp/containerrootrc ; chmod 644 /tmp/containerrootrc' 2>&1 | rmcr >>$Containerlogfile"
     echo "# run container root setup. container.CMD.sh will wait until setup script is ready."
-    echo "$Dockerexe exec --tty -u root $Containername /bin/sh /tmp/$(basename $Containerrootrc) 2>&1 | rmcr >>$Containerlogfile"
+    echo "$Dockerexe exec --tty -u root $Containername /bin/sh /tmp/containerrootrc 2>&1 | rmcr >>$Containerlogfile"
     echo ""
   }
   
@@ -4849,7 +4862,7 @@ create_containerrootrc() {      # create container root setup script: This scrip
 
   echo "#! /bin/sh"
   echo ""
-  echo "# $(basename $Containerrootrc)"
+  echo "# containerrootrc"
   echo "# This Script is executed as root in container."
   echo "# - Create container user"
   echo "# - Time zone"
@@ -4865,12 +4878,12 @@ create_containerrootrc() {      # create container root setup script: This scrip
   declare -f storeinfo
   declare -f rocknroll
   echo "$Messagefifofuncs"
-  echo "Infostorefile='$(convertpath share $Infostorefile)'"
   echo "Messagefile=$(convertpath share $Messagefifo)"
+  echo "Storeinfofile='$(convertpath share $Storeinfofile)'"
   echo "Timetosaygoodbye=$(convertpath share $Timetosaygoodbye)"
   echo ""
 
-  echo "debugnote 'Running $(basename $Containerrootrc): Setup as root in container'"
+  echo "debugnote 'Running containerrootrc: Setup as root in container'"
   echo ""
 
   echo "# Check type of libc"
@@ -5087,7 +5100,7 @@ Messagefile=$(convertpath share $Messagefifo)
     echo ""
     
     echo "echo \"#! /bin/sh
-# User switch from root in $(basename $Containerrootrc) to unprivileged user in container.CMD.sh.
+# User switch from root in containerrootrc to unprivileged user in container.CMD.sh.
 # Additionally, su triggers logind and elogind. (Except su from busybox?)
 # Called by x11docker-agetty.
 . /usr/local/bin/x11docker-message
@@ -5557,10 +5570,7 @@ reload() {
     echo ""
   }
 
-  # message to container.CMD.sh
-  echo "# Ready."
-  echo "debugnote '$(basename $Containerrootrc) is ready'"
-  echo "echo 'x11docker: $(basename $Containerrootrc) is ready' >> $(convertpath share $Containerlogfile)"
+  echo "storeinfo containerrootrc ready"   # signal for container.CMD.sh
   echo ""
   
   [ "$Switchcontaineruser" = "yes" ] && {   # if "no", container.CMD.sh is executed in command line $Dockercommand
@@ -5609,10 +5619,12 @@ create_xtermrc() {              # create xtermrc: script to prompt for password 
   echo "# Ask for password if needed."
   echo "# Runs in terminal or in an additional terminal window"
   echo ""
+  declare -f storeinfo
   echo "$Messagefifofuncs"
   echo ""
   #[ "$Debugmode" = "yes" ] && echo "set -x"
   echo "Messagefile='$Messagefifo'"
+  echo "Storeinfofile='$Storeinfofile'"
   echo "export TERM=xterm SHELL=/bin/bash"
   echo ""  
   echo "debugnote 'Running xtermrc: Ask for password if needed ($Passwordneeded)'"
@@ -5633,7 +5645,7 @@ create_xtermrc() {              # create xtermrc: script to prompt for password 
     *)              echo "$Passwordcommand \"${Sudo}bash $Dockerrc \"" ;;
   esac
   echo ""  
-  echo "debugnote 'xtermrc is ready'"  
+  echo "storeinfo xtermrc ready"  
   echo "exit 0"
   return 0
 } >> $Xtermrc
@@ -5652,7 +5664,7 @@ start_docker() {                # start docker container
     ;;
     *)       $Passwordterminal "/usr/bin/env bash $Xtermrc" ;;
   esac
-  waitforlogentry "start_docker()" "$Messagelogfile" "xtermrc is ready" "" infinity
+  waitforlogentry "start_docker()" "$Storeinfofile" "xtermrc=ready" "" infinity
 
   rocknroll || return 64
   
@@ -5690,9 +5702,9 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
     declare -f storeinfo
     declare -f storepid
     echo ""
-    echo "Bgpidfile='$Bgpidfile'"
-    echo "Infostorefile='$Infostorefile'"
     echo "Messagefile='$Messagefifo'"
+    echo "Storeinfofile='$Storeinfofile'"
+    echo "Storepidfile='$Storepidfile'"
     [ "$Dbusrunsession" = "yes" ] && echo "Dbus='$(command -v dbus-run-session >/dev/null)'"
     
     echo "export $Newxenv"
@@ -5738,9 +5750,9 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
   nl -ba <$Containercommandscript >> $Containerlogfile
 
   # Send signal to run X and wait for X to be ready
-  echo "x11docker: dockerrc is ready" >>$Containerlogfile
+  storeinfo readyforX ready
 
-  waitforlogentry "$Xserver" "$Xinitlogfile" "xinitrc is ready" "$Xiniterrorcodes"
+  waitforlogentry "$Xserver" "$Storeinfofile" "xinitrc=ready" "$Xiniterrorcodes"
   
   # run start script
   unpriv "/usr/bin/env bash $Containercommandscript"
@@ -5748,7 +5760,6 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
 
   [ "$Showcontainerid" = "yes" ]      && echo ""             # --showid: empty here, no container ID
   [ "$Showcontainerpid1pid" = "yes" ] && echo $Hostexepid    # --showpid1
-  echo 'x11docker: pid check is ready' >>$Containerlogfile
 
   setonwatchpidlist $Hostexepid hostexe
       
@@ -6927,6 +6938,7 @@ check_passwordfrontend() {      # check password prompt frontend (pkexec, su, su
                Passwordcommand="bash -c" ; Passwordfrontend="none" ; Passwordneeded="no" ; Passwordterminal="bash -c"
     }
   }
+  [ "$Passwordcommand" = "bash -c" ] && Passwordcommand="eval"
   return 0
 }
 check_terminalemulator() {      # check terminal for password prompt of su or sudo
@@ -6968,7 +6980,7 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   local Line
   # create base cache folder
   [ "$Cachebasefolder" ] || {
-    Cachebasefolder="$Hostuserhome/.cache/x11docker"    ### FIXME really a good idea for Windows? WSL cache provides performance, but maybe must not be shared with container to avoid file access errors.
+    Cachebasefolder="$Hostuserhome/.cache/x11docker"    ### FIXME really a good idea for MS Windows? WSL cache provides performance, but maybe must not be shared with container to avoid file access errors.
 #    case $Winsubsystem in
 #      "") Cachebasefolder="$Hostuserhome/.cache/x11docker" ;;
 #      *)  Cachebasefolder="$(convertpath subsystem "$(cmd.exe /C "echo %userprofile%")" | rmcr)/x11docker/cache" ;;
@@ -7002,7 +7014,6 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   #export Cachefolder Sharefolder
   
   # host only access
-  Bgpidfile="$Cachefolder/$Bgpidfile"                               && mkfile $Bgpidfile
   Compositorlogfile="$Cachefolder/$Compositorlogfile"               && mkfile $Compositorlogfile
   Dockercommandfile="$Cachefolder/$Dockercommandfile"               && mkfile $Dockercommandfile
   Dockerinfofile="$Cachefolder/$Dockerinfofile"                     && mkfile $Dockerinfofile
@@ -7012,6 +7023,7 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Messagelogfile="$Cachefolder/$Messagelogfile"                     && mkfile $Messagelogfile
   Pulseaudioconf="$Cachefolder/$Pulseaudioconf"                     && mkfile $Pulseaudioconf
   Shareclipboardscript="$Cachefolder/$Shareclipboardscript"         && mkfile $Shareclipboardscript
+  Storepidfile="$Cachefolder/$Storepidfile"                         && mkfile $Storepidfile
   Systemdconsoleservice=$Cachefolder/$Systemdconsoleservice         && mkfile $Systemdconsoleservice
   Systemdenvironment=$Cachefolder/$Systemdenvironment               && mkfile $Systemdenvironment
   Systemdjournallogfile=$Sharefolder/$Systemdjournallogfile         && mkfile $Systemdjournallogfile
@@ -7038,11 +7050,11 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Containerenvironmentfile="$Sharefolder/$Containerenvironmentfile" && mkfile $Containerenvironmentfile 666
   Containerlogfile="$Sharefolder/$Containerlogfile"                 && mkfile $Containerlogfile 666
   Containerrootrc="$Sharefolder/$Containerrootrc"                   && mkfile $Containerrootrc
-  Infostorefile="$Sharefolder/$Infostorefile"                       && mkfile $Infostorefile 666
   Logfile="$Sharefolder/x11docker.log"                              && mkfile $Logfile
   Messagefifo="$Sharefolder/$Messagefifo"
   Pulseaudiocookie="$Sharefolder/$Pulseaudiocookie"
   Pulseaudiosocket="$Sharefolder/$Pulseaudiosocket"
+  Storeinfofile="$Sharefolder/$Storeinfofile"                       && mkfile $Storeinfofile 666
   Timetosaygoodbye="$Sharefolder/$Timetosaygoodbye"                 && mkfile $Timetosaygoodbye
   Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo"
   Xclientcookie="$Sharefolder/$Xclientcookie"                       && mkfile $Xclientcookie
@@ -7214,11 +7226,11 @@ declare_variables() {           # declare global variables
   Xtermrc="xtermrc"                               # Generated script for password prompt
     
   # Internal messages and pid storage
-  Bgpidfile="backgroundpids"                      # File to store pids and names of background processes that should be terminated on exit
   Dockerstopsignalfifo="$Dockerrc.stop"           # finish() send 'docker stop' signal to dockerrc
-  Infostorefile="info.store"                      # File to store some info like id, pid, name, exit code
   Logmessages=""                                  # Stores messages until logfile is available, needed by logentry()
   Messagefifo="message.fifo"                      # Message channel for warning/verbose/debugnote/note/error within container, dockerrc, containerrootrc and others
+  Storeinfofile="store.info"                      # File to store some info like id, pid, name, exit code
+  Storepidfile="store.pids"                       # File to store pids and names of background processes that should be terminated on exit
   Timetosaygoodbye="timetosaygoodbye"             # File giving term signal to all parties
   Timetosaygoodbyefifo="timetosaygoodbye.fifo"    # Message channel for --init=openrc|runit|sysvinit to shut down on x11docker signal
   Usemkfifo="yes"                                 # Not on Windows nor with kata-runtime
@@ -7278,7 +7290,7 @@ declare_variables() {           # declare global variables
   Hostsystem=""                                   # $ID from /etc/os-release
   Hostutctime=""                                  # Time zone from host as offset to UTC
   Hostwaylandsocket="$WAYLAND_DISPLAY"            # Store host wayland socket name
-  Hostxauthority="$(unspecialstring "Xauthority-${DISPLAY:-host}")"   # File to store copy of $XAUTHORITY
+  Hostxauthority="Xauthority.host.$(unspecialstring "${DISPLAY:-unknown}")"   # File to store copy of $XAUTHORITY
   Hostxenv=""                                     # Collection of host X environment variables
   Hostxsocket=""                                  # Socket of DISPLAY in /tmp/.X11-unix
   Nvidiacontainerfile="/usr/local/bin/NVIDIA-installer.run"  # --gpu: Path to nvidia installer in container
@@ -7356,10 +7368,10 @@ declare_variables() {           # declare global variables
   Customwestonini=""                              # --westonini: Custom config file for weston
   Westonini="weston.ini"                          # Generated config file for weston
   Xdummyconf="xorg.xdummy.conf"                   # --xdummy, --xpra: Generated xorg.conf for dummy video driver
-  Xclientcookie="Xclientcookie"                   # Generated X client cookie. Normally same as $Xservercookie, except for --hostdisplay and --nxagent
-  Xkbkeymapfile="xorg.xkb.keymap"                 # --keymap: File to store output of host keymap in xinitrc
+  Xclientcookie="Xauthority.client"               # Generated X client cookie. Normally same as $Xservercookie, except for --hostdisplay and --nxagent
+  Xkbkeymapfile="xkb.keymap"                      # --keymap: File to store output of host keymap in xinitrc
   Xorgconf=""                                     # --xorgconf: custom xorg.conf
-  Xservercookie="Xservercookie"                   # Generated X server cookie
+  Xservercookie="Xauthority.server"               # Generated X server cookie
   Xorgwrapper="Xorg.xdummy.wrapper"               # --xpra, --xdummy: Fork from xpra to wrap Xorg for Xdummy
   
   # Window manager
@@ -7910,7 +7922,7 @@ $(nl -ba <$Dockerrc)"
     # Main jobs: create unprivileged container user, disable possible privilege leaks, set local time.
     # Optional jobs: run init system, run DBus daemon, install nvidia driver, create language locale.
     create_containerrootrc
-    verbose "Generated $(basename $Containerrootrc):
+    verbose "Generated containerrootrc:
 $(nl -ba <$Containerrootrc)"
     create_xtermrc              # xtermrc to prompt for password if needed.
   }
@@ -7960,7 +7972,7 @@ $(nl -ba <$Westonini)"
   } <&0 & storepid $! containershell
   
   #### Start X server [and/or Wayland compositor]
-  waitforlogentry "start_xserver()" $Containerlogfile "dockerrc is ready" infinity
+  waitforlogentry "start_xserver()" $Storeinfofile "readyforX=ready" infinity
   rocknroll && [ "$Compositorcommand" ] && start_compositor
   rocknroll && start_xserver
 
@@ -7972,7 +7984,7 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
-  # BUG --interactive fails
+  # replace find in containerrootrc, missing in fedora images
   # Reduce number of files
   #  - Store container info like ID, PID etc in one file
 
