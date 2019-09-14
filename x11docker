@@ -246,8 +246,8 @@ Init system, elogind and DBus daemon:
                        used with one of --init=openrc|runit|sysvinit
      --dbus [=system]  Run DBus user session daemon for container command.
                        With argument 'system' also run a DBus system daemon. 
-                       Rather use one of --init=systemd|openrc|runit|sysvinit
-                       to run the DBus system daemon.
+                       (Rather use one of --init=systemd|openrc|runit|sysvinit
+                       to run the DBus system daemon.)
      --hostdbus        Connect to DBus user session from host.
 
 Container capabilities:
@@ -264,6 +264,9 @@ Container capabilities:
                        currently free RAM x FACTOR and available CPUs x FACTOR.
                        Allowed range is 0 < FACTOR <= 1. 
                        Default for --limit without argument FACTOR: 0.5
+     --newprivileges [=yes|no|auto]  Set or unset docker run option 
+                       --security-opt=no-new-privileges. Default with no
+                       argument is 'yes'. Default for most cases is 'no'.
 
 Miscellaneous:
      --launcher        Create application launcher on desktop and exit. 
@@ -826,19 +829,27 @@ mysleep() {                     # catch cases where sleep only supports integer
 storeinfo() {                   # store some information for later use
   # store and provide pieces of information
   # replace entry if codeword is already present
-  # stored as codeword=string
-  #  $1 codeword
-  #  $2 string to store
-  #    or dump stored string: (return 1 if not found)
-  #  $1 dump
-  #  #2 codeword
+  # Store as codeword=string:
+  #   $1 codeword
+  #   $2 string to store
+  # or dump stored string: (return 1 if not found)
+  #   $1 dump
+  #   #2 codeword
+  # or drop stored string:
+  #   $1 drop
+  #   #2 codeword
   case "${1:-}" in
-    dump) grep "^${2:-}="  $Storeinfofile | sed "s/^${2:-}=//" | grep . ;;
-    *) 
-      sed -i "/^${1:-}=/d" $Storeinfofile
-      echo "${1:-}=${2:-}" >> $Storeinfofile
-      debugnote "storeinfo(): ${1:-}=${2:-}"
-    ;;
+    dump) ;;
+    drop|*) sed -i "/^${1:-}=/d" $Storeinfofile ;;                                # drop entry (also if storing new entry)
+  esac
+  case "${1:-}" in
+    dump)   grep "^${2:-}="      $Storeinfofile | sed "s/^${2:-}=//" | grep . ;;  # dump entry
+    drop) ;;
+    *)      echo "${1:-}=${2:-}" >> $Storeinfofile ;;                             # store entry
+  esac
+  case "${1:-}" in
+    dump|drop) ;;
+    *) debugnote "storeinfo(): ${1:-}=${2:-}"
   esac
 }
 rmcr() {                        # remove carriage return to translate DOS/Windows newlines into UNIX newlines
@@ -3714,7 +3725,7 @@ create_dockercommand() {        ### create command to run docker
   --cap-add $Line"
   done < <(store_runoption dump cap)
 
-  # default yes, do not gain privileges
+  # default no, do not gain privileges
   [ "$Allownewprivileges" = "no" ] && Dockercommand="$Dockercommand \\
   --security-opt no-new-privileges"
 
@@ -3857,7 +3868,11 @@ setup_capabilities() {          # check linux capabilities needed by container
   # compare: man capabilities
 
   [ "$Sudouser" = "yes" ]       && Adminusercaps="yes"
-  [ "$Capdropall" = "no" ]      && Allownewprivileges="yes"
+  [ "$Capdropall" = "no" ]      && [ "$Allownewprivileges" = "auto" ] && { 
+    note "Option --cap-default: Enabling option --newprivileges=yes.
+  You can avoid this with --newprivileges=no"
+    Allownewprivileges="yes"
+  }
   
   # --sudouser
   [ "$Sudouser" = "yes" ] && warning "Option --sudouser severly reduces container security.
@@ -3897,12 +3912,30 @@ setup_capabilities() {          # check linux capabilities needed by container
   
   [ "$Adminusercaps" = "yes" ] && {
     Switchcontainerusercaps="yes"
-    Allownewprivileges="yes"
     store_runoption cap "CHOWN KILL FSETID FOWNER SETPCAP"
+    [ "$Allownewprivileges" = "auto" ] && {
+      note "Option --sudouser: Enabling option --newprivileges=yes.
+  You can avoid this with --newprivileges=no"
+      Allownewprivileges="yes"
+    }
   }
   [ "$Switchcontainerusercaps" = "yes" ] && store_runoption cap "SETUID SETGID DAC_OVERRIDE AUDIT_WRITE"
   
-  [ "$Sharegpu" = "yes" ] && [ "$Nvidiainstallerfile" ] && store_runoption cap "SETUID SETGID DAC_OVERRIDE CHOWN FOWNER" && Allownewprivileges="yes"
+  [ "$Sharegpu" = "yes" ] && [ "$Nvidiainstallerfile" ] && {
+    store_runoption cap "SETUID SETGID DAC_OVERRIDE CHOWN FOWNER"
+    [ "$Allownewprivileges" = "auto" ] && {
+      note "Option --gpu: Installing NVIDIA driver in container
+  needs advanced privileges. Enabling option --newprivileges=yes"
+      Allownewprivileges="yes"
+    }
+  }
+  
+  [ "$Allownewprivileges" = "auto" ] && Allownewprivileges="no"
+  
+  [ "$Allownewprivileges" = "yes" ] && warning "Option --newprivileges=yes: x11docker does not set 
+  docker run option --security-opt=no-new-privileges. 
+  That degrades container security.
+  However, this is still within a default docker setup."
   
   # Issues with hidepid=2 seen on NixOS (issue #83)
   { [ "$Switchcontaineruser" = "yes" ] || [ "$Containeruser" != "$Hostuser" ] ; } && {
@@ -4048,7 +4081,6 @@ Description=x11docker journal log service
 [Service]
 Type=simple
 ExecStart=/bin/sh -c '/bin/journalctl --follow --no-tail --merge >> $(convertpath share $Systemdjournallogfile) 2>&1'
-#ExecStart=/bin/sh -c '/bin/journalctl --follow --no-tail --merge >> $(convertpath share $Containerlogfile) 2>&1'
 [Install]
 WantedBy=x11docker.target
 " >> $Systemdjournalservice
@@ -4094,16 +4126,18 @@ DefaultEnvironment=$(while read -r Line; do echo -n "$Line " ; done < <(store_ru
   Some processes in container will run as root."
     ;;
     tini|none|dockerinit) 
-      [ "$Dbussystem" = "yes" ] && [ "$Capdropall" = "yes" ] && warning "Option --dbus=system slightly degrades container isolation.
+      [ "$Dbussystem" = "yes" ] && {
+        [ "$Capdropall" = "yes" ] && warning "Option --dbus=system slightly degrades container isolation.
   It adds some user switching capabilities x11docker would drop otherwise.
   However, they are still within default docker capabilities.
   Some processes in container will run as root.
   --dbus=system might need further capabilities or --cap-default to work
   as expected. If in doubt, one of --init=systemd|openrc|runit|sysvinit 
   might be a better choice."
-      note "Option --dbus=system with init system '$Initsystem'
+        note "Option --dbus=system with init system '$Initsystem'
   can have a quite long timeout delay until startup.
   Use one of --init=systemd|openrc|runit|sysvinit in that case."
+      }
     ;;
   esac
   
@@ -6252,6 +6286,29 @@ check_option_interferences() {  # check multiple option interferences, change se
       Dbusrunsession="yes"
     ;;
   esac
+  
+
+  # --cap-default
+  [ "$Capdropall" = "no" ] && { 
+    warning "Option --cap-default disables security hardening
+  for containers done by x11docker. Default docker capabilities are allowed.
+  This is considered to be less secure."
+    [ "$Allownewprivileges" = "auto" ] && {
+      note "Option --cap-default: Enabling option --newprivileges.
+  You can avoid this with --newprivileges=no"
+      Allownewprivileges="yes"
+    }
+  }
+  
+  # --newprivileges
+  case $Allownewprivileges in
+    yes|no|auto) ;;
+    *) 
+      note "Option --newprivileges: Unknown argument '$Allownewprivileges'.
+  Fallback: Setting --newprivileges=auto"
+      Allownewprivileges="auto"
+    ;;
+  esac
 
   # --hostipc: Check auto-enabling
   [ "$Xserver" = "--hostdisplay" ] && [ "$Trusted" = "yes" ] && [ "$Hostmitshm" = "yes" ] && [ "$Sharehostipc" = "no" ] && [ "$Hostssh" = "no" ] && {
@@ -7037,12 +7094,6 @@ option_messages() {             # some messages depending on options, but not ch
   container isolation. Network namespacing is disabled. 
   Container shares host network stack. Spying on network traffic may be possible. 
   Access to host X server $Hostdisplay may be possible through abstract unix socket."
-
-  # --cap-default
-  [ "$Capdropall" = "no" ] && warning "Option --cap-default disables security hardening
-  for containers done by x11docker. Default docker capabilities are allowed 
-  and option --security-opt=no-new-privileges is not set. 
-  This is considered to be less secure."
   
   # --webcam
   [ "$Sharewebcam" = "yes" ] && warning "Option --webcam: Container applications might look 
@@ -7418,7 +7469,7 @@ declare_variables() {           # declare global variables
   
   # Container setup
   Adminusercaps="no"                              # --cap-default, --sudouser, --user=root, --init=systemd: add capabilities for general container system administration
-  Allownewprivileges="no"                         # Docker run option --security-opt=no-new-privileges. Default: yes. Disabled by options --cap-default, --sudouser and --user=root.
+  Allownewprivileges="auto"                       # --newprivileges: Docker run option --security-opt=no-new-privileges. Default: no. Enabled by options --newprivileges, --cap-default, --sudouser and --user=root.
   Capabilities=""                                 # Capabilities to add. Default: none, exceptions for --init, --sudouser
   Capdropall="yes"                                # --cap-default: Drop all container capabilities and set --securty-opt=no-new-privileges yes/no
   Containercommand=""                             # Container command [+args]
@@ -7575,7 +7626,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,cachebasedir:,home::,homebasedir:,share:"                                                      # Host folders
   Longoptions="$Longoptions,alsa::,clipboard,gpu,lang::,printer::,pulseaudio::,sharessh,webcam"                            # Host integration features
   Longoptions="$Longoptions,env:,name:,no-entrypoint,runtime:,wordir:"                                                     # Container config
-  Longoptions="$Longoptions,cap-default,hostipc,hostnet,limit::,no-internet"                                               # Container capabilities
+  Longoptions="$Longoptions,cap-default,hostipc,hostnet,limit::,newprivileges::,no-internet"                               # Container capabilities
   Longoptions="$Longoptions,group-add:,hostuser:,sudouser,user:"                                                           # Container user
   Longoptions="$Longoptions,dbus::,init::,hostdbus,sharecgroup"                                                            # Container init and DBus
   Longoptions="$Longoptions,stdin,interactive"                                                                             # Container interaction
@@ -7723,6 +7774,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
          --hostnet)           Sharehostnet="yes" ;;                  # docker run option --network=host
          --limit)             Limitresources="${2:-0.5}" ; shift ;;  # Limited CPU and RAM access
          --name)              Containername="${2:-}" ; shift ;;      # Set container name
+         --newprivileges)     Allownewprivileges="${2:-yes}" ; shift ;; # [Don't] set --security-opt=no-new-privileges
          --no-entrypoint)     Noentrypoint="yes" ;;                  # Disable ENTRYPOINT of image
          --no-internet)       Internetaccess="no" ;;                 # Disallow internet access
          --runtime)           Runtime="${2:-}" ; shift               # Runtime=runc|nvidia|kata-runtime|crun
@@ -8003,10 +8055,8 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
-  # new options --dbus-system, --newprivileges ?
+  # reduce number of variables with storeinfo()
   # replace find in containerrootrc, missing in fedora images
-  # Reduce number of files
-  #  - Store container info like ID, PID etc in one file
 
   # BUG Cshare/timezone, something is wrong, no timezone file
   # support --exe --user

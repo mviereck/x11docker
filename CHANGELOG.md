@@ -7,10 +7,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
+### Added
+ - `--newprivileges [=yes|no]`: New option to set or unset docker run
+   option `--security-opt=no-new-privileges`.
 ### Changed
  - Return exit code of container command. x11docker errors return code `64`.
  - `--dbus`: Optional argument `=system` to run a DBus system daemon.
    Similar to previous `--dbus-system`. For experimental setups only.
+ - `--dbus-system`: Already deprecated in v6.2.0. 
+   New fallback: `--dbus=system --cap-default`.
  - `--weston`, `--kwin`, `--hostwayland`: Always set all Wayland environment
    variables and run with DBus user daemon. Previously needed `--wayland`.
  - `--xdummy --gpu`/`--xvfb --gpu`: Supported only in host X, 
