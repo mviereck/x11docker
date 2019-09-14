@@ -9,13 +9,14 @@ Project website: https://github.com/mviereck/x11docker
 ## [Unreleased]
 ### Changed
  - Return exit code of container command. x11docker errors return code `64`.
+ - `--dbus`: Optional argument `=system` to run a DBus system daemon.
+   Similar to previous `--dbus-system`. For experimental setups only.
  - `--weston`, `--kwin`, `--hostwayland`: Always set all Wayland environment
    variables and run with DBus user daemon. Previously needed `--wayland`.
  - `--xdummy --gpu`/`--xvfb --gpu`: Supported only in host X, 
    no longer on console or on Wayland.
  - `--xephyr`: enabled `-glamor`.
- - Startup: Wait for `dockerrc` to be ready for `docker run` before starting X.
-   Avoids hidden password prompts or pull request below X server window.
+ - Wait before starting X until possible password prompt is ready.
  - Lots of code cleanup.
 ### Fixed
  - Enable X extension `X-Resource` to allow Gnome 3 in container.
