@@ -652,7 +652,8 @@ storepid() {                    # store pid $1 and name $2 of process in file $S
   # this subroutine has a twin in xinitrc
   echo ${1:-} ${2:-} >> $Storepidfile
   debugnote "storepid(): Stored pid ${1:-} of ${2:-}: $(pspid ${1:-})"
-#  disown ${1:-} 2>/dev/null ||:
+  debugnote "storepid(): Stored pids:
+$(cat $Storepidfile)"
 }
 termpid() {                     # kill PID $1 with codename $2
   # TERM
@@ -1400,6 +1401,8 @@ $(sed -n '/'$Key1'/,/'$Key2'/p' /usr/share/doc/x11docker/CHANGELOG.md | head -n-
 
 #### features
 check_windowmanager() {         # option --wm: search a host window manager
+  [ "$Windowmanager" = "" ] && Windowmanager="none" && return 0
+
   command -v "$(cut -d' ' -f1 <<< "$Windowmanagercommand")" >/dev/null && Hostwindowmanager="$Windowmanagercommand" && Windowmanager="host"
   [ "$Hostwindowmanager" ] || for Hostwindowmanager in $Wm_all FAIL; do
     command -v "$Hostwindowmanager" >/dev/null && break
@@ -1486,8 +1489,10 @@ setup_clipboard() {             # option --clipboard: create shareclipboard scri
 # share clipboard between X servers $Hostdisplay and $Newdisplay
 
 $(declare -f mysleep)
+$(declare -f rocknroll)
+Timetosaygoodbye='$Timetosaygoodbye'
 
-while [ ! -s "$Timetosaygoodbye" ] ; do
+while rocknroll ; do
   # read content of clipboard of first X server $Hostdisplay
   X1clip=\"\$(env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipreceive)\"
   
@@ -1495,6 +1500,7 @@ while [ ! -s "$Timetosaygoodbye" ] ; do
   [ \"\$Shareclip\" != \"\$X1clip\" ] && {
     Shareclip=\"\$X1clip\"
     env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipsend <<<  \"\$Shareclip\" 
+#    echo \"\$Shareclip\" | env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipsend
   }
   Shareclip=\"\${Shareclip:-' '}\"     # avoid empty string error
   mysleep 0.3                       # sleep a bit to avoid high cpu usage
@@ -1506,6 +1512,7 @@ while [ ! -s "$Timetosaygoodbye" ] ; do
   [ \"\$Shareclip\" != \"\$X2clip\" ] && {
     Shareclip=\"\$X2clip\"
     env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipsend <<<  \"\$Shareclip\" 
+#    echo \"\$Shareclip\" | env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipsend
   }
   Shareclip=\"\${Shareclip:-' '}\"     # avoid empty string error
   mysleep 0.3                       # sleep a bit to avoid high cpu usage
@@ -2523,7 +2530,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   case "$Xtest" in
     yes) Xserveroptions="$Xserveroptions \\
   +extension XTEST"
-      [ "$Windowmanager" ] && [ "$Windowmanager" != "none" ] && warning "Did not disable X extension XTEST
+      [ "$Windowmanager" = "none" ] || warning "Did not disable X extension XTEST
   for X server $Xserver.
   If your host window manager $Windowmanager can start applications
   on its own (for example with a context menu), container applications
@@ -3232,6 +3239,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   #[ "$Debugmode" = "yes" ] && echo "set -x"
   
   declare -f disable_xhost
+  declare -f pspid
   declare -f rocknroll 
   declare -f storeinfo
   declare -f storepid 
@@ -3392,19 +3400,6 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
           echo       ""
         ;;
       esac
-
-      [ "$Shareclipboard" = "yes" ] && [ -n "$Hostdisplay" ] && {
-        case $Xserver in
-          --xpra|--xpra-xwayland|--nxagent|--xwin) ;;           # have their own clipboard management
-          --hostdisplay) ;;                                     # already same clipboard
-          *)                                                    # synchronizing between different X servers
-            echo     "# option '-c, --clipboard': Run clipboard script "
-            echo     "# (text copy only) (xpra has its own clipboard managment including images)"
-            echo     "bash $Shareclipboardscript & storepid \$! shareclipboard"
-            echo     ""
-          ;;
-        esac
-      }
     ;;
   esac
 
@@ -3547,11 +3542,27 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   echo             "echo 'xinitrc: xinitrc is ready'"
   echo             "storeinfo xinitrc ready"
   echo             ""
+  
+  
+  [ "$Shareclipboard" = "yes" ] && [ -n "$Hostdisplay" ] && {
+    case $Xserver in
+      --xpra|--xpra-xwayland|--nxagent|--xwin) ;;           # have their own clipboard management
+      --hostdisplay) ;;                                     # already same clipboard
+      *)                                                    # synchronizing between different X servers
+        echo     "# option '-c, --clipboard': Run clipboard script "
+        echo     "# (text copy only) (xpra has its own clipboard managment including images)"
+        echo     "bash $Shareclipboardscript"
+        echo     ""
+      ;;
+    esac
+  }
+  
   echo             "# wait for the end"
   case $Usemkfifo in
     yes) echo      "read Var <$Timetosaygoodbyefifo" ;;
     no)  echo      "while rocknroll; do sleep 1; done" ;;
   esac
+  
   return 0
 } >> $Xinitrc
 
@@ -5519,7 +5530,7 @@ $Wmdockercommand"'
   Last lines of container log:
 \$(rmcr < $Containerlogfile | tail)\"
 }"
-  echo ' storeinfo containerid "$Containerid"'
+  echo 'storeinfo containerid "$Containerid"'
   [ "$Showcontainerid" = "yes" ] && echo 'stdout "$Containerid"'
   echo ""
   
@@ -7200,7 +7211,10 @@ setup_verbosity() {             # options --verbose, --stdout, --stderr
   for Line in $Logfiles; do
     [ -e "$Line" ] && grep -q "/" <<< "$Line" && Logfiles="$Logfiles $Line"
   done
-  tail --pid="$$" --retry -n +1 -F $Logfiles 2>/dev/null >>$Logfile &
+  {
+    trap '' SIGINT
+    tail --pid="$$" --retry -n +1 -F $Logfiles 2>/dev/null >>$Logfile 
+  } &
 
   # option --verbose
   [ "$Verbose" = "yes" ] && {
@@ -7932,7 +7946,7 @@ Parsed options:    $Parsedoptions"
   setup_verbosity                # create summary logfile, start verbose output  # --verbose, --stdout, --stderr
   setup_fifo                     # open message channels for container, dockerrc, xinitrc and watchpidlist()
   check_screensize               # size of host X and of new X server            # --size #time0,213
-  [ "$Windowmanager" != "none" ] && check_windowmanager                          # --wm  
+  [ "$Windowmanager" ]           && check_windowmanager                          # --wm  
   [ "$Sharegpu" = "yes" ]        && setup_gpu                                    # --gpu
   [ "$Sharewebcam" = "yes" ]     && setup_webcam                                 # --webcam
   [ "$Sharecupsmode" ]           && setup_printer                                # --printer
@@ -8041,8 +8055,8 @@ $(nl -ba <$Westonini)"
       ;;
     esac
     
-#    debugnote "Process tree of x11docker:
-#  $(pstree -p $$ 2>&1 ||:)"
+    debugnote "Process tree of x11docker:
+  $(pstree -p $$ 2>&1 ||:)"
   } <&0 & storepid $! containershell
   
   #### Start X server [and/or Wayland compositor]
