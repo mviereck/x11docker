@@ -761,6 +761,7 @@ $(for Line in $Watchpidlist; do pspid $Line ; done)"
 
 #### more or less general routines
 askyesno() {                    # ask Yes/no question. Default 'yes' for ENTER, timeout with 'no' after 60s
+  local Choice
   read -t60 -n1 -p "(timeout after 60s assuming no) [Y|n]" Choice
   [ "$?" = '0' ] && {
     [[ "$Choice" == [YyJj]* ]] || [ -z "$Choice" ] && return 0
@@ -832,10 +833,10 @@ storeinfo() {                   # store some information for later use
   # Store as codeword=string:
   #   $1 codeword
   #   $2 string to store
-  # or dump stored string: (return 1 if not found)
+  # Dump stored string: (return 1 if not found)
   #   $1 dump
   #   #2 codeword
-  # or drop stored string:
+  # Drop stored string:
   #   $1 drop
   #   #2 codeword
   case "${1:-}" in
@@ -849,7 +850,7 @@ storeinfo() {                   # store some information for later use
   esac
   case "${1:-}" in
     dump|drop) ;;
-    *) debugnote "storeinfo(): ${1:-}=${2:-}"
+    *) debugnote "storeinfo(): ${1:-}=${2:-}" 2>/dev/null ||:
   esac
 }
 rmcr() {                        # remove carriage return to translate DOS/Windows newlines into UNIX newlines
@@ -1972,6 +1973,12 @@ check_screensize() {            # check physical and virtual screen size (also o
   verbose "Virtual screen size: $Screensize"
   verbose "Physical screen size:
   $(xrandr 2>/dev/null | grep Screen ||:)"
+  
+  # create set of Modelines if needed
+  { [ "$Xserver" = "--xpra" ] && [ "$Xpravfb" = "Xvfb" ] && [ "$Desktopmode" = "yes" ] ; } || [ "$Xserver" = "--xvfb" ] && {
+    Modelinefile="$(create_modelinefile ${Maxxaxis}x${Maxyaxis})"
+  }
+      
   return 0
 }
 check_vt() {                    # option --xorg: find free vt / tty
@@ -2710,8 +2717,7 @@ startup-animation=fade
         ;;
         yes)  # short start&stop of Weston to grep name of monitor. Needed instead of WL or X prefix
           [ -n "$Screensize" ] || [ "$Scaling" ] || [ -n "$Rotation" ] && {
-#            unpriv "$Weston --no-config --backend=drm-backend.so >> $Compositorlogfile 2>&1 & storeinfo compositorpid \$!"
-            unpriv "$Weston --no-config --backend=drm-backend.so >> $Compositorlogfile 2>&1 & echo compositorpid=\$! >> $Storeinfofile" ### FIXME hotfix for sudo missing storepid
+            unpriv "$Weston --no-config --backend=drm-backend.so >> $Compositorlogfile 2>&1 & storeinfo compositorpid \$!"
             Compositorpid="$(storeinfo dump compositorpid)"
             waitforlogentry "weston-screencheck" "$Compositorlogfile" "connector" "$Compositorerrorcodes"
             Westonoutput="$(grep Output <$Compositorlogfile | grep connector | head -n1 | cut -d ' ' -f3 | rev | cut -c2- | rev)"
@@ -3035,8 +3041,7 @@ disable_xhost() {               # remove any access to X server granted by xhost
   command -v xhost >/dev/null || {
     warning "Command 'xhost' not found.
   Can not check for possibly allowed network access to X.
-  Please install 'xhost'.
-  $Wikipackages"
+  Please install 'xhost'."
     return 1
   }
   xhost 2>&1 | tail -n +2  /dev/stdin | while read -r Line ; do  # read all but the first line (header)
@@ -3059,26 +3064,26 @@ $(xhost 2>&1 )"
 
 #### X helper scripts
 create_modelinefile() {         # generate a set of smaller modelines for screen size $1 and store them in a cache file
-  local Modelinefile Modeline Size X Y Xcount Ycount
+  local Newmodelinefile Modeline Size X Y Xcount Ycount
   
   Size="${1:-}"
   X="$(echo "$Size" | cut -dx -f1)"
   Y="$(echo "$Size" | cut -dx -f2)"
-  Modelinefile="$Cachebasefolder/modelines.$Size"
+  Newmodelinefile="$Modelinefile.$Size"
   
-  [ -e "$Modelinefile" ] || {
-    mkfile "$Modelinefile"
+  [ -e "$Newmodelinefile" ] || {
     debugnote "Generating modelines for $Size"
+    mkfile "$Newmodelinefile"
     for Ycount in 25 30 40 45 50 55 60 65 70 75 80 85 90 95 100; do
       for Xcount in 25 30 40 45 50 55 60 65 70 75 80 85 90 95 100; do
         Modeline="$(cvt "$(awk -v a="$X" -v b=$Xcount 'BEGIN {print (a * b / 100)}')" "$(awk -v a="$Y" -v b=$Ycount 'BEGIN {print (a * b / 100)}' )" | tail -n1)"
         Modeline="$(echo "$Modeline" | sed s/_60.00//g)"
-        echo "$Modeline" >> "$Modelinefile"
+        echo "$Modeline" >> "$Newmodelinefile"
       done
     done
   }
   
-  echo "$Modelinefile"
+  echo "$Newmodelinefile"
 }
 create_xdummywrapper() {        # options --xdummy, --xpra: create startscript for Xdummy
   echo '#!/bin/sh
@@ -3226,14 +3231,10 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   echo "#! /bin/sh"
   #[ "$Debugmode" = "yes" ] && echo "set -x"
   
-  declare -f create_modelinefile
   declare -f disable_xhost
-  declare -f mkfile
   declare -f rocknroll 
-  declare -f saygoodbye
   declare -f storeinfo
   declare -f storepid 
-  declare -f waitfortheend 
   echo "$Messagefifofuncs"
 
   echo "getscreensize() {"
@@ -3252,20 +3253,18 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   echo "}"
   echo ""
 
-  echo "Cachebasefolder='$Cachebasefolder'"
-  echo "Hostuser='$Hostuser'"
-  echo "Hostusergid='$Hostusergid'"
   echo "Messagefile='$Messagefifo'"
   echo "Output=\"\$(getprimary)\""
   echo "Storeinfofile='$Storeinfofile'"
   echo "Storepidfile='$Storepidfile'"
   echo "Timetosaygoodbye='$Timetosaygoodbye'"
-  echo "Timetosaygoodbyefifo='$Timetosaygoodbyefifo'"
-  echo "Usemkfifo='$Usemkfifo'"
-  echo "Winsubsystem='$Winsubsystem'"
   echo ""
   echo "export PATH='${PATH:-}'"
   echo "export $Newxenv"
+  echo ""
+  echo "Cookie=''"
+  echo "Line=''"
+  echo "Var=''"
   echo ""
   
   echo "debugnote 'Running xinitrc'"
@@ -3385,7 +3384,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   $Wikipackages"
           }
           [ -s "$Xkbkeymapfile" ] && {
-            echo     "# set keyboard layout on $Newdisplay to same as on host"
+            echo     "# set keyboard layout on $Newdisplay"
             echo     "verbose \"Keyboard layout:"
             echo     "\$(cat $Xkbkeymapfile)\""
             echo     "xkbcomp $Xkbkeymapfile $Newdisplay"
@@ -3428,13 +3427,12 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
         echo         "# create set of different screen resolutions"
         echo         "xrandr --newmode $Modeline"
         echo         "xrandr --addmode \$Output $(echo $Modeline | cut -d " " -f1)"
-        echo         "Modelinefile=\"\$(create_modelinefile ${Maxxaxis}x${Maxyaxis})\""
         echo         "while read Line; do"
         echo         "  Line=\"\$(echo \"\$Line\" | sed 's/Modeline//g')\""
         echo         "  Line=\"\$(echo \"\$Line\" | sed 's/\"//g')\""
         echo         "  xrandr --newmode \$Line 2>/dev/null"
         echo         "  xrandr --addmode \"\$Output\" \$(echo \$Line | cut -d' ' -f1) 2>/dev/null"
-        echo         "done < \"\$Modelinefile\""
+        echo         "done < \"$Modelinefile\""
       }
       echo           ""
       [ "$Xserver" = "--xpra" ] && [ "$Desktopmode" = "yes" ] && echo "xrandr --output  \$Output --mode $(echo $Modeline | cut -d " " -f1)"
@@ -3548,7 +3546,12 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   [ "$Showdisplayenvironment" = "yes" ] && echo "stdout '$Newxenv'"     # --showenv
   echo             "echo 'xinitrc: xinitrc is ready'"
   echo             "storeinfo xinitrc ready"
-  echo             "waitfortheend"
+  echo             ""
+  echo             "# wait for the end"
+  case $Usemkfifo in
+    yes) echo      "read Var <$Timetosaygoodbyefifo" ;;
+    no)  echo      "while rocknroll; do sleep 1; done" ;;
+  esac
   return 0
 } >> $Xinitrc
 
@@ -4659,6 +4662,8 @@ exit 0\" >> /etc/rc.local"
                     org.freedesktop.resolve1
                     org.freedesktop.network1
                     org.freedesktop.timedate1
+                    org.freedesktop.Tracker1
+                    org.freedesktop.Tracker1.Miner.Extract
                     org.freedesktop.secrets
                     org.opensuse.CupsPkHelper.Mechanism
                     com.deepin.daemon.Audio
@@ -4999,22 +5004,14 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
     echo ""
   }
   
-  echo "Compositorlogfile='$Compositorlogfile'"
   echo "Containercommand=\"$Containercommand\""
-  echo "Hostuser='$Hostuser'"
-  echo "Hostusergid='$Hostusergid'"
   echo "Imagename=\"$Imagename\""
   echo "Messagefile='$Messagefifo'"
   echo "Newxenv='$Newxenv'"
   echo "export PATH='$PATH'"
-  echo "Showdisplayenvironment='$Showdisplayenvironment'"
   echo "Storeinfofile='$Storeinfofile'"
   echo "Storepidfile='$Storepidfile'"
   echo "Timetosaygoodbye='$Timetosaygoodbye'"
-  echo "Timetosaygoodbyefifo='$Timetosaygoodbyefifo'"
-  echo "Usemkfifo='$Usemkfifo'"
-  echo "Xiniterrorcodes='$Xiniterrorcodes'"
-  echo "Xinitlogfile='$Xinitlogfile'"
   echo "Xserver='$Xserver'"
   echo "Workdir='$Workdir'"
   echo ""
@@ -5638,8 +5635,7 @@ start_compositor() {            # start Wayland compositor Weston or KWin
     --kwin|--kwin-xwayland)                                       Compositorkeyword="X-Server" ;;
   esac
   
-#  unpriv "$(command -v dbus-launch) $Compositorcommand  >> $Compositorlogfile  2>&1 & storeinfo compositorpid \$!"
-  unpriv "$(command -v dbus-launch) $Compositorcommand  >> $Compositorlogfile  2>&1 & echo compositorpid=\$! >> $Storeinfofile" ### FIXME hotfix for sudo to have storepid available
+  unpriv "$(command -v dbus-launch) $Compositorcommand  >> $Compositorlogfile  2>&1 & storeinfo compositorpid \$!"
   
   waitforlogentry "start_compositor()" "$Compositorlogfile" "$Compositorkeyword" "$Compositorerrorcodes"
 
@@ -6013,7 +6009,10 @@ check_hostuser() {              # check for unprivileged host user
   # How to run as unprivileged user in unpriv()
   case "$Hostuser" in
     "$Startuser") Unpriv="eval" ;;   # alternatively: bash -c
-    *)            Unpriv="su $Hostuser -c" ;;
+    *)            Unpriv="su $Hostuser -c" 
+      export -f storeinfo
+      export Storeinfofile
+    ;;
   esac
   
   return 0
@@ -6829,6 +6828,7 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   $Cachebasefolder"                                    # can happen with --cachebasedir
   Logfilebackup="$Cachebasefolder/x11docker.log"       # afterward copy of $Logfile in $Cachebasefolder
   Imagelistfile="$Cachebasefolder/$Imagelistfile"                         && mkfile $Imagelistfile
+  Modelinefile="$Cachebasefolder/modelines"
 
   
   # create cache subfolder
@@ -7398,6 +7398,7 @@ declare_variables() {           # declare global variables
   Lastcheckedxserverresult=""                     # check_xdepends(): Result of last check. Avoids double-checking.
   Maxxaxis=""                                     # Maximal X screen size of display
   Maxyaxis=""                                     # Maximal Y screen size of display
+  Modelinefile=""
   Newdisplay=""                                   # --display: New DISPLAY for new X server
   Newdisplaynumber=""                             # --display: New display number for new X server.
   Newwaylandsocket=""                             # Wayland socket of $Compositorcommand
@@ -8057,7 +8058,8 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
-  # reduce number of variables with storeinfo()
+  # --cleanup: storeinfo() error in finish(?)
+  # reduce number of variables with storeinfo() ?
   # replace find in containerrootrc, missing in fedora images
 
   # BUG Cshare/timezone, something is wrong, no timezone file
