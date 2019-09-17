@@ -416,8 +416,8 @@ ${Colredbg}x11docker ERROR:${Colnorm} $Message
   logentry "x11docker ERROR: $Message
 "
   saygoodbye error
-  storeinfo dump error >/dev/null && waitfortheend
-  storeinfo error 64
+  storeinfo test error && waitfortheend
+  storeinfo error=64
 
   # output to X dialogbox if not running in terminal
   [ "$Runsinterminal" = "no" ] && [ "$Silent" = "no" ] && export ${Hostxenv:-DISPLAY} && alertbox "x11docker ERROR" "$Message" &
@@ -441,7 +441,7 @@ traperror() {                   # trap ERR: --debug: Output for 'set -o errtrace
   debugnote "traperror: Command at Line ${2:-} returned with error code ${1:-}:
   ${4:-}
   ${3:-} - ${5:-}"
-  storeinfo error 64
+  storeinfo error=64
   saygoodbye traperror
 }
 verbose() {                     # show verbose messages
@@ -454,6 +454,32 @@ warning() {                     # show warning messages
 " >&3
   logentry "x11docker WARNING: $*
 "
+}
+watchmessagefifo() {            # watch for messages coming from container or dockerrc
+  # message in fifo must end with :$Messagetype
+  local Line= Message= Messagetype=
+  trap '' SIGINT
+  while [ -e "$Cachefolder" ]; do
+    IFS= read -r Line <&6 ||:
+    [ "$Line" ] || sleep 2  # sleep for MSYS2/CYGWIN workaround
+    [ "$Line" ] && Message="$Message
+$Line"
+    grep -q -E ":WARNING|:NOTE|:DEBUGNOTE|:VERBOSE|:ERROR|:STDOUT" <<< "$Line" && {
+      Messagetype=":$(echo $Line | rev | cut -d: -f1  | rev)"
+      Message="${Message%$Messagetype }"
+      Message="$(tail -n +2 <<< "$Message")" # remove leading newline
+      case "$Messagetype" in
+        :WARNING)   warning   "$Message" ;;
+        :NOTE)      note      "$Message" ;;
+        :DEBUGNOTE) debugnote "$Message" ;;
+        :ERROR)     error     "$Message" ;;
+        :VERBOSE)   [ "-d " = "$(cut -c1-3 <<<"$Message" | head -n1)" ] && debugnote "$(tail -c +4 <<< "$Message")" || verbose "$Message" ;;
+        :STDOUT)    echo "$Message" ;;
+      esac
+      Message=
+      Messagetype=
+    }
+  done
 }
 
 #### exit
@@ -477,9 +503,6 @@ finish() {                      # trap EXIT routine to clean up background proce
     sudo -n echo 2>/dev/null && Sudo="sudo -n" || Sudo=""
   }
 
-  # check for background processes stored in $Storepidfile
-#  debugnote "finish(): List of stored background processes:
-#$(cat $Storepidfile 2>/dev/null)"
   while read -r Line ; do
     
     Pid="$(echo $Line  | awk '{print $1}')"
@@ -577,15 +600,15 @@ finish() {                      # trap EXIT routine to clean up background proce
     checkpid $Pid && {
       # should never happen
       warning "Failed to terminate pid $Pid ($Name): $(pspid $Pid)"
-      storeinfo error 64
+      storeinfo error=64
     }
   done < <(tac "$Storepidfile" 2>/dev/null)
 
   # check for possible error exit codes. Prefer CMD exit code over x11docker exit code.
-  Exitcode=$(storeinfo dump error ||:)
+  Exitcode=$(storeinfo dump error)
   Exitcode="${Exitcode:-0}"
   debugnote "x11docker exit code: $Exitcode"
-  storeinfo dump cmdexitcode >/dev/null && {
+  storeinfo test cmdexitcode && {
     Exitcode=$(storeinfo dump cmdexitcode)
     debugnote "CMD exit code: $Exitcode"
   }
@@ -599,14 +622,14 @@ finish() {                      # trap EXIT routine to clean up background proce
 
   # close additional file descriptors
   mysleep 0.2
-  for i in 3 4 6 7 8 9; do
+  for i in 3 4  6 7 8 9; do
     { >&$i ;} 2>/dev/null && exec >&$i-
   done
 
   # remove cache files
   [ "$Preservecachefiles" = "no" ] && grep -q cache <<<$Cachefolder && grep -q x11docker <<<$Cachefolder && [ "x11docker" != "$(basename "$Cachefolder")" ] && unpriv "rm -f -R '$Cachefolder'"
 
-  case $Sourced in
+  case $Runssourced in
     yes) return $Exitcode ;;
     *)   exit   $Exitcode ;;
   esac
@@ -615,16 +638,16 @@ finish_sigint() {               # trap SIGINT to activate debug mode on finish()
   local Pid1pid
   Debugmode="yes"
   debugnote "Received SIGINT"
-  storeinfo error 130
+  storeinfo error=130
   finish
 }
 saygoodbye() {                  # create file signaling watching processes to terminate
   debugnote "time to say goodbye ($*)"
-  [ -e "$Timetosaygoodbye" ]     && echo timetosaygoodbye >> $Timetosaygoodbye
+  [ -e "$Timetosaygoodbyefile" ] && echo timetosaygoodbye >> $Timetosaygoodbyefile
   [ -e "$Timetosaygoodbyefifo" ] && echo timetosaygoodbye >> $Timetosaygoodbyefifo
 }
 
-#### watching processes and messages
+#### watching processes
 checkpid() {                    # check if PID $1 is active
   #ps -p ${1:-} >/dev/null 2>&1
   [ -e "/proc/${1:-NONSENSE}" ]
@@ -636,8 +659,8 @@ pspid() {                       # ps -p $1 --no-headers
   LC_ALL=C ps -p "${1:-}" 2>/dev/null | grep -v 'TIME' | grep .
 }
 rocknroll() {                   # check whether x11docker session is still running
-  [ -s "$Timetosaygoodbye" ]   && return 1
-  [ -e "$Timetosaygoodbye" ]   || return 1
+  [ -s "$Timetosaygoodbyefile" ]   && return 1
+  [ -e "$Timetosaygoodbyefile" ]   || return 1
   return 0
 }
 setonwatchpidlist() {           # add PID $1 to watchpidlist()
@@ -652,8 +675,6 @@ storepid() {                    # store pid $1 and name $2 of process in file $S
   # this subroutine has a twin in xinitrc
   echo ${1:-} ${2:-} >> $Storepidfile
   debugnote "storepid(): Stored pid ${1:-} of ${2:-}: $(pspid ${1:-})"
-  debugnote "storepid(): Stored pids:
-$(cat $Storepidfile)"
 }
 termpid() {                     # kill PID $1 with codename $2
   # TERM
@@ -692,32 +713,6 @@ waitfortheend() {               # wait for end of x11docker session
     ;;
   esac
   return 0
-}
-watchmessagefifo() {            # watch for messages coming from container or dockerrc
-  # message in fifo must end with :$Messagetype
-  local Line= Message= Messagetype=
-  trap '' SIGINT
-  while [ -e "$Cachefolder" ]; do
-    IFS= read -r Line <&6 ||:
-    [ "$Line" ] || sleep 2  # sleep for MSYS2/CYGWIN workaround
-    [ "$Line" ] && Message="$Message
-$Line"
-    grep -q -E ":WARNING|:NOTE|:DEBUGNOTE|:VERBOSE|:ERROR|:STDOUT" <<< "$Line" && {
-      Messagetype=":$(echo $Line | rev | cut -d: -f1  | rev)"
-      Message="${Message%$Messagetype }"
-      Message="$(tail -n +2 <<< "$Message")" # remove leading newline
-      case "$Messagetype" in
-        :WARNING)   warning   "$Message" ;;
-        :NOTE)      note      "$Message" ;;
-        :DEBUGNOTE) debugnote "$Message" ;;
-        :ERROR)     error     "$Message" ;;
-        :VERBOSE)   [ "-d " = "$(cut -c1-3 <<<"$Message" | head -n1)" ] && debugnote "$(tail -c +4 <<< "$Message")" || verbose "$Message" ;;
-        :STDOUT)    echo "$Message" ;;
-      esac
-      Message=
-      Messagetype=
-    }
-  done
 }
 watchpidlist() {                # watch list of important pids
   # terminate x11docker if a PID in $Watchpidlist terminates
@@ -772,7 +767,7 @@ askyesno() {                    # ask Yes/no question. Default 'yes' for ENTER, 
 check_parent_sshd() {           # check whether pid $1 runs in SSH session
   local Wanted_pid="${1:-}" Process_line
   ps -p 1 >/dev/null 2>&1 || {
-    debugnote "Failed to check for sshd. ps -p not supported."
+    debugnote "check_parent_sshd(): Failed to check for sshd. ps -p not supported."
     return 1
   }
   while [ $Wanted_pid -ne 1 ] ; do
@@ -832,26 +827,26 @@ storeinfo() {                   # store some information for later use
   # store and provide pieces of information
   # replace entry if codeword is already present
   # Store as codeword=string:
-  #   $1 codeword
-  #   $2 string to store
-  # Dump stored string: (return 1 if not found)
+  #   $1 codeword=string
+  # Dump stored string:
   #   $1 dump
   #   #2 codeword
   # Drop stored string:
   #   $1 drop
   #   #2 codeword
+  # Test for codeword: (return 1 if not found)
+  #   $1 test
+  #   $2 codeword
+  #
   case "${1:-}" in
-    dump) ;;
-    drop|*) sed -i "/^${1:-}=/d" $Storeinfofile ;;                                # drop entry (also if storing new entry)
-  esac
-  case "${1:-}" in
-    dump)   grep "^${2:-}="      $Storeinfofile | sed "s/^${2:-}=//" | grep . ;;  # dump entry
-    drop) ;;
-    *)      echo "${1:-}=${2:-}" >> $Storeinfofile ;;                             # store entry
-  esac
-  case "${1:-}" in
-    dump|drop) ;;
-    *) debugnote "storeinfo(): ${1:-}=${2:-}" 2>/dev/null ||:
+    dump) grep     "^${2:-}="   $Storeinfofile | sed "s/^${2:-}=//" ;;  # dump entry
+    drop) sed -i  "/^${2:-}=/d" $Storeinfofile ;;                       # drop entry
+    test) grep -q  "^${2:-}="   $Storeinfofile ;;                       # test for entry
+    *)                                                                  # store entry
+      debugnote "storeinfo(): ${1:-}"
+      sed -i "/^$(echo "${1:-}" | cut -d= -f1)=/d"     $Storeinfofile   # drop possible old entry
+      echo "${1:-}"                                 >> $Storeinfofile
+    ;;
   esac
 }
 rmcr() {                        # remove carriage return to translate DOS/Windows newlines into UNIX newlines
@@ -1408,7 +1403,7 @@ check_windowmanager() {         # option --wm: search a host window manager
     command -v "$Hostwindowmanager" >/dev/null && break
   done
   [ "$Hostwindowmanager" = "FAIL" ] && Hostwindowmanager=""
-  [ "$X11dockermode" = "exe" ] && [ "$Windowmanager" != "host" ] && [ -n "$Windowmanager" ] && {
+  [ "$X11dockermode" = "exe" ] && [ "$Windowmanager" != "host" ] && [ "$Windowmanager" != "none" ] && {
     [ -n "$Windowmanagercommand" ] && [ "$Hostwindowmanager" != "$Windowmanagercommand" ] && note "Option --wm: With option --exe 
   x11docker does not support a containerized window manager yet.
   Will run host window manager: ${Hostwindowmanager:-(none found)}"  
@@ -1490,7 +1485,7 @@ setup_clipboard() {             # option --clipboard: create shareclipboard scri
 
 $(declare -f mysleep)
 $(declare -f rocknroll)
-Timetosaygoodbye='$Timetosaygoodbye'
+Timetosaygoodbyefile='$Timetosaygoodbyefile'
 
 while rocknroll ; do
   # read content of clipboard of first X server $Hostdisplay
@@ -1517,7 +1512,7 @@ while rocknroll ; do
   Shareclip=\"\${Shareclip:-' '}\"     # avoid empty string error
   mysleep 0.3                       # sleep a bit to avoid high cpu usage
 done
-" >> $Shareclipboardscript
+" >> $Clipboardrc
     ;;
   esac
   return 0
@@ -1773,6 +1768,7 @@ setup_webcam() {                # option --webcam: share webcam devices
 
 #### X server setup
 check_newxenv() {               # find free display, create $Newxenv
+  local Line
   # find free display number
   [ "$Newdisplaynumber" ] || {
     Newdisplaynumber="100"
@@ -1826,6 +1822,7 @@ check_newxenv() {               # find free display, create $Newxenv
     --weston|--weston-xwayland|--kwin|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland) Newwaylandsocket="wayland-$Newdisplaynumber" ;;
     --hostwayland|--xwayland)                                                            Newwaylandsocket="$Hostwaylandsocket" ;;
   esac
+  storeinfo "WAYLAND_DISPLAY=$Newwaylandsocket"
   
   #### create $Newxenv: collection of environment variables to access new X from host (e.g. in xinitrc)
   case $Xserver in
@@ -1833,6 +1830,7 @@ check_newxenv() {               # find free display, create $Newxenv
       Newxenv="DISPLAY=$Newdisplay"
       [ "$Xauthentication" = "yes" ] && Newxenv="$Newxenv XAUTHORITY=$Xclientcookie"
       Newxenv="$Newxenv XSOCKET=$Newxsocket"
+      Newxenv="$Newxenv WAYLAND_DISPLAY="
       Newxenv="$Newxenv $Xprashm"
     ;;
     --weston|--kwin|--hostwayland|--tty)
@@ -1849,10 +1847,13 @@ check_newxenv() {               # find free display, create $Newxenv
     Newxenv="$Newxenv XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
     for Line in $Waylandtoolkitenv ; do Newxenv="$Newxenv $Line" ; done
   }
-  Newxenv="$Newxenv X11DOCKER_CACHE=$Cachefolder"
 
-  debugnote "New X environment:
-  $Newxenv"
+  storeinfo "Xenv=$Newxenv"
+  storeinfo "DISPLAY=$Newdisplay"
+  storeinfo "XAUTHORITY=$Xclientcookie"
+  storeinfo "XSOCKET=$Newxsocket"
+  storeinfo "WAYLAND_DISPLAY=$Newwaylandsocket"
+  storeinfo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
   
   # X / Wayland environment variables for container
   case $Xserver in
@@ -2002,7 +2003,7 @@ check_vt() {                    # option --xorg: find free vt / tty
     for Line in $(find /sys/class/vc/vcsa*); do
       Ttyinuse="$Ttyinuse ${Line#/sys/class/vc/vcsa} "
     done
-    debugnote "TTYs currently known to kernel: $Ttyinuse"
+    debugnote "check_vt(): TTYs currently known to kernel: $Ttyinuse"
   }
 
   [ "$Newxvt" ] && grep -q " $Newxvt " <<< "$Ttyinuse" && warning "TTY $Newxvt seems to be already in use."
@@ -2364,7 +2365,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
     ;;
   esac
   
-  [ "$Runsonconsole" = "no" ] && [ "$Hostssh" = "no" ] && [ -z "$Hostdisplay$Hostwaylandsocket" ] && [ "$Xserver" != "--tty" ] && [ -z "$Winsubsystem" ] && {
+  [ "$Runsonconsole" = "no" ] && [ "$Runsoverssh" = "no" ] && [ -z "$Hostdisplay$Hostwaylandsocket" ] && [ "$Xserver" != "--tty" ] && [ -z "$Winsubsystem" ] && {
     warning "Environment variables DISPLAY and WAYLAND_DISPLAY are empty,
   but it seems x11docker was started within X, not from console.
   Please set DISPLAY and XAUTHORITY.
@@ -2383,7 +2384,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
     [ "$Autochooseserver" = "yes" ] && Xserver="--xorg"
   }
 
-  [ "$Hostssh" = "yes" ] && [ -z "$Hostdisplay$Hostwaylandsocket" ] && [ "$Xserver" != "--tty" ] && [ "$Autochooseserver" = "yes" ] && {
+  [ "$Runsoverssh" = "yes" ] && [ -z "$Hostdisplay$Hostwaylandsocket" ] && [ "$Xserver" != "--tty" ] && [ "$Autochooseserver" = "yes" ] && {
     error "You are running x11docker over SSH without providing a display.
   Please run with 'ssh -X' or 'ssh -Y'.
   (If you insist, you can run with option '--xorg', but won't see the result.)"
@@ -2466,7 +2467,8 @@ check_xserver() {               # check chosen X server, auto-choose X server
     esac
   }
 
-  [ "$Autochooseserver" = "yes" ] && note "Using X server option $Xserver" || debugnote  "Using X server option $Xserver"
+  [ "$Autochooseserver" = "yes" ] && note "Using X server option $Xserver" 
+  storeinfo "xserver=$Xserver"
   return 0
 }
 create_xcommand() {             ### create command to start X server and/or Wayland compositor
@@ -2532,7 +2534,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   +extension XTEST"
       [ "$Windowmanager" = "none" ] || warning "Did not disable X extension XTEST
   for X server $Xserver.
-  If your host window manager $Windowmanager can start applications
+  If your host window manager $Hostwindowmanager can start applications
   on its own (for example with a context menu), container applications
   can abuse this to run and remotely control host applications.
   If you provide content of X server $Xserver over network to others,
@@ -2699,7 +2701,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   #### Prepare weston.ini: config file for Weston
   case $Xserver in
     --weston|--weston-xwayland|--xpra-xwayland|--xdummy-xwayland)
-      command -v weston-launch >/dev/null && [ "$Runsonconsole" = "yes" ] && [ "$Bashinteractive" = "yes" ] && Weston="weston-launch -v --" || Weston="weston"
+      command -v weston-launch >/dev/null && [ "$Runsonconsole" = "yes" ] && [ "$Runsinteractive" = "yes" ] && Weston="weston-launch -v --" || Weston="weston"
       echo "[core]
 shell=desktop-shell.so
 idle-time=0
@@ -2724,11 +2726,12 @@ startup-animation=fade
         ;;
         yes)  # short start&stop of Weston to grep name of monitor. Needed instead of WL or X prefix
           [ -n "$Screensize" ] || [ "$Scaling" ] || [ -n "$Rotation" ] && {
-            unpriv "$Weston --no-config --backend=drm-backend.so >> $Compositorlogfile 2>&1 & storeinfo compositorpid \$!"
+            unpriv "$Weston --no-config --backend=drm-backend.so >> $Compositorlogfile 2>&1 & echo compositorpid=\$! >>$Storeinfofile"
             Compositorpid="$(storeinfo dump compositorpid)"
+            storeinfo "compositorpid=$Compositorpid"
             waitforlogentry "weston-screencheck" "$Compositorlogfile" "connector" "$Compositorerrorcodes"
             Westonoutput="$(grep Output <$Compositorlogfile | grep connector | head -n1 | cut -d ' ' -f3 | rev | cut -c2- | rev)"
-            debugnote "Screen output for weston: $Westonoutput"
+            debugnote "$Xserver: Detected screen output for weston: $Westonoutput"
             kill $Compositorpid
             mkfile "$Compositorlogfile"
           }
@@ -2892,17 +2895,14 @@ mode=$Screensize
 
     --nxagent)
       # files needed by nxagent
-      export NXAGENT_KEYSTROKEFILE="$Cachefolder/nx_keys"
-      export NX_CLIENT="$Cachefolder/nx_client"
-      mkfile "$NXAGENT_KEYSTROKEFILE"
-      mkfile "$NX_CLIENT"
-      mkfile "$Cachefolder/nxagentoptions"
+      export NXAGENT_KEYSTROKEFILE="$Nxagentkeysfile"
+      export NX_CLIENT="$Nxagentclientrc"
       
       Xserveroptions="$Xserveroptions \\
   -norootlessexit \\
   -verbose \\
   -ac \\
-  -options $Cachefolder/nxagentoptions \\
+  -options $Nxagentoptionsfile \\
   -keystrokefile $NXAGENT_KEYSTROKEFILE"
       case $Desktopmode in
         "yes") Xserveroptions="$Xserveroptions \\
@@ -2936,9 +2936,8 @@ mode=$Screensize
       esac
       
       Nxagentoptions="${Nxagentoptions}:${Newdisplaynumber}"
-      echo $Nxagentoptions >> "$Cachefolder/nxagentoptions"
-      debugnote "Additional nxagent options: 
-  $Nxagentoptions"
+      echo "$Nxagentoptions" >> "$Nxagentoptionsfile"
+      debugnote "$Xserver: Additional nxagent options: $Nxagentoptions"
       
       # Workaround as nxagent ignores XAUTHORITY and fails to start if option -auth is given without containing the cookie fom host display. 
       # Option -ac above complies "xhost +" and is reverted in xinitrc.
@@ -2966,7 +2965,7 @@ case $dialog in
   pulldown) ;;
   yesnosuspend)
     kill $pid
-    echo timetosaygoodbye >> '$Timetosaygoodbye'
+    echo timetosaygoodbye >> '$Timetosaygoodbyefile'
   ;;
 esac
 ' >> "$NX_CLIENT"
@@ -3079,7 +3078,7 @@ create_modelinefile() {         # generate a set of smaller modelines for screen
   Newmodelinefile="$Modelinefile.$Size"
   
   [ -e "$Newmodelinefile" ] || {
-    debugnote "Generating modelines for $Size"
+    debugnote "$Xserver: Generating modelines for $Size"
     mkfile "$Newmodelinefile"
     for Ycount in 25 30 40 45 50 55 60 65 70 75 80 85 90 95 100; do
       for Xcount in 25 30 40 45 50 55 60 65 70 75 80 85 90 95 100; do
@@ -3265,7 +3264,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   echo "Output=\"\$(getprimary)\""
   echo "Storeinfofile='$Storeinfofile'"
   echo "Storepidfile='$Storepidfile'"
-  echo "Timetosaygoodbye='$Timetosaygoodbye'"
+  echo "Timetosaygoodbyefile='$Timetosaygoodbyefile'"
   echo ""
   echo "export PATH='${PATH:-}'"
   echo "export $Newxenv"
@@ -3306,7 +3305,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
           echo       "xhost | grep -q 'SI:localuser:$Hostuser' || { xhost +SI:localuser:$Hostuser ; Xhostentry='yes' ; }"
           echo       ""
         }
-        case "$Hostssh" in
+        case "$Runsoverssh" in
           no)
             echo     "echo 'Requesting $Trusted cookie from X server'"
             echo     "xauth -v -i -f $Xclientcookie generate $Newdisplay . $Trusted timeout 3600"
@@ -3320,7 +3319,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
         echo         "  [ '$Trusted' = 'untrusted' ] && note 'Could not create untrusted cookie. 
   Maybe your X server misses extension SECURITY.'"
         [ "$Xserver" = "--hostdisplay" ] && {
-          [ "$Sharehostipc" = "no" ] && [ "$Hostssh" = "no" ] && [ "$Hostmitshm" = "yes" ] && {
+          [ "$Sharehostipc" = "no" ] && [ "$Runsoverssh" = "no" ] && [ "$Hostmitshm" = "yes" ] && {
             echo     "  warning 'Memory access failures and rendering glitches
   may occure due to unrestricted cookie.
   Avoid them with isolation breaking option --hostipc,
@@ -3538,9 +3537,8 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
     echo           ""
   }
   
-  [ "$Showdisplayenvironment" = "yes" ] && echo "stdout '$Newxenv'"     # --showenv
   echo             "echo 'xinitrc: xinitrc is ready'"
-  echo             "storeinfo xinitrc ready"
+  echo             "storeinfo xinitrc=ready"
   echo             ""
   
   
@@ -3551,7 +3549,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
       *)                                                    # synchronizing between different X servers
         echo     "# option '-c, --clipboard': Run clipboard script "
         echo     "# (text copy only) (xpra has its own clipboard managment including images)"
-        echo     "bash $Shareclipboardscript"
+        echo     "bash $Clipboardrc"
         echo     ""
       ;;
     esac
@@ -3672,6 +3670,7 @@ create_dockercommand() {        ### create command to run docker
   --name $Containername"
   Wmdockercommand="$Wmdockercommand \\
   --name ${Containername}_WM"
+  storeinfo "containername=$Containername"
   
   [ "$Limitresources" ] && {
     Memory="$(awk "BEGIN {print int($(free -b | awk 'NR==2 {print $7}') * $Limitresources)}")"
@@ -3728,8 +3727,6 @@ create_dockercommand() {        ### create command to run docker
   [ "$Runtime" ] && {
     Dockercommand="$Dockercommand \\
   --runtime='$Runtime'"
-#    Wmdockercommand="$Wmdockercommand \\
-#  --runtime=$Runtime"
   }
       
   # capabilities
@@ -3825,7 +3822,7 @@ create_dockercommand() {        ### create command to run docker
   [ -e "$Nvidiainstallerfile" ] && Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$Nvidiainstallerfile:ro" "$Nvidiacontainerfile")"
 
-  # X socket will be softlinked to /tmp/.X11-unix in container.CMD.sh
+  # X socket will be softlinked to /tmp/.X11-unix in containerrc
   [ "$Newxsocket" ] && {
     Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$Newxsocket" "/X$Newdisplaynumber")"
@@ -3833,7 +3830,7 @@ create_dockercommand() {        ### create command to run docker
   --volume $(convertpath volume "$Newxsocket")"
   }
   
-  # Wayland socket will be softlinked to XDG_RUNTIME_DIR in container.CMD.sh
+  # Wayland socket will be softlinked to XDG_RUNTIME_DIR in containerrc
   [ "$Setupwayland" = "yes" ] && Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$XDG_RUNTIME_DIR/$Newwaylandsocket" "/$Newwaylandsocket")"
 
@@ -3856,7 +3853,7 @@ create_dockercommand() {        ### create command to run docker
   Dockercommand="$Dockercommand \\
   --entrypoint env"
   
-  # add environment variables. Only needed here for possible 'docker exec'. Otherwise set in container.CMD.sh
+  # add environment variables. Only needed here for possible 'docker exec'. Otherwise set in containerrc
   while read Line; do
     Dockercommand="$Dockercommand \\
   --env '$Line'"
@@ -3873,8 +3870,8 @@ create_dockercommand() {        ### create command to run docker
   --"
   
   case $Switchcontaineruser in
-    no)  Dockercommand="$Dockercommand $Imagename $Tini /bin/sh - $(convertpath share $Containercommandscript)" ;;  # dockerrc runs containerrootrc with 'docker exec'
-    yes) Dockercommand="$Dockercommand $Imagename $Tini /bin/sh - $(convertpath share $Containerrootrc)"  ;;    # containerrootrc runs container.CMD.sh
+    no)  Dockercommand="$Dockercommand $Imagename $Tini /bin/sh - $(convertpath share $Containerrc)" ;;  # dockerrc runs containerrootrc with 'docker exec'
+    yes) Dockercommand="$Dockercommand $Imagename $Tini /bin/sh - $(convertpath share $Containerrootrc)"  ;;    # containerrootrc runs containerrc
   esac
 
   return 0
@@ -4034,7 +4031,8 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
     $Hostuserhome/.local/share/x11docker/
     /usr/local/share/x11docker/"
       }
-      debugnote "Found tini binary: ${Tinibinaryfile:-(none)}"
+      verbose "--init: Found tini binary: ${Tinibinaryfile:-(none)}"
+      [ "$Tinibinaryfile" ] && storeinfo "tini=$Tinibinaryfile"
     ;;
 
     systemd)
@@ -4052,13 +4050,14 @@ Also=x11docker-journal.service
 " >> $Systemdtarget
 
       echo "[Unit]
-Description=x11docker start CMD service
-# runs x11docker-agetty->x11docker-login->x11docker.CMD.sh
+Description=x11docker start service 
+# start on console to support --interactive
+# runs x11docker-agetty->x11docker-login->containerrc
 Wants=multi-user.target
 Wants=x11docker-watch.service
 Wants=x11docker-journal.service
 Wants=dbus.service
-After=systemd-user-sessions.service plymouth-quit-wait.service
+After=systemd-user-sessions.service
 After=rc-local.service getty-pre.target
 Before=getty.target
 [Service]
@@ -4082,10 +4081,10 @@ WantedBy=multi-user.target
 
       echo "[Unit]
 Description=x11docker watch service
-# Watches for end of x11docker.CMD.sh and initiates shutdown
+# Watches for end of containerrc and initiates shutdown
 [Service]
 Type=simple
-ExecStart=/bin/sh -c 'while sleep 1; do systemctl is-active console-getty >/dev/null || { echo timetosaygoodbye >>$(convertpath share $Timetosaygoodbye) ; systemctl halt ; } ; [ -s $(convertpath share $Timetosaygoodbye) ] && systemctl halt ; done'
+ExecStart=/bin/sh -c 'while sleep 1; do systemctl is-active console-getty >/dev/null || { echo timetosaygoodbye >>$(convertpath share $Timetosaygoodbyefile) ; systemctl halt ; } ; [ -s $(convertpath share $Timetosaygoodbyefile) ] && systemctl halt ; done'
 [Install]
 WantedBy=x11docker.target
 " >> $Systemdwatchservice
@@ -4233,7 +4232,7 @@ create_containerrootrc() {      ### create containerrootrc: This script runs as 
   echo "$Messagefifofuncs"
   echo "Messagefile=$(convertpath share $Messagefifo)"
   echo "Storeinfofile='$(convertpath share $Storeinfofile)'"
-  echo "Timetosaygoodbye=$(convertpath share $Timetosaygoodbye)"
+  echo "Timetosaygoodbyefile=$(convertpath share $Timetosaygoodbyefile)"
   echo ""
 
   echo "debugnote 'Running containerrootrc: Setup as root in container'"
@@ -4252,7 +4251,7 @@ create_containerrootrc() {      ### create containerrootrc: This script runs as 
   echo "chmod -c 1777 /tmp/.ICE-unix /tmp/.X11-unix /tmp/.font-unix"
   echo "export DISPLAY=$Newdisplay XAUTHORITY=$(convertpath share $Xclientcookie)"
   [ "$Xoverip" = "no" ] && {
-    echo "[ -e /X$Newdisplaynumber ] && ln -s /X$Newdisplaynumber $Newxsocket" # done again in container.CMD.sh. At least x11docker/deepin needs it here already.
+    echo "[ -e /X$Newdisplaynumber ] && ln -s /X$Newdisplaynumber $Newxsocket" # done again in containerrc. At least x11docker/deepin needs it here already.
     echo "ls -l /X$Newdisplaynumber"
     echo "ls -l $Newxsocket"
   }
@@ -4453,13 +4452,13 @@ Messagefile=$(convertpath share $Messagefifo)
     echo ""
     
     echo "echo \"#! /bin/sh
-# User switch from root in containerrootrc to unprivileged user in container.CMD.sh.
+# User switch from root in containerrootrc to unprivileged user in containerrc.
 # Additionally, su triggers logind and elogind. (Except su from busybox?)
 # Called by x11docker-agetty.
 . /usr/local/bin/x11docker-message
 debugnote 'Running x11docker-login'
-chmod +x $(convertpath share $Containercommandscript)
-exec su - -s /bin/sh  \$Containeruser $(convertpath share $Containercommandscript)
+chmod +x $(convertpath share $Containerrc)
+exec su - -s /bin/sh  \$Containeruser $(convertpath share $Containerrc)
 \" >/usr/local/bin/x11docker-login"
     echo "chmod +x /usr/local/bin/x11docker-login"
     echo ""
@@ -4510,7 +4509,8 @@ halt -f
       echo "systemctl unmask systemd-logind"
       echo "systemctl enable systemd-logind"
       echo ""
-      
+      echo "echo bla >/tmp/mybla"
+      echo "echo bla >/mybla"
       echo "# remove failing and annoying services"
       echo "Unservicelist='
               apt-daily.service
@@ -4629,7 +4629,7 @@ depend() {
   after *
 }
 start() {
-  ebegin 'Starting container.CMD.sh'
+  ebegin 'Starting containerrc'
   /usr/local/bin/x11docker-agetty
   openrc-shutdown --poweroff 0
   shutdown 0
@@ -4907,7 +4907,7 @@ reload() {
     echo "}"
     echo ""
     echo "[ \"\$Langcontainer\" ] && {"
-    echo '  storeinfo locale "$Langcontainer"'
+    echo '  storeinfo locale="$Langcontainer"'
     echo "  echo \"LANG=\$Langcontainer\" > /etc/default/locale"
     echo "} || note 'Option --lang: Desired locale for '$Langwunsch' not found and not generated.'"
     echo ""
@@ -4931,10 +4931,10 @@ reload() {
     echo ""
   }
 
-  echo "storeinfo containerrootrc ready"   # signal for container.CMD.sh
+  echo "storeinfo containerrootrc=ready"   # signal for containerrc
   echo ""
   
-  [ "$Switchcontaineruser" = "yes" ] && {   # if "no", container.CMD.sh is executed in command line $Dockercommand
+  [ "$Switchcontaineruser" = "yes" ] && {   # if "no", containerrc is executed in command line $Dockercommand
     echo "# --init=$Initsystem"
     case $Initsystem in
       none|dockerinit)
@@ -4976,8 +4976,8 @@ reload() {
   }
   return 0
 } >> $Containerrootrc
-create_dockerrc() {             ### create dockerrc: This script runs as root (or member of group docker) on host. Also creates container.CMD.sh
-  # create container.CMD.sh -> runs as unprivileged user in container
+create_dockerrc() {             ### create dockerrc: This script runs as root (or member of group docker) on host. Also creates containerrc
+  # create containerrc -> runs as unprivileged user in container
   # check and set up cgroup on host for systemd or elogind
   # run docker
   local Line= Wantcgroup= Path=
@@ -4988,7 +4988,7 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   echo "#  This script runs as root (or member of group docker) on host."
   echo "#  - inspect image"
   echo "#  - pull image if needed"
-  echo "#  - create container.CMD.sh"
+  echo "#  - create containerrc"
   echo "#  - set up systemd/elogind cgroup if needed"
   echo "#  - run window manager in container or from host if needed"
   echo ""
@@ -5022,7 +5022,8 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   echo "export PATH='$PATH'"
   echo "Storeinfofile='$Storeinfofile'"
   echo "Storepidfile='$Storepidfile'"
-  echo "Timetosaygoodbye='$Timetosaygoodbye'"
+  echo "Timetosaygoodbyefile='$Timetosaygoodbyefile'"
+  echo "Timetosaygoodbyefifo='$Timetosaygoodbyefifo'"
   echo "Xserver='$Xserver'"
   echo "Workdir='$Workdir'"
   echo ""
@@ -5098,15 +5099,16 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   [ "$Runtime" ] && echo "  Runtime='$Runtime'"
   echo "}"
   echo "debugnote \"dockerrc: Container Runtime: \$Runtime\""
+  echo "storeinfo \"runtime=\$Runtime\""
   echo ""
   
   echo "# Refresh images.list for x11docker-gui"
-  echo "$Dockerexe images 2>>$Containerlogfile | grep -v REPOSITORY | awk '{print \$1 \":\" \$2}' >>$Imagelistfile.sort"
-  echo "rmcr $Imagelistfile.sort"
+  echo "$Dockerexe images 2>>$Containerlogfile | grep -v REPOSITORY | awk '{print \$1 \":\" \$2}' >>$Dockerimagelistfile.sort"
+  echo "rmcr $Dockerimagelistfile.sort"
   echo "while read -r Line ; do"
-  echo '  grep -q "<none>" <<<$Line || echo $Line >> '$Imagelistfile
-  echo "done < <(sort < $Imagelistfile.sort)"
-  echo "rm $Imagelistfile.sort"
+  echo '  grep -q "<none>" <<<$Line || echo $Line >> '$Dockerimagelistfile
+  echo "done < <(sort < $Dockerimagelistfile.sort)"
+  echo "rm $Dockerimagelistfile.sort"
   echo ""
 
   echo "# Check if image $Imagename is available locally"
@@ -5117,7 +5119,7 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
     yes) echo "$Dockerexe inspect $Imagename >>$Containerlogfile 2>&1 || Dockerpull=yes" ;;
     ask)
       [ "$Runsinterminal" = "yes" ] && {
-        echo "grep -x -q '$Imagename' < $Imagelistfile || grep -x -q '$Imagename:latest' < $Imagelistfile || {"
+        echo "grep -x -q '$Imagename' < $Dockerimagelistfile || grep -x -q '$Imagename:latest' < $Dockerimagelistfile || {"
         echo "  $Dockerexe inspect $Imagename >>$Containerlogfile 2>&1 || {"
         echo "    echo 'Image $Imagename not found locally.' >&2"
         echo "    echo 'Do you want to pull it from docker hub?' >&2"
@@ -5153,7 +5155,7 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   echo "  # extract image command from image if not given on cli"
   echo "  Containercommand=\"\$(cut -d] -f2 <<< \"\$Inspect\" | cut -d[ -f2)\""
   echo "  debugnote \"dockerrc: Image CMD: \$Containercommand\""
-  echo "  echo \"\$Containercommand\" | grep -q $(convertpath share $Containercommandscript) && error 'Recursion error: Found CMD $(convertpath share $Containercommandscript) in image.
+  echo "  echo \"\$Containercommand\" | grep -q $(convertpath share $Containerrc) && error 'Recursion error: Found CMD $(convertpath share $Containerrc) in image.
   Did you use docker commit with an x11docker container?
   Please build new images with a Dockerfile instead of using docker commit,
   or provide a different container command.'"
@@ -5168,10 +5170,10 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
       echo "[ \"\$Imageuser\" ] && note \"Found 'USER \$Imageuser' in image."
       echo "  If you want to run with user \$Imageuser instead of host user $Containeruser,"
       echo "  than run with --user=RETAIN.\""
-      echo "storeinfo containeruser \"$Containeruser\""
+      echo "storeinfo containeruser=\"$Containeruser\""
     ;;
     no)
-      echo 'storeinfo containeruser "${Imageuser:-root}"'
+      echo 'storeinfo containeruser="${Imageuser:-root}"'
     ;;
   esac
   echo ""
@@ -5223,12 +5225,12 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   echo "[ -z \"\$Containercommand\$Entrypoint\" ] && error 'No container command specified and no CMD or ENTRYPOINT found in image.'"
   echo ""
 
-  echo     "######## Create $(basename $Containercommandscript) ########"
+  echo     "######## Create $(basename $Containerrc) ########"
   echo     ""
   echo     "{ echo '#! /bin/sh'"
 #  [ "$Debugmode" = "yes" ] && echo "echo 'set -x'"
   echo     "  echo ''"
-  echo     "  echo '# $(basename $Containercommandscript)'"
+  echo     "  echo '# $(basename $Containerrc)'"
   echo     "  echo '# Created startscript for docker run used as container command.'"
   echo     "  echo '# Runs as unprivileged user in container.'"
   echo     "  echo ''"
@@ -5249,29 +5251,28 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   echo     "  echo '$Messagefifofuncs'"
   echo     "  echo 'Messagefile=$(convertpath share $Messagefifo)'"
   echo     "  echo 'Storeinfofile=$(convertpath share $Storeinfofile)'"
-  echo     "  echo 'Timetosaygoodbye=$(convertpath share $Timetosaygoodbye)'"
-  echo     "  echo 'Timetosaygoodbyefifo=$(convertpath share $Timetosaygoodbyefifo)'"
+  echo     "  echo 'Timetosaygoodbyefile=$(convertpath share $Timetosaygoodbyefile)'"
   echo     "  echo ''"
   
-  echo     "  echo 'waitforlogentry $(basename $Containercommandscript) \$Storeinfofile containerrootrc=ready "" infinity'"
+  echo     "  echo 'waitforlogentry $(basename $Containerrc) \$Storeinfofile containerrootrc=ready "" infinity'"
 
-  echo     "  echo 'debugnote \"Running $(basename $Containercommandscript): Unprivileged user commands in container\"'"
+  echo     "  echo 'debugnote \"Running $(basename $Containerrc): Unprivileged user commands in container\"'"
   echo     "  echo ''"
 
   echo     '  echo "Containercommand=\"$Containercommand\""'
   echo     '  echo "Entrypoint=\"$Entrypoint\""'
   echo     "  echo ''"
-  echo     "  echo 'verbose \"$(basename $Containercommandscript): Container system:'"
+  echo     "  echo 'verbose \"$(basename $Containerrc): Container system:'"
   echo     "  echo '\$(cat /etc/os-release 2>&1)\"'"
   echo     "  echo ''"
 
-  echo     "} >> $Containercommandscript"
+  echo     "} >> $Containerrc"
 
   [ "$Switchcontaineruser" = "yes" ] && {   ### FIXME try --format '{{json .ContainerConfig.Env}}'
-    echo "echo '# Environment variables found in image:'   >> $Containercommandscript"
+    echo "echo '# Environment variables found in image:'   >> $Containerrc"
     echo "IFS=$'\n'"
     echo "while read -r Line; do"
-    echo   "  echo \"export \$(escapestring \"\$Line\")\"  >> $Containercommandscript"
+    echo   "  echo \"export \$(escapestring \"\$Line\")\"  >> $Containerrc"
     echo "done < <($Dockerexe run --rm --entrypoint env $Imagename env 2>>$Containerlogfile | grep -v 'HOSTNAME=' | rmcr)"
     echo "IFS=$' \t\n'"
   }
@@ -5302,11 +5303,11 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   [ "$Sharehosthome" = "no" ] && echo   "  echo 'mkdir -p \$Containeruserhome'"
   echo     "  echo '# Copy files from /etc/skel into empty HOME'"
   echo     "  echo '[ -d /etc/skel ] && [ -z \"\$(ls -A \"$Containeruserhome\" 2>/dev/null | grep -v gnupg)\" ] && {'"
-  echo     "  echo '  debugnote \"$(basename $Containercommandscript): HOME is empty. Copying from /etc/skel\"'"
+  echo     "  echo '  debugnote \"$(basename $Containerrc): HOME is empty. Copying from /etc/skel\"'"
   echo     "  echo '  cp -n -R /etc/skel/. \$Containeruserhome'"
   echo     "  echo '  :'"
   echo     "  echo '} || {'"
-  echo     "  echo '  debugnote \"$(basename $Containercommandscript): HOME not empty. Not copying from /etc/skel\"'"
+  echo     "  echo '  debugnote \"$(basename $Containerrc): HOME not empty. Not copying from /etc/skel\"'"
   echo     "  echo '}'"
   echo     "  echo ''"
   
@@ -5354,7 +5355,7 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   echo     "  echo 'bash --version >/dev/null 2>&1 && export SHELL=/bin/bash || export SHELL=/bin/sh'"
   echo     "  echo 'export TERM=xterm'"
 
-  echo     "  echo 'storeinfo dump locale && export LANG=\"\$(storeinfo dump locale)\"'"
+  echo     "  echo 'storeinfo test locale && export LANG=\"\$(storeinfo dump locale)\"'"
 
   echo     "  echo '[ -e \"$Hostlocaltime\" ] || export TZ=$Hostutctime'"
   echo     "  echo '[ \"\$(date -Ihours)\" != \"$(date -Ihours)\" ] && export TZ=$Hostutctime'"
@@ -5389,7 +5390,7 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
     echo   "  echo ''"
   }
   
-  echo     "  echo \"debugnote \\\"$(basename $Containercommandscript): Running container command: 
+  echo     "  echo \"debugnote \\\"$(basename $Containerrc): Running container command: 
   \\\$Dbus \$Entrypoint \$Containercommand
   \\\"\""
   echo     "  echo ''"
@@ -5404,13 +5405,13 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
       echo "  echo \"\$Exec \\\$Dbus \$Entrypoint \$Containercommand\""
     ;;
   esac
-  echo     "  echo \"storeinfo cmdexitcode \\\$?\""
-  echo     "} >> $Containercommandscript"
-  echo     "######## End of container.CMD.sh ########"
+  echo     "  echo \"storeinfo cmdexitcode=\\\$?\""
+  echo     "} >> $Containerrc"
+  echo     "######## End of containerrc ########"
   echo ""
   
-  echo "# Write container.CMD.sh into x11docker.log"
-  echo "nl -ba >> $Logfile < $Containercommandscript"
+  echo "# Write containerrc into x11docker.log"
+  echo "nl -ba >> $Logfile < $Containerrc"
   echo ""
 
 
@@ -5451,7 +5452,7 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   }
   
   echo "# Send signal to run X and wait for X to be ready"
-  echo 'storeinfo readyforX ready'
+  echo 'storeinfo readyforX=ready'
   echo "waitforlogentry 'dockerrc' $Xinitlogfile 'xinitrc is ready' '$Xiniterrorcodes'"
   echo ""
   
@@ -5530,9 +5531,7 @@ $Wmdockercommand"'
   Last lines of container log:
 \$(rmcr < $Containerlogfile | tail)\"
 }"
-  echo 'storeinfo containerid "$Containerid"'
-  [ "$Showcontainerid" = "yes" ] && echo 'stdout "$Containerid"'
-  echo ""
+  echo 'storeinfo containerid="$Containerid"'
   
   echo "# Wait for container to be ready"
   echo "for ((Count=1 ; Count<=40 ; Count++)); do"
@@ -5557,13 +5556,12 @@ $Wmdockercommand"'
   echo "  rocknroll || exit 64"
   echo "  mysleep 0.1"
   echo "done"
-  echo 'storeinfo pid1pid "$Pid1pid"'
-  [ "$Showcontainerpid1pid" = "yes" ] && echo "stdout \$Pid1pid  # --showpid1"
+  echo 'storeinfo pid1pid="$Pid1pid"'
   echo ""
 
   echo "# Get IP of container"
   echo "Containerip=\"\$($Dockerexe inspect --format '{{ .NetworkSettings.IPAddress }}' $Containername 2>>$Containerlogfile)\""
-  echo 'storeinfo containerip $Containerip'
+  echo 'storeinfo containerip=$Containerip'
   echo ""
   
   echo "# Check log for startup failure"
@@ -5581,10 +5579,13 @@ $(tail $Containerlogfile)\""
   [ "$Switchcontaineruser" = "no" ] && {
     echo "# copy containerrootrc inside of container to avoid possible noexec of host home."
     echo "$Dockerexe exec --tty $Containername sh -c 'cp $(convertpath share $Containerrootrc) /tmp/containerrootrc ; chmod 644 /tmp/containerrootrc' 2>&1 | rmcr >>$Containerlogfile"
-    echo "# run container root setup. container.CMD.sh will wait until setup script is ready."
+    echo "# run container root setup. containerrc will wait until setup script is ready."
     echo "$Dockerexe exec --tty -u root $Containername /bin/sh /tmp/containerrootrc 2>&1 | rmcr >>$Containerlogfile"
     echo ""
   }
+  
+  echo "storeinfo dockerrc=ready"
+  echo ""
   
   [ -z "$Winsubsystem" ] && {
     echo '[ "$Containerid" ] || [ "$Wmcontainerid" ] && {'
@@ -5606,8 +5607,10 @@ create_xtermrc() {              # create xtermrc: Script to prompt for password 
   echo "# Ask for password if needed."
   echo "# Runs in terminal or in an additional terminal window"
   echo ""
+  declare -f rocknroll
   declare -f storeinfo
   echo "$Messagefifofuncs"
+  echo "Timetosaygoodbyefile='$Timetosaygoodbyefile'"
   echo ""
   #[ "$Debugmode" = "yes" ] && echo "set -x"
   echo "Messagefile='$Messagefifo'"
@@ -5631,8 +5634,8 @@ create_xtermrc() {              # create xtermrc: Script to prompt for password 
     lxsu)           echo "$Passwordcommand bash $Dockerrc" ;;
     *)              echo "$Passwordcommand \"${Sudo}bash $Dockerrc \"" ;;
   esac
-  echo ""  
-  echo "storeinfo xtermrc ready"  
+  echo ""
+  echo "storeinfo xtermrc=ready"  
   echo "exit 0"
   return 0
 } >> $Xtermrc
@@ -5646,7 +5649,7 @@ start_compositor() {            # start Wayland compositor Weston or KWin
     --kwin|--kwin-xwayland)                                       Compositorkeyword="X-Server" ;;
   esac
   
-  unpriv "$(command -v dbus-launch) $Compositorcommand  >> $Compositorlogfile  2>&1 & storeinfo compositorpid \$!"
+  unpriv "$(command -v dbus-launch) $Compositorcommand  >> $Compositorlogfile  2>&1 & echo compositorpid=\$! >>$Storeinfofile"
   
   waitforlogentry "start_compositor()" "$Compositorlogfile" "$Compositorkeyword" "$Compositorerrorcodes"
 
@@ -5660,8 +5663,8 @@ start_compositor() {            # start Wayland compositor Weston or KWin
   return 0
 }
 start_docker() {                # start xtermrc -> dockerrc
-  local Containerid= Containerpid1=
-    
+  local Containerpid1= 
+
   # run docker in xtermrc, ask for password if needed
   case $Passwordfrontend in
     su|sudo)
@@ -5670,14 +5673,12 @@ start_docker() {                # start xtermrc -> dockerrc
         yes) $Passwordterminal  /usr/bin/env bash $Xtermrc ;;
       esac
     ;;
-    *)       $Passwordterminal "/usr/bin/env bash $Xtermrc" ;;
-  esac
-  waitforlogentry "start_docker()" "$Storeinfofile" "xtermrc=ready" "" infinity
-
+    *)       $Passwordterminal              "bash $Xtermrc" ;;
+  esac & storepid $! dockerrc
+  
+  waitforlogentry "start_docker()" "$Storeinfofile" "dockerrc=ready" "" infinity
   rocknroll || return 64
   
-  Containerid=$(storeinfo dump containerid)
-  Containerip=$(storeinfo dump containerip)         # used by start_pulseaudiotcp()
   Containerpid1=$(storeinfo dump pid1pid)
 
   # watch container
@@ -5688,11 +5689,8 @@ start_docker() {                # start xtermrc -> dockerrc
       } || error "Container startup seems to have failed.
   Last lines of log:
 $(tail $Containerlogfile)"
-
-      [ "$Containerpid1" ] && sleep 1 && debugnote "Process tree of container: (maybe not complete yet)
-$(pstree -cp $Containerpid1 2>&1 ||:)"
     ;;
-    *) [ "$Containerid" ] && setonwatchpidlist "CONTAINER$Containerid" ;;
+    *) setonwatchpidlist "CONTAINER$Containername" ;;
   esac
 
   return 0
@@ -5753,30 +5751,24 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
     echo ""
     
     echo "\$Dbus $Hostexe $( [ "$Forwardstdin" = "yes" ] && echo "<$Cmdstdinfifo") >>$Cmdstdoutlogfile 2>>$Cmdstderrlogfile &"
-    echo 'storeinfo pid1pid $!'
-  } >> $Containercommandscript
-  nl -ba <$Containercommandscript >> $Containerlogfile
+    echo 'storeinfo pid1pid=$!'
+  } >> $Containerrc
+  nl -ba <$Containerrc >> $Containerlogfile
 
   # Send signal to run X and wait for X to be ready
-  storeinfo readyforX ready
-
-  waitforlogentry "$Xserver" "$Storeinfofile" "xinitrc=ready" "$Xiniterrorcodes"
+  storeinfo readyforX=ready
+  waitforlogentry "$Xserver" "$Xinitlogfile" "xinitrc is ready" "$Xiniterrorcodes"
   
   # run start script
-  unpriv "/usr/bin/env bash $Containercommandscript"
+  unpriv "/usr/bin/env bash $Containerrc"         ### FIXME support --user
   Hostexepid="$(storeinfo dump pid1pid)"
-
-  [ "$Showcontainerid" = "yes" ]      && echo ""             # --showid: empty here, no container ID
-  [ "$Showcontainerpid1pid" = "yes" ] && echo $Hostexepid    # --showpid1
-
-  setonwatchpidlist $Hostexepid hostexe
-      
-  sleep 1 && debugnote "Process tree of $Hostexe:
-$(pstree -p $Hostexepid 2>&1 ||:)"
+  setonwatchpidlist "${Hostexepid:-NOPID}" hostexe
 
   return 0
 } 
 start_pulseaudiotcp() {         # option --pulseaudio=tcp: load Pulseaudio TCP module (authenticated with container IP)
+  local Containerip
+  Containerip="$(storeinfo dump containerip)"
   unpriv "pactl load-module module-native-protocol-tcp  port=$Pulseaudioport auth-ip-acl=${Containerip:-"127.0.0.1"} 2>&1" >>$Messagelogfile 
   return 0
 }
@@ -5844,7 +5836,7 @@ $(tail $Compositorlogfile)")"
 check_host() {                  # check host environment
   local Drive
 
-  [ "${0:-}" = "${BASH_SOURCE:-}" ] && Sourced="no" || Sourced="yes"
+  [ "${0:-}" = "${BASH_SOURCE:-}" ] && Runssourced="no" || Runssourced="yes"
 
   Hostsystem="$(source /etc/os-release 2>/dev/null; echo ${ID:-})"
 
@@ -5903,9 +5895,9 @@ check_host() {                  # check host environment
   
   # Check whether x11docker runs over SSH
   pstree -ps $$ >/dev/null 2>&1 && {
-    pstree -ps $$ | grep -q sshd && Hostssh="yes" || Hostssh="no"
+    pstree -ps $$ | grep -q sshd && Runsoverssh="yes" || Runsoverssh="no"
   } || {
-    check_parent_sshd "$$"       && Hostssh="yes" || Hostssh="no"
+    check_parent_sshd "$$"       && Runsoverssh="yes" || Runsoverssh="no"
   }
   
   # Check whether x11docker runs on console
@@ -5927,8 +5919,8 @@ check_host() {                  # check host environment
   
   # Check whether x11docker runs in interactive bash mode (--enforce-i)
   case $- in
-    *i*) Bashinteractive="yes" ;;
-    *)   Bashinteractive="no" ;;
+    *i*) Runsinteractive="yes" ;;
+    *)   Runsinteractive="no" ;;
   esac
   
   # Check whether ps can watch processes of other users
@@ -6020,10 +6012,7 @@ check_hostuser() {              # check for unprivileged host user
   # How to run as unprivileged user in unpriv()
   case "$Hostuser" in
     "$Startuser") Unpriv="eval" ;;   # alternatively: bash -c
-    *)            Unpriv="su $Hostuser -c" 
-      export -f storeinfo
-      export Storeinfofile
-    ;;
+    *)            Unpriv="su $Hostuser -c" ;;
   esac
   
   return 0
@@ -6045,7 +6034,7 @@ check_hostxenv() {              # check environment variables for host X display
   XAUTHORITY=${XAUTHORITY:-}
   [ -z "$XAUTHORITY" ]   && command -v systemctl >/dev/null    && XAUTHORITY="$(systemctl --user show-environment | grep XAUTHORITY= | cut -d= -f2)"
   [ -z "$XAUTHORITY" ]   && [ -e "$Hostuserhome/.Xauthority" ] && XAUTHORITY="$Hostuserhome/.Xauthority"
-  [ "$Hostssh" = "yes" ] && [ -e "$Hostuserhome/.Xauthority" ] && XAUTHORITY="$Hostuserhome/.Xauthority"
+  [ "$Runsoverssh" = "yes" ] && [ -e "$Hostuserhome/.Xauthority" ] && XAUTHORITY="$Hostuserhome/.Xauthority"
   [ "${XAUTHORITY:-}" ]  && {
     unpriv "xauth -i -f ${XAUTHORITY:-} nlist $Hostdisplay 2>/dev/null | xauth -f $Hostxauthority nmerge - 2>/dev/null"
     chown $Hostuser $Hostxauthority
@@ -6233,7 +6222,7 @@ check_option_interferences() {  # check multiple option interferences, change se
   }
 
   # --hostdisplay with SSH
-  [ "$Xserver" = "--hostdisplay" ] && [ "$Hostssh" = "yes" ] && {
+  [ "$Xserver" = "--hostdisplay" ] && [ "$Runsoverssh" = "yes" ] && {
     [ "$Trusted" = "no" ] || [ "$Sharehostnet" = "no" ]  && {
       note "For SSH connection with option --hostdisplay
   x11docker must enable option --hostnet and allow trusted cookies.
@@ -6323,7 +6312,7 @@ check_option_interferences() {  # check multiple option interferences, change se
   esac
 
   # --hostipc: Check auto-enabling
-  [ "$Xserver" = "--hostdisplay" ] && [ "$Trusted" = "yes" ] && [ "$Hostmitshm" = "yes" ] && [ "$Sharehostipc" = "no" ] && [ "$Hostssh" = "no" ] && {
+  [ "$Xserver" = "--hostdisplay" ] && [ "$Trusted" = "yes" ] && [ "$Hostmitshm" = "yes" ] && [ "$Sharehostipc" = "no" ] && [ "$Runsoverssh" = "no" ] && {
     note "Option --hostdisplay: To allow --hostdisplay with trusted cookies,
   x11docker must share host IPC namespace with container (option --hostipc)
   to allow shared memory for X extension MIT-SHM."
@@ -6576,7 +6565,7 @@ check_option_interferences() {  # check multiple option interferences, change se
   Fallback: Disabling option --stdin."
         Forwardstdin="no"
       }
-      [ "$Bashinteractive" = "yes" ] && {
+      [ "$Runsinteractive" = "yes" ] && {
         note "Option -i, --interactive: Does not work in interactive
   bash mode (option --enforce-i).
   Fallback: Disabling option --interactive."
@@ -6830,19 +6819,16 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
 #      *)  Cachebasefolder="$(convertpath subsystem "$(cmd.exe /C "echo %userprofile%")" | rmcr)/x11docker/cache" ;;
 #    esac
   }
+  
   Cachebasefolder="$(convertpath subsystem "$Cachebasefolder")"
   [ "$Cachebasefolder" != "$(echo $Cachebasefolder | sed -e 's/ *//g')" ] && error "Cache root folder must not contain whitespaces.
   $Cachebasefolder"
   unpriv "mkdir -p $Cachebasefolder"                                      || error "Could not create cache folder
   $Cachebasefolder"
   writeaccess $Hostuseruid $Cachebasefolder                               || error "User $Hostuser does not have write access to cache folder
-  $Cachebasefolder"                                    # can happen with --cachebasedir
-  Logfilebackup="$Cachebasefolder/x11docker.log"       # afterward copy of $Logfile in $Cachebasefolder
-  Imagelistfile="$Cachebasefolder/$Imagelistfile"                         && mkfile $Imagelistfile
-  Modelinefile="$Cachebasefolder/modelines"
-
+  $Cachebasefolder"
   
-  # create cache subfolder
+  # Create cache subfolders
   Cachefolder="$Cachebasefolder/$Codename-$Cachenumber"
   [ -d "$Cachefolder" ] && error "Cache folder already exists:
   $Cachefolder"
@@ -6856,9 +6842,8 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
 
   Sharefolder="$Cachefolder/$Sharefolder"
   unpriv "mkdir -p $Sharefolder"
-  #export Cachefolder Sharefolder
   
-  # host only access
+  # Files in $Cachefolder: host only access
   Compositorlogfile="$Cachefolder/$Compositorlogfile"               && mkfile $Compositorlogfile
   Dockercommandfile="$Cachefolder/$Dockercommandfile"               && mkfile $Dockercommandfile
   Dockerinfofile="$Cachefolder/$Dockerinfofile"                     && mkfile $Dockerinfofile
@@ -6866,8 +6851,11 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Dockerstopsignalfifo="$Cachefolder/$Dockerstopsignalfifo"
   Hostxauthority="$Cachefolder/$Hostxauthority"                     && mkfile $Hostxauthority
   Messagelogfile="$Cachefolder/$Messagelogfile"                     && mkfile $Messagelogfile
+  Nxagentclientrc="$Cachefolder/$Nxagentclientrc"                   && mkfile $Nxagentclientrc
+  Nxagentkeysfile="$Cachefolder/$Nxagentkeysfile"                   && mkfile $Nxagentkeysfile
+  Nxagentoptionsfile="$Cachefolder/$Nxagentoptionsfile"             && mkfile $Nxagentoptionsfile
   Pulseaudioconf="$Cachefolder/$Pulseaudioconf"                     && mkfile $Pulseaudioconf
-  Shareclipboardscript="$Cachefolder/$Shareclipboardscript"         && mkfile $Shareclipboardscript
+  Clipboardrc="$Cachefolder/$Clipboardrc"                           && mkfile $Clipboardrc
   Storepidfile="$Cachefolder/$Storepidfile"                         && mkfile $Storepidfile
   Systemdconsoleservice=$Cachefolder/$Systemdconsoleservice         && mkfile $Systemdconsoleservice
   Systemdenvironment=$Cachefolder/$Systemdenvironment               && mkfile $Systemdenvironment
@@ -6887,11 +6875,11 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Xservercookie="$Cachefolder/$Xservercookie"                       && mkfile $Xservercookie
   Xtermrc="$Cachefolder/$Xtermrc"                                   && mkfile $Xtermrc
   
-  # shared to /x11docker in container
+  # Files in $Sharefolder: shared to /x11docker in container
   Cmdstderrlogfile="$Sharefolder/$Cmdstderrlogfile"                 && mkfile $Cmdstderrlogfile 666
   Cmdstdinfifo="$Sharefolder/$Cmdstdinfifo"
   Cmdstdoutlogfile="$Sharefolder/$Cmdstdoutlogfile"                 && mkfile $Cmdstdoutlogfile 666
-  Containercommandscript="$Sharefolder/$Containercommandscript"     && mkfile $Containercommandscript
+  Containerrc="$Sharefolder/$Containerrc"                           && mkfile $Containerrc
   Containerenvironmentfile="$Sharefolder/$Containerenvironmentfile" && mkfile $Containerenvironmentfile 666
   Containerlogfile="$Sharefolder/$Containerlogfile"                 && mkfile $Containerlogfile 666
   Containerrootrc="$Sharefolder/$Containerrootrc"                   && mkfile $Containerrootrc
@@ -6900,9 +6888,14 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   Pulseaudiocookie="$Sharefolder/$Pulseaudiocookie"
   Pulseaudiosocket="$Sharefolder/$Pulseaudiosocket"
   Storeinfofile="$Sharefolder/$Storeinfofile"                       && mkfile $Storeinfofile 666
-  Timetosaygoodbye="$Sharefolder/$Timetosaygoodbye"                 && mkfile $Timetosaygoodbye
+  Timetosaygoodbyefile="$Sharefolder/$Timetosaygoodbyefile"         && mkfile $Timetosaygoodbyefile
   Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo"
   Xclientcookie="$Sharefolder/$Xclientcookie"                       && mkfile $Xclientcookie
+  
+  # Files in $Cachebasefolder
+  Dockerimagelistfile="$Cachebasefolder/$Dockerimagelistfile"       && mkfile $Dockerimagelistfile
+  Logfilebackup="$Cachebasefolder/x11docker.log"
+  Modelinefile="$Cachebasefolder/$Modelinefile"
   
   # file to store display numbers in use today
   Numbersinusefile="$Cachebasefolder/$Numbersinusefile"
@@ -6910,6 +6903,8 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
     [ "$Line" != "$Numbersinusefile" ] && rm "$Line"
   done
   [ -e "$Numbersinusefile" ] || mkfile "$Numbersinusefile"
+  
+  storeinfo "cache=$Cachefolder"
   
   return 0
 }
@@ -6930,6 +6925,10 @@ drop_cachefiles() {             # remove some cache files that are not needed in
     --weston|--kwin|--hostwayland|--tty) rm $Xclientcookie $Xservercookie ;;
     *) [ "$Xauthentication" = "no" ]  && rm $Xclientcookie $Xservercookie ;;
   esac
+  case $Xserver in
+    --nxagent) ;;
+    *) rm $Nxagentclientrc $Nxagentkeysfile $Nxagentoptionsfile ;;
+  esac
   case $Pulseaudiomode in
     "") rm $Pulseaudioconf ;;
   esac
@@ -6943,8 +6942,8 @@ drop_cachefiles() {             # remove some cache files that are not needed in
   esac
   case $Xserver in
     --xephyr|--xorg|--xdummy|--xdummy-xwayland|--xvfb|--xwayland|--weston-xwayland) 
-      [ "$Shareclipboard" = "no" ] && rm $Shareclipboardscript ;;
-    *)                                rm $Shareclipboardscript ;;
+      [ "$Shareclipboard" = "no" ] && rm $Clipboardrc ;;
+    *)                                rm $Clipboardrc ;;
   esac
   case $Xserver in
     --hostdisplay|--xwin|--nxagent|--hostwayland|--weston|--kwin|--tty) rm $Xkbkeymapfile ;;
@@ -7007,7 +7006,7 @@ option_messages() {             # some messages depending on options, but not ch
         no) [ "$Startuser" = "root" ] && warning "x11docker will run Xorg as root." ;;
       esac
 
-      [ "$Hostssh" = "yes" ] && warning "x11docker can run Xorg on another tty (option --xorg),
+      [ "$Runsoverssh" = "yes" ] && warning "x11docker can run Xorg on another tty (option --xorg),
   but you won't see it in your SSH session.
   Rather install e.g. Xephyr on ssh server and use option --xephyr."
     ;;
@@ -7151,7 +7150,7 @@ setup_fifo() {                  # set up fifo channels (also option --stdin)
     WSL)          Usemkfifo="no" ;;      ### FIXME: Better performance in WSL if using real mkfifo. But maybe file system damage due to shared cache files?
   esac
 
-  # redirect stdin to named pipe. Named pipe is shared with container and used as stdin of container command in container.CMD.sh
+  # redirect stdin to named pipe. Named pipe is shared with container and used as stdin of container command in containerrc
   [ "$Forwardstdin" = "yes" ] && {
     case $Usemkfifo in
       yes) unpriv "mkfifo $Cmdstdinfifo" ;;
@@ -7297,26 +7296,27 @@ declare_variables() {           # declare global variables
   Colnorm="${Esc}[0m"
   
   # x11docker startup environment
-  Bashinteractive=""                              # --enforce-i: Script runs in bash interactive mode (bash -i) yes/no.
+  Runsinteractive=""                              # --enforce-i: Script runs in bash interactive mode (bash -i) yes/no.
   Runsinterminal=""                               # x11docker runs in a terminal yes/no
   Runsonconsole=""                                # x11docker runs on tty yes/no
-  Sourced=""                                      # x11docker has been sourced yes/no
+  Runsoverssh=""                                  # x11docker runs over SSH yes/no. Makes a difference for --hostdisplay
+  Runssourced=""                                  # x11docker has been sourced yes/no
   
   # Generated scripts
-  Containercommandscript="container.CMD"          # Generated script starting container command
+  Clipboardrc="clipboardrc"                       # --clipboard: Generated script for text clipboard sharing
+  Containerrc="containerrc"                       # Generated script starting container command
   Containerrootrc="containerrootrc"               # Generated script to set up container, e.g. user creation. Runs as root in container.
-  Dockerrc="dockerrc"                             # Generated script to check image, set up host and create $Containercommandscript
-  Shareclipboardscript="clipboard.sh"             # --clipboard: Generated script for text clipboard sharing
+  Dockerrc="dockerrc"                             # Generated script to check image, set up host and create $Containerrc
   Xinitrc="xinitrc"                               # Generated script to set up X, e.g. cookie and xrandr
   Xtermrc="xtermrc"                               # Generated script for password prompt
     
-  # Internal messages and pid storage
-  Dockerstopsignalfifo="$Dockerrc.stop"           # finish() send 'docker stop' signal to dockerrc
+  # Internal messages
+  Dockerstopsignalfifo="$Dockerrc.stopfifo"       # finish() send 'docker stop' signal to dockerrc
   Logmessages=""                                  # Stores messages until logfile is available, needed by logentry()
   Messagefifo="message.fifo"                      # Message channel for warning/verbose/debugnote/note/error within container, dockerrc, containerrootrc and others
   Storeinfofile="store.info"                      # File to store some info like id, pid, name, exit code
   Storepidfile="store.pids"                       # File to store pids and names of background processes that should be terminated on exit
-  Timetosaygoodbye="timetosaygoodbye"             # File giving term signal to all parties
+  Timetosaygoodbyefile="timetosaygoodbye"         # File giving term signal to all parties
   Timetosaygoodbyefifo="timetosaygoodbye.fifo"    # Message channel for --init=openrc|runit|sysvinit to shut down on x11docker signal
   Usemkfifo="yes"                                 # Not on Windows nor with kata-runtime
   Watchpidfifo="watchpid.fifo"                    # Message channel to transfer pids to watchpidlist()
@@ -7333,8 +7333,8 @@ declare_variables() {           # declare global variables
   Xpraserverlogfile="xpra.server.log"             # Logfile for xpra server
     
   Dockercommandfile="docker.command"              # File to store generated docker command, needed for --interactive
+  Dockerimagelistfile="docker.imagelist"          # File with list of local images.Used by x11docker-gui, too
   Dockerinfofile="docker.info"                    # File to store outpu of 'docker info'
-  Imagelistfile="docker.imagelist"                # File with list of local images.Used by x11docker-gui, too
   
   # Generated commands
   Compositorcommand=""                            # Command to start Weston or KWin
@@ -7371,7 +7371,6 @@ declare_variables() {           # declare global variables
   Hostlibc=""                                     # glibc or musl. Can be important for locale and timezone.
   Hostlocaltime=""                                # Time zone from host, myrealpath /etc/localtime
   Hostmitshm="yes"                                # X on host has extension MIT-SHM enabled yes/no. Assume yes, check later
-  Hostssh=""                                      # x11docker runs over SSH yes/no. Makes a difference for --hostdisplay
   Hostsystem=""                                   # $ID from /etc/os-release
   Hostutctime=""                                  # Time zone from host as offset to UTC
   Hostwaylandsocket="$WAYLAND_DISPLAY"            # Store host wayland socket name
@@ -7412,7 +7411,7 @@ declare_variables() {           # declare global variables
   Lastcheckedxserverresult=""                     # check_xdepends(): Result of last check. Avoids double-checking.
   Maxxaxis=""                                     # Maximal X screen size of display
   Maxyaxis=""                                     # Maximal Y screen size of display
-  Modelinefile=""
+  Modelinefile="modelines"
   Newdisplay=""                                   # --display: New DISPLAY for new X server
   Newdisplaynumber=""                             # --display: New display number for new X server.
   Newwaylandsocket=""                             # Wayland socket of $Compositorcommand
@@ -7421,6 +7420,9 @@ declare_variables() {           # declare global variables
   Newxsocket=""                                   # New X unix socket
   Newxvt=""                                       # --vt: number of virtual console to use for --xorg
   Numbersinusefile="displaynumbers.$(date +%y_%m_%d)" # File to store display numbers used today. Helps to avoid race conditions on simultuanous startups
+  Nxagentclientrc="nxagent.nxclientrc"            # --nxagent NX_CLIENT script to catch nxagent messages
+  Nxagentkeysfile="nxagent.keys"                  # --nxagent keyboard shortcut config
+  Nxagentoptionsfile="nxagent.options"            # --nxagent options not available on cli, but possible in config file
   Modeline=""                                     # Screen modeline describing display size, see "man cvt". Needed for Xdummy
   Outputcount="1"                                 # --output-count: quantum of virtual screens for Weston or Xephyr
   Rotation=""                                     # --rotate: Rotation for --weston, --weston-xwayland or --xorg: 0/90/180/270/flipped/flipped-90/..
@@ -7461,7 +7463,7 @@ declare_variables() {           # declare global variables
   Xorgwrapper="Xorg.xdummy.wrapper"               # --xpra, --xdummy: Fork from xpra to wrap Xorg for Xdummy
   
   # Window manager
-  Windowmanager=""                                # --wm: Window manager to use: container/host/auto
+  Windowmanager="none"                            # --wm: Window manager to use: container/host/auto
   Windowmanagercommand=""                         # --wm: Argument for --wm, host command or docker image
   Hostwindowmanager=""                            # --wm: A window manager from host, given or autodetected
   
@@ -7470,7 +7472,7 @@ declare_variables() {           # declare global variables
   Homebasefolder=""                               # --homebasedir: Base directory for container home with --home
   Internetaccess="yes"                            # --no-internet: Disable internet access
   Langwunsch=""                                   # --lang: Search or create UTF-8 locale in container and set LANG
-  Pulseaudioconf="pulseclient.conf"               # --pulseaudio: Client config in container
+  Pulseaudioconf="pulseaudio.client.conf"         # --pulseaudio: Client config in container
   Pulseaudiocookie="pulseaudio.cookie"            # --pulseaudio: possible pulse cookie from host to share
   Pulseaudiomode=""                               # --pulseaudio: 'tcp', 'socket' or 'auto'
   Pulseaudioport=""                               # --pulseaudio: TCP port for --pulseaudio=tcp
@@ -7901,17 +7903,17 @@ main() {
   declare_variables
   parse_options "$@"
 
-  [ "$Silent" = "yes" ]    && exec 3>/dev/null                                  # --silent
-  [ "$Debugmode" = "yes" ] && {                                                 # --debug
+  [ "$Silent" = "yes" ]    && exec 3>/dev/null                                    # --silent
+  [ "$Debugmode" = "yes" ] && {                                                   # --debug
     set -Eu
     trap 'traperror $? $LINENO $BASH_LINENO "$BASH_COMMAND" $(printf "::%s" ${FUNCNAME[@]})'  ERR
   }
   
   # check host, create cache
   check_host                    # get some infos about host system #time0,234
-  check_runmode                 # modes: run image, or host command, or X only  # --exe, --xonly
-  check_hostuser                # find unprivileged host user                   # --hostuser
-  create_cachefiles             # create cache files owned by unprivileged user # --cachebasedir #time0,433
+  check_runmode                 # modes: run image, or host command, or X only    # --exe, --xonly
+  check_hostuser                # find unprivileged host user                     # --hostuser
+  create_cachefiles             # create cache files owned by unprivileged user   # --cachebasedir #time0,433
   check_hostxenv                # check X environment from host
   
   debugnote "
@@ -7922,9 +7924,9 @@ Command:           '$0' $(for Line in "$@"; do echo -n "'$Line' " ; done)
 Parsed options:    $Parsedoptions"
 
   # Special x11docker jobs
-  [ "$Createlauncher" = "yes" ] && { create_launcher ; exit ; }                 # --launcher: Create application launcher icon on desktop
-  [ "$Cleanup" = "yes" ]        && { cleanup ;         exit ; }                 # --cleanup: Clean up cache and orphaned x11docker containers
-  [ "$Installermode" ]          && {                                            # --install, --update, --update-master, --remove
+  [ "$Createlauncher" = "yes" ] && { create_launcher ; exit ; }                   # --launcher: Create application launcher icon on desktop
+  [ "$Cleanup" = "yes" ]        && { cleanup ;         exit ; }                   # --cleanup: Clean up cache and orphaned x11docker containers
+  [ "$Installermode" ]          && {                                              # --install, --update, --update-master, --remove
     [ "$Startuser" = "root" ] || [ "$Winsubsystem" = "CYGWIN" ] || [ "$Winsubsystem" = "MSYS2" ] || error "Must run as root to install, update or remove x11docker."
     installer $Installermode
     exit
@@ -7937,37 +7939,37 @@ Parsed options:    $Parsedoptions"
  
   # container user
   [ "$Createcontaineruser" = "yes" ] && {
-    check_containeruser          # unprivileged user in container                # --user
-    check_containerhome          # create persistant container home on host      # --home, --homedir, --homebasedir
+    check_containeruser          # unprivileged user in container                 # --user
+    check_containerhome          # create persistant container home on host       # --home, --homedir, --homebasedir
   }
   
   # some checks and setup
   drop_cachefiles                # remove cachefiles not needed for current setup
-  setup_verbosity                # create summary logfile, start verbose output  # --verbose, --stdout, --stderr
+  setup_verbosity                # create summary logfile, start verbose output   # --verbose, --stdout, --stderr
   setup_fifo                     # open message channels for container, dockerrc, xinitrc and watchpidlist()
-  check_screensize               # size of host X and of new X server            # --size #time0,213
-  [ "$Windowmanager" ]           && check_windowmanager                          # --wm  
-  [ "$Sharegpu" = "yes" ]        && setup_gpu                                    # --gpu
-  [ "$Sharewebcam" = "yes" ]     && setup_webcam                                 # --webcam
-  [ "$Sharecupsmode" ]           && setup_printer                                # --printer
-  [ "$Pulseaudiomode" ]          && setup_sound_pulseaudio                       # --pulseaudio
-  [ "$Sharealsa" = "yes" ]       && setup_sound_alsa                             # --alsa
-  [ "$Cleanxhost" = "yes" ]      && clean_xhost                                  # --clean-xhost
+  check_screensize               # size of host X and of new X server             # --size #time0,213
+  [ "$Windowmanager" ]           && check_windowmanager                           # --wm  
+  [ "$Sharegpu" = "yes" ]        && setup_gpu                                     # --gpu
+  [ "$Sharewebcam" = "yes" ]     && setup_webcam                                  # --webcam
+  [ "$Sharecupsmode" ]           && setup_printer                                 # --printer
+  [ "$Pulseaudiomode" ]          && setup_sound_pulseaudio                        # --pulseaudio
+  [ "$Sharealsa" = "yes" ]       && setup_sound_alsa                              # --alsa
+  [ "$Cleanxhost" = "yes" ]      && clean_xhost                                   # --clean-xhost
   
   #### Create command to run X server [and/or Wayland compositor]
   [ "$Xserver" != "--xorg" ]     && [ -n "$Newxvt" ]              && note "Option --vt only takes effect with option --xorg."
-  [ "$Xserver" = "--xorg" ]      && [ -z "$Newxvt" ]              && check_vt    # --vt: find free tty/virtual terminal for Xorg
+  [ "$Xserver" = "--xorg" ]      && [ -z "$Newxvt" ]              && check_vt     # --vt: find free tty/virtual terminal for Xorg
   { [ "$Xserver" = "--xdummy" ]  || [ "$Xpravfb" = "Xdummy" ] ; } && create_xdummyxorgconf && create_xdummywrapper
   check_newxenv                  # find free display, create $Newxenv
-  create_xcommand                # set up start command for X server             # all X server and Wayland options
+  create_xcommand                # set up start command for X server              # all X server and Wayland options
   [ "$Xcommand" ]                && debugnote "X server command:
   $Xcommand"
   [ "$Compositorcommand" ]       && debugnote "Compositor command:
   $Compositorcommand"
-  [ "$Shareclipboard" = "yes" ]  && setup_clipboard                              # --clipboard
+  [ "$Shareclipboard" = "yes" ]  && setup_clipboard                               # --clipboard
     
   check_terminalemulator         # find terminal emulator like xterm for error messages and 'docker pull'
-  check_passwordfrontend         # check for su/sudo/gksu/pkexec etc.            # --pw #time0,230
+  check_passwordfrontend         # check for su/sudo/gksu/pkexec etc.             # --pw #time0,230
   [ "$Runsinterminal" = "no" ]   && [ "$Passwordneeded" = "yes" ] && warning "You might need to run x11docker in terminal
   for password prompt if prompting for password with a GUI fails."
   
@@ -7980,8 +7982,8 @@ Parsed options:    $Parsedoptions"
   Terminal for password frontend:                 $Passwordterminal
   Running in a terminal:                          $Runsinterminal
   Running on console:                             $Runsonconsole
-  Running over SSH:                               $Hostssh
-  Running sourced:                                $Sourced
+  Running over SSH:                               $Runsoverssh
+  Running sourced:                                $Runssourced
   bash \$-:                                        $-"
   [ "$Winsubsystem" ] && debugnote "
   Running on Windows subsystem:                   $Winsubsystem
@@ -7991,9 +7993,9 @@ Parsed options:    $Parsedoptions"
   #### Create docker command
   [ "$X11dockermode" = "run" ] && {
     # core setup of docker command
-    setup_initsystem            # init in container. Default: tini              # --init
+    setup_initsystem            # init in container. Default: tini                # --init
     setup_capabilities          # add linux capabilities if needed for some options. Default: --cap-drop=ALL
-    [ "$Sharehostdbus" = "yes" ] && setup_hostdbus                              # --hostdbus
+    [ "$Sharehostdbus" = "yes" ] && setup_hostdbus                                # --hostdbus
     create_dockercommand        # create 'docker run' command #time0,631
     echo "$Dockercommand" >> $Dockercommandfile
     
@@ -8002,7 +8004,7 @@ Parsed options:    $Parsedoptions"
     
     #### Create helper scripts to set up container
     ## dockerrc runs as root (or member of group docker) on host.
-    # Main jobs: check image, pull image if needed, create script x11docker.CMD.sh to run container command
+    # Main jobs: check image, pull image if needed, create script containerrc to run container command
     create_dockerrc             
     verbose "Generated dockerrc:
 $(nl -ba <$Dockerrc)"
@@ -8036,12 +8038,12 @@ $(nl -ba <$Westonini)"
     trap '' SIGINT
     
     case $X11dockermode in
-      run) start_docker ;;                                                      # (default)
-      exe) start_hostexe ;;                                                     # --exe, --xonly
+      run) start_docker ;;                                                        # (default)
+      exe) start_hostexe ;;                                                       # --exe, --xonly
     esac
     
-    [ "$Xpraservercommand" ] && start_xpra                                      # --xpra, --xpra-xwayland
-    [ "$Pulseaudiomode" = "tcp" ] && start_pulseaudiotcp                        # --pulseaudio=tcp
+    [ "$Xpraservercommand" ] && start_xpra                                        # --xpra, --xpra-xwayland
+    [ "$Pulseaudiomode" = "tcp" ] && start_pulseaudiotcp                          # --pulseaudio=tcp
     
     # check pids of xinit and X server, set them on watchpidlist
     case $Xserver in
@@ -8055,8 +8057,21 @@ $(nl -ba <$Westonini)"
       ;;
     esac
     
+    [ "$Showdisplayenvironment" = "yes" ] && echo "$(storeinfo dump Xenv)"        # --showenv
+    [ "$Showcontainerid" = "yes" ]        && echo "$(storeinfo dump containerid)" # --showid
+    [ "$Showcontainerpid1pid" = "yes" ]   && echo "$(storeinfo dump pid1pid)"     # --showpid1
+    
+    storeinfo "x11docker=ready"
+  
+    Pid1pid="$(storeinfo dump pid1pid)"
+    checkpid "$Pid1pid" && debugnote "Process tree of ${Hostexe:-container}: (maybe not complete yet)
+$(pstree -cp $Pid1pid 2>&1 ||:)"
     debugnote "Process tree of x11docker:
-  $(pstree -p $$ 2>&1 ||:)"
+$(pstree -p $$ 2>&1 ||:)"
+    debugnote "storeinfo(): Stored info:
+$(cat $Storeinfofile)"
+    debugnote "storepid(): Stored pids:
+$(cat $Storepidfile)"
   } <&0 & storepid $! containershell
   
   #### Start X server [and/or Wayland compositor]
@@ -8072,13 +8087,16 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
+  # avoid loosing dockerstopshell from process tree
+  # dockerstopshell does not react if fifofile is deleted.
   # --cleanup: storeinfo() error in finish(?)
   # reduce number of variables with storeinfo() ?
   # replace find in containerrootrc, missing in fedora images
+  # check systemd warnings on x11docker services
 
   # BUG Cshare/timezone, something is wrong, no timezone file
+  
   # support --exe --user
-  # --nxagent -d kdeneon/plasma:user-lts leads to black fullscreen
   # cleanup(): avoid hardcoded pathes
   
   # bug report startplasmacompositor: --libinput
