@@ -656,7 +656,7 @@ pspid() {                       # ps -p $1 --no-headers
   # On some systems ps does not have option --no-headers.
   # On some systems (busybox) ps -p is not supported  ### FIXME
   # return 1 if not found
-  LC_ALL=C ps -p "${1:-}" 2>/dev/null | grep -v 'TIME' | grep .
+  LC_ALL=C ps -p "${1:-}" 2>/dev/null | grep -v 'TIME' ||:
 }
 rocknroll() {                   # check whether x11docker session is still running
   [ -s "$Timetosaygoodbyefile" ]   && return 1
@@ -721,7 +721,7 @@ watchpidlist() {                # watch list of important pids
   local Pid= Containername= Line= Watchpidlist=
   trap '' SIGINT
   
-  while rocknroll ; do
+  while rocknroll; do
     # check for new Pid once a second
     read -t1 Pid <&9 ||:
     [ "$Usemkfifo" = "no" ] && sleep 2  # read does not wait if not a fifo
@@ -1804,6 +1804,12 @@ check_newxenv() {               # find free display, create $Newxenv
         ;;
       esac
     ;;
+    --weston|--kwin|--hostwayland|--tty)
+      Newdisplay=""
+      Newxsocket=""
+      Xclientcookie=""
+      Xservercookie=""
+    ;;
     *)
       case $Xoverip in
         yes) Newdisplay="$Hostip:$Newdisplaynumber" ;;
@@ -1822,38 +1828,16 @@ check_newxenv() {               # find free display, create $Newxenv
     --weston|--weston-xwayland|--kwin|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland) Newwaylandsocket="wayland-$Newdisplaynumber" ;;
     --hostwayland|--xwayland)                                                            Newwaylandsocket="$Hostwaylandsocket" ;;
   esac
-  storeinfo "WAYLAND_DISPLAY=$Newwaylandsocket"
-  
-  #### create $Newxenv: collection of environment variables to access new X from host (e.g. in xinitrc)
-  case $Xserver in
-    --xpra|--xephyr|--xpra-xwayland|--weston-xwayland|--hostdisplay|--xorg|--xdummy|--xvfb|--xdummy-xwayland|--xwayland|--kwin-xwayland|--nxagent|--xwin)
-      Newxenv="DISPLAY=$Newdisplay"
-      [ "$Xauthentication" = "yes" ] && Newxenv="$Newxenv XAUTHORITY=$Xclientcookie"
-      Newxenv="$Newxenv XSOCKET=$Newxsocket"
-      Newxenv="$Newxenv WAYLAND_DISPLAY="
-      Newxenv="$Newxenv $Xprashm"
-    ;;
-    --weston|--kwin|--hostwayland|--tty)
-      Newxenv="DISPLAY= XAUTHORITY="
-      Newdisplay=""
-      Newxsocket=""
-      Xclientcookie=""
-      Xservercookie=""
-    ;;
-  esac
 
-  [ "$Setupwayland" = "yes" ] && {
-    Newxenv="$Newxenv WAYLAND_DISPLAY=$Newwaylandsocket"
-    Newxenv="$Newxenv XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
-    for Line in $Waylandtoolkitenv ; do Newxenv="$Newxenv $Line" ; done
-  }
 
+  # create $Newxenv: collection of environment variables to access new X from host (e.g. in xinitrc)
+  [ "$Newdisplay" ]       && storeinfo "DISPLAY=$Newdisplay"                && Newxenv="$Newxenv DISPLAY=$Newdisplay"
+  [ -e "$Xclientcookie" ] && storeinfo "XAUTHORITY=$Xclientcookie"          && Newxenv="$Newxenv XAUTHORITY=$Xclientcookie"
+  [ "$Newxsocket" ]       && storeinfo "XSOCKET=$Newxsocket"                && Newxenv="$Newxenv XSOCKET=$Newxsocket"
+  [ "$Newwaylandsocket" ] && storeinfo "WAYLAND_DISPLAY=$Newwaylandsocket"  && Newxenv="$Newxenv WAYLAND_DISPLAY=$Newwaylandsocket"
+  [ "$Setupwayland" = "yes" ] && for Line in $Waylandtoolkitenv ; do           Newxenv="$Newxenv $Line" ; done
+  storeinfo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"                              && Newxenv="$Newxenv XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
   storeinfo "Xenv=$Newxenv"
-  storeinfo "DISPLAY=$Newdisplay"
-  storeinfo "XAUTHORITY=$Xclientcookie"
-  storeinfo "XSOCKET=$Newxsocket"
-  storeinfo "WAYLAND_DISPLAY=$Newwaylandsocket"
-  storeinfo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
   
   # X / Wayland environment variables for container
   case $Xserver in
@@ -3978,8 +3962,6 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
   # some init system setup also in containerrootrc
   local Message=
 
-  store_runoption env "container=docker"   # At least OpenRC and systemd regard this hint
-
   case $Initsystem in
     tini|systemd|sysvinit|openrc|runit|dockerinit|s6-overlay|none) ;;
     *) 
@@ -3991,6 +3973,23 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
   
   # --init in Mobyvm. /usr/bin/docker-init is not available in MSYS2/Cygwin/WSL
   [ "$Winsubsystem" ] && [ "$Initsystem" = "tini" ] && Initsystem="dockerinit"
+  
+  case "$X11dockermode" in
+    exe) 
+      case $Initsystem in
+        tini|none) ;;
+        dockerinit) Initsystem="none" ;;
+        *) 
+          note "Option --init: Only --init[=tini] or --init=none are 
+  supported with option --exe. Fallback: Setting option --init=tini"
+          Initsystem="tini"
+        ;;
+      esac
+    ;;
+    run)
+      store_runoption env "container=docker"   # At least OpenRC and systemd regard this hint
+    ;;
+  esac
   
   case $Initsystem in
     none|dockerinit) ;;
@@ -4018,8 +4017,8 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
             Initsystem="none"
           }
         }
-      } || {
-        Initsystem="none"
+      } || Initsystem="none"
+      [ "$Initsystem" = "none" ] && [ "$X11dockermode" = "run" ] && {
         note "Did not find container init system 'tini'.
   This is a bug in your distributions docker package.
   Normally, docker provides init system tini as '/usr/bin/docker-init'.
@@ -5674,7 +5673,7 @@ start_docker() {                # start xtermrc -> dockerrc
       esac
     ;;
     *)       $Passwordterminal              "bash $Xtermrc" ;;
-  esac & storepid $! dockerrc
+  esac
   
   waitforlogentry "start_docker()" "$Storeinfofile" "dockerrc=ready" "" infinity
   rocknroll || return 64
@@ -5711,6 +5710,7 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
     echo "Messagefile='$Messagefifo'"
     echo "Storeinfofile='$Storeinfofile'"
     echo "Storepidfile='$Storepidfile'"
+    echo "Tini='$(storeinfo dump tini)'"
     [ "$Dbusrunsession" = "yes" ] && echo "Dbus='$(command -v dbus-run-session >/dev/null)'"
     
     echo "export $Newxenv"
@@ -5744,13 +5744,15 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
     }
     echo ""
     
+    echo "storeinfo test tini && Tini=\"\$(storeinfo dump tini) -s --\" || Tini=''"
+    
     echo "# close additional file descriptors"
     echo "for i in 3 4 6 7 8 9; do"
     echo "  { >&\$i ;} 2>/dev/null && exec >&\$i-"
     echo "done"
     echo ""
     
-    echo "\$Dbus $Hostexe $( [ "$Forwardstdin" = "yes" ] && echo "<$Cmdstdinfifo") >>$Cmdstdoutlogfile 2>>$Cmdstderrlogfile &"
+    echo "\$Tini \$Dbus $Hostexe $( [ "$Forwardstdin" = "yes" ] && echo "<$Cmdstdinfifo") >>$Cmdstdoutlogfile 2>>$Cmdstderrlogfile &"
     echo 'storeinfo pid1pid=$!'
   } >> $Containerrc
   nl -ba <$Containerrc >> $Containerlogfile
@@ -6589,10 +6591,7 @@ check_option_interferences() {  # check multiple option interferences, change se
       }
     ;;
   esac
-  [ "$Interactive" = "yes" ] && {
-    Showstdout="no"
-    Showstderr="no"
-  }
+  [ "$Interactive" = "yes" ] && Showcontaineroutput="no"
   
   # --limit N
   [ "$Limitresources" ] && {
@@ -7238,20 +7237,6 @@ setup_verbosity() {             # options --verbose, --stdout, --stderr
     esac
   }
 
-  # options --stdout, --stderr
-  [ "$Showstdout" = "yes" ] && {
-    { 
-      trap '' SIGINT
-      waitforlogentry 'tailstdout' $Storeinfofile 'pid1pid=' "" infinity
-      tail --pid="$$" --retry -n +1 -F $Cmdstdoutlogfile     2>/dev/null
-    } &
-  }
-  [ "$Showstderr" = "yes" ] && {
-    { 
-      trap '' SIGINT
-      tail --pid="$$" --retry -n +1 -F $Cmdstderrlogfile >&2 2>/dev/null
-    } &
-  }
   return 0
 }
 
@@ -7549,8 +7534,7 @@ declare_variables() {           # declare global variables
   
   # Verbosity options
   Verbose="no"                                    # --verbose: Be verbose yes/no
-  Showstdout="yes"                                # Show container command stdout
-  Showstderr="yes"                                # Show container command stderr
+  Showcontaineroutput="yes"                                # Show container command stdout
   Silent="no"                                     # --quiet: Do not show x11docker messages
   Showdisplayenvironment="no"                     # --showenv: Output of environment variables of new display on stdout
   Showcontainerid="no"                            # --showid: Output of container ID on stdout
@@ -7970,6 +7954,7 @@ Parsed options:    $Parsedoptions"
     
   check_terminalemulator         # find terminal emulator like xterm for error messages and 'docker pull'
   check_passwordfrontend         # check for su/sudo/gksu/pkexec etc.             # --pw #time0,230
+  setup_initsystem               # init in container. Default: tini               # --init
   [ "$Runsinterminal" = "no" ]   && [ "$Passwordneeded" = "yes" ] && warning "You might need to run x11docker in terminal
   for password prompt if prompting for password with a GUI fails."
   
@@ -7993,7 +7978,6 @@ Parsed options:    $Parsedoptions"
   #### Create docker command
   [ "$X11dockermode" = "run" ] && {
     # core setup of docker command
-    setup_initsystem            # init in container. Default: tini                # --init
     setup_capabilities          # add linux capabilities if needed for some options. Default: --cap-drop=ALL
     [ "$Sharehostdbus" = "yes" ] && setup_hostdbus                                # --hostdbus
     create_dockercommand        # create 'docker run' command #time0,631
@@ -8042,7 +8026,7 @@ $(nl -ba <$Westonini)"
       exe) start_hostexe ;;                                                       # --exe, --xonly
     esac
     
-    [ "$Xpraservercommand" ] && start_xpra                                        # --xpra, --xpra-xwayland
+    [ "$Xpraservercommand" ]      && start_xpra                                   # --xpra, --xpra-xwayland
     [ "$Pulseaudiomode" = "tcp" ] && start_pulseaudiotcp                          # --pulseaudio=tcp
     
     # check pids of xinit and X server, set them on watchpidlist
@@ -8056,13 +8040,9 @@ $(nl -ba <$Westonini)"
         checkpid "$Xserverpid" && setonwatchpidlist $Xserverpid Xserver
       ;;
     esac
-    
-    [ "$Showdisplayenvironment" = "yes" ] && echo "$(storeinfo dump Xenv)"        # --showenv
-    [ "$Showcontainerid" = "yes" ]        && echo "$(storeinfo dump containerid)" # --showid
-    [ "$Showcontainerpid1pid" = "yes" ]   && echo "$(storeinfo dump pid1pid)"     # --showpid1
-    
-    storeinfo "x11docker=ready"
   
+    storeinfo "x11docker=ready"
+
     Pid1pid="$(storeinfo dump pid1pid)"
     checkpid "$Pid1pid" && debugnote "Process tree of ${Hostexe:-container}: (maybe not complete yet)
 $(pstree -cp $Pid1pid 2>&1 ||:)"
@@ -8072,6 +8052,21 @@ $(pstree -p $$ 2>&1 ||:)"
 $(cat $Storeinfofile)"
     debugnote "storepid(): Stored pids:
 $(cat $Storepidfile)"
+    
+    debugnote "stdout and stderr:"
+    [ "$Showdisplayenvironment" = "yes" ] && echo "$(storeinfo dump Xenv)"        # --showenv
+    [ "$Showcontainerid" = "yes" ]        && echo "$(storeinfo dump containerid)" # --showid
+    [ "$Showcontainerpid1pid" = "yes" ]   && echo "$(storeinfo dump pid1pid)"     # --showpid1
+    [ "$Showcontaineroutput" = "yes" ]    && {
+      {
+        trap '' SIGINT
+        tail --pid="$$" --retry -n +1 --follow=name $Cmdstdoutlogfile     2>/dev/null ||:
+      } &
+      {
+        trap '' SIGINT
+        tail --pid="$$" --retry -n +1 --follow=name $Cmdstderrlogfile >&2 2>/dev/null ||:
+      } &
+    }
   } <&0 & storepid $! containershell
   
   #### Start X server [and/or Wayland compositor]
@@ -8087,9 +8082,10 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
+  # sed: couldn't open temporary file /x11docker/sed91glvn: Permission denied
+
   # avoid loosing dockerstopshell from process tree
   # dockerstopshell does not react if fifofile is deleted.
-  # --cleanup: storeinfo() error in finish(?)
   # reduce number of variables with storeinfo() ?
   # replace find in containerrootrc, missing in fedora images
   # check systemd warnings on x11docker services
