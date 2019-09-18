@@ -8,6 +8,8 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
+ - `--infofile`: New option: Echo path to internal x11docker info storage file.
+   Can be used to parse informations like container IP and name.
  - `--newprivileges [=yes|no]`: New option to set or unset docker run
    option `--security-opt=no-new-privileges`.
 ### Changed
@@ -16,6 +18,7 @@ Project website: https://github.com/mviereck/x11docker
    Similar to previous `--dbus-system`. For experimental setups only.
  - `--dbus-system`: Already deprecated in v6.2.0. 
    New fallback: `--dbus=system --cap-default`.
+ - `--exe`: Run with `tini`/`docker-init` if available.
  - `--weston`, `--kwin`, `--hostwayland`: Always set all Wayland environment
    variables and run with DBus user daemon. Previously needed `--wayland`.
  - `--xdummy --gpu`/`--xvfb --gpu`: Supported only in host X, 
