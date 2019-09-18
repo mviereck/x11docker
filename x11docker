@@ -2731,14 +2731,8 @@ startup-animation=fade
         ;;
         yes)  # short start&stop of Weston to grep name of monitor. Needed instead of WL or X prefix
           [ -n "$Screensize" ] || [ "$Scaling" ] || [ -n "$Rotation" ] && {
-            unpriv "$Weston --no-config --backend=drm-backend.so >> $Compositorlogfile 2>&1 & echo compositorpid=\$! >>$Storeinfofile"
-            Compositorpid="$(storeinfo dump compositorpid)"
-            storeinfo "compositorpid=$Compositorpid"
-            waitforlogentry "weston-screencheck" "$Compositorlogfile" "connector" "$Compositorerrorcodes"
-            Westonoutput="$(grep Output <$Compositorlogfile | grep connector | head -n1 | cut -d ' ' -f3 | rev | cut -c2- | rev)"
+            Westonoutput="$(weston_getoutputname)"
             debugnote "$Xserver: Detected screen output for weston: $Westonoutput"
-            kill $Compositorpid
-            mkfile "$Compositorlogfile"
           }
         ;;
       esac
@@ -3071,6 +3065,16 @@ $(xhost 2>&1 )"
     return 1
   }
   return 0
+}
+weston_getoutputname() {        # short startup of weston on tty to grep output name
+  unpriv "$Weston --no-config --backend=drm-backend.so >> $Compositorlogfile 2>&1 & echo compositorpid=\$! >>$Storeinfofile"
+  waitforlogentry "weston-screencheck" "$Compositorlogfile" "connector" "$Compositorerrorcodes"
+  
+  grep Output <$Compositorlogfile | grep connector | head -n1 | cut -d ' ' -f3 | rev | cut -c2- | rev
+  
+  termpid "$(storeinfo dump compositorpid)" weston
+  storeinfo drop compositorpid
+  mkfile "$Compositorlogfile"
 }
 
 #### X helper scripts
@@ -5662,7 +5666,7 @@ create_xtermrc() {              # create xtermrc: Script to prompt for password 
 
 #### final startup routines
 start_compositor() {            # start Wayland compositor Weston or KWin
-  local Compositorkeyword Compositorpid 
+  local Compositorkeyword
   
   case $Xserver in
     --weston|--weston-xwayland|--xpra-xwayland|--xdummy-xwayland) Compositorkeyword="weston-desktop-shell" ;;
@@ -5670,11 +5674,9 @@ start_compositor() {            # start Wayland compositor Weston or KWin
   esac
   
   unpriv "$(command -v dbus-launch) $Compositorcommand  >> $Compositorlogfile  2>&1 & echo compositorpid=\$! >>$Storeinfofile"
-  
+  storeinfo "compositorpid=$(storeinfo dump compositorpid)"
   waitforlogentry "start_compositor()" "$Compositorlogfile" "$Compositorkeyword" "$Compositorerrorcodes"
-
-  Compositorpid="$(storeinfo dump compositorpid)"
-  setonwatchpidlist $Compositorpid compositor
+  setonwatchpidlist "$(storeinfo dump compositorpid)" compositor
 
   case $Xserver in
     --xpra-xwayland|--xdummy-xwayland)  # hide weston window
@@ -5693,10 +5695,7 @@ start_docker() {                # start xtermrc -> dockerrc
     ;;
     *)       $Passwordterminal              "bash $Xtermrc" ;;
   esac
-  
   waitforlogentry "start_docker()" "$Storeinfofile" "dockerrc=ready" "" infinity
-  rocknroll || return 64
-  return 0
 }
 start_hostexe() {               # options --exe, --xonly: Run host executeable instead of docker container
   local Line
@@ -5809,8 +5808,8 @@ $(tail $Xpraserverlogfile)
   Last lines of xpra client log:
 $(tail $Xpraclientlogfile)"
     saygoodbye xpra
-  } & storepid $! xpraloop
-
+  }
+  
   return 0
 }
 start_xserver() {               # start X server
@@ -8050,10 +8049,7 @@ $(nl -ba <$Westonini)"
       "") setonwatchpidlist "${Pid1pid:-NOPID}" pid1pid ;;
       *)  setonwatchpidlist "CONTAINER$Containername" ;;
     esac
-    
-    [ "$Xpraservercommand" ]      && start_xpra                                   # --xpra, --xpra-xwayland
-    [ "$Pulseaudiomode" = "tcp" ] && start_pulseaudiotcp                          # --pulseaudio=tcp
-    
+        
     # watch xinit and X server
     case $Xserver in
       --tty|--hostdisplay|--hostwayland|--weston|--kwin) ;;
@@ -8065,7 +8061,10 @@ $(nl -ba <$Westonini)"
         checkpid "$Xserverpid" && setonwatchpidlist "$Xserverpid" Xserver
       ;;
     esac
-  
+
+    [ "$Pulseaudiomode" = "tcp" ] && start_pulseaudiotcp                          # --pulseaudio=tcp
+
+    # some debug output
     checkpid "$Pid1pid" && debugnote "Process tree of ${Hostexe:-container}: (maybe not complete yet)
 $(pstree -cp $Pid1pid 2>&1 ||:)"
     debugnote "Process tree of x11docker:
@@ -8077,6 +8076,7 @@ $(cat $Storeinfofile)"
     debugnote "storepid(): Stored pids:
 $(cat $Storepidfile)"
     
+    # optional info on stdout
     [ "$Showinfofile" = "yes" ]           && echo "$Storeinfofile"                # --infofile
     [ "$Showdisplayenvironment" = "yes" ] && echo "$(storeinfo dump Xenv)"        # --showenv
     [ "$Showcontainerid" = "yes" ]        && echo "$(storeinfo dump containerid)" # --showid
@@ -8085,8 +8085,13 @@ $(cat $Storepidfile)"
     storeinfo "x11docker=ready"
   } <&0 & storepid $! containershell
   
-  #### Start X server [and/or Wayland compositor]
+  #### Start X server [and/or Wayland compositor] [and xpra]
   waitforlogentry "start_xserver()" $Storeinfofile "readyforX=ready" infinity
+  [ "$Xpraservercommand" ] && {
+    waitforlogentry xpra $Storeinfofile "xinitrc=ready" infinity
+    rocknroll || exit 0
+    start_xpra                                                                    # --xpra, --xpra-xwayland
+  } & storepid $! xpraloop
   rocknroll && [ "$Compositorcommand" ] && start_compositor
   rocknroll && start_xserver
 
@@ -8097,18 +8102,17 @@ main "$@"
   
 #### ToDo notes for development
 todo() {
+  # BUG Cshare/timezone, something is wrong, no timezone file
+  # replace find in containerrootrc, missing in fedora images
+  # cleanup(): avoid hardcoded pathes
+
   # how to trigger elogind in alpine, su does not take effect. missing policykit?
+  # support --exe --user ?
   # avoid loosing dockerstopshell from process tree
   # dockerstopshell does not react if fifofile is deleted.
   # reduce number of variables with storeinfo() ?
-  # replace find in containerrootrc, missing in fedora images
   # check systemd warnings on x11docker services
-
-  # BUG Cshare/timezone, something is wrong, no timezone file
-  
-  # support --exe --user
-  # cleanup(): avoid hardcoded pathes
-  
+    
   # bug report startplasmacompositor: --libinput
   # bug report: kwin_wayland SYS_RESOURCE
   
@@ -8149,8 +8153,6 @@ todo() {
   # further checks of pam.d
   # further checks of multimonitor behaviour
 
-  # check xhost +localhost
-  # --no-init no-new-privileges switchuser: exec fails, but why?
   # check out capsh. replace su with capsh? (missing in alpine) But how to trigger login?
 
   # --keymap does not work on tty with --kwin and --kwin-xwayland. No idea how to set it.
