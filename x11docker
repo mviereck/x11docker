@@ -490,7 +490,7 @@ $Line"
 
 #### exit
 finish() {                      # trap EXIT routine to clean up background processes and cache
-  local Pid Name Zeit Exitcode Pid1pid= Dockerlogspid= Dockerstopshellpid= Wmcontainerpid1= Watchmessagefifopid= i
+  local Pid Name Zeit Exitcode Pid1pid= Dockerlogspid= Dockerstopshellpid= Wmcontainerpid1= Watchmessagefifopid= i 
 
   # do not finish() in subshell, just give signal to all other processes and terminate subshell
   [ "$$" = "$BASHPID" ] || {
@@ -551,20 +551,25 @@ finish() {                      # trap EXIT routine to clean up background proce
   done < <(tac "$Storepidfile" 2>/dev/null)
 
   # Check if container is still running -> docker stop
-  checkpid $Pid1pid && {
+  [ "$X11dockermode" = "run" ] && containerisrunning && {
     Debugmode="yes"
     debugnote "finish(): Container still running. Executing 'docker stop'.
   Will wait up to 15 seconds for docker to finish."
-    echo "stop" >> "$Dockerstopsignalfifo"
+  
+    case $Winsubsystem in
+      "") echo "stop" >> "$Dockerstopsignalfifo" ;;
+      *)  $Dockerexe stop $Containername >>$Containerlogfile 2>&1 ;;
+    esac
     
     Zeit="$(date +%s)"
-    while checkpid $Pid1pid ; do
+    while :; do
+      containerisrunning || break
       debugnote "finish(): Waiting for container to terminate ..."
       sleep 1
       [ 15 -lt $(($(date +%s) - $Zeit)) ] && break
     done
       
-    checkpid $Pid1pid && {
+    containerisrunning && {
       Exitcode="64"
       debugnote "finish(): Container did not terminate as it should.
   Will not clean cache to avoid file permission issues.
@@ -577,6 +582,7 @@ finish() {                      # trap EXIT routine to clean up background proce
       Preservecachefiles="yes"
     } || debugnote "finish(): Container terminated successfully"
   }
+  
   # Check if 'docker logs' is still running
   checkpid $Dockerlogspid      && echo "stop" >> "$Dockerstopsignalfifo"
   # Check if window manager container is still running
@@ -584,19 +590,6 @@ finish() {                      # trap EXIT routine to clean up background proce
   # Terminate watching subshell in dockerrc
   [ -e "$Dockerstopsignalfifo" ] && echo "exit" >> "$Dockerstopsignalfifo"
   checkpid $Dockerstopshellpid && sleep 1
-  
-  # MS Windows: different container stop procedure because $Pid1pid is not in ps.
-  [ "$Winsubsystem" ] && [ "$Containername" ] && {
-    $Dockerexe ps -a | grep -q $Containername && {
-      debugnote "finish(): Container still running. Executing 'docker stop'."
-      $Dockerexe stop $Containername >>$Containerlogfile 2>&1 || {
-        Exitcode="64"
-        warning "Failed to stop container $Containername.
-  Will not clean cache to avoid file permission issues."
-        Preservecachefiles="yes"
-      }
-    }
-  }
   
   # Stop watching for messages, check others again
   while read -r Line ; do
@@ -667,6 +660,12 @@ saygoodbye() {                  # create file signaling watching processes to te
 checkpid() {                    # check if PID $1 is active
   #ps -p ${1:-} >/dev/null 2>&1
   [ -e "/proc/${1:-NONSENSE}" ]
+}
+containerisrunning() {          # check if container is running
+  case $Winsubsystem in
+    "") checkpid           "$(storeinfo dump pid1pid)" ;;
+    *)  $Dockerexe inspect "$(storeinfo dump containerid)" >/dev/null 2>&1 ;;
+  esac
 }
 pspid() {                       # ps -p $1 --no-headers
   # On some systems ps does not have option --no-headers.
