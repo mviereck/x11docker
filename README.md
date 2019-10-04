@@ -26,7 +26,7 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
  - Low [dependencies](#dependencies):
    - No obliging dependencies on host beside X and Docker. Recommended: `xpra` and `Xephyr`.
    - No dependencies inside of Docker images except for some optional features.
- - Several [optional features](#options) like [GPU](#hardware-acceleration), [sound](#sound), [webcam](#webcam) and [printer](#printer) support.
+ - Several [optional features](#options) like [GPU](#gpu-hardware-acceleration), [sound](#sound), [webcam](#webcam) and [printer](#printer) support.
  - Remote access with [SSH](https://github.com/mviereck/x11docker/wiki/Remote-access-with-SSH), [VNC](https://github.com/mviereck/x11docker/wiki/VNC) 
    or [HTML5](https://github.com/mviereck/x11docker/wiki/Container-applications-running-in-Browser-with-HTML5) possible.
  - Easy to use. [Examples](#examples): 
@@ -44,7 +44,7 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
    - [Choice of X servers and Wayland compositors](#choice-of-x-servers-and-wayland-compositors)
    - [Desktop or seamless mode](#desktop-or-seamless-mode)
    - [Shared folders and HOME in container](#shared-folders-and-home-in-container)
-   - [Hardware acceleration](#hardware-acceleration)
+   - [GPU hardware acceleration](#gpu-hardware-acceleration)
    - [Clipboard](#clipboard)
    - [Sound](#sound)
    - [Webcam](#webcam)
@@ -143,7 +143,7 @@ Changes in a running Docker container system will be lost, the created Docker co
    
 Note that x11docker copies files from `/etc/skel` in container to `HOME` if `HOME` is empty. That allows to provide customized user settings.
  
-### Hardware acceleration
+### GPU hardware acceleration
 Hardware acceleration for OpenGL is possible with option `-g, --gpu`. 
  - This will work out of the box in most cases with open source drivers on host. Otherwise have a look at [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options). 
  - Closed source [NVIDIA drivers](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container) need some setup and support less [x11docker X server options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options#attributes-of-x-server-and-wayland-options).
@@ -172,7 +172,6 @@ Printers on host can be provided to container with option `--printer`.
  - The container needs `cups` client libraries in image.
    Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
 
- 
 ### Language locales
 x11docker provides option `--lang` for flexible language locale settings. 
  - `--lang` without an argument sets `LANG` in container to same as on host. Same as `--lang=$LANG`
@@ -185,12 +184,10 @@ x11docker provides option `--lang` for flexible language locale settings.
 ### Wayland
 To run  [Wayland](https://wayland.freedesktop.org/) instead of an X server x11docker provides options `--wayland`, `--weston`, `--kwin` and `--hostwayland`. 
 For further description loot at [wiki: Description of Wayland options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options#description-of-wayland-options).
- - Option `--wayland` automatically sets up a Wayland environment with some related environment variables.
- - Options `--kwin` and `--weston` run Wayland compositors `kwin_wayland` or `weston`.
-   - For QT5 applications without option `--wayland` add options `--dbus`  and `--env QT_QPA_PLATFORM=wayland`.
- - Option `--hostwayland` can run single applications on host Wayland desktops like Gnome 3, KDE 5 and [Sway](https://github.com/swaywm/sway).
+ - Option `--wayland` automatically sets up a Wayland environment. It regards option `--desktop`.
+ - Options `--weston` and `--kwin` run Wayland compositors `weston` or `kwin_wayland`.
+ - Option `--hostwayland` can run applications seamless on host Wayland desktops like Gnome 3, KDE 5 and [Sway](https://github.com/swaywm/sway).
  - Example: `xfce4-terminal` on Wayland: `x11docker --wayland x11docker/xfce xfce4-terminal`
- 
  
 ### Init system
 x11docker supports several init systems as PID 1 in container with option `--init`. Init in container solves the [zombie reaping issue](https://blog.phusion.nl/2015/01/20/docker-and-the-pid-1-zombie-reaping-problem/).
@@ -201,6 +198,7 @@ Look at [wiki: Init systems in Docker](https://github.com/mviereck/x11docker/wik
 Some desktop environments and applications need a running DBus system daemon and/or DBus user session. DBus options need `dbus` in image.
  - use `--dbus` to run a DBus user session daemon.
  - A DBus system daemon will be started automatically with [init systems](#Init-system) `systemd`, `openrc`, `runit` and `sysvinit` (option `--init`).
+   - It is also possible to run a DBus system daemon with `--dbus=system` without advanced init systems. However, this causes trouble in some cases and is not recommended in general.
  - use `--hostdbus` to connect to host DBus user session.
  - use `--share /run/dbus/system_bus_socket` to share host DBus system socket.
 
@@ -435,6 +433,9 @@ A special one to check features and container isolation is `x11docker/check`.
 | [Enlightenment](https://github.com/mviereck/dockerfile-x11docker-enlightenment) (based on [Void Linux](https://www.voidlinux.org/)) | `x11docker --desktop --gpu --runit x11docker/enlightenment` |
 | [Fluxbox](https://github.com/mviereck/dockerfile-x11docker-fluxbox) (based on Debian, 87 MB) | `x11docker --desktop x11docker/fluxbox` |
 | [FVWM](https://github.com/mviereck/dockerfile-x11docker-fvwm) (based on [Alpine](https://alpinelinux.org/), 22.5 MB) | `x11docker --desktop x11docker/fvwm` |
+| [Gnome 3](https://github.com/mviereck/dockerfile-x11docker-gnome) | `x11docker --desktop --gpu --init=systemd x11docker/gnome` |
+| [KDE Plasma](https://github.com/mviereck/dockerfile-x11docker-kde-plasma) | `x11docker --desktop --gpu --init=systemd x11docker/kde-plasma` |
+| [KDE Plasma](https://github.com/mviereck/dockerfile-x11docker-kde-plasma) as nested Wayland compositor| `x11docker --gpu --init=systemd -- --cap-add SYS_RESOURCE -- x11docker/kde-plasma startplasmacompositor` |
 | [Lumina](https://github.com/mviereck/dockerfile-x11docker-lumina) ([website](https://lumina-desktop.org)) (based on [Void Linux](https://www.voidlinux.org/))| `x11docker --desktop x11docker/lumina` |
 | [LiriOS](https://liri.io/) (needs at least docker 18.06 <br> or this [xcb bugfix](https://github.com/mviereck/x11docker/issues/76).) (based on Fedora) | `x11docker --desktop --gpu lirios/unstable` |
 | [LXDE](https://github.com/mviereck/dockerfile-x11docker-lxde) | `x11docker --desktop x11docker/lxde` |

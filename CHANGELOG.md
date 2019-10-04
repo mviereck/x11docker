@@ -6,10 +6,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [6.3.0](https://github.com/mviereck/x11docker/releases/tag/v6.3.0) - 2019-10-04
 ### Added
- - `--infofile`: New option: Echo path to internal x11docker info storage file.
-   Can be used to parse informations like container IP and name.
+ - `--showinfofile`: New option: Echo path to internal x11docker info storage
+   file. Can be parsed for informations like container IP and name.
  - `--newprivileges [=yes|no]`: New option to set or unset docker run
    option `--security-opt=no-new-privileges`.
 ### Changed
@@ -19,6 +19,8 @@ Project website: https://github.com/mviereck/x11docker
  - `--dbus-system`: Already deprecated in v6.2.0. 
    New fallback: `--dbus=system --cap-default`.
  - `--exe`: Run with `tini`/`docker-init` if available.
+ - `--showenv`: Does not contain `X11DOCKER_CACHE` anymore.
+   Have a look at `--showinfofile` instead.
  - `--weston`, `--kwin`, `--hostwayland`: Always set all Wayland environment
    variables and run with DBus user daemon. Previously needed `--wayland`.
  - `--xdummy --gpu`/`--xvfb --gpu`: Supported only in host X, 
