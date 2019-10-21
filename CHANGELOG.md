@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Fixed
+ - Do not set `tini` option `-s`. Avoids issue with `catatonit`.
+   [(#189)](https://github.com/mviereck/x11docker/issues/189)
+ - Exchange static file descriptor numbers with dynamic ones.
+   Hopefully fixes an odd issue where bash eats up some lines of code on exit.
+
 ## [6.3.0](https://github.com/mviereck/x11docker/releases/tag/v6.3.0) - 2019-10-04
 ### Added
  - `--showinfofile`: New option: Echo path to internal x11docker info storage

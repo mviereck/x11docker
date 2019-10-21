@@ -11,9 +11,9 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="6.3.0"
+Version="6.3.1-beta"
 
-# --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups. Not supported in general by shebang.
+# --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
   *i*) set +H ;;
   *)   exec bash --noprofile --norc --noediting -i -- "$0" "$@" ;;
@@ -397,7 +397,7 @@ $Message"
   return 0
 }
 debugnote() {                   # show debug output $*
-  [ "$Debugmode" = "yes" ] && [ "$Verbose" = "no" ] && echo "${Colblue}DEBUGNOTE[$(timestamp)]:${Colnorm} $*" >&3
+  [ "$Debugmode" = "yes" ] && [ "$Verbose" = "no" ] && echo "${Colblue}DEBUGNOTE[$(timestamp)]:${Colnorm} $*" >&${FDstderr}
   logentry "DEBUGNOTE[$(timestamp)]: $*"
   return 0
 }
@@ -439,7 +439,7 @@ $*"
 }
 note() {                        # show notice messages
   [ "$Verbose" = "no" ] && echo "${Colgreen}x11docker note:${Colnorm} $*
-" >&3
+" >&${FDstderr}
   logentry "x11docker note: $*
 "
 }
@@ -457,7 +457,7 @@ verbose() {                     # show verbose messages
 }
 warning() {                     # show warning messages
   [ "$Verbose" = "no" ] && echo "${Colyellow}x11docker WARNING:${Colnorm} $*
-" >&3
+" >&${FDstderr}
   logentry "x11docker WARNING: $*
 "
 }
@@ -466,7 +466,7 @@ watchmessagefifo() {            # watch for messages coming from container or do
   local Line= Message= Messagetype=
   trap '' SIGINT
   while [ -e "$Cachefolder" ]; do
-    IFS= read -r Line <&6 ||:
+    IFS= read -r Line <&${FDmessage} ||:
     [ "$Line" ] || sleep 2  # sleep for MSYS2/CYGWIN workaround
     [ "$Line" ] && Message="$Message
 $Line"
@@ -584,11 +584,11 @@ finish() {                      # trap EXIT routine to clean up background proce
   }
   
   # Check if 'docker logs' is still running
-  checkpid $Dockerlogspid      && echo "stop" >> "$Dockerstopsignalfifo"
+  checkpid $Dockerlogspid      && echo "stop" >&${FDdockerstop}
   # Check if window manager container is still running
-  checkpid $Wmcontainerpid1    && echo "stop" >> "$Dockerstopsignalfifo"
+  checkpid $Wmcontainerpid1    && echo "stop" >&${FDdockerstop}
   # Terminate watching subshell in dockerrc
-  [ -e "$Dockerstopsignalfifo" ] && echo "exit" >> "$Dockerstopsignalfifo"
+  [ -e "$Dockerstopsignalfifo" ] && echo "exit" >&${FDdockerstop}
   checkpid $Dockerstopshellpid && sleep 1
   
   # Stop watching for messages, check others again
@@ -603,17 +603,6 @@ finish() {                      # trap EXIT routine to clean up background proce
     }
   done < <(tac "$Storepidfile" 2>/dev/null)
 
-  # check for possible error exit codes. Prefer CMD exit code over x11docker exit code.
-#  [ -e "$Storeinfofile" ] && case $Winsubsystem in
-#    "") ;;
-#    *) 
-#      for i in $(seq 10); do
-#        grep -q "cmdexitcode=" <"$Storeinfofile" && break
-#        debugnote "Waiting for CMD exit code since ${i}s"
-#        sleep 1
-#      done
-#    ;;
-#  esac
   Exitcode=$(storeinfo dump error)
   Exitcode="${Exitcode:-0}"
   debugnote "x11docker exit code: $Exitcode"
@@ -629,10 +618,10 @@ finish() {                      # trap EXIT routine to clean up background proce
     unpriv "rmcr '$Logfilebackup'"
   }
 
-  # close additional file descriptors
+  # close file descriptors
   mysleep 0.2
-  for i in 3 4  6 7 8 9; do
-    { >&$i ;} 2>/dev/null && exec >&$i-
+  for Descriptor in ${FDcmdstdin} ${FDdockerstop} ${FDmessage} ${FDstderr} ${FDtimetosaygoodbye} ${FDwatchpid} ; do
+    exec {Descriptor}>&-
   done
 
   # remove cache files
@@ -733,7 +722,7 @@ waitfortheend() {               # wait for end of x11docker session
   case $Usemkfifo in
     yes)
       while rocknroll; do
-        bash -c "read -n1 <&8" && saygoodbye timetosaygoodbyefifo || sleep 1
+        bash -c "read -n1 <${FDtimetosaygoodbye}" && saygoodbye timetosaygoodbyefifo || sleep 1
       done
     ;;
     no) # Reading from fifo fails on Windows, workaround
@@ -747,13 +736,13 @@ waitfortheend() {               # wait for end of x11docker session
 watchpidlist() {                # watch list of important pids
   # terminate x11docker if a PID in $Watchpidlist terminates
   # serves mainly watching X server, Wayland compositor, container and hostexe
-  # echo PIDs to watch into >&9 (setonwatchpidlist())
+  # echo PIDs to watch into >{FDwatchpid} (setonwatchpidlist())
   local Pid= Containername= Line= Watchpidlist=
   trap '' SIGINT
   
   while rocknroll; do
     # check for new Pid once a second
-    read -t1 Pid <&9 ||:
+    read -t1 Pid <&${FDwatchpid} ||:
     [ "$Usemkfifo" = "no" ] && sleep 2  # read does not wait if not a fifo
     # Got new pid
     [ "$Pid" ] && {
@@ -794,6 +783,30 @@ askyesno() {                    # ask Yes/no question. Default 'yes' for ENTER, 
   }
   return 1
 }
+check_envvar() {                # allow only chars in string $1 that can be exspected in environment variables
+  # Allows only chars in "a-zA-Z0-9_:/.,@=-"
+  # Option -w allows whitespace, too. Can be needed for PATH.
+  # Char * as in LS_COLORS is not allowed to avoid abuse.
+  # Replaces forbidden chars with X and returns 1
+  # Returns 0 if no change occured.
+  # Echoes result.
+  local Newvar Space=
+  
+  case "${1:-}" in
+    -w) Space=" " ; shift ;;
+  esac
+  
+  Newvar="$(printf %s "${1:-}" | LC_ALL=C tr -c "a-zA-Z0-9_:/.,@=${Space}-" "X" )"
+  
+  printf %s "$Newvar"
+  printf "\n"
+  
+  [ "$Newvar" = "${1:-}" ] && return 0
+  
+  debugnote "check_envvar(): Input string has been changed. Result:
+  $Newvar"
+  return 1
+}
 check_parent_sshd() {           # check whether pid $1 runs in SSH session
   local Wanted_pid="${1:-}" Process_line
   ps -p 1 >/dev/null 2>&1 || {
@@ -820,21 +833,6 @@ download() {                    # download file at URL $1 and store it in file $
     wget) wget    "${1:-}" -O       "${2:-}" ;;
     curl) curl -L "${1:-}" --output "${2:-}" ;;
   esac
-}
-envvarstring() {                # allow only chars in string $1 that can be exspected in environment variables
-  # Option -w allows whitespace, too.
-  local Newvar
-  case "${1:-}" in
-    -w) shift; Newvar="$(echo "${1:-}" | LC_ALL=C sed -e 's/[^a-zA-Z0-9_:/.@ -]/\X/g')" ;;
-    *)         Newvar="$(echo "${1:-}" | LC_ALL=C sed -e 's/[^a-zA-Z0-9_:/.@-]/\X/g')" ;;
-  esac
-  echo "$Newvar"
-  
-  [ "$Newvar" = "${1:-}" ] && return 0 || {
-    debugnote "envvarstring(): Input string has been changed. Result:
-  $Newvar"
-    return 1
-  }
 }
 escapestring() {                # escape special chars of $1
   # escape all characters except those described in [^a-zA-Z0-9,._+@=:/-]
@@ -897,10 +895,12 @@ timestamp() {                   # print HH:MM:SS,NNN
   date +%T,%N | cut -c1-12
 }
 unspecialstring() {             # replace special chars of $1 with -
-  # Replace all characters except those described in [^a-zA-Z0-9_] with a '-'. 
-  # Replace double '--' with single '-'
+  # Replace all characters except those described in "a-zA-Z0-9_" with a '-'. 
+  # Replace newlines, too.
   # Remove leading and trailing '-'
-  echo "${1:-}" | LC_ALL=C sed -e 's/[^a-zA-Z0-9_]/\-/g; 1{$s/^$/""/}; 1!s/^/"/; $!s/$/"/ ; s/\([-]\)\1\+/\1/g ; s/-$//g ; s/^-//g'
+  # Avoid double '--'
+  # Return empty string if only special chars are given.
+  printf %s "${1:-}" | LC_ALL=C tr -cs "a-zA-Z0-9_" "-" | sed -e 's/^-// ; s/-$//'
 }
 verlt() {                       # version number check $1 less than $2
   [ "${1:-}" = "${2:-}" ] && return 1 || { verlte "${1:-}" "${2:-}" && return 0 || return 1 ; }
@@ -5734,7 +5734,7 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
     echo "Messagefile='$Messagefifo'"
     echo "Storeinfofile='$Storeinfofile'"
     echo "Storepidfile='$Storepidfile'"
-    echo "Tini='$(storeinfo dump tini)'"
+    echo "Tini=''"
     [ "$Dbusrunsession" = "yes" ] && echo "Dbus='$(command -v dbus-run-session >/dev/null)'"
     
     echo "export $Newxenv"
@@ -5767,7 +5767,10 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
     }
     echo ""
     
-    echo "storeinfo test tini && Tini=\"\$(storeinfo dump tini) -s --\" || Tini=''"
+    echo "storeinfo test tini && {"
+    echo "  Tini=\"\$(storeinfo dump tini)  --\" "
+    echo "  export TINI_SUBREAPER=1"
+    echo "}"
     echo ""
     
     echo "# close additional file descriptors"
@@ -7159,31 +7162,27 @@ setup_fifo() {                  # set up fifo channels (also option --stdin)
   # and to send pids to watch to watchpidlist() thread
 
   # file descriptors in use:
-  # &0  stdin                 --stdin with catstdin
-  # &1  stdout
-  # &2  stderr
-  # &3  stderr                for warnings and notes, with --silent redirected to /dev/null
-  # &4  stderr                for --stderr
-  # &5                        (not in use)
-  # &6  $Messagefifo          for messages from other threads to watchmessagefifo()
-  # &7  stdin>>$Cmdstinfile   --stdin with catstdin
-  # &8  $Timetosaygoodbyefifo for saygoodbye() and waitfortheend()
-  # &9  $Watchpidfifo         for watchpidlist()
+  # FDstderr            stderr                for warnings and notes redirected to &2, with --silent redirected to /dev/null
+  # FDmessage           $Messagefifo          for messages from other threads to watchmessagefifo()
+  # FDcmdstdin          stdin>>$Cmdstinfile   --stdin with catstdin, redirection of &0
+  # FDtimetosaygoodbye  $Timetosaygoodbyefifo for saygoodbye() and waitfortheend()
+  # FDwatchpid          $Watchpidfifo         for watchpidlist()
+  # FDdockerstop        $Dockerstopsignalfifo to send docker stop singnal to dockerrc in finish()
 
   [ "$Runtime" = "kata-runtime" ] && Usemkfifo="no"
   case "$Winsubsystem" in
     MSYS2|CYGWIN) Usemkfifo="no" ;;
     WSL)          Usemkfifo="no" ;;      ### FIXME: Better performance in WSL if using real mkfifo. But maybe file system damage due to shared cache files?
   esac
-
+  
   # redirect stdin to named pipe. Named pipe is shared with container and used as stdin of container command in containerrc
   [ "$Forwardstdin" = "yes" ] && {
     case $Usemkfifo in
       yes) unpriv "mkfifo $Cmdstdinfifo" ;;
       no)  mkfile $Cmdstdinfifo ;;
     esac
-    exec 7<>$Cmdstdinfifo 
-    cat <&0 >&7 & storepid $! catstdin
+    exec {FDcmdstdin}<>$Cmdstdinfifo 
+    cat <&0 >${FDcmdstdin} & storepid $! catstdin
     storeinfo "stdin=$Cmdstdinfifo"
   }
 
@@ -7203,18 +7202,18 @@ setup_fifo() {                  # set up fifo channels (also option --stdin)
   [ "$Winsubsystem" ] || {
     # used by finish() and dockerrc
     unpriv "mkfifo $Dockerstopsignalfifo"
-    exec 4<>$Dockerstopsignalfifo
+    exec {FDdockerstop}<>$Dockerstopsignalfifo
   }
   
   # used by waitfortheend()
-  exec 8<>$Timetosaygoodbyefifo
+  exec {FDtimetosaygoodbye}<>$Timetosaygoodbyefifo
   
   # start watching important pids, e.g. xinit, container.
-  exec 9<>$Watchpidfifo
+  exec {FDwatchpid}<>$Watchpidfifo
   watchpidlist & storepid $! watchpidlist
   
   # start watching for messages out of container or dockerrc
-  exec 6<>$Messagefifo
+  exec {FDmessage}<>$Messagefifo
   watchmessagefifo & storepid $! watchmessagefifo
   
   
@@ -7246,7 +7245,7 @@ setup_verbosity() {             # options --verbose, --stdout, --stderr
   [ "$Verbose" = "yes" ] && {
     trap '' SIGINT
     case $Verbosecolors in
-      no)  tail --pid="$$" --retry -n +1 -F $Logfile 2>/dev/null >&3 ;;
+      no)  tail --pid="$$" --retry -n +1 -F $Logfile 2>/dev/null >&${FDstderr} ;;
       yes) tail --pid="$$" --retry -n +1 -F $Logfile 2>/dev/null | sed "
                                       /\(Failed to add fd to store\|Failed to set invocation ID\|Failed to reset devices.list\)/d;
                                       s/\(ERROR\|Error\|error\|FAILURE\|FATAL\|Fatal\|fatal\)/${Colredbg}\1${Colnorm}/g;
@@ -7257,7 +7256,7 @@ setup_verbosity() {             # options --verbose, --stdout, --stderr
                                       s/\(Starting\|Activating\)/${Colgreen}\0${Colnorm}/;
                                       s/\(Started\|Reached target\|activated\)/${Colgreenbg}\0${Colnorm}/;
                                       s/^\(+\|++\|+++\)/${Colgreenbg}\0${Colnorm}/ ;
-                                      s/^x11docker/${Colgreen}\0${Colnorm}/ " >&3
+                                      s/^x11docker/${Colgreen}\0${Colnorm}/ " >&${FDstderr}
       ;;
     esac
   } &
@@ -7283,19 +7282,19 @@ declare_variables() {           # declare global variables
   export IFS=$' \n\t'                             # set IFS to default
 
   # Global environment variables used in x11docker
-  ALSA_CARD=$(envvarstring "${ALSA_CARD:-}")
-  CUPS_SERVER=$(envvarstring "${CUPS_SERVER:-}")
-  DBUS_SESSION_BUS_ADDRESS=$(envvarstring "${DBUS_SESSION_BUS_ADDRESS:-}")
-  DISPLAY=$(envvarstring "${DISPLAY:-}")
-  GDK_BACKEND=$(envvarstring "${GDK_BACKEND:-}")
-  HOME=$(envvarstring "${HOME:-}")
-  LANG=$(envvarstring "${LANG:-}")
-  LC_ALL=$(envvarstring "${LC_ALL:-}")
-  PATH="$(envvarstring -w "${PATH:-}")"
-  WAYLAND_DISPLAY=$(envvarstring "${WAYLAND_DISPLAY:-}")
-  XAUTHORITY=$(envvarstring "${XAUTHORITY:-}")
-  XDG_RUNTIME_DIR=$(envvarstring "${XDG_RUNTIME_DIR:-}")
-  XDG_VTNR=$(envvarstring "${XDG_VTNR:-}")
+  ALSA_CARD=$(check_envvar "${ALSA_CARD:-}")
+  CUPS_SERVER=$(check_envvar "${CUPS_SERVER:-}")
+  DBUS_SESSION_BUS_ADDRESS=$(check_envvar "${DBUS_SESSION_BUS_ADDRESS:-}")
+  DISPLAY=$(check_envvar "${DISPLAY:-}")
+  GDK_BACKEND=$(check_envvar "${GDK_BACKEND:-}")
+  HOME=$(check_envvar "${HOME:-}")
+  LANG=$(check_envvar "${LANG:-}")
+  LC_ALL=$(check_envvar "${LC_ALL:-}")
+  PATH="$(check_envvar -w "${PATH:-}")"
+  WAYLAND_DISPLAY=$(check_envvar "${WAYLAND_DISPLAY:-}")
+  XAUTHORITY=$(check_envvar "${XAUTHORITY:-}")
+  XDG_RUNTIME_DIR=$(check_envvar "${XDG_RUNTIME_DIR:-}")
+  XDG_VTNR=$(check_envvar "${XDG_VTNR:-}")
   
   # Add possibly missing PATH entries
   PATH="${PATH:-"/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/games:/usr/games"}"
@@ -7306,6 +7305,14 @@ declare_variables() {           # declare global variables
   grep -q ':/usr/local/games:' <<< ":$PATH:" || PATH="$PATH:/usr/local/games"
   grep -q ':/usr/games:'       <<< ":$PATH:" || PATH="$PATH:/usr/games"
   export PATH
+  
+  # File descriptors
+  FDcmdstdin=""                                   # --stdin channel to forward stdin to container. Previously &7
+  FDdockerstop=""                                 # message channel to send docker stop signal to dockerrc. Previously &4
+  FDmessage=""                                    # message channel for notes, warnings and verbosity across threads and container. Previously &6
+  #FDstderr=""                                    # internal stderr >&2, redirected to null with --silent. Alread declared in main(). Previously &3
+  FDtimetosaygoodbye=""                           # message channel to send termination signal from or to containers. Previously &8
+  FDwatchpid=""                                   # message channel for watchpidlist(). Previously &9
   
   # Terminal colors used for messages and -V
   Esc="$(printf '\033')"
@@ -7681,9 +7688,9 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,install,remove,update,update-master"                                                           # Installation
   #
   Longoptions="$Longoptions,iglx,xcomposite,xtest,xorgconf:,xoverip"                                                       # Experimental
-  Longoptions="$Longoptions,dbus-system,homedir:,no-xhost,sharedir:,systemd,vcxsrv"                                        # Deprecated
+  Longoptions="$Longoptions,dbus-system,homedir:,no-xhost,sharedir:,systemd"                                               # Deprecated
   Longoptions="$Longoptions,cachedir:,no-init,nothing,no-xtest,openrc,ps,runit,silent,starter,stderr,stdout"               # Removed
-  Longoptions="$Longoptions,sys-admin,sysvinit,tini,trusted,untrusted"                                                     # Removed
+  Longoptions="$Longoptions,sys-admin,sysvinit,tini,trusted,untrusted,vcxsrv"                                              # Removed
 
   Parsererrorfile="/tmp/x11docker.parserserror.$Cachenumber"
   Parsedoptions="$(getopt --options "$Shortoptions" --longoptions "$Longoptions" --name "$0" -- "$@" 2>$Parsererrorfile)"
@@ -7694,6 +7701,8 @@ parse_options() {               # parse cli options
   [ "$*" = "-h --" ] &&       usage &&        exit 0                 # Catch single -h for usage info, otherwise it means --hostdisplay
   [ "$*" = "--" ]    &&       usage &&        exit 0                 # x11docker without options
   [ "$*" = "-- --" ] &&       usage &&        exit 0                 # x11docker-gui without options
+  
+  #[ "$Restrictedmode" != "off" ] && check_options_restricted "$Parsedoptions"
 
   while { [ $# -gt 0 ] && [ -z "$Imagename" ] ;}; do
     case "${1:-}" in
@@ -7917,6 +7926,193 @@ ${2:-}"                       ; shift ;;                             # Add custo
   
   return 0
 }
+check_options_restricted() {
+  local Allow
+  eval set -- "$@"
+  while { [ $# -gt 0 ] && [ -z "$Imagename" ] ;}; do
+    Allow=no
+    case "${1:-}" in
+         --help)              Allow=yes ;;
+         --license|--licence) Allow=yes ;;
+         --version)           Allow=yes ;;
+         --wmlist)            Allow=yes ;;
+
+      -e|--exe)               Allow=yes ;;
+         --xonly)             Allow=yes ;;
+
+     #### Choice of X servers and Wayland compositors
+         --auto)              Allow=yes ;; ### CHECK --hostdisplay or --xorg
+      -h|--hostdisplay)       Allow=yes ;; ### CHECK access to user space
+      -H|--hostwayland)       Allow=yes ;;
+      -K|--kwin)              Allow=yes ;;
+         --kwin-xwayland)     Allow=yes ;;
+      -n|--nxagent)           Allow=yes ;;
+      -t|--tty)               Allow=yes ;;
+      -T|--weston)            Allow=yes ;;
+      -Y|--weston-xwayland)   Allow=yes ;;
+         --xdummy)            Allow=yes ;;
+      -y|--xephyr)            Allow=yes ;;
+      -a|--xpra)              Allow=yes ;;
+      -A|--xpra-xwayland)     Allow=yes ;;
+      -x|--xorg)              Allow=yes ;; ### CHECK system abuse possible?
+         --xvfb)              Allow=yes ;;
+      -X|--xwayland)          Allow=yes ;;
+         --xwin)              Allow=yes ;; 
+
+     #### Influencing automatical choice of X server or Wayland compositor
+      -d|--desktop)           Allow=yes ;;
+      -g|--gpu)               Allow=yes ;; ### LEVEL
+      -W|--wayland)           Allow=yes ;;
+         --wm)                Allow=yes ;; ### CHECK
+
+     #### X and Wayland appearance
+         --border)            Allow=yes ;;
+         --dpi)               Allow=yes ;;
+      -f|--fullscreen)        Allow=yes ;;
+         --output-count)      Allow=yes ;;
+         --rotate)            Allow=yes ;;
+         --scale)             Allow=yes ;;
+         --size)              Allow=yes ;;
+      -F|--xfishtank)         Allow=yes ;;
+
+     #### X and Wayland configuration
+         --display)           Allow=yes ;;
+         --keymap)            Allow=yes ;;
+         --vt)                Allow=yes ;; ### CHECK
+         --westonini)         Allow=yes ;; ### CHECK
+         
+     #### X Authentication
+         --clean-xhost|--no-xhost) Allow=yes ;; ### LEVEL
+         --no-auth)           Allow=yes ;; ### LEVEL
+         --xhost)             Allow=yes ;; ### LEVEL
+         
+     #### Host integration options
+         --alsa)              Allow=yes ;; ### LEVEL
+      -c|--clipboard)         Allow=yes ;;
+      -l)                     Allow=yes ;;
+         --lang)              Allow=yes ;;
+      -P|--printer)           Allow=yes ;; ### LEVEL
+      -p)                     Allow=yes ;; ### LEVEL
+         --pulseaudio)        Allow=yes ;; ### LEVEL
+         --sharessh)          Allow=yes ;; ### CHECK
+         --webcam)            Allow=yes ;; ### LEVEL
+
+     #### Special options
+         --enforce-i)         Allow=yes ;;
+      -i|--interactive)       Allow=yes ;;
+         --pull)              Allow=yes ;; ### LEVEL'
+         --pw)                Allow=yes ;;
+         --runasroot)         Allow=yes ;; ### LEVEL
+         --runfromhost)       Allow=yes ;;
+
+     #### User settings
+         --group-add)         Allow="no" ;; ### LEVEL?
+         --hostuser)          Allow="no" ;;
+         --sudouser)          Allow=yes ;; ### LEVEL
+         --user)              [ "$Containeruser" = "RETAIN" ] && Allow=yes || Allow=no ;; ### LEVEL
+               
+     #### Init system and DBus
+         --dbus)              Allow=yes ;; ### LEVEL =system
+         --hostdbus)          Allow=yes ;; ### CHECK
+         --init)              Allow=yes ;; ### LEVEL
+         --sharecgroup)       Allow=yes ;; ### LEVEL
+         --systemd)           Allow=yes ;; ### LEVEL
+
+     #### Container configuration
+         --cap-default)       Allow=yes ;; ### LEVEL
+         --env)               Allow=yes ;;
+         --hostipc)           Allow="no" ;;
+         --hostnet)           Allow="no" ;;
+         --limit)             Allow=yes ;;
+         --name)              Allow=yes ;;
+         --newprivileges)     Allow=yes ;; ### LEVEL
+         --no-entrypoint)     Allow=yes ;;
+         --no-internet)       Allow=yes ;;
+         --runtime)           Allow=yes ;;
+         --stdin)             Allow=yes ;;
+         --workdir)           Allow=yes ;;
+
+     #### host folders
+      -m)                     Allow=yes ;;
+         --home|--homedir)    restrictedpath "${2:-}" && Allow=yes || Allow="no" ;;
+         --share|--sharedir)  restrictedpath "${2:-}" && Allow=yes || Allow="no" ;;
+         --homebasedir)       restrictedpath "${2:-}" && Allow=yes || Allow="no" ;;
+         --cachebasedir)      restrictedpath "${2:-}" && Allow=yes || Allow="no" ;;
+
+     #### Verbosity options
+      -D|--debug)             Allow=yes ;;
+         --showinfofile)      Allow=yes ;;
+      -v|--verbose)           Allow=yes ;;
+      -V)                     Allow=yes ;;
+      -q|--quiet)             Allow=yes ;;
+         --showcache)         Allow=yes ;;
+         --showenv)           Allow=yes ;;
+         --showid)            Allow=yes ;;
+         --showpid1)          Allow=yes ;;
+
+     #### Special options not starting X or docker
+         --cleanup)           Allow=yes ;; ### CHECK Do not remove containers?
+         --install|--update|--update-master|--remove) Allow="no" ;;
+         --launcher)          Allow=yes ;;
+      
+     #### Experimental options
+         --iglx)              Allow=yes ;;
+         --xcomposite)        Allow=yes ;;
+         --xorgconf)          Allow="no" ;;
+         --xoverip)           Allow=yes ;;
+         --xtest)             Allow=yes ;;
+       --) break ;;
+    esac
+    [ "$Allow" = "yes" ] || error "x11docker restricted mode:
+  Found forbidden option or argument: ${1:-}"
+    shift
+  done
+  [ -n "$Customdockeroptions" ] && error "x11docker restricted mode:
+  Found forbidden custom docker options: $Customdockeroptions"
+}
+restrict_options() {
+ # experimental code, not ready yet. Intention: Alow harmless options only.
+
+ # level 1:
+ # --hostipc
+ # --hostnet
+ # custom docker options
+ # --share --home=DIR --cachebasedir --homebasedir # HOME only
+ # --user except RETAIN if --home
+ # --hostuser
+ # --install, --update, --update-master, --remove
+
+ # check parameter abuse
+ # --env
+ # basically all
+ 
+ # level 2:
+ # --hostdisplay
+
+ # unsure:
+ # --pull
+ # --runasroot
+ # --hostdbus
+ # --cleanup in multi-user environment?
+ # level 3:
+ # --newprivileges
+ # --cap-default
+ # --sudouser
+ # --group-add
+ # --init=systemd|openrc|sysvinit|runit
+ # --dbus=system
+ # --sharecgroup
+  local Message
+  [ "$Hostipc" = "yes" ] && Message="$Message
+  --hostipc"
+  [ "$Hostnet" = "yes" ] && Message="$Message
+  --hostnet"
+  [ "$Customdockeroptions" ] && Message="$Message
+  Custom docker options: $(escapestring "$Customdockeroptions")"
+  error "x11docker runs in restricted mode.
+  Found following options that are not allowed:
+$Message"
+}
 unpriv() {                      # run a command as unprivileged user. Needed if x11docker was started by root or with sudo.
   # $Unpriv is declared in check_hostuser: 'eval' or 'su $Hostuser -c'
   $Unpriv "${1:-}"
@@ -7925,7 +8121,7 @@ main() {
   trap finish EXIT
   trap finish_sigint SIGINT
   
-  exec 3>&2                     # stderr channel for warning(), error(), note(), debugnote() and --verbose
+  exec {FDstderr}>&2            # stderr channel for warning(), error(), note(), debugnote() and --verbose
   
   declare_variables
   parse_options "$@"
@@ -7962,7 +8158,7 @@ Parsed options:    $Parsedoptions"
 
   # check options
   check_xserver                  # check chosen X server or auto-choose one
-  check_option_interferences     # check multiple options, change settings if needed
+  check_option_interferences     # check options, change settings if needed
   option_messages                # some messages depending on options, but not changing anything
  
   # container user
@@ -7973,7 +8169,7 @@ Parsed options:    $Parsedoptions"
   
   # some checks and setup
   drop_cachefiles                # remove cachefiles not needed for current setup
-  setup_verbosity                # create summary logfile, start verbose output   # --verbose, --stdout, --stderr
+  setup_verbosity                # create [and show] summary logfile              # --verbose
   setup_fifo                     # open message channels for container, dockerrc, xinitrc and watchpidlist()
   check_screensize               # size of host X and of new X server             # --size #time0,213
   [ "$Windowmanager" ]           && check_windowmanager                           # --wm  
