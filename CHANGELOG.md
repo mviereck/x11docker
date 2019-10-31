@@ -12,6 +12,10 @@ Project website: https://github.com/mviereck/x11docker
    [(#189)](https://github.com/mviereck/x11docker/issues/189)
  - Exchange static file descriptor numbers with dynamic ones.
    Hopefully fixes an odd issue where bash eats up some lines of code on exit.
+ - docker-for-win: Do not use cache path within WSL subsystem.
+   [(#165)](https://github.com/mviereck/x11docker/issues/165)
+ - `--xpra`: Check for validity of `--opengl=noprobe`.
+ - `--xpra`: Drop support on MS Windows / WSL.
 
 ## [6.3.0](https://github.com/mviereck/x11docker/releases/tag/v6.3.0) - 2019-10-04
 ### Added
