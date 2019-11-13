@@ -17,6 +17,8 @@ Project website: https://github.com/mviereck/x11docker
  - `--xpra`: Check for validity of `--opengl=noprobe`.
  - `--xpra`: Drop support on MS Windows / WSL.
  - Use window manager in auto mode for `--xephyr` and similars.
+ - Fix `waitforlogentry()` error if pulling image.
+   [(#191)](https://github.com/mviereck/x11docker/issues/191)
 
 ## [6.3.0](https://github.com/mviereck/x11docker/releases/tag/v6.3.0) - 2019-10-04
 ### Added
