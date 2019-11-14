@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [6.4.0](https://github.com/mviereck/x11docker/releases/tag/v6.4.0) - 2019-11-14
 ### Added
  - `--xtest [=yes|no]`: New option to enable or disable X extension XTEST.
    Can be needed for custom access with xpra.
