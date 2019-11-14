@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
+### Added
+ - `--xtest [=yes|no]`: New option to enable or disable X extension XTEST.
+   Can be needed for custom access with xpra.
+   [(#190)](https://github.com/mviereck/x11docker/issues/190)
 ### Fixed
  - Do not set `tini` option `-s`. Avoids issue with `catatonit`.
    [(#189)](https://github.com/mviereck/x11docker/issues/189)
