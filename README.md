@@ -289,7 +289,7 @@ _Rather special options reducing security, but not needed for regular use:_
     `--init=systemd` also shares access to `/sys/fs/cgroup`. Some processes will run as root in container.
     If a root process somehow breaks out of container, it can harm your host system. Allows many container capabilties that x11docker would drop otherwise.
   - `--hostipc` sets docker run option `--ipc=host`. Allows MIT-SHM / shared memory. Disables IPC namespacing.
-  - `--hostnet` sets docker run option `--network=host`. Shares host network stack. Disables network namespacing. Container can spy on an maybe manipulate host network traffic.
+  - `--hostnet` sets docker run option `--network=host`. Shares host network stack. Disables network namespacing. Container can spy on and maybe manipulate host network traffic.
   - `--hostdbus` allows communication over DBus with host applications.
 
 ### Sandbox
@@ -300,7 +300,7 @@ Using Docker with x11docker as a sandbox is not intended to run obviously evil s
  - Compatibility environment to run software that is hard or impossible to install on host due to dependency issues.
  - Development environment to collect libraries, compiler and so on to keep the host clean.
  - Development environment to mitigate damage caused by unexpected/buggy behaviour.
- - Security layer for software that may be malicious in worst case. Examples: Internet browser with Javascript enabled, or wine with Windows applications.
+ - Security layer for software that may be malicious in worst case. Examples: Internet browser with enabled `javascript`, or `wine` with MS Windows applications.
 
 x11docker already restricts process capabilities. You can additionally restrict access to CPU and RAM with option `--limit`. 
 As default `--limit` restricts to 50% of available CPUs and 50% of currently free RAM. Another amount can be specified with `--limit=FACTOR` with a `FACTOR` greater than zero and less than or equal one.
@@ -315,16 +315,17 @@ For more custom fine tuning have a look at [Docker documentation: Limit a contai
 ### Security and feature check
 To check container isolation and some feature options use image `x11docker/check` and try out with several options.
  - An insecure setup is `x11docker --hostdisplay --gpu x11docker/check`. It fairly well demonstrates common X security leaks.
- - Add options like `--pulseaudio --alsa --webcam --clipboard` to check their functionality.
+ - Add options like `--pulseaudio --alsa --webcam --clipboard --printer` to check their functionality.
   
 ## Installation
-Note that x11docker is just a **bash script** without library dependencies. Basically it is a wrapper for X servers and Docker. To allow advanced usage of x11docker abilities look at chapter [Dependencies](#dependencies).
+Note that x11docker is just a **bash script** without library dependencies. Basically it is just a wrapper for X servers and Docker. To allow advanced usage of x11docker abilities have a look at chapter [Dependencies](#dependencies).
 ### Installation options
-As root you can install, update and remove x11docker to system directories to be available system-wide:
+As root you can install, update and remove x11docker in system directories to be available system-wide:
  - `x11docker --install` : install x11docker and x11docker-gui from current directory. (Useful to install from an extracted `zip` file or a cloned `git` repository.)
  - `x11docker --update` : download and install latest [release](https://github.com/mviereck/x11docker/releases) from github.
  - `x11docker --update-master` : download and install latest master version from github.
  - `x11docker --remove` : remove all files installed by x11docker.
+   - Note: This does not remove `~/.local/share/x11docker` where it stores persistent files of option `--home`.
  
 Copies `x11docker` and `x11docker-gui` to `/usr/bin`. Creates an icon in `/usr/share/icons`. 
 Creates `x11docker.desktop` in `/usr/share/applications`. Copies `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
@@ -341,7 +342,7 @@ Creates `x11docker.desktop` in `/usr/share/applications`. Copies `README.md`, `C
 ### Minimal installation
 You can run x11docker from an arbitray location with `bash x11docker`.
 For minimal system-wide installation make `x11docker` executable with `chmod +x x11docker` and move it to `/usr/bin` (or another location in `PATH`).
-Other files than `x11docker` script itself are not essential.
+Other files than script `x11docker` itself are not essential.
 
 ### Installation on MS Windows
 x11docker can run natively on MS Windows electively in one of:
@@ -367,13 +368,13 @@ Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/
 
 
 ## Troubleshooting
-For troubleshooting, run `x11docker` or `x11docker-gui` in a terminal. 
+For troubleshooting run `x11docker` or `x11docker-gui` in a terminal. 
  - x11docker shows warnings if something is insecure, missing or going wrong. 
    - Use option `-v, --verbose` to see full logfile output.
      - Option `-D, --debug` gives a less verbose output.
      - You can find the latest dispatched logfile at `~/.cache/x11docker/x11docker.log`.
  - Some applications fail with fallback option `--hostdisplay`. Add `--clipboard` to disable some security restrictions.
-   If that does not help, install [additional X servers](#dependencies).
+   If that does not help, install [additional X servers](#dependencies). The most stable option is `--xephyr`.
  - Make sure your x11docker version is up to date with `x11docker --update` (latest release) or `x11docker --update-master` (latest beta).
  - The image may have a `USER` specification and be designed for this user. 
    x11docker sets up a container user that can mismatch this container user setup. 
@@ -455,7 +456,7 @@ RUN apt-get update && apt-get install -y vlc
 ```
   
 ### Screenshots
-Sample screenshots are stored in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
+More screenshots are stored in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
 
 `x11docker --desktop x11docker/lxde-wine`
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxde-wine.png "LXDE desktop in docker")
