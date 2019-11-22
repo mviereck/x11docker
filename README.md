@@ -369,33 +369,45 @@ Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/
 
 ## Troubleshooting
 For troubleshooting run `x11docker` or `x11docker-gui` in a terminal. 
- - x11docker shows warnings if something is insecure, missing or going wrong. 
+x11docker shows warnings if something is insecure, missing or going wrong. 
+### Core checks
+ 1. Carefully read the regular x11docker messages. Often they already give a hint what to do.
+   - Use option `-D, --debug` to see some internal messages.
    - Use option `-v, --verbose` to see full logfile output.
-     - Option `-D, --debug` gives a less verbose output.
-     - You can find the latest dispatched logfile at `~/.cache/x11docker/x11docker.log`.
- - Some applications fail with fallback option `--hostdisplay`. Add `--clipboard` to disable some security restrictions.
-   If that does not help, install [additional X servers](#dependencies). The most stable option is `--xephyr`.
- - Make sure your x11docker version is up to date with `x11docker --update` (latest release) or `x11docker --update-master` (latest beta).
- - The image may have a `USER` specification and be designed for this user. 
-   x11docker sets up a container user that can mismatch this container user setup. 
-   - Check for a `USER` specification in image with `docker inspect --format '{{.Config.User}}' IMAGENAME`.
-   - If yes, try with `--user=RETAIN` to run with the `USER` specified in image.
- - Some applications need more privileges or capabilities than x11docker provides by default. 
-   - Reduce container isolation with e.g.:
-     - x11docker options: `--cap-default --hostipc --hostnet`. (Try `--cap-default` first).
-     - docker run options: `--cap-add ALL --security-opt seccomp=unconfined --privileged`
-     - Example: `x11docker --cap-default --hostipc --hostnet -- --cap-add ALL --security-opt seccomp=unconfined --privileged -- IMAGENAME`
-     - Try with reduced container isolation. If it works, drop options one by one until the needed one(s) are left.
-     - If `--cap-add ALL` helps, find the [capability](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) you really need and add only that one.
-       - List of capabilities disabled by Docker by default: `--cap-add=SYS_MODULE --cap-add=SYS_RAWIO --cap-add=SYS_PACCT --cap-add=SYS_ADMIN --cap-add=SYS_NICE --cap-add=SYS_RESOURCE --cap-add=SYS_TIME --cap-add=SYS_TTY_CONFIG --cap-add=AUDIT_CONTROL --cap-add=MAC_OVERRIDE --cap-add=MAC_ADMIN --cap-add=NET_ADMIN --cap-add=SYSLOG --cap-add=DAC_READ_SEARCH --cap-add=LINUX_IMMUTABLE --cap-add=NET_BROADCAST --cap-add=IPC_LOCK --cap-add=IPC_OWNER --cap-add=SYS_PTRACE --cap-add=SYS_BOOT --cap-add=LEASE --cap-add=WAKE_ALARM --cap-add=BLOCK_SUSPEND --cap-add=AUDIT_READ`
-     - If `--privileged` helps, your application probably needs a device in `/dev`. Find out which one and share it with e.g. `--share /dev/vboxdrv`. Try also `--share /run/udev/data:ro`.
-       - Please, don't use `--privileged` as a solution. It allows too much access to host and fatally breaks container isolation. Investigate the permissions your container needs indeed.
-     - If `--cap-default` helps, container security is degraded to a reasonable level. It causes x11docker not to set `--security-opt=no-new-privileges` and allows Docker#s default capabilities.
-       - List of capabilities allowed with `--cap-default`: `--cap-add=SETPCAP --cap-add=MKNOD --cap-add=AUDIT_WRITE --cap-add=CHOWN --cap-add=NET_RAW --cap-add=DAC_OVERRIDE --cap-add=FOWNER --cap-add=FSETID --cap-add=KILL --cap-add=SETGID --cap-add=SETUID --cap-add=NEW_BIND_SERVICE --cap-add=SYS_CHROOT --cap-add=SETFCAP`
-   - You can run container applications as root with `--user=root`.
- - A few applications need a [DBus](#dbus) user daemon. Install `dbus` in image and try option `--dbus`.
- - A few applications need systemd and/or a running [DBus](#dbus) system daemon. Install `systemd` in image and try option `--init=systemd`.
-   
+   - You can find the latest dispatched logfile at `~/.cache/x11docker/x11docker.log`.
+ 1. Try another X server option.
+   - Some applications fail with fallback option `--hostdisplay`. Add `--clipboard` to disable some security restrictions of `--hostdisplay`.
+   - If that does not help, install [additional X servers](#dependencies). The most stable and reliable option is `--xephyr`.
+ 1. Make sure your x11docker version is up to date with `x11docker --update` (latest release) or `x11docker --update-master` (latest beta).
+### Privilege checks
+Some applications need more privileges or [capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) than x11docker provides by default. 
+One attempt is to allow several privileges until the setup works. Than reduce privileges to find out which are needed indeed. 
+(Note the ` -- `-in the following commands, do not miss them).
+ 1. Adding privileges:
+   - Try `x11docker --cap-default IMAGENAME`
+   - Try `x11docker --cap-default --hostipc --hostnet IMAGENAME`
+   - Try `x11docker --cap-default --hostipc --hostnet --share /run/udev/data:ro -- --cap-add ALL --security-opt seccomp=unconfined --privileged -- IMAGENAME`
+ 1. Reducing privileges:
+   - Option `--cap-default` might already be enough. It allows default container capabilities as Docker would do on itself. You can just stop debugging and reducing here if you like to.
+     - You can try to reduce `--cap-default`. Partially remove addional options to find out which one(s) are needed:
+       - First try `x11docker --newprivileges -- IMAGENAME`
+       - Than try and reduce: `x11docker --newprivileges -- --cap-add=SETPCAP --cap-add=MKNOD --cap-add=AUDIT_WRITE --cap-add=CHOWN --cap-add=NET_RAW --cap-add=DAC_OVERRIDE --cap-add=FOWNER --cap-add=FSETID --cap-add=KILL --cap-add=SETGID --cap-add=SETUID --cap-add=NEW_BIND_SERVICE --cap-add=SYS_CHROOT --cap-add=SETFCAP -- IMAGENAME`
+   - `--cap-add ALL` should not be considered as a solution. Drop capabilities from following command to find the one you need:
+     `x11docker --cap-default -- --cap-add=SYS_MODULE --cap-add=SYS_RAWIO --cap-add=SYS_PACCT --cap-add=SYS_ADMIN --cap-add=SYS_NICE --cap-add=SYS_RESOURCE --cap-add=SYS_TIME --cap-add=SYS_TTY_CONFIG --cap-add=AUDIT_CONTROL --cap-add=MAC_OVERRIDE --cap-add=MAC_ADMIN --cap-add=NET_ADMIN --cap-add=SYSLOG --cap-add=DAC_READ_SEARCH --cap-add=LINUX_IMMUTABLE --cap-add=NET_BROADCAST --cap-add=IPC_LOCK --cap-add=IPC_OWNER --cap-add=SYS_PTRACE --cap-add=SYS_BOOT --cap-add=LEASE --cap-add=WAKE_ALARM --cap-add=BLOCK_SUSPEND --cap-add=AUDIT_READ -- IAGENAME`
+       - Many of these capabilities are rather dangerous and should not be allowed for a container. Especially to mention is `SYS_ADMIN`.
+   - Option `--privileged` should not be considered to be a solution. Basically it allows arbitrary access to the host for container applications.
+     - Likely you need to share a device file in `/dev`, e.g. something like `--share /dev/vboxdrv`.
+   - `--hostipc` and `--hostnet` severly reduce container isolation. Better solutions are desireable.
+ 1. Open a ticket to ask for possibilities how to optimize the privilege setup.
+### Other checks
+ 1. Container user: By default x11docker sets up an unprivileged container user similar to your host user.
+   - The image may have a `USER` specification and be designed for this user. 
+     - Check for a `USER` specification in image with `docker inspect --format '{{.Config.User}}' IMAGENAME`
+     - You can enable this predefined user with `--user=RETAIN`
+   - The container might need a root user. Try with `--user=root`. Note that this disables some x11docker restrictions for containers similar to `--cap-default`.
+ 1. Init and DBus
+   - A few applications need a [DBus](#dbus) user daemon. Install `dbus` in image and try option `--dbus`.
+   - A few applications need systemd and/or a running [DBus](#dbus) system daemon. Install `systemd` in image and try option `--init=systemd`.
    
 ## Contact
 Feel free to open a [ticket](https://github.com/mviereck/x11docker/issues) if you have a question or encounter an issue.
