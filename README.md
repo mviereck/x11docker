@@ -381,12 +381,12 @@ x11docker shows warnings if something is insecure, missing or going wrong.
    
 **3.** Try another X server option.
  - Some applications fail with fallback option `--hostdisplay`. Add `--clipboard` to disable some security restrictions of `--hostdisplay`.
- - If that does not help, install [additional X servers](#dependencies). The most stable and reliable option is `--xephyr`.
+ - If that does not help, install [additional X servers](https://github.com/mviereck/x11docker/wiki/Dependencies#recommended-base). The most stable and reliable option is `--xephyr`.
  
 ### Privilege checks
 Some applications need more privileges or [capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) than x11docker provides by default. 
 One attempt is to allow several privileges until the setup works. Than reduce privileges to find out which are needed indeed. 
-(Note the ` -- `-in the following commands, do not miss them).
+(Note the ` -- ` in the following commands, do not miss them).
 
 **1.** Adding privileges:
  - Try `x11docker --cap-default IMAGENAME`
@@ -399,8 +399,9 @@ One attempt is to allow several privileges until the setup works. Than reduce pr
    - You can try to reduce `--cap-default`. Partially remove addional options to find out which one(s) are needed:
      - First try `x11docker --newprivileges -- IMAGENAME`
      - Than try and reduce: `x11docker --newprivileges -- --cap-add=SETPCAP --cap-add=MKNOD --cap-add=AUDIT_WRITE --cap-add=CHOWN --cap-add=NET_RAW --cap-add=DAC_OVERRIDE --cap-add=FOWNER --cap-add=FSETID --cap-add=KILL --cap-add=SETGID --cap-add=SETUID --cap-add=NEW_BIND_SERVICE --cap-add=SYS_CHROOT --cap-add=SETFCAP -- IMAGENAME`
- - `--cap-add ALL` should not be considered as a solution. Drop capabilities from following command to find the one(s) you need:
-   `x11docker --cap-default -- --cap-add=SYS_MODULE --cap-add=SYS_RAWIO --cap-add=SYS_PACCT --cap-add=SYS_ADMIN --cap-add=SYS_NICE --cap-add=SYS_RESOURCE --cap-add=SYS_TIME --cap-add=SYS_TTY_CONFIG --cap-add=AUDIT_CONTROL --cap-add=MAC_OVERRIDE --cap-add=MAC_ADMIN --cap-add=NET_ADMIN --cap-add=SYSLOG --cap-add=DAC_READ_SEARCH --cap-add=LINUX_IMMUTABLE --cap-add=NET_BROADCAST --cap-add=IPC_LOCK --cap-add=IPC_OWNER --cap-add=SYS_PTRACE --cap-add=SYS_BOOT --cap-add=LEASE --cap-add=WAKE_ALARM --cap-add=BLOCK_SUSPEND --cap-add=AUDIT_READ -- IAGENAME`
+ - `--cap-add ALL` should not be considered to be a solution. 
+   - Drop capabilities from following command to find the one(s) you need:
+   `x11docker --cap-default -- --cap-add=SYS_MODULE --cap-add=SYS_RAWIO --cap-add=SYS_PACCT --cap-add=SYS_ADMIN --cap-add=SYS_NICE --cap-add=SYS_RESOURCE --cap-add=SYS_TIME --cap-add=SYS_TTY_CONFIG --cap-add=AUDIT_CONTROL --cap-add=MAC_OVERRIDE --cap-add=MAC_ADMIN --cap-add=NET_ADMIN --cap-add=SYSLOG --cap-add=DAC_READ_SEARCH --cap-add=LINUX_IMMUTABLE --cap-add=NET_BROADCAST --cap-add=IPC_LOCK --cap-add=IPC_OWNER --cap-add=SYS_PTRACE --cap-add=SYS_BOOT --cap-add=LEASE --cap-add=WAKE_ALARM --cap-add=BLOCK_SUSPEND --cap-add=AUDIT_READ -- IMAGENAME`
    - Many of these capabilities are rather dangerous and should not be allowed for a container. Especially to mention is `SYS_ADMIN`.
  - Option `--privileged` should not be considered to be a solution. Basically it allows arbitrary access to the host for container applications.
    - Likely you need to share a device file in `/dev`, e.g. something like `--share /dev/vboxdrv`.
