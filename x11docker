@@ -1603,7 +1603,7 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
   otherwise for security reasons. Container security is reduced now.
   However, given capabilities are still within default Docker capabilities.
   You would not have this issue with free nouveau driver on host."
-            
+          :
         } || {
           Nvidiainstallerfile=""
           note "You are using proprietary closed source NVIDIA driver.
@@ -1828,10 +1828,6 @@ check_newxenv() {               # find free display, create $Newxenv
   [ "$Xoverip" ] || case $Xserver in
     --xwin) Xoverip="yes" ;;
   esac
-  case $Winsubsystem in
-    MSYS2|CYGWIN|WSL) Xoverip="yes" ;;
-  esac
-  [ "$Runtime" = "kata-runtime" ] && Xoverip="yes"
   
   # set $Newdisplay (DISPLAY of container) and $Newxsocket
   case $Xserver in
@@ -1839,7 +1835,7 @@ check_newxenv() {               # find free display, create $Newxenv
       case $Xoverip in
         yes) 
           [ "$(cut -c1 <<< "$Hostdisplay")" = ":" ] && Newdisplay="${Hostip}${Hostdisplay}" || Newdisplay="$Hostdisplay"  ;;
-        no)
+        no|"")
           Newdisplay="$Hostdisplay"
           Newdisplaynumber="$(echo $Newdisplay | cut -d: -f2 | cut -d. -f1)"
           Newxsocket="$Hostxsocket"
@@ -1855,7 +1851,7 @@ check_newxenv() {               # find free display, create $Newxenv
     *)
       case $Xoverip in
         yes) Newdisplay="$Hostip:$Newdisplaynumber" ;;
-        no)
+        no|"")
           Newdisplay=":$Newdisplaynumber"
           Newxsocket="/tmp/.X11-unix/X$Newdisplaynumber"
           Newxlock="/tmp/.X$Newdisplaynumber-lock"
@@ -2105,15 +2101,6 @@ check_xdepends() {              # check dependencies on host for X server option
     ;;
   esac
   case ${1:-} in
-    --hostdisplay)
-      [ "$Runtime" = "kata-runtime" ] && {
-        nc -z 127.0.0.1 $((6000 + $Hostdisplaynumber)) || {
-          $Message "${1:-}: Display $Hostdisplay can not be accessed over TCP.
-  --runtime=kata-runtime works only with X over TCP."
-          Return=1
-        }
-      }
-    ;;
     --xpra-xwayland|--weston-xwayland|--xwayland|--weston|--kwin|--kwin-xwayland|--xdummy-xwayland|--hostwayland)
       [ "$Nvidiaversion" ] && {
         $Message "${1:-}: Closed source NVIDIA driver does not support Wayland."
@@ -2308,13 +2295,38 @@ check_xdepends() {              # check dependencies on host for X server option
       ;;
     esac
   }
-
-  Return="${Return:-"0"}"
-  debugnote "Dependency check for ${1:-}: ${Return:-0}"
-  [ "$Return" = "1" ] && {
-    $Message "${1:-} not possible: missing dependencies."
-    Autochooseserver="yes"
+  [ "$Xoverip" = "yes" ] && {
+    case ${1:-} in
+      --xephyr|--xorg|--nxagent|--xpra|--xvfb|--xdummy|--xwin|--tty) ;;
+      --hostdisplay)
+        [ -n "$(cut -d: -f1 <<< "$Hostdisplay")" ] || {
+          $Message "${1:-} does not support X over TCP
+  except if started remotely with 'ssh -X'."
+          Return=1
+        }
+      ;;
+      --xwayland|--weston-xwayland|--kwin|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland|--hostwayland)
+        $Message "${1:-} does not support X over TCP."
+        Return=1
+      ;;
+    esac
   }
+  [ "$Sharegpu" = "yes" ] && {
+    case ${1:-} in
+      --hostdisplay|--xorg|--xpra-xwayland|--weston-xwayland|--kwin-xwayland|--xdummy-xwayland|--xwayland) ;;
+      --weston|--kwin|--hostwayland) ;;
+      *) 
+        $Message "${1:-} does not support hardware acceleration (--gpu)."
+        Return=1
+      ;;
+    esac
+  }
+  
+  Return="${Return:-"0"}"
+  debugnote "Dependency check for ${1:-}: $Return"
+  
+  [ "$Return" = "1" ] && Autochooseserver="yes"
+  
   Lastcheckedxserver="${1:-}"
   Lastcheckedxserverresult="$Return"
   
@@ -2391,6 +2403,16 @@ check_xserver() {               # check chosen X server, auto-choose X server
         Xserver="--xdummy-xwayland"
       ;;
     esac
+  }
+  
+  # X over TCP
+  [ -z "$Xoverip" ] && {
+    [ "$Runtime" = "kata-runtime" ] && Xoverip="yes"
+    [ "$Runsinsnap" = "yes" ]       && Xoverip="yes"
+    case $Winsubsystem in
+      MSYS2|CYGWIN|WSL)                Xoverip="yes" ;;
+    esac
+    [ "$Xoverip" = "yes" ] && [ "$Autochooseserver" = "no" ] && note "Enabled X over TCP instead of sharing unix socket."
   }
 
   [ "$Nvidiaversion" ] && [ "$Sharegpu" = "yes" ] && case $Xserver in
@@ -2595,7 +2617,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   Allowing access to new X server for everyone.
   Your X server is accessable over TCP network without any restriction.
   That can be abused to take control over your system." ;;
-        no) [ "$Xserver" = "--hostdisplay" ] || warning "Option --no-auth: SECURITY RISK!
+        no|"") [ "$Xserver" = "--hostdisplay" ] || warning "Option --no-auth: SECURITY RISK!
   Allowing access to new X server for everyone."
       Xserveroptions="$Xserveroptions \\
   -ac" ;;
@@ -2611,7 +2633,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   -listen tcp" ;;
       esac
     ;;
-    no) Xserveroptions="$Xserveroptions \\
+    no|"") Xserveroptions="$Xserveroptions \\
   -nolisten tcp" ;;
   esac
 
@@ -5883,6 +5905,9 @@ check_host() {                  # check host environment
   [ "${0:-}" = "${BASH_SOURCE:-}" ] && Runssourced="no" || Runssourced="yes"
 
   Hostsystem="$(grep '^ID=' /etc/os-release 2>/dev/null | cut -d= -f2 || echo 'unknown')"
+  
+  # Check if docker is installed with Ubuntu snap
+  [ "$(command -v docker | cut -c1-5)" = "/snap" ] && Runsinsnap="yes" | Runsinsnap="no"
 
   # Check libc from host. If same as in container, it is possible to share timezone file
   Hostlibc="unknown"
@@ -5985,6 +6010,7 @@ check_host() {                  # check host environment
   
   # Check if host uses proprietary NVIDIA driver
   Nvidiaversion=$(head -n1 2>/dev/null </proc/driver/nvidia/version | awk '{ print $8 }')
+  #Nvidiaversion=430.14
     
   return 0
 }
@@ -6149,7 +6175,7 @@ check_option_interferences() {  # check multiple option interferences, change se
           allowed_users=anybody
           needs_root_rights=yes
       If the file does not exist already, you can create it.
-      On Ubuntu 16.04 and debian 9 you need package xserver-xorg-legacy."
+      On Debian and Ubuntu you need package xserver-xorg-legacy."
       }
     ;;
     --xpra) # check vfb for xpra
@@ -6239,7 +6265,7 @@ check_option_interferences() {  # check multiple option interferences, change se
   Please install 'xauth' to allow X cookie authentication.
   You can disable cookie authentication with discouraged option --no-auth."
           ;;
-          no)
+          no|"")
             warning "Command 'xauth' not found.
   Please install 'xauth' to allow X cookie authentication.
   Securing X access with cookie authentication is not possible.
@@ -6261,11 +6287,11 @@ check_option_interferences() {  # check multiple option interferences, change se
   Container gains access to GPU hardware.
   This allows reading host window content (palinopsia leak)
   and GPU rootkits (compare proof of concept: jellyfish)."
-    case $Xserver in
-      --xpra|--xdummy|--nxagent|--xephyr)
-        note "Option $Xserver does not support hardware acceleration.
-  Fallback: using software rendering, disabling option --gpu"
-        Sharegpu="no"
+    case $Xoverip in
+      yes)
+        [ "$Sharehostnet" = "no" ] && note "Option --gpu: With X over IP the host network stack must
+  be shared to allow GPU access. Enabling option --hostnet."
+        Sharehostnet="yes"
       ;;
     esac
   }
@@ -6721,6 +6747,16 @@ check_option_interferences() {  # check multiple option interferences, change se
     ;;
   esac
   
+  # Docker installed in Ubuntu snap
+  [ "$Runsinsnap" = "yes" ] && {
+    note "Docker was installed with snap. That causes some restrictions.
+  Option --newprivileges=yes is enabled.
+  Option --hostdisplay is not available because X can only be accessed over TCP. 
+  Option --gpu only works with --xorg and --hostnet.
+  It is recommended to install Docker natively instead of running it in snap."
+    [ "$Allownewprivileges" = "auto" ] && Allownewprivileges="yes"
+  }
+  
   return 0
 }
 check_passwordfrontend() {      # check password prompt frontend (pkexec, su, sudo, ...) (also option --pw)
@@ -6808,6 +6844,7 @@ check_runmode() {               # check run/--exe/--xonly
       Codename="$Hostexe"
       command -v $Hostexe >/dev/null || error "Command '$Hostexe' not found."
       verbose "Host application to execute: $Hostexe"
+      Runsinsnap="no"
     ;;
     xonly)
       X11dockermode="exe"
@@ -6817,6 +6854,7 @@ check_runmode() {               # check run/--exe/--xonly
       Codename="xonly"
       Imagebasename="xonly"
       Showdisplayenvironment="yes"
+      Runsinsnap="no"
     ;;
   esac
   
@@ -7059,10 +7097,6 @@ option_messages() {             # some messages depending on options, but not ch
   2.) Switch to console tty1...tty6 with <CTRL><ALT><F1>...<F6>
       and start x11docker there.
   3.) Run x11docker as root."
-
-      [ "$Autochooseserver" = "yes" ] && [ -n "$Hostdisplay" ] && note "Could not find Xephyr, Xnest, nxagent,
-  xpra, weston+Xwayland or kwin_wayland+Xwayland to run a nested X server.
-  Consider to install one of them."
 
       case $Xlegacywrapper in
         yes) warning "Although x11docker starts Xorg as unprivileged user,
@@ -7363,6 +7397,7 @@ declare_variables() {           # declare global variables
   Colnorm="${Esc}[0m"
   
   # x11docker startup environment
+  Runsinsnap=""                                   # docker runs in Ubuntu snap yes/no
   Runsinteractive=""                              # --enforce-i: Script runs in bash interactive mode (bash -i) yes/no.
   Runsinterminal=""                               # x11docker runs in a terminal yes/no
   Runsonconsole=""                                # x11docker runs on tty yes/no
@@ -7515,7 +7550,7 @@ declare_variables() {           # declare global variables
   Xpraversion=""                                  # $(xpra --version) to decide some xpra options and messages
   Xpravfb=""                                      # --xpra, --xdummy, --xvfb: vfb for --xpra: Xdummy or Xvfb
   Xserver=""                                      # X server option to use
-  Xoverip="no"                                    # --xoverip: Connect to X over TCP yes/no
+  Xoverip=""                                      # --xoverip: Connect to X over TCP yes/no
   Xtest=""                                        # --xtest: Enable extension Xtest yes/no. If empty, yes for --xpra/--xdummy/--xvfb, otherwise no
   Yaxis=""                                        # Virtual screen height
   
@@ -7591,7 +7626,7 @@ declare_variables() {           # declare global variables
   Sharecgroup="no"                                # --sharecgroup, --init=systemd: share /sys/fs/cgroup. Also needed for elogind
   Sharehostdbus="no"                              # --hostdbus: Connect to DBus user daemon on host
   Tinibinaryfile=""                               # --init=tini (default): Binary of tini; either /usr/bin/docker-exec or provided by user in [...]/share/x11docker
-  Tinicontainerpath="/usr/local/bin/tini"         # --init=tini: Path of tini in container
+  Tinicontainerpath="/usr/local/bin/init"         # --init=tini: Path of tini (or catatonit) in container
   
   # Gaining root privileges to run docker
   Passwordcommand=""                              # --pw: Generated command for password prompt
