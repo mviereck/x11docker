@@ -7,10 +7,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
+### Added
+ - `--xoverip`: New option to enforce X over TCP/IP. For special setups only.
 ### Changed
  - `--xephyr`: Disabled Xephyr option `-glamor`.
    [(#196)](https://github.com/mviereck/x11docker/issues/196)
  - `TODO.md` outsourced from x11docker script.
+### Fixed
+ - `--gpu`: NVIDIA driver installation failed with `--cap-default`.
+   [(#198)](https://github.com/mviereck/x11docker/issues/198)
 
 ## [6.4.0](https://github.com/mviereck/x11docker/releases/tag/v6.4.0) - 2019-11-14
 ### Added
