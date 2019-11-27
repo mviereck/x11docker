@@ -63,6 +63,9 @@
 
 ![screenshot](screenshot-xpra-pstree.png "xterm showing pstree in xpra window using x11docker")
 
+[Interactive xterm during `docker build`](https://github.com/mviereck/x11docker/wiki/docker-build-with-interactive-GUI)
+![screenshot](screenshot-dockerbuild.png "Interactive xterm during docker build")
+
 ![screenshot](x11docker-gui.png "x11docker GUI main")
 
 ![screenshot](x11docker-512x512.png "x11docker logo")
