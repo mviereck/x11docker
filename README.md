@@ -65,6 +65,9 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
    - [Installation on MS Windows](#installation-on-ms-windows)
  - [Dependencies](#dependencies)
  - [Troubleshooting](#troubleshooting)
+   - [Core checks](#core-checks)
+   - [Privilege checks](#privilege-checks)
+   - [Other checks](#other-checks)
  - [Contact](#contact)
    - [Issues](#issues)
    - [Contributing](#contributing)
@@ -394,6 +397,7 @@ One attempt is to allow several privileges until the setup works. Than reduce pr
  - Try `x11docker --cap-default --hostipc --hostnet --share /run/udev/data:ro -- --cap-add ALL --security-opt seccomp=unconfined --privileged -- IMAGENAME`
    
 **2.** Reducing privileges:
+ - Drop options one by one in this order: `--privileged --security-opt seccomp=unconfined --cap-add ALL --share /run/udev/data:ro --hostnet --hostipc --cap-default`. Only leave options that are needed to keep the setup working.
  - Option `--cap-default` might already be enough. It allows default container capabilities as Docker would do on itself. 
    - You can just stop debugging and reducing here if you like to.
    - You can try to reduce `--cap-default`. Partially remove addional options to find out which one(s) are needed:
@@ -445,7 +449,7 @@ A special one to check features and container isolation is `x11docker/check`.
 | [Kodi media center](https://kodi.tv/) with hardware <br> acceleration, Pulseaudio sound <br> and shared `Videos` folder. <br> For setup look at [ehough/docker-kodi](https://github.com/ehough/docker-kodi). | `x11docker --gpu --pulseaudio --share ~/Videos erichough/kodi`. |
 | [XaoS](https://github.com/patrick-nw/xaos) fractal generator | `x11docker patricknw/xaos` |
 | [Telegram messenger](https://telegram.org/) with persistent <br> `HOME` for configuration storage | `x11docker --home xorilog/telegram` |
-| Firefox with shared `Download` folder. | `x11docker --share $HOME/Downloads -- --shm-size=4G -- jess/firefox` |
+| Firefox with shared `Download` folder. | `x11docker --share $HOME/Downloads -- --tmpfs /dev/shm -- jess/firefox` |
 | [Tor browser](https://www.torproject.org/projects/torbrowser.html) | `x11docker jess/tor-browser` |
 | Chromium browser | `x11docker -- jess/chromium --no-sandbox` |
 | VLC media player with shared `Videos` <br> folder and Pulseaudio sound | `x11docker --pulseaudio --share=$HOME/Videos jess/vlc` |

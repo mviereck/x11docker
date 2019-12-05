@@ -14,6 +14,8 @@ Project website: https://github.com/mviereck/x11docker
    [(#196)](https://github.com/mviereck/x11docker/issues/196)
  - `TODO.md` outsourced from x11docker script.
 ### Fixed
+ - Support `snap` installation of Docker.
+   [(#191)](https://github.com/mviereck/x11docker/issues/191)
  - `--gpu`: NVIDIA driver installation failed with `--cap-default`.
    [(#198)](https://github.com/mviereck/x11docker/issues/198)
 
@@ -33,7 +35,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--xpra`: Drop support on MS Windows / WSL.
  - Use window manager in auto mode for `--xephyr` and similars.
  - Fix `waitforlogentry()` error if pulling image.
-   [(#191)](https://github.com/mviereck/x11docker/issues/191)
+   [(#193)](https://github.com/mviereck/x11docker/issues/193)
 
 ## [6.3.0](https://github.com/mviereck/x11docker/releases/tag/v6.3.0) - 2019-10-04
 ### Added
