@@ -13,6 +13,10 @@ Project website: https://github.com/mviereck/x11docker
  - `--xephyr`: Disabled Xephyr option `-glamor`.
    [(#196)](https://github.com/mviereck/x11docker/issues/196)
  - `TODO.md` outsourced from x11docker script.
+ - Run `containerrootrc` with `--privileged`. Does not affect desired 
+   container command in `containerrc`. Allows less privileges with NVIDIA
+   driver installation and should avoid bugs like in
+   [(#196)](https://github.com/mviereck/x11docker/issues/196)
 ### Fixed
  - Support `snap` installation of Docker.
    [(#191)](https://github.com/mviereck/x11docker/issues/191)

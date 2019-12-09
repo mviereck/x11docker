@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="6.4.1-beta"
+Version="6.5.0-beta"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -172,6 +172,7 @@ X and Wayland appearance options:
                        Allowed for --xpra, --xorg --xpra-xwayland: 0.25...8.0.
                        Allowed for --weston and --weston-xwayland: 1...9.
                        (Mismatching font sizes can be adjusted with --dpi).
+                       Odd resolutions with --xorg might need --scale=1.
      --size XxY        Screen size of new X server (e.g. 800x600).
      --output-count N  Multiple virtual monitors for Weston, KWin or Xephyr.
      --rotate N        Rotate display (--xorg, --weston and --weston-xwayland)
@@ -215,6 +216,7 @@ Special options:
                          pkexec beesu none
      --runfromhost CMD Run host command CMD on new X server (you may need & ).
      --runasroot CMD   Run command CMD as root in container on startup.
+                       Caution: Runs with --privileged host access.
      --runtime RUNTIME Specify docker runtime. Known by x11docker:
                          runc:         Docker default runtime.
                          crun:         Fast replacement for runc written in C.
@@ -1600,12 +1602,12 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
           debugnote "NVIDIA: Found proprietary closed source NVIDIA driver installer
   $Nvidiainstallerfile"
 
-          [ "$Capdropall" = "yes" ] && warning "To install proprietary closed source NVIDIA driver,
-  x11docker must give some capabilities to container that would be dropped
-  otherwise for security reasons. Container security is reduced now.
-  However, given capabilities are still within default Docker capabilities.
-  You would not have this issue with free nouveau driver on host."
-          :
+#          [ "$Capdropall" = "yes" ] && warning "To install proprietary closed source NVIDIA driver,
+#  x11docker must give some capabilities to container that would be dropped
+#  otherwise for security reasons. Container security is reduced now.
+#  However, given capabilities are still within default Docker capabilities.
+#  You would not have this issue with free nouveau driver on host."
+#          :
         } || {
           Nvidiainstallerfile=""
           note "You are using proprietary closed source NVIDIA driver.
@@ -3999,8 +4001,10 @@ setup_capabilities() {          # check linux capabilities needed by container
   }
   [ "$Switchcontainerusercaps" = "yes" ] && store_runoption cap "SETUID SETGID DAC_OVERRIDE AUDIT_WRITE"
   
-  [ "$Sharegpu" = "yes" ] && [ "$Nvidiainstallerfile" ] && {
-    store_runoption cap "SETUID SETGID DAC_OVERRIDE CHOWN FOWNER"
+  #[ "$Sharegpu" = "yes" ] && [ "$Nvidiainstallerfile" ] && {
+  [ "$Sharegpu" = "yes" ] && [ "$Nvidiainstallerfile" ] && [ "$Switchcontaineruser" = "yes" ] && {
+    #store_runoption cap "SETUID SETGID DAC_OVERRIDE CHOWN FOWNER"
+    store_runoption cap "CHOWN FOWNER"
     [ "$Allownewprivileges" = "auto" ] && {
       note "Option --gpu: Installing NVIDIA driver in container
   needs advanced privileges. Enabling option --newprivileges=yes"
@@ -5539,7 +5543,7 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   
   echo "rocknroll || exit 64"
   echo ""
-  
+
   [ "$Windowmanager" = "none" ] || {
     echo "# run window manager (in image or from host)"
     echo "Windowmanager=\"$Windowmanager\""
@@ -5643,6 +5647,14 @@ $Wmdockercommand"'
   echo "  rocknroll || exit 64"
   echo "  mysleep 0.1"
   echo "done"
+
+  echo '[ -z "$Pid1pid" ] && error "dockerrc(): Did not receive PID of PID1 in container.
+  Maybe the container immediately stopped forunknown reasons.
+  Output of \"docker ps | grep x11docker\":
+$(docker ps | grep x11docker)
+  
+  Content of container log:
+$(rmcr < '$Containerlogfile' )"'
   echo 'storeinfo pid1pid="$Pid1pid"'
   echo ""
 
@@ -5664,10 +5676,11 @@ $(tail $Containerlogfile)\""
   echo ""
   
   [ "$Switchcontaineruser" = "no" ] && {
+    echo "debugnote 'dockerrc(): Starting containerrootrc with privileged docker exec'"
     echo "# copy containerrootrc inside of container to avoid possible noexec of host home."
-    echo "$Dockerexe exec --tty $Containername sh -c 'cp $(convertpath share $Containerrootrc) /tmp/containerrootrc ; chmod 644 /tmp/containerrootrc' 2>&1 | rmcr >>$Containerlogfile"
+    echo "$Dockerexe exec --privileged --tty $Containername sh -c 'cp $(convertpath share $Containerrootrc) /tmp/containerrootrc ; chmod 644 /tmp/containerrootrc' 2>&1 | rmcr >>$Containerlogfile"
     echo "# run container root setup. containerrc will wait until setup script is ready."
-    echo "$Dockerexe exec --tty -u root $Containername /bin/sh /tmp/containerrootrc 2>&1 | rmcr >>$Containerlogfile"
+    echo "$Dockerexe exec --privileged --tty -u root $Containername /bin/sh /tmp/containerrootrc 2>&1 | rmcr >>$Containerlogfile"
     echo ""
   }
   
@@ -6014,6 +6027,7 @@ check_host() {                  # check host environment
   
   # Check if host uses proprietary NVIDIA driver
   Nvidiaversion=$(head -n1 2>/dev/null </proc/driver/nvidia/version | awk '{ print $8 }')
+  Nvidiaversion="430.14"
     
   return 0
 }
@@ -6150,7 +6164,7 @@ check_hostxenv() {              # check environment variables for host X display
 check_option_interferences() {  # check multiple option interferences, change settings if needed
 
   [ "$Desktopmode" = "no" ] && case $Xserver in
-    --xephyr|--weston-xwayland|--kwin-xwayland) Windowmanager="auto" ;;
+    --xephyr|--weston-xwayland|--kwin-xwayland|--xorg) Windowmanager="auto" ;;
   esac
   
   case $Xserver in
@@ -7061,10 +7075,22 @@ option_messages() {             # some messages depending on options, but not ch
   # X server specific messages
   case $Xserver in
     --hostdisplay)
-      [ "$Autochooseserver" = "yes" ] && note "To allow protection against X security leaks,
+      [ "$Autochooseserver" = "yes" ] && case "$Sharegpu" in
+        yes)
+          case $Nvidiaversion in
+            "") note "To allow protection against X security leaks,
+  please install 'xinit' and one or more of:
+    xpra, weston+Xwayland or kwin_wayland+Xwayland,
+  or run a second Xorg server with option --xorg." ;;
+            *) note "To allow protection against X security leaks 
+  while uing --gpu with NVIDIA, please use option --xorg." ;;
+          esac
+        ;;
+        no) note "To allow protection against X security leaks,
   please install 'xinit' and one or more of:
     xpra, Xephyr, nxagent, weston+Xwayland, kwin_wayland+Xwayland or Xnest,
-  or run a second Xorg server with option --xorg."
+  or run a second Xorg server with option --xorg." ;;
+      esac
       case "$Trusted" in
         no)
           warning "Option --hostdisplay provides only low container isolation!
@@ -7783,17 +7809,17 @@ parse_options() {               # parse cli options
   
   #[ "$Restrictedmode" != "off" ] && check_options_restricted "$Parsedoptions"
 
-  while { [ $# -gt 0 ] && [ -z "$Imagename" ] ;}; do
+  while [ $# -gt 0 ]; do
     case "${1:-}" in
       --hostdisplay|--hostwayland|--kwin|--kwin-xwayland|--nxagent|--tty|--weston|--weston-xwayland|--xpra-xwayland|--xephyr|--xorg|--xwayland|--xwin|-h|-H|-K|-n|-t|-T|-Y|-y|-A|-x|-X)
         [ -n "$Xserver" ] && note "Please use only one X server or Wayland option at a time.
   You have set option '${1:-}' after option '$Xserver'.
   ${1:-} will take effect."
       ;;
-      --xpra|--xvfb|--xdummy)
+      --xpra|--xvfb|--xdummy|-a)
         case $Xserver in
           "") ;;
-          --xpra) ;;
+          --xpra|-a) ;;
           --xvfb|--xdummy)
             [ "${1:-}" != "--xpra" ] && note "Please use only one X server or Wayland option at a time.
   You have set option '${1:-}' after option '$Xserver'.
