@@ -9,13 +9,14 @@ Project website: https://github.com/mviereck/x11docker
 ## [Unreleased]
 ### Added
  - `--xoverip`: New option to enforce X over TCP/IP. For special setups only.
+   [(#201)](https://github.com/mviereck/x11docker/issues/201)
 ### Changed
  - `--xephyr`: Disabled Xephyr option `-glamor`.
    [(#196)](https://github.com/mviereck/x11docker/issues/196)
  - `TODO.md` outsourced from x11docker script.
  - Run `containerrootrc` with `--privileged`. Does not affect desired 
    container command in `containerrc`. Allows less privileges with NVIDIA
-   driver installation and should avoid bugs like in
+   driver installation and avoids issues like in
    [(#196)](https://github.com/mviereck/x11docker/issues/196)
 ### Fixed
  - Support `snap` installation of Docker.
