@@ -213,6 +213,7 @@ Container runtimes known and supported by x11docker are:
    - Some x11docker options are not possible with `--runtime=kata-runtime`. Most important: `--hostdisplay`, `--gpu`, `--printer`, `--webcam` and all Wayland related options.
  - [`nvidia`](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container#nvidianvidia-docker-images): Specialized fork of `runc` to support `nvidia/nvidia-docker` images.
  - [`crun`](https://github.com/giuseppe/crun): Fast and lightweight alternative to `runc` with same functionality.
+ - `oci`: Runtime reported in [#205](https://github.com/mviereck/x11docker/issues/205), no documentation found. Handled by x11docker like `runc`.
  
 Possible runtime configuration in `/etc/docker/daemon.json`:
 ```
