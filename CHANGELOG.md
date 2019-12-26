@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Changed
+ - `--nxagent`: Use `keyboard='clone'` for xkb settings. 
+   [(#208)](https://github.com/mviereck/x11docker/issues/208)
+
+
 ## [6.5.0](https://github.com/mviereck/x11docker/releases/tag/v6.5.0) - 2019-12-22
 ### Added
  - `--xoverip`: New option to enforce X over TCP/IP. For special setups only.
