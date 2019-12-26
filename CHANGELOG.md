@@ -8,7 +8,7 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Changed
- - `--nxagent`: Use `keyboard='clone'` for xkb settings. 
+ - `--nxagent --keymap=clone`: Clone xkb settings from host in nxagent.
    [(#208)](https://github.com/mviereck/x11docker/issues/208)
 
 
