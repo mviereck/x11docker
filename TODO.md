@@ -2,7 +2,7 @@
 x11docker ToDo notes
 
 ## Actually to fix
- - `--wm=command` does not give a message if command is not found.
+ - `--wm`: XTEST warning does not appear if dockerrc runs host wm as a fallback.
  - `--install`/`--update`: first install shows entire `CHANGELOG.md`. Should only show most recent release notes.
  - replace `find` in `containerrootrc`, missing in fedora images.
  - error message window in Wayland fails: xterm: no display. x11docker should use `konsole` or `xfce4-terminal`.

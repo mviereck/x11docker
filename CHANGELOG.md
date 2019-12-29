@@ -10,6 +10,8 @@ Project website: https://github.com/mviereck/x11docker
 ### Changed
  - `--nxagent --keymap=clone`: Clone xkb settings from host in nxagent.
    [(#208)](https://github.com/mviereck/x11docker/issues/208)
+ - `--wm`: Improved checks and fallback handling. 
+   Disabled context menu for host window manager `-wm=openbox`.
 
 
 ## [6.5.0](https://github.com/mviereck/x11docker/releases/tag/v6.5.0) - 2019-12-22

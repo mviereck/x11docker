@@ -1442,22 +1442,76 @@ $(sed -n '/'$Key1'/,/'$Key2'/p' /usr/share/doc/x11docker/CHANGELOG.md | head -n-
 
 #### features
 check_windowmanager() {         # option --wm: search a host window manager
-  [ "$Windowmanager" = "" ] && Windowmanager="none" && return 0
-
-  command -v "$(cut -d' ' -f1 <<< "$Windowmanagercommand")" >/dev/null && Hostwindowmanager="$Windowmanagercommand" && Windowmanager="host"
-  [ "$Hostwindowmanager" ] || for Hostwindowmanager in $Wm_all FAIL; do
+  # check --wm arguments, adjust mode
+  case "$Windowmanagermode" in
+    ""|none)
+      Windowmanagermode="none"
+      return 0
+    ;;
+    auto)
+      case $X11dockermode in
+        exe) Windowmanagermode="host" ;;
+        run) Windowmanagermode="container" ;;
+      esac
+      [ -n "$Windowmanagercommand" ] && {
+        command -v "$(cut -d' ' -f1 <<< "$Windowmanagercommand")" >/dev/null && {
+          Hostwindowmanager="$Windowmanagercommand"
+          Windowmanagermode="host"
+        } || {
+          note "Option --wm: Did not find command on host: $Windowmanagercommand
+  If a docker image with this name exists, x11docker will run it."
+          Windowmanagermode="container"
+        }
+      }
+    ;;
+    host) ;;
+    container)
+      [ "$X11dockermode" = "exe" ] && {
+        note "Option --wm: With option --exe 
+  x11docker does not support a containerized window manager yet.
+  Fallback: Setting --wm=host"  
+        Windowmanagermode="host"
+      }
+    ;;
+  esac
+  
+  # Find a host window manager
+  [ "$Hostwindowmanager" ] || for Hostwindowmanager in $Wm_all WM_NOT_FOUND; do
     command -v "$Hostwindowmanager" >/dev/null && break
   done
-  [ "$Hostwindowmanager" = "FAIL" ] && Hostwindowmanager=""
-  [ "$X11dockermode" = "exe" ] && [ "$Windowmanager" != "host" ] && [ "$Windowmanager" != "none" ] && {
-    [ -n "$Windowmanagercommand" ] && [ "$Hostwindowmanager" != "$Windowmanagercommand" ] && note "Option --wm: With option --exe 
-  x11docker does not support a containerized window manager yet.
-  Will run host window manager: ${Hostwindowmanager:-(none found)}"  
-    Windowmanager="host"
-  }
-  [ "$Windowmanager" = "auto" ] && Windowmanager="container"
-  [ "$Windowmanager" = "container" ] && Windowmanagercommand="${Windowmanagercommand:-x11docker/openbox sh -c 'openbox --config-file /etc/x11docker/openbox-nomenu.rc'}"
   
+  # 
+  case "$Windowmanagercommand" in
+    "")
+      case "$Windowmanagermode" in
+        container)
+          Windowmanagercommand="x11docker/openbox sh -c 'openbox --sm-disable --config-file /etc/x11docker/openbox-nomenu.rc'"
+        ;;
+        host)
+          [ "$Hostwindowmanager" = "WM_NOT_FOUND" ] && {
+            Hostwindowmanager=""  
+            note "Option --wm: No host window manager found.
+  Fallback: Setting --wm=none"
+            Windowmanagermode="none"
+          }
+        ;;
+      esac
+    ;;
+  esac
+  
+  case "$Windowmanagermode" in     ### FIXME warning does not appear if dockerrc runs host wm as a fallback
+    host)
+      [ "$Xtest" = "yes" ] && warning "Options --xtest --wm: Did not disable X extension XTEST
+  for X server $Xserver.
+  If your host window manager $Hostwindowmanager can start applications
+  on its own (for example with a context menu), container applications
+  can abuse this to run and remotely control host applications.
+  If you provide content of X server $Xserver over network to others,
+  they may take control over your host system!" 
+    ;;
+  esac
+  
+  # command adjustment for some host window managers
   case $(basename "$(cut -d' ' -f1 <<< "$Hostwindowmanager")") in
     cinnamon|cinnamon-session) Hostwindowmanager="cinnamon --sm-disable";;
     compiz) # if none, create minimal config to have useable window decoration and can move windows
@@ -1472,9 +1526,19 @@ s0_active_plugins = core;composite;opengl;decor;resize;move;
     matchbox) Hostwindowmanager="matchbox-window-manager"  ;;
     mate|mate-session) Hostwindowmanager="mate-session -f" ;;
     mate-wm) Hostwindowmanager="marco --sm-disable"  ;;
-    openbox) Hostwindowmanager="openbox --sm-disable" ;;
+    openbox) 
+      Hostwindowmanager="openbox --sm-disable" 
+      [ -e "/etc/xdg/openbox/rc.xml" ] && {
+        cp /etc/xdg/openbox/rc.xml $Sharefolder/openbox-nomenu.rc
+        sed -i /ShowMenu/d         $Sharefolder/openbox-nomenu.rc
+        sed -i s/NLIMC/NLMC/       $Sharefolder/openbox-nomenu.rc
+        Hostwindowmanager="$Hostwindowmanager --config-file $Sharefolder/openbox-nomenu.rc"
+      }
+    ;;
   esac
+  
   verbose "Detected host window manager: ${Hostwindowmanager:-"(none)"}"
+  return 0
 }
 clean_xhost() {                 # option --clean-xhost: disable xhost policies on host X
   [ -z "$Hostdisplay" ] && note "Option --clean-xhost: No host X display found." && return 1
@@ -2591,14 +2655,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   esac
   case "$Xtest" in
     yes) Xserveroptions="$Xserveroptions \\
-  +extension XTEST"
-      [ "$Windowmanager" = "host" ] && warning "Option --xtest: Did not disable X extension XTEST
-  for X server $Xserver.
-  If your host window manager $Hostwindowmanager can start applications
-  on its own (for example with a context menu), container applications
-  can abuse this to run and remotely control host applications.
-  If you provide content of X server $Xserver over network to others,
-  they may take control over your host system!" ;;
+  +extension XTEST" ;;
     no)  Xserveroptions="$Xserveroptions \\
   -extension XTEST -tst" ;;
   esac
@@ -5116,7 +5173,7 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   echo "Pid1pid="
   echo "Runtime="
   echo "Signal="
-  echo "Windowmanager="
+  echo "Windowmanagermode="
   echo "Windowmanagercommand="
   echo "Wmcontainerid="
   echo "Wmdockercommand="
@@ -5535,17 +5592,18 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   echo "rocknroll || exit 64"
   echo ""
 
-  [ "$Windowmanager" = "none" ] || {
+  [ "$Windowmanagermode" = "none" ] || {
     echo "# run window manager (in image or from host)"
-    echo "Windowmanager=\"$Windowmanager\""
+    echo "Windowmanagermode=\"$Windowmanagermode\""
     echo "Windowmanagercommand=\"$Windowmanagercommand\""
     echo "Wmdockercommand=\"$Wmdockercommand\""
-    echo '[ "$Windowmanager" = "container" ] && {'
+    echo '[ "$Windowmanagermode" = "container" ] && {'
     echo "  $Dockerexe inspect \"\$(cut -d' ' -f1 <<<\"\$Windowmanagercommand\")\" >>$Containerlogfile 2>&1 && {"
     echo '    Wmdockercommand="$Wmdockercommand \
   -- $Windowmanagercommand"'
     echo '    debugnote "dockerrc: Window manager container: Generated docker command:
 $Wmdockercommand"'
+    echo "    note \"Option --wm: Starting window manager image: $Windowmanagercommand\""
     echo '    Wmcontainerid="$(eval $Wmdockercommand)"'
     echo '    [ "$Wmcontainerid" ] && {'
     echo '      debugnote "dockerrc: Window manager container: $Wmcontainerid"'
@@ -5561,7 +5619,7 @@ $Wmdockercommand"'
     echo "      done"
     echo '    }'
     echo '    checkpid "$Pid1pid" && storepid "$Pid1pid" wmcontainerpid1'
-    echo '    checkpid "$Pid1pid" || { note "Option --wm: Failed to run window manager image: $Windowmanagercommand." && Windowmanager=host ; }'
+    echo '    checkpid "$Pid1pid" || { note "Option --wm: Failed to run window manager image: $Windowmanagercommand." && Windowmanagermode=host ; }'
     echo '  } || {'
     echo "    note \"Option --wm: Did not find window manager image
       \$(cut -d' ' -f1 <<<\"\$Windowmanagercommand\")
@@ -5569,16 +5627,16 @@ $Wmdockercommand"'
       docker pull x11docker/openbox
   If you want to use a host window manager instead and avoid this warning,
   use option                         --wm=host  or  --wm=COMMAND
-  or provide a local image with e.g. --wm=x11docker/lxde
+  or provide a local image with e.g. --wm=x11docker/fvwm
   To run without a window manager:   --wm=none  or  --desktop
   Fallback: Will try to run a host window manager: $Hostwindowmanager\""
-    echo "    Windowmanager=host"
+    echo "    Windowmanagermode=host"
     echo "  }"
     echo "}"
-    echo '[ "$Windowmanager" = "host" ] && {'
-    echo "  command -v '$Hostwindowmanager' >/dev/null || note 'Did not find a host window manager.
-  Please pull image x11docker/openbox or provide one of:
-  $Wm_good'"
+    echo '[ "$Windowmanagermode" = "host" ] && {'
+    echo "  command -v $Hostwindowmanager >/dev/null || note 'Did not find a host window manager.
+  Please pull image x11docker/openbox or provide a recommended one:
+  $Wm_recommended_nodesktop_light'"
     echo "  note 'Option --wm: Starting host window manager: ${Hostwindowmanager:-WM_NOT_FOUND}'"
     echo "  [ \"\$(id -u)\" = '0' ]  && su $Hostuser -c 'env $Newxenv ${Hostwindowmanager:-NO_WM_FOUND} >>$Xinitlogfile 2>&1 & storepid \$! windowmanager' || \\"
     echo "                                               env $Newxenv ${Hostwindowmanager:-NO_WM_FOUND} >>$Xinitlogfile 2>&1 & storepid \$! windowmanager"
@@ -5807,12 +5865,12 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
     echo "\$(env | sort)\""
     echo ""
     
-    [ "$Windowmanager" = "host" ] && {
+    [ "$Windowmanagermode" = "host" ] && {
       command -v $Hostwindowmanager >/dev/null && {
         echo "  note 'Option --wm: Starting host window manager: ${Hostwindowmanager:-WM_NOT_FOUND}'"
         echo "  ${Hostwindowmanager:-NO_WM_FOUND} >>$Xinitlogfile 2>&1 & storepid \$! windowmanager"
-      } || note "Did not find a host window manager. Please provide one of:
-  $Wm_good"
+      } || note "Did not find a host window manager. Please provide one. Recommended:
+  $Wm_recommended_nodesktop_light"
     }
     echo ""
     
@@ -6155,7 +6213,7 @@ check_hostxenv() {              # check environment variables for host X display
 check_option_interferences() {  # check multiple option interferences, change settings if needed
 
   [ "$Desktopmode" = "no" ] && case $Xserver in
-    --xephyr|--weston-xwayland|--kwin-xwayland|--xorg) Windowmanager="auto" ;;
+    --xephyr|--weston-xwayland|--kwin-xwayland|--xorg) Windowmanagermode="auto" ;;
   esac
   
   case $Xserver in
@@ -6235,12 +6293,12 @@ check_option_interferences() {  # check multiple option interferences, change se
   esac
 
   # check if a host window manager is needed
-  [ "$Desktopmode" = "no" ] && [ -z "$Windowmanager" ] && case $Xserver in
+  [ "$Desktopmode" = "no" ] && [ -z "$Windowmanagermode" ] && case $Xserver in
     --xephyr|--weston-xwayland|--kwin-xwayland|--xorg|--xwayland)
       note "Option $Xserver: x11docker assumes that you need
   a window manager. If you don't want this, run with option --desktop. 
   Enabling option --wm to provide a window manager."
-      Windowmanager="auto"
+      Windowmanagermode="auto"
       [ "$Autochooseserver" = "yes" ] && [ "$Runsonconsole" = "no" ] && {
         case $Sharegpu in
           no)  note "Did not find a nice solution to run a seamless application
@@ -6255,7 +6313,7 @@ check_option_interferences() {  # check multiple option interferences, change se
       }
     ;;
     *)
-      Windowmanager="none"
+      Windowmanagermode="none"
     ;;
   esac
 
@@ -6551,7 +6609,7 @@ check_option_interferences() {  # check multiple option interferences, change se
     }
     case $Xserver in
       --xpra|--xpra-xwayland|--nxagent)
-        [ "$Desktopmode" = "no" ] && [ -z "$Windowmanager" ] && Windowmanager="auto" && Desktopmode="yes" ;;
+        [ "$Desktopmode" = "no" ] && [ -z "$Windowmanagermode" ] && Windowmanagermode="auto" && Desktopmode="yes" ;;
       --weston|--kwin|--hostwayland|--hostdisplay|--tty)
         note "Option --xfishtank is not supported for $Xserver."
         Xfishtank="no"
@@ -7179,7 +7237,7 @@ option_messages() {             # some messages depending on options, but not ch
 
     --nxagent)
       [ "$Hostsystem" = "mageia" ] && {
-        [ "$Desktopmode" = "no" ] && [ "$Autochooseserver" = "yes" ] && Desktopmode="yes" && Windowmanager="auto"
+        [ "$Desktopmode" = "no" ] && [ "$Autochooseserver" = "yes" ] && Desktopmode="yes" && Windowmanagermode="auto"
         [ "$Desktopmode" = "no" ] && warning "nxagent version 3.5.0 on Mageia 6 is known to crash
   in seamless mode. (Detected version: '$(strings --bytes 20 /usr/libexec/nx/nxagent | grep "NXAGENT - Version")').
   If you encounter issues, please try seamless --xpra (secure),
@@ -7595,7 +7653,7 @@ declare_variables() {           # declare global variables
   Xorgwrapper="Xorg.xdummy.wrapper"               # --xpra, --xdummy: Fork from xpra to wrap Xorg for Xdummy
   
   # Window manager
-  Windowmanager="none"                            # --wm: Window manager to use: container/host/auto
+  Windowmanagermode="none"                        # --wm: Window manager to use: container/host/auto
   Windowmanagercommand=""                         # --wm: Argument for --wm, host command or docker image
   Hostwindowmanager=""                            # --wm: A window manager from host, given or autodetected
   
@@ -7705,7 +7763,7 @@ declare_variables() {           # declare global variables
   Wm_good="$Wm_good jwm kwin kwin_x11 lxsession mate-session mate-wm marco metacity notion olwm olvwm openbox ororobus pekwm"
   Wm_good="$Wm_good sawfish twm wmaker w9wm xfwm4"
   # - these wm's are recommended and lightweight, but cannot show desktop options. best first:
-  Wm_recommended_nodesktop_light="xfwm4 metacity marco sawfish"
+  Wm_recommended_nodesktop_light="xfwm4 metacity marco openbox sawfish"
   # - these wm's are recommended and heavy, but cannot show desktop options (especially exiting themselves). best first:
   Wm_recommended_nodesktop_heavy="kwin compiz"
   # - these wm's are recommended, lightweight AND desktop independent. best first:
@@ -7864,13 +7922,13 @@ parse_options() {               # parse cli options
       -d|--desktop)           Desktopmode="yes" ;;                   # image contains a desktop environment.
       -g|--gpu)               Sharegpu="yes" ;;                      # share files in /dev/dri, allow GPU usage
       -W|--wayland)           Setupwayland="yes" ;;                  # set up wayland environment, regards --desktop
-      -w)                                      Windowmanager="auto" ;;
+      -w)                                      Windowmanagermode="auto" ;;
          --wm)                case "${2:-}" in                       # choose window manager
-                                "n"|"none")    Windowmanager="none" ;;
-                                "host")        Windowmanager="host" ;;
-                                "container")   Windowmanager="container" ;;
-                                ""|"auto"|"m") Windowmanager="auto" ;;
-                                *)             Windowmanager="auto"; Windowmanagercommand="${2:-}" ;;
+                                "n"|"none")    Windowmanagermode="none" ;;
+                                "host")        Windowmanagermode="host" ;;
+                                "container")   Windowmanagermode="container" ;;
+                                ""|"auto"|"m") Windowmanagermode="auto" ;;
+                                *)             Windowmanagermode="auto"; Windowmanagercommand="${2:-}" ;;
                               esac
                               shift ; Desktopmode="yes" ;;
 
@@ -8114,7 +8172,7 @@ Parsed options:    $Parsedoptions"
   setup_verbosity                # create [and show] summary logfile              # --verbose
   setup_fifo                     # open message channels for container, dockerrc, xinitrc and watchpidlist()
   check_screensize               # size of host X and of new X server             # --size #time0,213
-  [ "$Windowmanager" ]           && check_windowmanager                           # --wm  
+  [ "$Windowmanagermode" ]       && check_windowmanager                           # --wm  
   [ "$Sharegpu" = "yes" ]        && setup_gpu                                     # --gpu
   [ "$Sharewebcam" = "yes" ]     && setup_webcam                                  # --webcam
   [ "$Sharecupsmode" ]           && setup_printer                                 # --printer
