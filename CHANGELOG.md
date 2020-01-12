@@ -8,6 +8,7 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
+ - WSL2 support. Does not support MobyVM but native docker in WSL2 only.
  - `--shell`: New option to specify preferred user shell.
    [(#26)](https://github.com/mviereck/x11docker/issues/26)
    [(#211)](https://github.com/mviereck/x11docker/issues/211)
