@@ -199,6 +199,7 @@ X and Wayland special configuration:
 Special options:
      --env VAR=value   Set custom environment variable VAR=value
  -i, --interactive     Run with an interactive tty to allow shell commands.
+     --mobyvm          Use MobyVM (for WSL2 only that defaults to linux docker).
      --name NAME       Specify container name NAME.
      --no-internet     Disable internet access for container.
      --no-entrypoint   Disable ENTRYPOINT in image to allow other commands, too
@@ -563,9 +564,9 @@ finish() {                      # trap EXIT routine to clean up background proce
     debugnote "finish(): Container still running. Executing 'docker stop'.
   Will wait up to 15 seconds for docker to finish."
   
-    case $Winsubsystem in
-      ""|WSL2) echo "stop" >> "$Dockerstopsignalfifo" ;;
-      MSYS2|CYGWIN|WSL1)  $Dockerexe stop $Containername >>$Containerlogfile 2>&1 ;;
+    case $Mobyvm in
+      no)  echo "stop" >> "$Dockerstopsignalfifo" ;;
+      yes) $Dockerexe stop $Containername >>$Containerlogfile 2>&1 ;;
     esac
     
     Zeit="$(date +%s)"
@@ -660,9 +661,9 @@ checkpid() {                    # check if PID $1 is active
   [ -e "/proc/${1:-NONSENSE}" ]
 }
 containerisrunning() {          # check if container is running
-  case $Winsubsystem in
-    ""|WSL2) checkpid      "$(storeinfo dump pid1pid)" ;;
-    *)  $Dockerexe inspect "$(storeinfo dump containerid)" >/dev/null 2>&1 ;;
+  case $Mobyvm in
+    no)   checkpid      "$(storeinfo dump pid1pid)" ;;
+    yes)  $Dockerexe inspect "$(storeinfo dump containerid)" >/dev/null 2>&1 ;;
   esac
 }
 pspid() {                       # ps -p $1 --no-headers
@@ -1017,9 +1018,9 @@ convertpath() {                 # convert unix and windows pathes
         unix)         echo "$Winsubpath$Path" ;;
         subsystem)    echo "$Path" ;;
         volume)
-          case $Winsubsystem in
-            WSL2)     echo "'$Path':'${3:-$Path}'$Readwritemode" ;;
-            *)        echo "'$Winsubpath$Path':'${3:-$Path}'$Readwritemode" ;;
+          case $Mobyvm in
+            no)  echo "'$Path':'${3:-$Path}'$Readwritemode" ;;
+            yes) echo "'$Winsubpath$Path':'${3:-$Path}'$Readwritemode" ;;
           esac
         ;;
         container)    echo "${3:-$Path}" ;;
@@ -2182,11 +2183,11 @@ check_xdepends() {              # check dependencies on host for X server option
         Return=1
       }
       [ "$Runtime" = "kata-runtime" ] && {
-        $Message "${1:-} not possible with --runtime=kata-runtime"
+        $Message "${1:-} not supported with --runtime=kata-runtime"
         Return=1
       }
       [ "$Winsubsystem" ] && {
-        $Message "${1:-} not possible on MS Windows."
+        $Message "${1:-} not supported on MS Windows."
         Return=1
       }
     ;;
@@ -2576,7 +2577,8 @@ check_xserver() {               # check chosen X server, auto-choose X server
   
   check_xdepends $Xserver || {
     case $Winsubsystem in
-      "") error "Did not find a possibility to provide a display.
+      "") 
+        error "Did not find a possibility to provide a display.
   Recommendations:
     To run within an already running X server, install one or all of:
       Xephyr xpra nxagent
@@ -2586,10 +2588,13 @@ check_xserver() {               # check chosen X server, auto-choose X server
       weston and Xwayland
   $Wikipackages" 
       ;;
-      CYGWIN) error "Did not find a possibility to provide a display.
+      CYGWIN) 
+        error "Did not find a possibility to provide a display.
   Please install packages 'xinit' and 'xauth' in Cygwin,
-  or run x11docker with runx:  https://github.com/mviereck/runx" ;;
-      MSYS2|WSL1|WSL2) [ "$Hostdisplay" ] && {
+  or run x11docker with runx:  https://github.com/mviereck/runx" 
+      ;;
+      MSYS2|WSL1|WSL2) 
+        [ "$Hostdisplay" ] && {
           error "Did not find a possibility to provide a nested display.
   Please install package 'xinit' and one or all of:  nxagent Xephyr xpra
   $Wikipackages"
@@ -3715,9 +3720,9 @@ check_containerhome() {         # options --home, --homedir, --homebasedir: chec
       Homebasefolder=""
     }
   }
-  [ "$Homebasefolder" ] || case $Winsubsystem in
-    ""|WSL2) Homebasefolder="$Containeruserhome/.local/share/x11docker" ;;
-    *)       Homebasefolder="$(convertpath subsystem "$(wincmd 'echo %userprofile%') ")/x11docker/home" ;;
+  [ "$Homebasefolder" ] || case $Mobyvm in
+    no)  Homebasefolder="$Containeruserhome/.local/share/x11docker" ;;
+    yes) Homebasefolder="$(convertpath subsystem "$(wincmd 'echo %userprofile%') ")/x11docker/home" ;;
   esac
   
   [ "$Sharehosthome" = "yes" ] && {
@@ -4117,8 +4122,8 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
   esac
   
   # --init in Mobyvm. /usr/bin/docker-init is not available in MSYS2/Cygwin/WSL1
-  case $Winsubsystem in
-    MSYS2|CYGWIN|WSL1) [ "$Initsystem" = "tini" ] && Initsystem="dockerinit" ;;
+  case $Mobyvm in
+    yes) [ "$Initsystem" = "tini" ] && Initsystem="dockerinit" ;;
   esac
   
   case "$X11dockermode" in
@@ -5628,9 +5633,9 @@ $Wmdockercommand"'
     echo "      for ((Count=1 ; Count<=10 ; Count++)); do"
     echo "        Pid1pid=\"\$($Dockerexe inspect --format '{{.State.Pid}}' \$Wmcontainerid 2>>$Containerlogfile | rmcr)\""
     echo "        debugnote \"dockerrc: Window manager container: \$Count. check for PID 1: \$Pid1pid\""
-    case $Winsubsystem in
-      ""|WSL2) echo '        checkpid "$Pid1pid" && break' ;;
-      *)  echo '        [ "$Pid1pid" ] && [ "$Pid1pid" != "0" ] && break' ;;
+    case $Mobyvm in
+      no)  echo '        checkpid "$Pid1pid" && break' ;;
+      yes) echo '        [ "$Pid1pid" ] && [ "$Pid1pid" != "0" ] && break' ;;
     esac
     echo "        rocknroll || exit 64"
     echo "        mysleep 0.2"
@@ -5707,9 +5712,9 @@ $Wmdockercommand"'
   echo "for ((Count=1 ; Count<=40 ; Count++)); do"
   echo "  Pid1pid=\"\$($Dockerexe inspect --format '{{.State.Pid}}' $Containername 2>>$Containerlogfile | rmcr)\""
   echo "  debugnote \"dockerrc: \$Count. check for PID 1: \$Pid1pid\""
-    case $Winsubsystem in
-      ""|WSL2) echo '  checkpid "$Pid1pid" && break' ;;
-      *)       echo '  [ "$Pid1pid" ] && [ "$Pid1pid" != "0" ] && break' ;;
+    case $Mobyvm in
+      no)  echo '  checkpid "$Pid1pid" && break' ;;
+      yes) echo '  [ "$Pid1pid" ] && [ "$Pid1pid" != "0" ] && break' ;;
     esac
   echo "  rocknroll || exit 64"
   echo "  mysleep 0.1"
@@ -5754,8 +5759,8 @@ $(tail $Containerlogfile)\""
   echo "storeinfo dockerrc=ready"
   echo ""
   
-  case $Winsubsystem in
-    ""|WSL2)
+  case $Mobyvm in
+    no)
       echo '[ "$Containerid" ] || [ "$Wmcontainerid" ] && {'
       echo "  # wait for signal of finish()"
       echo "  read Signal <$Dockerstopsignalfifo"
@@ -6020,28 +6025,35 @@ check_host() {                  # check host environment
   case $Winsubsystem in
     MSYS2|CYGWIN) 
       Winsubmount="$(cygpath.exe -u "c:/" | rmcr | sed s%/c/%%)"
-      Winsubpath="$(convertpath unix "$(cygpath.exe -w "/" | rmcr)" )" ;;
+      Winsubpath="$(convertpath unix "$(cygpath.exe -w "/" | rmcr)" )"
+      Mobyvm="yes"  
+    ;;
     WSL1)          
       Winsubmount="/mnt"
       grep -q "Windows" <<< "${PATH:-}" || export PATH="${PATH:-}:$Winsubmount/c/Windows/System32:$Winsubmount/c/Windows/System32/WindowsPowerShell/v1.0" # can miss after sudo in WSL
-      Winsubpath="$(convertpath unix "$(getwslpath)")" ;;
+      Winsubpath="$(convertpath unix "$(getwslpath)")"
+      Mobyvm="yes"  
+    ;;
     WSL2)
       Winsubmount="/"
       grep -q "Windows" <<< "${PATH:-}" || export PATH="${PATH:-}:$Winsubmount/c/Windows/System32:$Winsubmount/c/Windows/System32/WindowsPowerShell/v1.0" # can miss after sudo in WSL
-      Winsubpath="$(convertpath unix "$(getwslpath)")" ;;
+      Winsubpath="$(convertpath unix "$(getwslpath)")" 
+    ;;
   esac
-  case $Winsubsystem in
-    MSYS2|Cygwin|WSL1)
+  [ "$Winsubsystem" ] && Hostsystem="MSWindows-$Winsubsystem"
+  
+  [ -z "$Mobyvm" ] && Mobyvm="no"  
+  case $Mobyvm in
+    yes)
       command -v docker.exe >/dev/null || export PATH="$PATH:$(convertpath subsystem "C:/Program Files/docker"):$(convertpath subsystem "C:/Program Files/Docker/Docker/resources/bin")"
       Dockerexe="docker.exe"
-      Hostsystem="MSWindows-$Winsubsystem"
     ;;
-    WSL2)
-      Hostsystem="MSWindows-$Winsubsystem"
+    no)
+      Dockerexe="docker"
     ;;
   esac
   
-  # Check host IP. Needed for --pulseaudio=tcp and --xwin
+  # Check host IP. Needed for --pulseaudio=tcp, --printer=tcp, --xoverip and --xwin
   case $Winsubsystem in
     "")
                        Hostip="$(ip -4 -o a | grep 'docker0' | awk '{print $4}' | cut -d/ -f1 | grep 172.17.0.1)"
@@ -6650,8 +6662,8 @@ check_option_interferences() {  # check multiple option interferences, change se
   }
   
   # MSYS2, Cygwin, WSL1
-  case $Winsubsystem in
-    MSYS2|CYGWIN|WSL1)
+  case $Mobyvm in
+    yes)
       grep -q "/c/" <<< "$Cachebasefolder" && [ -z "$Homebasefolder" ] && note "Per default x11docker stores its cache files on drive C:.
   docker setup may not allow to share files from drive C:.
   If startup fails with an 'access denied' error,
@@ -6887,8 +6899,8 @@ check_passwordfrontend() {      # check password prompt frontend (pkexec, su, su
   # check if x11docker can run docker without prompting for password
   [ "$Passwordfrontend" = "none" ] && Passwordneeded="no"
   [ "$X11dockermode" = "exe" ]     && Passwordneeded="no"
-  case $Winsubsystem in
-    MSYS2|CYGWIN|WSL1) Passwordneeded="no" && Passwordfrontend="none" ;;
+  case $Mobyvm in
+    yes) Passwordneeded="no" && Passwordfrontend="none" ;;
   esac
   [ -z "$Passwordfrontend" ] && $Dockerexe info >/dev/null 2>&1 && Passwordfrontend="none" && Passwordneeded="no"
   [ -z "$Passwordfrontend" ] && sudo -n env >/dev/null 2>&1     && Passwordfrontend="sudo" && Passwordneeded="no"
@@ -7032,8 +7044,13 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
   [ "$Cachebasefolder" ] || {
     #Cachebasefolder="$Hostuserhome/.cache/x11docker"    ### FIXME really a good idea for MS Windows? WSL cache provides performance, but maybe must not be shared with container to avoid file access errors.
     case $Winsubsystem in
-      ""|MSYS2|CYGWIN|WSL2) Cachebasefolder="$Hostuserhome/.cache/x11docker" ;;
-      WSL1)                 Cachebasefolder="$(convertpath subsystem "$(wincmd "echo %userprofile%")")/x11docker/cache" ;;
+      ""|MSYS2|CYGWIN) Cachebasefolder="$Hostuserhome/.cache/x11docker" ;;
+      WSL1|WSL2)
+        case $Mobyvm in
+          yes)         Cachebasefolder="$(convertpath subsystem "$(wincmd "echo %userprofile%")")/x11docker/cache" ;;
+          no)          Cachebasefolder="$Hostuserhome/.cache/x11docker" ;;
+        esac
+      ;;
     esac
   }
   [ "$Cachebasefolder" = "/x11docker/cache" ] && error "Failed to find a valid path for cache directory.
@@ -7369,12 +7386,11 @@ setup_fifo() {                  # set up fifo channels (also option --stdin)
   # FDwatchpid          $Watchpidfifo         for watchpidlist()
   # FDdockerstop        $Dockerstopsignalfifo to send docker stop singnal to dockerrc in finish()
 
-  [ "$Runtime" = "kata-runtime" ] && Usemkfifo="no"
-  case "$Winsubsystem" in
-    MSYS2|CYGWIN) Usemkfifo="no" ;;
-    WSL1)         Usemkfifo="no" ;;      ### FIXME: Better performance in WSL1 if using real mkfifo. But maybe file system damage due to shared cache files?
-    WSL2)         Usemkfifo="yes" ;;
+  case "$Mobyvm" in
+    yes) Usemkfifo="no" ;;
+    no)  Usemkfifo="yes" ;;
   esac
+  [ "$Runtime" = "kata-runtime" ] && Usemkfifo="no"
   
   # redirect stdin to named pipe. Named pipe is shared with container and used as stdin of container command in containerrc
   [ "$Forwardstdin" = "yes" ] && {
@@ -7400,8 +7416,8 @@ setup_fifo() {                  # set up fifo channels (also option --stdin)
     ;;
   esac
   
-  case $Winsubsystem in
-    ""|WSL2)
+  case $Mobyvm in
+    no)
       # used by finish() and dockerrc
       unpriv "mkfifo $Dockerstopsignalfifo"
       exec {FDdockerstop}<>$Dockerstopsignalfifo
@@ -7551,7 +7567,7 @@ declare_variables() {           # declare global variables
   Storepidfile="store.pids"                       # File to store pids and names of background processes that should be terminated on exit
   Timetosaygoodbyefile="timetosaygoodbye"         # File giving term signal to all parties
   Timetosaygoodbyefifo="timetosaygoodbye.fifo"    # Message channel for --init=openrc|runit|sysvinit to shut down on x11docker signal
-  Usemkfifo="yes"                                 # Not on Windows nor with kata-runtime
+  Usemkfifo=""                                    # Not on Windows nor with kata-runtime
   Watchpidfifo="watchpid.fifo"                    # Message channel to transfer pids to watchpidlist()
   X11dockererrorfile="x11docker.error"            # Store error exit code
   
@@ -7620,6 +7636,7 @@ declare_variables() {           # declare global variables
   Winsubmount=""                                  # Path within subsystem to mounted MS Windows drives
   Winsubpath=""                                   # Path within MS Windows to subsystem files
   Winsubsystem=""                                 # MS Windows subsystem WSL1, WSL2, MSYS2 or CYGWIN
+  Mobyvm=""                                       # MS Windows: Use MobyVM yes/no (No only for WSL2 possible)
   
   # Cache folders
   Cachebasefolder=""                              # --cachebasedir Base cache folder
@@ -7774,7 +7791,7 @@ declare_variables() {           # declare global variables
   Cachenumber="$(date +%s%N | cut -c6-16)"        # Number to use for cache folder
   [ -z "$Cachenumber" ] && Cachenumber="$(makecookie)"
   Codename=""                                     # created from image name and command without special chars for use with container name and cache folder
-  Dockerexe="docker"                              # Can be docker.exe on MS Windows
+  Dockerexe=""                                    # Can be docker.exe on MS Windows
   Hostexe=""                                      # --exe: Host command
   Passwordterminal=""                             # Terminal emulator to use for password prompt (if no terminal emulator is needed, it will be 'bash -c')
   Imagebasename=""                                # Image name without tags and / replaced with -. For use of --home folders.
@@ -7880,7 +7897,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,enforce-i,pull::,pw:"                                                                          # x11docker config
   Longoptions="$Longoptions,cachebasedir:,home::,homebasedir:,share:"                                                      # Host folders
   Longoptions="$Longoptions,alsa::,clipboard,gpu,lang::,printer::,pulseaudio::,sharessh,webcam"                            # Host integration features
-  Longoptions="$Longoptions,env:,name:,no-entrypoint,runtime:,workdir:"                                                    # Container config
+  Longoptions="$Longoptions,env:,mobyvm,name:,no-entrypoint,runtime:,workdir:"                                             # Container config
   Longoptions="$Longoptions,cap-default,hostipc,hostnet,limit::,newprivileges::,no-internet"                               # Container capabilities
   Longoptions="$Longoptions,group-add:,hostuser:,sudouser,user:,shell:"                                                    # Container user
   Longoptions="$Longoptions,dbus::,init::,hostdbus,sharecgroup"                                                            # Container init and DBus
@@ -8060,6 +8077,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
          --hostipc)           Sharehostipc="yes" ;;                  # docker run option --ipc=host
          --hostnet)           Sharehostnet="yes" ;;                  # docker run option --network=host
          --limit)             Limitresources="${2:-0.5}" ; shift ;;  # Limited CPU and RAM access
+         --mobyvm)            Mobyvm="yes" ;;                        # Use MobyVM in WSL2
          --name)              Containername="${2:-}" ; shift ;;      # Set container name
          --newprivileges)     Allownewprivileges="${2:-yes}" ; shift ;; # [Don't] set --security-opt=no-new-privileges
          --no-entrypoint)     Noentrypoint="yes" ;;                  # Disable ENTRYPOINT of image
@@ -8258,7 +8276,8 @@ Parsed options:    $Parsedoptions"
   [ "$Winsubsystem" ] && debugnote "
   Running on Windows subsystem:                   $Winsubsystem
   Path to subsystem:                              $(convertpath windows $Winsubpath)
-  Mount path in subsystem:                        $Winsubmount/"
+  Mount path in subsystem:                        $Winsubmount/
+  Using MobyVM:                                   $Mobyvm"
 
   #### Create docker command
   [ "$X11dockermode" = "run" ] && {
@@ -8316,12 +8335,12 @@ $(nl -ba <$Westonini)"
     # watch container
     case $X11dockermode in
       run)
-        case $Winsubsystem in
-          ""|WSL2) setonwatchpidlist "${Pid1pid:-NOPID}" pid1pid ;;
-          *)       setonwatchpidlist "CONTAINER$Containername" ;;
+        case $Mobyvm in
+          no)  setonwatchpidlist "${Pid1pid:-NOPID}" pid1pid ;;
+          yes) setonwatchpidlist "CONTAINER$Containername" ;;
         esac
       ;;
-      exe)    setonwatchpidlist "${Pid1pid:-NOPID}" pid1pid ;;
+      exe)     setonwatchpidlist "${Pid1pid:-NOPID}" pid1pid ;;
     esac
         
     # watch xinit and X server
