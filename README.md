@@ -72,6 +72,7 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
    - [Issues](#issues)
    - [Contributing](#contributing)
    - [Support](#support)
+ - [Donation](#donation)
  - [Examples](#examples)
    - [Adjust images for your needs](#adjust-images-for-your-needs)
    - [Screenshots](#screenshots)
@@ -438,6 +439,19 @@ If you want to contribute to x11docker, please open a [ticket](https://github.co
 Please open a [ticket](https://github.com/mviereck/x11docker/issues) if you need support. Please note that `x11docker` is a non-commercial project maintained in free time. 
 I'll help where I can, but there is no organisation behind `x11docker` that can provide large scale support.
 
+## Donation
+If you like to make a donation: Thank you! :)
+
+I don't take the money myself, but please spend some to [Galsan Tschinag](http://galsan-tschinag.de/portrait/) in Mongolia ([Wikipedia](https://en.wikipedia.org/wiki/Galsan_Tschinag)). 
+One of his great projects is the afforestation of Mongolia.
+A donation account in Germany is provided by [Förderverein Mongolei e.V.](http://foerderverein-mongolei.de/spenden/).
+```
+Förderverein Mongolei e.V.
+IBAN DE7261290120 0394 3660 00
+BIC GENODES1NUE
+Volksbank Kirchheim-Nürtingen
+```
+I personally know some of the people behind this. I assure that they are trustworthy and have a great heart and soul and do a good thing.
 
 ## Examples
 [x11docker image examples with desktop environments can be found on docker hub.](https://hub.docker.com/u/x11docker/)
