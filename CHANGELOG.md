@@ -8,7 +8,7 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
- - WSL2 support. See also option `--mobyvm`.
+ - WSL2 support. See also new option `--mobyvm`.
    [(#214)](https://github.com/mviereck/x11docker/issues/214)
  - `--preset`: New option to read files with predefined option sets.
    [(#218)](https://github.com/mviereck/x11docker/issues/218)
@@ -20,8 +20,10 @@ Project website: https://github.com/mviereck/x11docker
 ### Changed
  - `--nxagent --keymap=clone`: Clone xkb settings from host in nxagent.
    [(#208)](https://github.com/mviereck/x11docker/issues/208)
+ - `--printer`: Share entire `run/cups`, not only socket `run/cups/cups.sock`.
+   [(#222)](https://github.com/mviereck/x11docker/issues/222)
  - `--wm`: Improved checks and fallback handling. 
-   Disabled context menu for host window manager `-wm=openbox`.
+   Disabled context menu for host window manager `--wm=openbox`.
 
 
 ## [6.5.0](https://github.com/mviereck/x11docker/releases/tag/v6.5.0) - 2019-12-22
