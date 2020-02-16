@@ -24,6 +24,9 @@ Project website: https://github.com/mviereck/x11docker
    [(#222)](https://github.com/mviereck/x11docker/issues/222)
  - `--wm`: Improved checks and fallback handling. 
    Disabled context menu for host window manager `--wm=openbox`.
+### Fixed
+ - snap/snappy: More general detection.
+   [(#223)](https://github.com/mviereck/x11docker/issues/223)
 
 
 ## [6.5.0](https://github.com/mviereck/x11docker/releases/tag/v6.5.0) - 2019-12-22
