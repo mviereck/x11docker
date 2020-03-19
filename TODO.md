@@ -2,6 +2,9 @@
 x11docker ToDo notes
 
 ## Actually to fix
+ - `--xorg` does not enable `--wm` but should do it.
+ - docker-for-win: DOS newline mess in `error()` #219.
+ - docker-for-win: Double entries in log.
  - `--wm`: XTEST warning does not appear if dockerrc runs host wm as a fallback.
  - `--install`/`--update`: first install shows entire `CHANGELOG.md`. Should only show most recent release notes.
  - replace `find` in `containerrootrc`, missing in fedora images.

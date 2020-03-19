@@ -74,6 +74,9 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
    - [Support](#support)
  - [Donation](#donation)
  - [Examples](#examples)
+   - [Single applications](#single-applications)
+   - [Desktop environments](#desktop-environments)
+   - [Option --preset](#option---preset)
    - [Adjust images for your needs](#adjust-images-for-your-needs)
    - [Screenshots](#screenshots)
    
@@ -117,7 +120,7 @@ To run only an empty new X server:
 Description of some commonly used feature [options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview).
  - Some of these options have dependencies on host and/or in image.
    Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
-
+ - For often used option combinations you can make shortcuts with [option `--preset`](#option---preset).
 
 ### Choice of X servers and Wayland compositors
 If no X server option is specified, x11docker automatically chooses one depending on installed [dependencies](#dependencies) and on given or missing options `--desktop`, `--gpu` and `--wayland`. Most recommended are `xpra` and `Xephyr`.
@@ -254,7 +257,7 @@ Core concept is:
  - Reduces [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
    - Sets docker run option `--cap-drop=ALL` to drop all capabilities. Most applications don't need them.
    - Sets docker run option [`--security-opt=no-new-privileges`](https://www.projectatomic.io/blog/2016/03/no-new-privs-docker/).
-   - These restrictions can be disabled with x11docker option `--cap-default` or reduced with `--sudouser` or `--user=root`.
+   - These restrictions can be disabled with x11docker option `--cap-default` or reduced with `--sudouser`, `--user=root`, `--newprivileges`.
    
 That being said, Docker's default capabilities and its seccomp profile are not bad. 
 I am not aware of an escape from a container without an additional isolation degrading option or configuration.
@@ -457,6 +460,7 @@ I personally know some of the people behind this. I assure that they are trustwo
 [x11docker image examples with desktop environments can be found on docker hub.](https://hub.docker.com/u/x11docker/)
 A special one to check features and container isolation is `x11docker/check`.
 
+### Single applications
 | Application | x11docker command |
 | --- | --- |
 | Xfce4 Terminal | `x11docker x11docker/xfce xfce4-terminal` |
@@ -469,7 +473,7 @@ A special one to check features and container isolation is `x11docker/check`.
 | Chromium browser | `x11docker -- jess/chromium --no-sandbox` |
 | VLC media player with shared `Videos` <br> folder and Pulseaudio sound | `x11docker --pulseaudio --share=$HOME/Videos jess/vlc` |
 
-
+### Desktop environments
 | Desktop environment <br> (most based on Debian)| x11docker command |
 | --- | --- |
 | [Cinnamon](https://github.com/mviereck/dockerfile-x11docker-cinnamon) | `x11docker --desktop --gpu --init=systemd x11docker/cinnamon` |
@@ -489,6 +493,39 @@ A special one to check features and container isolation is `x11docker/check`.
 | [Sway](https://github.com/mviereck/dockerfile-x11docker-sway) Wayland compositor ([website](https://swaywm.org/))| `x11docker --gpu x11docker/sway` |
 | [Trinity](https://github.com/mviereck/dockerfile-x11docker-trinity) ([website](https://www.trinitydesktop.org/)) (successor of KDE 3) | `x11docker --desktop x11docker/trinity` |
 | [Xfce](https://github.com/mviereck/dockerfile-x11docker-xfce) | `x11docker --desktop x11docker/xfce` |
+
+### Option --preset
+For very long option combinations you might want to use option `--preset FILENAME` to have a command shortcut. 
+`FILENAME` is a file in `~/.config/x11docker/preset` containing some x11docker options.
+ - Example multimedia: Create a file `~/.config/x11docker/preset/multimedia`:
+   ```
+   --gpu
+   --webcam
+   --printer
+   --pulseaudio
+   --clipboard
+   --share ~/Videos
+   --share ~/Music
+   ```
+   Use it like: `x11docker --preset=multimedia jess/vlc`
+ - Example deepin desktop: Instead of very long command
+   ```
+   x11docker --desktop --gpu --init=systemd --cap-default --hostipc -- --cap-add=SYS_RESOURCE --cap-add=IPC_LOCK -- x11docker/deepin
+   ``` 
+   you can create a file `~/.config/x11docker/preset/deepin` containing the desired options:
+   ```
+   --desktop 
+   --gpu
+   --init=systemd 
+   --cap-default 
+   --hostipc 
+   -- 
+   --cap-add=SYS_RESOURCE 
+   --cap-add=IPC_LOCK 
+   -- 
+   x11docker/deepin
+   ```
+   Run with: `x11docker --preset=deepin`
    
 ### Adjust images for your needs
 For persistent changes of image system adjust Dockerfile and rebuild. To add custom applications to x11docker example images you can create a new Dockerfile based on them. Example:

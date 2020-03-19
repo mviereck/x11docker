@@ -6,14 +6,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [6.6.0](https://github.com/mviereck/x11docker/releases/tag/v6.6.0) - 2020-03-19
 ### Added
- - WSL2 support. See also new option `--mobyvm`.
+ - Experimental WSL2 support. See also new option `--mobyvm`.
    [(#214)](https://github.com/mviereck/x11docker/issues/214)
  - `--preset`: New option to read files with predefined option sets.
    [(#218)](https://github.com/mviereck/x11docker/issues/218)
  - `--mobyvm`: New option to use MobyVM in WSL2. 
-   Default for WSL2 is native linux docker.
+   Default for WSL2 is native Linux docker.
  - `--shell`: New option to specify preferred user shell.
    [(#26)](https://github.com/mviereck/x11docker/issues/26)
    [(#211)](https://github.com/mviereck/x11docker/issues/211)
@@ -27,6 +27,8 @@ Project website: https://github.com/mviereck/x11docker
 ### Fixed
  - snap/snappy: More general detection.
    [(#223)](https://github.com/mviereck/x11docker/issues/223)
+ - `--workdir`: Fixed parsing error. 
+   [(#232)](https://github.com/mviereck/x11docker/issues/232)
 
 
 ## [6.5.0](https://github.com/mviereck/x11docker/releases/tag/v6.5.0) - 2019-12-22
