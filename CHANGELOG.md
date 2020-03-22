@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [6.6.1](https://github.com/mviereck/x11docker/releases/tag/v6.6.1) - 2022-03-19
+### Fixed
+ - `--runx`: Fix `XAUTHORITY` copy bug. 
+   [(#219)](https://github.com/mviereck/x11docker/issues/219)
+
 ## [6.6.0](https://github.com/mviereck/x11docker/releases/tag/v6.6.0) - 2020-03-19
 ### Added
  - Experimental WSL2 support. See also new option `--mobyvm`.
