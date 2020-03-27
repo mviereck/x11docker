@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Fixed
+ - `--update`: Fix `sed` error in changelog excerpt.
+   [(#236)](https://github.com/mviereck/x11docker/issues/236)
+
 ## [6.6.1](https://github.com/mviereck/x11docker/releases/tag/v6.6.1) - 2022-03-19
 ### Fixed
  - `--runx`: Fix `XAUTHORITY` copy bug. 
