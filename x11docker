@@ -4048,18 +4048,36 @@ create_dockercommand() {        ### create command to run docker
   # --gpu: share NVIDIDA driver installer
   [ -e "$Nvidiainstallerfile" ] && Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$Nvidiainstallerfile:ro" "$Nvidiacontainerfile")"
-
+  
   # X socket will be softlinked to /tmp/.X11-unix in containerrc
   [ "$Newxsocket" ] && {
-    Dockercommand="$Dockercommand \\
+    case $Containersetup in
+      yes)
+        Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$Newxsocket" "/X$Newdisplaynumber")"
+      ;;
+      no)
+        Dockercommand="$Dockercommand \\
+  --volume $(convertpath volume "$Newxsocket")"
+      ;;
+    esac
     Wmdockercommand="$Wmdockercommand \\
   --volume $(convertpath volume "$Newxsocket")"
   }
   
   # Wayland socket will be softlinked to XDG_RUNTIME_DIR in containerrc
-  [ "$Setupwayland" = "yes" ] && Dockercommand="$Dockercommand \\
+  [ "$Setupwayland" = "yes" ] && {
+    case $Containersetup in
+      yes)
+        Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$XDG_RUNTIME_DIR/$Newwaylandsocket" "/$Newwaylandsocket")"
+      ;;
+      no)
+        Dockercommand="$Dockercommand \\
+  --volume $(convertpath volume "$XDG_RUNTIME_DIR/$Newwaylandsocket")"
+      ;;
+    esac
+  }
 
   ## options --hostipc and --hostnet
   [ "$Sharehostipc" = "yes" ]      && Dockercommand="$Dockercommand \\
@@ -4073,12 +4091,24 @@ create_dockercommand() {        ### create command to run docker
   [ "$Pulseaudiomode" = "socket" ] && Dockercommand="$Dockercommand \\
   --volume $Pulseaudioconf:/etc/pulse/client.conf:ro"
   ## option --workdir or /tmp
-  Dockercommand="$Dockercommand \\
+  case $Containersetup in
+    yes)
+      Dockercommand="$Dockercommand \\
   --workdir '${Workdir:-/tmp}'"
+    ;;
+    no)
+      [ "$Workdir" ] && Dockercommand="$Dockercommand \\
+  --workdir '$Workdir'"
+    ;;
+  esac
   
-  # real entrypoint is checked in dockerrc
-  Dockercommand="$Dockercommand \\
+  case $Containersetup in
+    yes)
+      # real entrypoint is checked in dockerrc
+      Dockercommand="$Dockercommand \\
   --entrypoint env"
+    ;;
+  esac
   
   # add environment variables. Only needed here for possible 'docker exec'. Otherwise set in containerrc
   while read Line; do
@@ -4096,9 +4126,16 @@ create_dockercommand() {        ### create command to run docker
   Dockercommand="$Dockercommand \\
   --"
   
-  case $Switchcontaineruser in
-    no)  Dockercommand="$Dockercommand $Imagename $Tini /bin/sh - $(convertpath share $Containerrc)" ;;  # dockerrc runs containerrootrc with 'docker exec'
-    yes) Dockercommand="$Dockercommand $Imagename $Tini /bin/sh - $(convertpath share $Containerrootrc)"  ;;    # containerrootrc runs containerrc
+  case $Containersetup in
+    yes)
+      case $Switchcontaineruser in
+        no)  Dockercommand="$Dockercommand $Imagename $Tini /bin/sh - $(convertpath share $Containerrc)" ;;  # dockerrc runs containerrootrc with 'docker exec'
+        yes) Dockercommand="$Dockercommand $Imagename $Tini /bin/sh - $(convertpath share $Containerrootrc)"  ;;    # containerrootrc runs containerrc
+      esac
+    ;;
+    no)
+      Dockercommand="$Dockercommand $Imagename $Containercommand"
+    ;;
   esac
 
   return 0
@@ -4722,7 +4759,7 @@ exec /usr/local/bin/x11docker-login
 \" >/usr/local/bin/x11docker-agetty"
     echo "chmod +x /usr/local/bin/x11docker-agetty"
     echo ""
-    
+
     echo "echo \"#! /bin/sh
 # Wait for end of x11docker and shut down container. 
 # Started in background by x11docker for sysvinit|runit|openrc.
@@ -4818,7 +4855,7 @@ for Service in /etc/runit/runsvdir/default/* ; do sv status      \\\$Service ;do
 \" > /etc/sv/x11docker/run"
       echo "chmod +x /etc/sv/x11docker/run"
       echo ""
-      
+     
       echo "echo \"#! /bin/sh
 sv down x11docker
 runit-init 0
@@ -5105,7 +5142,7 @@ reload() {
   
   echo "rocknroll || exit 64"
   echo ""
-  
+
   [ "$Langwunsch" ] && {
     echo "# --lang: Language locale"
     echo "verbose \"Searching for language locale matching $Langwunsch\""
@@ -5550,7 +5587,7 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   echo     "  echo '  cp -n -R /etc/skel/. \$Containeruserhome'"
   echo     "  echo '  :'"
   echo     "  echo '} || {'"
-  echo     "  echo '  debugnote \"$(basename $Containerrc): HOME not empty. Not copying from /etc/skel\"'"
+  echo     "  echo '  debugnote \"$(basename $Containerrc): HOME is not empty. Not copying from /etc/skel\"'"
   echo     "  echo '}'"
   echo     "  echo ''"
   
@@ -6561,6 +6598,25 @@ check_option_interferences() {  # check multiple option interferences, change se
   esac
   [ "$Trusted" = "no" ] && warning "Clipboard isolation may fail."
 
+  case $Containersetup in
+    no)
+      case $Initsystem in
+        none|tini) ;;
+        *) note "Option --no-setup: Option --init is not supported" ;;
+      esac
+      Initsystem=""
+      Dbusrunsession="no"
+      Createcontaineruser="no"
+      Langwunsch=""
+      Noentrypoint="no"
+      Runasroot=""
+      # --stdin?
+      # --sudouser?
+      # --hostdbus
+      # nvidia installer
+    ;;
+  esac
+  
   # --dbus [=system]
   case $Dbusrunsession in
     yes|user|session) Dbusrunsession="yes" ;;
@@ -6943,7 +6999,7 @@ check_option_interferences() {  # check multiple option interferences, change se
   case $Sharecupsmode in
     auto)
       Sharecupsmode="socket"
-      [ "$Runsinspap" = "yes" ]       && Sharecupsmode="tcp"
+      [ "$Runsinsnap" = "yes" ]       && Sharecupsmode="tcp"
       [ "$Runtime" = "kata-runtime" ] && Sharecupsmode="tcp"
     ;;
     ""|socket|tcp) ;;
@@ -7872,6 +7928,7 @@ declare_variables() {           # declare global variables
   Containerenvironmentfile="container.environment" # file to store final container environment
   Containerlocaltimefile="libc.localtime"         # localtime file from host shared to container
   Containername=""                                # --name: Container name
+  Containersetup="yes"
   Customdockeroptions=""                          # -- [...] -- : Custom options for "docker run".
   Imagename=""                                    # Image to run
   Interactive="no"                                # --interactive: Run docker with interactive tty yes/no
@@ -7891,7 +7948,7 @@ declare_variables() {           # declare global variables
   Systemdtarget="systemd.x11docker.target"
   Systemdwatchservice="systemd.watch.service"
   Workdir=""                                      # --workdir: Set working directory in container
-  
+
   # Init and DBus
   Dbusrunsession="no"                             # --dbus, --wayland, --init=systemd|openrc|runit|sysvinit: Run container command with dbus-run-session / DBus user session
   Dbussystem="no"                                 # --init=systemd|openrc|runit|sysvinit: Run DBus system daemon in container
@@ -8035,7 +8092,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,cleanup,help,launcher,licence,license,version,wmlist"                                          # Special options without starting X or container
   Longoptions="$Longoptions,install,remove,update,update-master"                                                           # Installation
   #
-  Longoptions="$Longoptions,iglx,keepcache,xcomposite,xorgconf:,runx"                                                      # Experimental
+  Longoptions="$Longoptions,iglx,keepcache,no-setup,xcomposite,xorgconf:,runx"                                             # Experimental
   Longoptions="$Longoptions,dbus-system,homedir:,no-xhost,sharedir:,systemd"                                               # Deprecated
   Longoptions="$Longoptions,cachedir:,no-init,nothing,no-xtest,openrc,ps,runit,silent,starter,stderr,stdout"               # Removed
   Longoptions="$Longoptions,sys-admin,sysvinit,tini,trusted,untrusted,vcxsrv"                                              # Removed
@@ -8264,6 +8321,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
      #### Experimental options
          --iglx)              Iglx="yes" ;               note "Option --iglx: experimental only." ;;            # Indirect rendering; broken since Xorg ~18.2
          --keepcache)         Preservecachefiles="yes" ; note "Option --keepcache: experimental only." ;;            
+         --no-setup)          Containersetup="no" ;      note "Option --no-setup: experimental only." ;;            
          --xcomposite)        Xcomposite="yes" ;         note "Option --xcomposite: experimental only." ;;      # Enable X extension COMPOSITE
          --xorgconf)          Xorgconf="${2:-}" ;        note "Option --xorgconf: eperimental only" ; shift ;;  # Custom xorg.conf
       
