@@ -2,6 +2,7 @@
 x11docker ToDo notes
 
 ## Actually to fix
+ - `--gpu --webcam` adds user to group `video` twice.
  - `--xorg` does not enable `--wm` but should do it.
  - docker-for-win: DOS newline mess in `error()` #219.
  - docker-for-win: Double entries in log.
