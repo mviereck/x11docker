@@ -14,9 +14,10 @@ Software can be installed in a deployable Docker image with a rudimentary Linux 
 This can help to run or deploy software that is difficult to install on several systems due to dependency issues. It is possible to run outdated versions or latest development versions side by side. 
 Files to work on can be shared between host and container.
 
-x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#installation-on-ms-windows). x11docker is not adapted to run on macOS except in a Linux VM.
-
 [x11docker wiki](https://github.com/mviereck/x11docker/wiki) provides some how-to's for basic setups without x11docker.
+
+### Supported systems
+x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#installation-on-ms-windows). x11docker does not run on macOS except in a Linux VM.
 
 ### Features
  - Focus on [security](#security):
