@@ -15,6 +15,9 @@ Project website: https://github.com/mviereck/x11docker
    [(#236)](https://github.com/mviereck/x11docker/issues/236)
  - `--webcam`: Add container user to group video.
    [(#241)](https://github.com/mviereck/x11docker/issues/241)
+### Deprecated
+ - `--sharessh`: Please use (directly or with help of option `--preset`):
+   `--share $(dirname $SSH_AUTH_SOCK) --env SSH_AUTH_SOCK="$SSH_AUTH_SOCK"`
 
 ## [6.6.1](https://github.com/mviereck/x11docker/releases/tag/v6.6.1) - 2022-03-19
 ### Fixed
