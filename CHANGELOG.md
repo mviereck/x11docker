@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
+### Added
+ - `--home=VOLUME`, `--share=VOLUME`: Support of docker volumes.
+   [ehough/docker-kodi#33](https://github.com/ehough/docker-kodi/issues/33)
 ### Fixed
  - `--update`: Fix `sed` error in changelog excerpt.
    [(#236)](https://github.com/mviereck/x11docker/issues/236)

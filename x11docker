@@ -97,13 +97,14 @@ Basic settings: (especially influencing automatical choice of X server)
                          none: Run without a window manager. Same as --desktop.
 
 Shared folders:
- -m, --home [=DIR]     Share a host folder as home folder in container to store
-                       persistent data. Uses ~/.local/share/x11docker/IMAGENAME.
-                       Optionally specify another host folder DIR.
-                       ( ~/.local/share/x11docker has a softlink to ~/x11docker.
-                        Use --homebasedir to change the base storage folder.)
-     --share PATH      Share host file or folder PATH. Read-only with PATH:ro
+ -m, --home [=ARG]     Create a persistant HOME folder for data storage.
+                       Default: Uses ~/.local/share/x11docker/IMAGENAME.
+                       ARG can be another host folder or a docker volume.
+                       (~/.local/share/x11docker has a softlink to ~/x11docker.)
+                       (Use --homebasedir to change this base storage folder.)
+     --share ARG       Share host file or folder ARG. Read-only with ARG:ro
                        Device files in /dev can be shared, too.
+                       ARG can also be a docker volume instead of a host folder.
 
 Host integration:
  -c, --clipboard       Share clipboard. Graphical clips with --xpra only.
@@ -971,17 +972,6 @@ convertpath() {                 # convert unix and windows pathes
     return 0
   }
   
-  # not on Windows
-  [ -z "$Winsubsystem" ] && {
-    case $Mode in
-      unix|subsystem) echo "$Path" ;;
-      windows)        warning "Nonsense path conversion $Mode: $Path" ; return 1 ;;
-      volume)         echo "'$Path':'${3:-$Path}'$Readwritemode" ;;
-      container)      echo "${3:-$Path}" ;;
-    esac
-    return 0
-  }
-  
   # replace \ with /
   Path="$(tr '\\' '/' <<< "$Path")"
   
@@ -1003,6 +993,27 @@ convertpath() {                 # convert unix and windows pathes
   # change C to c
   Drive="${Drive,}"
 
+  # docker volume
+  [ "${Path:0:1}" = "/" ] || {
+    case $Mode in
+      unix|subsystem|windows) echo "$Path" ; debugnote "convertpath() $Mode: Docker volumes do not have a specified path on host: $Path" ;;
+      volume)         echo "'$Path':'${3:-/$Path}'$Readwritemode" ;;
+      container)      echo "${3:-/$Path}" ;;
+    esac
+    return 0
+  }
+
+  # not on Windows
+  [ -z "$Winsubsystem" ] && {
+    case $Mode in
+      unix|subsystem) echo "$Path" ;;
+      windows)        warning "convertpath(): Nonsense path conversion $Mode: $Path" ; return 1 ;;
+      volume)         echo "'$Path':'${3:-$Path}'$Readwritemode" ;;
+      container)      echo "${3:-$Path}" ;;
+    esac
+    return 0
+  }
+  
   case $Winsubsystem in
     WSL1)
       [ -z "$Drive" ] && case $Mode in
@@ -3795,54 +3806,99 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
 
 #### docker command setup
 check_containerhome() {         # options --home, --homedir, --homebasedir: check HOME of container user.
-  ## option '--home':    share folder ~/.local/share/x11docker/imagename with created container as its home directory
-  ## option '--homedir': share custom host folder as home
+  ## option '--home':        Share folder ~/.local/share/x11docker/imagename with created container as its home directory
+  ## option '--home=DIR':    Share custom host folder as home
   ## option '--homebasedir': Specify base folder here to store container home folders for --home
   
   # base home folder
-  [ "$Homebasefolder" ] && {                # --homebasedir
-    Homebasefolder="$(convertpath subsystem "$Homebasefolder")"
-    [ -e "$Homebasefolder" ] || {
+  [ "$Hosthomebasefolder" ] && {                # --homebasedir
+    Hosthomebasefolder="$(convertpath subsystem "$Hosthomebasefolder")"
+    [ -e "$Hosthomebasefolder" ] || {
       warning "Option --homebasedir: Specified path does not exist:
-  $Homebasefolder
+  $Hosthomebasefolder
   Fallback: Using default home base directory."
-      Homebasefolder=""
+      Hosthomebasefolder=""
     }
   }
-  [ "$Homebasefolder" ] || case $Mobyvm in
-    no)  Homebasefolder="$Containeruserhome/.local/share/x11docker" ;;
-    yes) Homebasefolder="$(convertpath subsystem "$(wincmd 'echo %userprofile%') ")/x11docker/home" ;;
+  [ "$Hosthomebasefolder" ] || case $Mobyvm in
+    no)  Hosthomebasefolder="$Containeruserhosthome/.local/share/x11docker" ;;
+    yes) Hosthomebasefolder="$(convertpath subsystem "$(wincmd 'echo %userprofile%') ")/x11docker/home" ;;
   esac
   
-  [ "$Sharehosthome" = "yes" ] && {
-    # if no home folder on host is specified (--homedir), create a standard one in ~/.local/share/x11docker
-    [ -z "$Containeruserhosthome" ] && Containeruserhosthome="$Homebasefolder/$Imagebasename"
-    [ -d "$Containeruserhosthome" ] || {
-      [ "$Startuser" = "root" ] && su $Containeruser -c "mkdir -p '$Containeruserhosthome'"
-      [ "$Containeruser" = "$Hostuser" ] && unpriv "mkdir -p '$Containeruserhosthome'" && {
-        # create symbolic link to ~/x11docker
-        echo "$Containeruserhosthome" | grep -q .local/share/x11docker && [ ! -e "$Containeruserhome/x11docker" ] && unpriv "ln -s '$Homebasefolder' '$Containeruserhome/x11docker'" ||:
-      } || {
-        # errors can occur if specifying a user with --user different from current user
-        error "Can not create persistent home folder for
-  user '$Containeruser' on host (option --home or --homedir).
-  Four possibilities to solve issue:
-  1.) Create folder with write access for user '$Containeruser'
-  $Containeruserhosthome
-  2.) Run x11docker one time as user '$Containeruser'.
-  3.) Run x11docker one time as user 'root'.
-  4.) Use option --homedir=DIR with DIR pointing to a writeable folder."
+  case $Sharehome in
+    yes|host)
+      [ -z "$Persistanthomevolume" ] && Persistanthomevolume="$Hosthomebasefolder/$Imagebasename"
+      [ "${Persistanthomevolume:0:1}" = "/" ] && Sharehome="host" || Sharehome="volume"
+    ;;
+  esac
+
+  case $Sharehome in
+    host)  
+      case $Createcontaineruser in
+        no)
+          note "Option --home or --home=dir is not supported 
+  with option --user=RETAIN.
+  Alternatively, specify a docker volume with --home=VOLUME.
+  Also you can use option --share to share host directories.
+  Fallback: Disabling option --home."
+          Sharehome="no"
+        ;;
+        yes)
+          grep -q "unknown" <<< "$Containeruser" && {
+            note "Option --home: Sharing a host folder is allowed only
+  for container users that also exist on host.
+  You can use a docker volume with --home=VOLUME instead.
+  Fallback: Disabling option --home."
+            Sharehome="no"
+          }
+        ;;
+      esac
+    ;;
+  esac
+
+  case $Sharehome in
+    host)   Containeruserhomebasefolder="/hosthome" ;;
+    no)     Containeruserhomebasefolder="/tmphome" ;;
+    volume) Containeruserhomebasefolder="/$Persistanthomevolume" 
+      grep -q "/" <<< "$Persistanthomevolume" && error "Option --home: Invalid argument: '$Persistanthomevolume'
+  Please either specify an absolute path beginning with '/'
+  or specify a docker volume without any '/'."
+    ;;
+  esac
+  Containeruserhome="$Containeruserhomebasefolder/$Containeruser"
+  
+  case $Sharehome in
+    host)  
+      # if no home folder on host is specified (--home=DIR), create a standard one in ~/.local/share/x11docker
+      [ -d "$Persistanthomevolume" ] || {
+        [ "$Startuser" = "root" ] && su $Containeruser -c "mkdir -p '$Persistanthomevolume'"
+        [ "$Containeruser" = "$Hostuser" ] && unpriv "mkdir -p '$Persistanthomevolume'" && {
+          # create symbolic link to ~/x11docker
+          echo "$Persistanthomevolume" | grep -q .local/share/x11docker && [ ! -e "$Containeruserhome/x11docker" ] && unpriv "ln -s '$Hosthomebasefolder' '$Containeruserhome/x11docker'" ||:
+        }
       }
-    }
-    writeaccess $Containeruseruid "$Containeruserhosthome" || warning "User '$Containeruser' seems to have no write access to
-  $Containeruserhosthome."
-    verbose "Sharing directory $Containeruserhosthome
+      [ -d "$Persistanthomevolume" ] || error "Option --home: Could not create persistent home folder for
+  user '$Containeruser' on host. Can e.g. happen with option --user.
+  Four possibilities to solve issue:
+  1.) Run x11docker one time as user '$Containeruser'.
+  2.) Run x11docker one time as user 'root'.
+  3.) Use option --home=DIR with DIR pointing to a writeable folder.
+  4.) Use option --home=VOLUME to use a docker volume."
+      writeaccess $Containeruseruid "$Persistanthomevolume" || warning "User '$Containeruser' might have no write access to
+  $Persistanthomevolume."
+      verbose "Sharing directory $Persistanthomevolume
   with container as its home directory $Containeruserhome"
-  }
+    ;;
+    volume)
+      debugnote "Option --home: Using docker volume $Persistanthomevolume"
+    ;;
+  esac
+
   return 0
 }
 check_containeruser() {         # check container user and shared home folder (also option --user)
   ## check container user
+  [ "$Containeruser" = "RETAIN" ] && return 0
   [ -z "$Containeruser" ] && Containeruser="$Hostuser"               # default: containeruser = hostuser. can be changed with --user
   [ -n "$Containeruser" ] && echo "$Containeruser" | grep -q ':' && {  # option --user can specify a group/gid after :
     Containerusergid="$(echo "$Containeruser" | cut -d: -f2)"
@@ -3853,28 +3909,22 @@ check_containeruser() {         # check container user and shared home folder (a
     Containeruser=$(getent passwd "$Containeruser" | cut -d: -f1)      # can be name or uid -> now name
     Containeruseruid=$(getent passwd "$Containeruser" | cut -d: -f3)
     [ -z "$Containerusergid" ] && Containerusergid="$(getent passwd $Containeruser | cut -d: -f4)"
-    [ "$Sharehosthome" = "no" ] && Containeruserhome="/fakehome/$Containeruser" || Containeruserhome="$(getent passwd "$Containeruser" | cut -d: -f6)"
+    Containeruserhosthome="$(getent passwd "$Containeruser" | cut -d: -f6)"
   } || {                                                   # user does not exist on host
     [[ "$Containeruser" =~ ^[0-9]+$ ]] || error "Option --user: Unknown host user or invalid user number '$Containeruser'.
   Non-host users can be specified with an UID only, not with a name."
     Containeruseruid="$Containeruser"
     Containeruser="unknown$Containeruseruid"
     [ -z "$Containerusergid" ] && Containerusergid=100
-    Containeruserhome="/fakehome/$Containeruser"
-    [ -z "$Containeruserhosthome" ] && [ "$Sharehosthome" = "yes" ] && {
-      warning "Option --home: Will not create a persistent home folder
-  on host for a non-existing user. Instead, you can specify --homedir
-  to a location where user uid '$Containeruseruid' has write access.
-  Fallback: Disabling option --home, not creating a persistent home folder."
-      Sharehosthome="no"
-    }
+    Containeruserhosthome=""
   }
+    
   Containerusergroup="$(getent group $Containerusergid | cut -d: -f1 || echo group_$Containeruser)"
   [ "$Containeruseruid" = "0" ] && {
     Containeruser="root"
     Containerusergid="0"
     Containerusergroup="root"
-    Containeruserhome="/root"
+    Containeruserhosthome="/root"
     Sudouser="yes" && note "Option --user=root: Enabling option --sudouser."
   }
   case $X11dockermode in
@@ -4020,9 +4070,17 @@ create_dockercommand() {        ### create command to run docker
   Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$Sharefolder:rw" $Sharefoldercontainer)"
   
-  # --home, --homedir
-  [ "$Sharehosthome" = "yes" ] && [ -n "$Containeruserhosthome" ] && Dockercommand="$Dockercommand \\
-  --volume $(convertpath volume "$Containeruserhosthome:rw" "$Containeruserhome")"
+  # --home
+  case $Sharehome in
+    host)
+      Dockercommand="$Dockercommand \\
+  --volume $(convertpath volume "$Persistanthomevolume:rw" "$Containeruserhome")"
+    ;;
+    volume)
+      Dockercommand="$Dockercommand \\
+  --volume '$Persistanthomevolume':'$Containeruserhomebasefolder':rw"
+    ;;
+  esac
   
   # --share
   while read -r Line; do
@@ -4449,11 +4507,16 @@ store_runoption() {             # store env, cap or volume/device for docker com
       Path="$(convertpath subsystem "${2:-}")"
       Readwritemode="$(echo "${2:-}" | rev | cut -c1-3 | rev)"
       [ "$Readwritemode" = ":ro" ] || Readwritemode=""
-      [ -e "$Path" ] && {
+      [ -e "$Path" ] && [ "${Path:0:1}" = "/" ] && {
         Sharevolumescount="$((Sharevolumescount + 1))"
         Sharevolumes[$Sharevolumescount]="${2:-}"
-      } || warning "File or folder not found. Will not share volume:
-  ${2:-}"
+      } || {
+        grep -q '/' <<< "$Path" && error "Option --share: Invalid argument $Path.
+  Either specify an absolute path beginning with '/'
+  or specify a docker volume without any '/'."
+        Sharevolumescount="$((Sharevolumescount + 1))"
+        Sharevolumes[$Sharevolumescount]="${2:-}"
+      }
       [ -h "$Path" ] && myrealpath "$Path" >/dev/null && {
         note "Option --share: Shared file is a symbolic link. Sharing target, too.
   Symlink: $Path
@@ -4560,9 +4623,7 @@ create_containerrootrc() {      ### create containerrootrc: This script runs as 
   echo ""
   case $Createcontaineruser in
     yes)
-      [ "$Sharehosthome" = "no" ] && echo "mkdir -v -m 777 /fakehome"
       echo "Containeruserhome='$Containeruserhome'"
-      echo ""
       
       # create container user
       echo "# Create user entry in /etc/passwd (and delete possibly existing same uid)"
@@ -4587,7 +4648,7 @@ create_containerrootrc() {      ### create containerrootrc: This script runs as 
       case $Sudouser in
         no)  echo "echo 'root:*:17219:0:99999:7:::' >> /etc/shadow" ;;
         yes) echo "echo 'root:$Containeruserpassword:17219:0:99999:7:::' >> /etc/shadow  # with option --sudouser, set root password 'x11docker'"
-             echo "sed -i 's%root:-:%root:x:%' /etc/passwd                                 # allow password in /etc/shadow"
+             echo "sed -i 's%root:-:%root:x:%' /etc/passwd                               # allow password in /etc/shadow"
         ;;
       esac
       echo ""
@@ -4646,6 +4707,7 @@ create_containerrootrc() {      ### create containerrootrc: This script runs as 
     ;;
   esac
   
+  # /etc/group
   echo "# Set up container user groups"
   for Line in $Containerusergroups ; do
     echo "Groupname=\"$(cat /etc/group 2>/dev/null | grep "$Line" | cut -d: -f1)\""
@@ -4660,15 +4722,11 @@ create_containerrootrc() {      ### create containerrootrc: This script runs as 
     echo ""
   done
 
-  echo "[ -e \"\$Containeruserhome\" ] || {"
-  echo "  # only create HOME here if capability CHOWN is allowed."
-  echo "  :>/tmp/chowntestfile"
-  echo "  chown \"\$Containeruser\" /tmp/chowntestfile && {"
-  echo "    mkdir -v -p \"\$Containeruserhome\""
-  echo "    chown \"\$Containeruser\" \"\$Containeruserhome\""
-  echo "  }"
-  echo "  rm /tmp/chowntestfile"
-  echo "}"
+  # HOME
+  echo "# Create HOME"
+  echo "mkdir -p \$Containeruserhome"
+  echo "chown \$Containeruser:\$(id -g \$Containeruser) \"\$Containeruserhome\""
+  echo "ls -la \$Containeruserhome"
   echo ""
 
   # --gpu with closed source nvidia driver
@@ -4792,8 +4850,6 @@ halt -f
       echo "systemctl unmask systemd-logind"
       echo "systemctl enable systemd-logind"
       echo ""
-      echo "echo bla >/tmp/mybla"
-      echo "echo bla >/mybla"
       echo "# remove failing and annoying services"
       echo "Unservicelist='
               apt-daily.service
@@ -5568,8 +5624,16 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
       echo "  echo 'Containeruserhome=\"$Containeruserhome\"'"
     ;;
     no)
-      echo "  echo 'Containeruserhome=\"\$(cat /etc/passwd | grep \"\$Containeruser:.:\" | cut -d: -f6)\"'"
-      echo "  echo 'Containeruserhome=\"\${Containeruserhome:-/tmp/\$Containeruser}\"'"
+      case $Sharehome in
+        no)
+          echo "  echo 'Containeruserhome=\"\$(cat /etc/passwd | grep \"\$Containeruser:.:\" | cut -d: -f6)\"'"
+          echo "  echo 'Containeruserhome=\"\${Containeruserhome:-/tmp/\$Containeruser}\"'"
+          echo "  echo 'mkdir -p \"\$Containeruserhome\"'"
+        ;;
+        volume)
+          echo "  echo 'Containeruserhome=\"$Containeruserhome\"'"    
+        ;;
+      esac
     ;;
   esac
   echo     "  echo 'export USER=\"\$Containeruser\"'"
@@ -5582,9 +5646,8 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   echo     "  echo '[ -e /run/user/\$Containeruseruid ] && ln -s /run/user/\$Containeruseruid \$XDG_RUNTIME_DIR || mkdir -p -m700 \$XDG_RUNTIME_DIR'"
   echo     "  echo ''"
       
-  [ "$Sharehosthome" = "no" ] && echo   "  echo 'mkdir -p \$Containeruserhome'"
   echo     "  echo '# Copy files from /etc/skel into empty HOME'"
-  echo     "  echo '[ -d /etc/skel ] && [ -z \"\$(ls -A \"$Containeruserhome\" 2>/dev/null | grep -v gnupg)\" ] && {'"
+  echo     "  echo '[ -d /etc/skel ] && [ -z \"\$(ls -A \"\$Containeruserhome\" 2>/dev/null | grep -v gnupg)\" ] && {'"
   echo     "  echo '  debugnote \"$(basename $Containerrc): HOME is empty. Copying from /etc/skel\"'"
   echo     "  echo '  cp -n -R /etc/skel/. \$Containeruserhome'"
   echo     "  echo '  :'"
@@ -5596,7 +5659,7 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   while read -r Line; do
     Path="$(convertpath container "$Line")"
     [ "$Path" = "${Path#$Containeruserhome}" ] && [ "$(cut -c1-5 <<< "$Line")" != "/dev/" ] && {
-      echo "  echo '# --share: create soft link of shared file/folder $(basename "$Line") to container home'"
+      echo "  echo '# --share: create soft link of shared file/folder/volume $(basename "$Line") to container home'"
       echo "  echo 'ln -s \"$(convertpath container "$Line")\" \"\$Containeruserhome\"'"
       echo "  echo ''"
     }
@@ -5998,10 +6061,9 @@ start_hostexe() {               # options --exe, --xonly: Run host executeable i
     }
     echo ""
     
-    [ "$Sharehosthome" = "yes" ] && {
-      echo "export HOME='$Containeruserhosthome'"
-      echo "cd '$Containeruserhosthome'"
-    }
+    echo "export HOME='$Containeruserhome'"
+    echo "cd '$Containeruserhome'"
+
     [ "$Workdir" ] && echo "cd '$Workdir'"
     echo ""
     
@@ -6824,7 +6886,7 @@ check_option_interferences() {  # check multiple option interferences, change se
     yes)
       case "$Winsubsystem" in
         WSL1|WSL2)
-          grep -q "/c/" <<< "$Cachebasefolder" && [ -z "$Homebasefolder" ] && note "With MobyVM and WSL x11docker stores its cache files on drive C:
+          grep -q "/c/" <<< "$Cachebasefolder" && [ -z "$Hosthomebasefolder" ] && note "With MobyVM and WSL x11docker stores its cache files on drive C:
   to allow cache file sharing.
   Your Docker setup might not allow to share files from drive C:.
   If startup fails with an 'access denied' error,
@@ -6898,24 +6960,6 @@ check_option_interferences() {  # check multiple option interferences, change se
   $Customwestonini"
     Customwestonini=""
   }
-  
-  # --user=RETAIN / keep container defined in image
-  case $Createcontaineruser in
-    no)
-      [ "$Sharehosthome" = "yes" ] && {
-        warning "Option --home is not supported with option --user=RETAIN.
-  You can use option --share to share host directories.
-  To use option --home, you can check uid and gid of container user
-  and run x11docker with --user=uid:gid instead of --user=RETAIN.
-  Fallback: Disabling option --home."
-        Sharehosthome="no"
-      }
-      [ "$Sudouser" = "yes" ] && note "Option --sudouser has limited support with --user=RETAIN.
-  x11docker will only set needed capabilities. 
-  User setup and /etc/sudoers won't be touched.
-  Option --group-add=sudo might be useful."
-    ;;
-  esac
   
   # --interactive
   case $Interactive in
@@ -7539,6 +7583,16 @@ option_messages() {             # some messages depending on options, but not ch
   [ "$Sharewebcam" = "yes" ] && warning "Option --webcam: Container applications might look 
   at you and also might take screenshots of your Desktop."
   
+  # --user=RETAIN / keep container defined in image
+  case $Createcontaineruser in
+    no)
+      [ "$Sudouser" = "yes" ] && note "Option --sudouser has limited support with --user=RETAIN.
+  x11docker will only set needed capabilities. 
+  User setup and /etc/sudoers won't be touched.
+  Option --group-add=sudo might be useful."
+    ;;
+  esac
+  
   [ "$Customdockeroptions" ] && {
     warning "Found custom DOCKER_RUN_OPTIONS.
   x11docker will add them to 'docker run' command without
@@ -7786,10 +7840,11 @@ declare_variables() {           # declare global variables
   Containerusergroup=""
   Containerusergroups=""                          # --group-add: Additional groups for container user
   Containeruserhome=""                            # HOME path within container
-  Containeruserhosthome=""                        # --home: Path to shared host folder used as HOME in container.
+  Containeruserhosthome=""                        # HOME path of container user on host
   Containeruserpassword="sac19FwGGTx/A"           # Encrypted password "x11docker", suits /etc/shadow. Generated with:  perl -e 'print crypt("x11docker", "salt"),"\n"'
   Createcontaineruser="yes"                       # exception: --user=RETAIN
   Lognameuser=""                                  # $(logname) or $SUDO_USER or $PKEXEC_USER
+  Persistanthomevolume=""                         # --home: Path to shared host folder or docker volume used as HOME in container.
   Startuser=""                                    # User who started x11docker
   Unpriv=""                                       # Command to run commands as unprivileged user
   Containerusershell="auto"                       # --shell: Preferred user shell
@@ -7902,7 +7957,7 @@ declare_variables() {           # declare global variables
   
   # Host integration
   Alsacard="$ALSA_CARD"                           # --alsa: Specified ALSA card
-  Homebasefolder=""                               # --homebasedir: Base directory for container home with --home
+  Hosthomebasefolder=""                               # --homebasedir: Base directory for container home with --home
   Internetaccess="yes"                            # --no-internet: Disable internet access
   Langwunsch=""                                   # --lang: Search or create UTF-8 locale in container and set LANG
   Pulseaudioconf="pulseaudio.client.conf"         # --pulseaudio: Client config in container
@@ -7914,7 +7969,7 @@ declare_variables() {           # declare global variables
   Shareclipboard="no"                             # --clipboard: Enable clipboard sharing
   Sharecupsmode=""                                # --printer: Share access to CUPS printer server: socket|tcp|""
   Sharegpu="no"                                   # --gpu: Use hardware accelerated OpenGL, share files in /dev/dri
-  Sharehosthome="no"                              # --home: Share a folder ~/.local/share/x11docker/Imagename with created container
+  Sharehome="no"                                  # --home: Share a folder ~/.local/share/x11docker/Imagename with created container
   Sharevolumes=""                                 # --share: Host files or folders or devices to share, array
   Sharevolumescount="0"                           # --share: Counts shared folders in array
   Sharewebcam="no"                                # --webcam: Share webcam device /dev/video*
@@ -8291,17 +8346,17 @@ ${2:-}"                       ; shift ;;                             # Add custo
          --stdin)             Forwardstdin="yes" ;;                  # Forward stdin to container command
          --workdir)           Workdir="${2:-}" ; shift ;;            # Set working directory
 
-     #### host folders
-      -m)                     Sharehosthome="yes" ;;
-         --home|--homedir)    Sharehosthome="yes"                    # Share host folder as HOME in container, ~/x11docker/imagename or $2
+     #### host folders and docker volumes
+      -m)                     Sharehome="host" ;;
+         --home|--homedir)    Sharehome="yes"                        # Share host folder as HOME in container, ~/x11docker/imagename or $2
                               [ "${1:-}" = "--homedir" ] && note "Option --homedir is deprecated.
   Please use --home=DIR instead."
-                              Containeruserhosthome="${2:-}" ; shift ;;
+                              Persistanthomevolume="${2:-}" ; shift ;;
          --share|--sharedir)  store_runoption volume "${2:-}"        # Share host file, device or directory
                               [ "${1:-}" = "--sharedir" ] && note "Option --sharedir is deprecated.
   Please use option --share=PATH instead."
                               shift ;;
-         --homebasedir)       Homebasefolder="${2:-}" ; shift ;;     # Set base folder for --home instead of ~/.local/share/x11docker
+         --homebasedir)       Hosthomebasefolder="${2:-}" ; shift ;; # Set base folder for --home instead of ~/.local/share/x11docker
          --cachebasedir)      Cachebasefolder="${2:-}" ; shift ;;    # Set base folder for cache  instead of ~/.cache/x11docker
 
      #### Verbosity options
@@ -8432,10 +8487,8 @@ Parsed options:    $Parsedoptions_global"
   option_messages                # some messages depending on options, but not changing anything
  
   # container user
-  [ "$Createcontaineruser" = "yes" ] && {
-    check_containeruser          # unprivileged user in container                 # --user
-    check_containerhome          # create persistant container home on host       # --home, --homedir, --homebasedir
-  }
+  check_containeruser            # unprivileged user in container                 # --user
+  check_containerhome            # create persistant container home               # --home, --homebasedir
   
   # some checks and setup
   drop_cachefiles                # remove cachefiles not needed for current setup
