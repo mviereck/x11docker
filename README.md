@@ -139,12 +139,17 @@ x11docker assumes that you want to run a single application in seamless mode, i.
    - Another window manager image an be specified with e.g. `--wm=x11docker/lxde`.
    - As a fallback x11docker runs a window manager from host, either autodetected or specified with e.g. `--wm=xfwm4`. 
    
-### Shared folders and HOME in container
-Changes in a running Docker container system will be lost, the created Docker container will be discarded. For persistent data storage you can share host directories:
- - Option `-m, --home` creates a host directory in `~/.local/share/x11docker/IMAGENAME` that is shared with the container and mounted as its `HOME` directory. Files in container home and user configuration changes will persist. 
+### Shared folders, Docker volumes and HOME in container
+Changes in a running Docker container system will be lost, the created Docker container will be discarded. For persistent data storage you can share host directories or Docker volumes:
+ - Option `-m, --home` creates a host directory in `~/.local/share/x11docker/IMAGENAME` that is shared with the container and mounted as its `HOME` directory. 
+   Files in container home and user configuration changes will persist. 
    x11docker creates a softlink from `~/.local/share/x11docker` to `~/x11docker`.
    - You can specify another host directory for container `HOME` with `--home=DIR`.
- - Option `--share PATH` mounts a host file or folder at the same location in container. `--share PATH:ro` restricts to read-only access. Device files in `/dev` are supported, too.
+   - You can specify a Docker volume for container `HOME` with `--home=VOLUME`.
+ - Option `--share PATH` mounts a host file or folder at the same location in container. 
+   - You can also specify a Docker volume with `--share VOLUME`.
+   - `--share PATH:ro` restricts to read-only access. 
+   - Device files in `/dev` are supported, too.
  - Special cases for `$HOME`:
    - `--home=$HOME` will use your host home as container home. Discouraged, use with care.
    - `--share $HOME` will symlink your host home as a subfolder of container home. 
