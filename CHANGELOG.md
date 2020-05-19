@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [6.6.2](https://github.com/mviereck/x11docker/releases/tag/v6.6.2) - 2022-05-19
 ### Added
  - `--home=VOLUME`, `--share=VOLUME`: Support of docker volumes.
    [ehough/docker-kodi#33](https://github.com/ehough/docker-kodi/issues/33)
