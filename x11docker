@@ -109,7 +109,9 @@ Shared host folders or Docker volumes:
 Host integration:
  -c, --clipboard       Share clipboard. Graphical clips with --xpra only.
  -p, --pulseaudio [=MODE]  Sound with pulseaudio. Needs 'pulseaudio' on host
-                       and in image. Optional arg MODE can be 'socket' or 'tcp'.
+                       and in image. Optional arg MODE can be 'socket', 'tcp' or
+                       'system'. In case of 'system' a socket address might be
+                       specified after a comma: '=system,/path/to/socket'
      --alsa [=CARDNAME]   Sound with ALSA. You can define a desired sound card
                        with CARDNAME. List of available sound cards: aplay -l
  -l, --lang [=LOCALE]  Set language variable LANG=LOCALE in container.
@@ -1856,10 +1858,11 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
   # TCP module is created after container startup to authenticate it with container IP.
   # Detailed documentation at: https://github.com/mviereck/x11docker/wiki/Container-sound:-ALSA-or-Pulseaudio
   #
-  # g  $Pulseaudiomode    =tcp or =socket: Connect over tcp or with shared socket
+  # g  $Pulseaudiomode    =tcp, =socket, =system: Connect over tcp, with shared socket or to system instance via default or specified socket
   # g  $Pulseaudioport    TCP port
   local Lowerport= Upperport=
   local Pulseaudiopath
+  local Pulseaudiosystemsocket
 
   warning "Option --pulseaudio allows container applications
   to catch your audio output and microphone input."
@@ -1871,7 +1874,13 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
     [ "$Runtime" = "kata-runtime" ]    && Pulseaudiomode="tcp"
     [ "$Runsinsnap" = "yes" ]          && Pulseaudiomode="tcp"
   }
-  
+
+  # if we get system mode check if socket address provided
+  [ "$Pulseaudiomode" =~ "^system.*" ] && {
+    Pulseaudiosystemsocket = "${Pulseaudiomode:7}"
+    Pulseaudiomode = "system"
+  }
+
   case $Pulseaudiomode in
     socket)
       # create pulseaudio socket
@@ -1908,6 +1917,33 @@ $(nl -ba <$Pulseaudioconf)"
       [ -e "$Hostuserhome/.config/pulse/cookie" ] && cp "$Hostuserhome/.config/pulse/cookie" "$Pulseaudiocookie" || note "Option --pulseaudio: Did not find cookie
   $Hostuserhome/.config/pulse/cookie"
       store_runoption env "PULSE_SERVER=tcp:$Hostip:$Pulseaudioport"
+    ;;
+    system)
+      # find system-wide pulseaudio socket if none provided
+      [ -z Pulseaudiosystemsocket ] && Pulseaudiosystemsocket="$(LC_ALL=C pactl info | grep 'Server String' | cut -f 3 -d' ')"
+
+      # create a link to system socket
+      unpriv "ln -s $Pulseaudiosystemsocket $Pulseaudiosocket 2>&1" >>$Messagelogfile && {
+        store_runoption env "PULSE_SERVER=unix:$(convertpath share $Pulseaudiosocket)"
+        store_runoption env "PULSE_COOKIE=$(convertpath share $Pulseaudiocookie)"
+      } || {
+        note "Option --pulseaudio: using system socket ($Pulseaudiosystemsocket) failed.
+  Is pulseaudio running at all on your host?
+  Fallback: Enabling option --alsa"
+        Pulseaudiomode=""
+        Sharealsa="yes"
+      }
+
+      echo "# Connect to host pulseaudio server using mounted UNIX socket
+default-server = unix:$(convertpath share $Pulseaudiosocket)
+# Prevent a server running in container
+autospawn = no
+daemon-binary = /bin/true
+# Prevent use of shared memory
+enable-shm = false
+" >> $Pulseaudioconf
+        verbose "Generated pulseaudio client.conf:
+$(nl -ba <$Pulseaudioconf)"
     ;;
   esac
   return 0
@@ -7061,7 +7097,7 @@ check_option_interferences() {  # check multiple option interferences, change se
   # --pulseaudio
   case $Pulseaudiomode in
     "") ;;
-    auto|tcp|socket) 
+    auto|tcp|socket|system*) 
       command -v pactl >/dev/null || {
         note "Option --pulseaudio: pactl not found.
   Is pulseaudio installed and running on your host system?
