@@ -193,6 +193,7 @@ x11docker provides option `--lang` for flexible language locale settings.
    Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
  - Examples: `--lang=de` for German, `--lang=zh_CN` for Chinese, `--lang=ru` for Russian, `--lang=$LANG` for your host locale.
  - For support of chinese, japanese and korean characters install a font like `fonts-arphic-uming` in image.
+ - Keyboard input methods like `fcitx-pinyin` are possible with some container setup. Compare ticket [#269](https://github.com/mviereck/x11docker/issues/269#issuecomment-667124421).
    
 ### Wayland
 To run  [Wayland](https://wayland.freedesktop.org/) instead of an X server x11docker provides options `--wayland`, `--weston`, `--kwin` and `--hostwayland`. 
