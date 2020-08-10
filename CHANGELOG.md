@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unrelesead]
+### Fixed
+ - `--hostnet`: set host IP to 127.0.0.1 for options like `--pulseaudio=tcp`.
+ - `--pulseaudio`: set to TCP if pulseaudio runs as system daemon.
+   [(#266)](https://github.com/mviereck/x11docker/issues/266)
+ - Allow `docker logs` to grab container output, too. 
+   [(#254)](https://github.com/mviereck/x11docker/issues/254)
+
 ## [6.6.2](https://github.com/mviereck/x11docker/releases/tag/v6.6.2) - 2022-05-19
 ### Added
  - `--home=VOLUME`, `--share=VOLUME`: Support of docker volumes.
