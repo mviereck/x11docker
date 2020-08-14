@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unrelesead]
+## [Unreleased]
 ### Fixed
  - `--hostnet`: set host IP to 127.0.0.1 for options like `--pulseaudio=tcp`.
  - `--pulseaudio`: set to TCP if pulseaudio runs as system daemon.
