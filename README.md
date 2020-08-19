@@ -439,7 +439,7 @@ One attempt is to allow several privileges until the setup works. Than reduce pr
 
 **3.** Docker Image & OS Architecture Mismatch
 - The Docker image may not have been built for the architecture you are currently running on (ie. Image is built for amd64 but you are running on arm). 
-  - You can check the architecture of an image with `docker inspect --format {{.Architecture}} IMAGENAME'`
+  - You can check the architecture of an image with `docker inspect --format {{.Architecture}} IMAGENAME`
   - With a mismatch the container will quit unexpectedely & `x11docker` may emit the error `x11docker ERROR: dockerrc(): Did not receive PID of PID1 in container.`
 - Use or build a Docker Image that supports your target architecture.
 
