@@ -437,10 +437,11 @@ One attempt is to allow several privileges until the setup works. Than reduce pr
  - A few applications need a [DBus](#dbus) user daemon. Install `dbus` in image and try option `--dbus`.
  - A few applications need systemd and/or a running [DBus](#dbus) system daemon. Install `systemd` in image and try option `--init=systemd`.
 
-**3.** Docker Image & OS Architecture Match
-- The Docker image may not have been built for multiple architectures (ie. amd64 & armhf). 
-  - In this case the container will quit unexpectedely & `x11docker` may emit the error `x11docker ERROR: dockerrc(): Did not receive PID of PID1 in container.`
-- Use a Docker Image that was built for your target architecture.
+**3.** Docker Image & OS Architecture Mismatch
+- The Docker image may not have been built for the architecture you are currently running on (ie. Image is built for amd64 but you are running on arm). 
+  - You can check the architecture of an image with `docker inspect --format {{.Architecture}} IMAGENAME'`
+  - With a mismatch the container will quit unexpectedely & `x11docker` may emit the error `x11docker ERROR: dockerrc(): Did not receive PID of PID1 in container.`
+- Use or build a Docker Image that supports your target architecture.
 
 ## Contact
 Feel free to open a [ticket](https://github.com/mviereck/x11docker/issues) if you have a question or encounter an issue.
