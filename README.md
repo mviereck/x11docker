@@ -438,11 +438,10 @@ One attempt is to allow several privileges until the setup works. Than reduce pr
  - A few applications need systemd and/or a running [DBus](#dbus) system daemon. Install `systemd` in image and try option `--init=systemd`.
 
 **3.** Docker Image & OS Architecture Mismatch
- - The Docker image may not be built for the architecture of your OS. (ie. Image is built for amd64 but your OS is build for arm) 
+ - The Docker image may not be built for the architecture of your OS. (ie. Image is built for amd64 but your OS is build for arm). 
+   With a mismatch the container will quit unexpectedely & `x11docker` may emit the error `x11docker ERROR: dockerrc(): Did not receive PID of PID1 in container.`
    - You can check the image architecture with `docker inspect --format {{.Architecture}} IMAGENAME`
-   - You can check the OS architecture with `uname -m`
- - With a mismatch the container will quit unexpectedely & `x11docker` may emit the error `x11docker ERROR: dockerrc(): Did not receive PID of PID1 in container.`
- - Use or [build](https://docs.docker.com/buildx/working-with-buildx/) a Docker Image that supports your target architecture.
+   - You can check the host architecture with `uname -m`
 
 ## Contact
 Feel free to open a [ticket](https://github.com/mviereck/x11docker/issues) if you have a question or encounter an issue.
@@ -486,7 +485,7 @@ A special one to check features and container isolation is `x11docker/check`.
 | [Tor browser](https://www.torproject.org/projects/torbrowser.html) | `x11docker jess/tor-browser` |
 | Chromium browser | `x11docker -- jess/chromium --no-sandbox` |
 | VLC media player with shared `Videos` <br> folder and Pulseaudio sound | `x11docker --pulseaudio --share=$HOME/Videos jess/vlc` |
-| GNU Octave Scientific Programming Language built for arm & arm64 | `x11docker aptman/dbhi:bionic-octave octave` | 
+| [GNU Octave Scientific Programming Language](https://www.gnu.org/software/octave/) built for arm & arm64 | `x11docker aptman/dbhi:bionic-octave octave` | 
 
 ### Desktop environments
 | Desktop environment <br> (most based on Debian)| x11docker command |
