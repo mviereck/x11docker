@@ -442,6 +442,7 @@ One attempt is to allow several privileges until the setup works. Than reduce pr
    With a mismatch the container will quit unexpectedely & x11docker may emit the error `dockerrc(): Did not receive PID of PID1 in container.`
    - You can check the image architecture with `docker inspect --format {{.Architecture}} IMAGENAME`.
    - You can check the host architecture with `uname -m`.
+ - [QEMU](https://www.qemu.org/) allows executing foreign architectures through dynamic translation of the instructions. Combining QEMU and Docker, it is possible to execute containers for e.g. ARM on AMD64, or vice versa. In fact, QEMU is included in *Docker Desktop* (Windows and Mac OS) since v1.13.0 (2017-01-19). Find detailed explanations, utilities and examples at [dbhi/qus](https://github.com/dbhi/qus). Moreover, as a reference, in [dbhi/docker](https://github.com/dbhi/docker) images from *qus* are used to build and publish [multi-arch](https://docs.docker.com/search/?q=multi-arch) images/manifests in an AMD64 only CI service (GitHub Actions).
 
 ## Contact
 Feel free to open a [ticket](https://github.com/mviereck/x11docker/issues) if you have a question or encounter an issue.
