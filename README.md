@@ -64,6 +64,7 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
    - [Shortest way for first installation](#shortest-way-for-first-installation)
    - [Minimal installation](#minimal-installation)
    - [Installation on MS Windows](#installation-on-ms-windows)
+   - [Deinstallation](#deinstallation)
  - [Dependencies](#dependencies)
  - [Troubleshooting](#troubleshooting)
    - [Core checks](#core-checks)
@@ -367,6 +368,11 @@ x11docker can run natively on MS Windows electively in one of:
 
 Further informations at [wiki: x11docker on MS Windows](https://github.com/mviereck/x11docker/wiki/x11docker-on-MS-Windows).
 
+### Deinstallation
+You can remove x11docker with `x11docker --remove`. 
+It will only leave the softlink `~/x11docker` and its target `~/.local/share/x11docker` where persistant files of option `~/home` are stored.
+It won't remove `~/.local/share/x11docker` or `~/.config/x11docker` that you might have created yourself.
+
 
 ## Dependencies
 x11docker can run with standard system utilities without additional dependencies on host or in image. 
@@ -442,6 +448,7 @@ One attempt is to allow several privileges until the setup works. Than reduce pr
    With a mismatch the container will quit unexpectedely & x11docker may emit the error `dockerrc(): Did not receive PID of PID1 in container.`
    - You can check the image architecture with `docker inspect --format {{.Architecture}} IMAGENAME`.
    - You can check the host architecture with `uname -m`.
+   - For further information and multi-arch setups look at [wiki: Multi-arch setups with QEMU](https://github.com/mviereck/x11docker/wiki/Multiarch-setups-with-QEMU).
 
 ## Contact
 Feel free to open a [ticket](https://github.com/mviereck/x11docker/issues) if you have a question or encounter an issue.
