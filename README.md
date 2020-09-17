@@ -369,9 +369,14 @@ x11docker can run natively on MS Windows electively in one of:
 Further informations at [wiki: x11docker on MS Windows](https://github.com/mviereck/x11docker/wiki/x11docker-on-MS-Windows).
 
 ### Deinstallation
-You can remove x11docker with `x11docker --remove`. 
-It will only leave the softlink `~/x11docker` and its target `~/.local/share/x11docker` where persistant files of option `~/home` are stored.
-It won't remove `~/.local/share/x11docker` or `~/.config/x11docker` that you might have created yourself.
+You can remove x11docker with `x11docker --remove`. That will remove the [files listed above](#installation-options).
+x11docker will **not** remove:
+ - Files and folders for persitant data storgage with option `--home`. These are:
+   - `~/.local/share/x11docker` where persistant data is stored.
+   - Softlink `~/x11docker` that points there.
+ - Folders you might have created yourself for x11docker: 
+   - `~/.local/share/x11docker` 
+   - `~/.config/x11docker`
 
 
 ## Dependencies
