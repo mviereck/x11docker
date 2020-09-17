@@ -371,7 +371,7 @@ Further informations at [wiki: x11docker on MS Windows](https://github.com/mvier
 ### Deinstallation
 You can remove x11docker with `x11docker --remove`. That will remove the [files listed above](#installation-options).
 x11docker will **not** remove:
- - Files and folders for persitant data storgage with option `--home`. These are:
+ - Files and folders for persistant data storage with option `--home`. These are:
    - `~/.local/share/x11docker` where persistant data is stored.
    - Softlink `~/x11docker` that points there.
  - Folders you might have created yourself for x11docker: 
