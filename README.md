@@ -370,6 +370,7 @@ Further informations at [wiki: x11docker on MS Windows](https://github.com/mvier
 
 ### Deinstallation
 You can remove x11docker with `x11docker --remove`. That will remove the [files listed above](#installation-options).
+It will also remove `~/.cache/x11docker` and stop all running x11docker containers.
 x11docker will **not** remove:
  - Files and folders for persistant data storage with option `--home`. These are:
    - `~/.local/share/x11docker` where persistant data is stored.
@@ -462,7 +463,9 @@ If reporting an [issue](https://github.com/mviereck/x11docker/issues):
  - Have a look at chapter [Troubleshooting](#troubleshooting).
  - Most times it makes sense to store the `--verbose` output (or `~/.cache/x11docker/x11docker.log`) at [pastebin.com](https://pastebin.com/).
 ### Contributing
-If you want to contribute to x11docker, please open a [ticket](https://github.com/mviereck/x11docker/issues) before creating a pull request. Often it is possible to accomplish desired tasks with already available options.
+If you want to contribute to x11docker, please open a [ticket](https://github.com/mviereck/x11docker/issues) before creating a pull request. 
+Often it is possible to accomplish desired tasks with already available options.
+Note that x11docker is considered to be stable and changes other than bug fixes are less likely to be merged. In general new features are not intended.
 ### Support
 Please open a [ticket](https://github.com/mviereck/x11docker/issues) if you need support. Please note that `x11docker` is a non-commercial project maintained in free time. 
 I'll help where I can, but there is no organisation behind `x11docker` that can provide large scale support.
