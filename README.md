@@ -31,7 +31,7 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
  - Remote access with [SSH](https://github.com/mviereck/x11docker/wiki/Remote-access-with-SSH), [VNC](https://github.com/mviereck/x11docker/wiki/VNC) 
    or [HTML5](https://github.com/mviereck/x11docker/wiki/Container-applications-running-in-Browser-with-HTML5) possible.
  - Easy to use. [Examples](#examples): 
-   - `x11docker jess/cathode`
+   - `x11docker x11docker/fvwm xterm`
    - `x11docker --desktop --size 320x240 x11docker/lxde` (needs nested X server `Xephyr`)
    
 
