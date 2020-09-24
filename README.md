@@ -51,9 +51,9 @@
 `x11docker --xfishtank`
 ![screenshot](screenshot-xfishtank.png "X fish tank")
 
-`x11docker jess/cathode`
+`x11docker x11docker/fvwm xterm`
 
-![screenshot](screenshot-retroterm.png "cool retro term running in Xpra window using x11docker")
+![screenshot](screenshot-retroterm.png "xterm in Xpra window using x11docker")
 
 `x11docker --desktop --size 320x240 x11docker/lxde`
 
