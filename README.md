@@ -44,7 +44,7 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
  - [Options](#options)
    - [Choice of X servers and Wayland compositors](#choice-of-x-servers-and-wayland-compositors)
    - [Desktop or seamless mode](#desktop-or-seamless-mode)
-   - [Shared folders and HOME in container](#shared-folders-and-home-in-container)
+   - [Shared folders and HOME in container](#shared-folders-docker-volumes-and-home-in-container)
    - [GPU hardware acceleration](#gpu-hardware-acceleration)
    - [Clipboard](#clipboard)
    - [Sound](#sound)
@@ -155,7 +155,7 @@ Changes in a running Docker container system will be lost, the created Docker co
    - `--home=$HOME` will use your host home as container home. Discouraged, use with care.
    - `--share $HOME` will symlink your host home as a subfolder of container home. 
    
-Note that x11docker copies files from `/etc/skel` in container to `HOME` if `HOME` is empty. That allows to provide customized user settings.
+Note that x11docker copies files from `/etc/skel` in container to `HOME` if `HOME` is empty. That allows to provide predefined user configurations in the image.
  
 ### GPU hardware acceleration
 Hardware acceleration for OpenGL is possible with option `-g, --gpu`. 
@@ -396,7 +396,9 @@ Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/
 
 ## Troubleshooting
 For troubleshooting run `x11docker` or `x11docker-gui` in a terminal. 
-x11docker shows warnings if something is insecure, missing or going wrong. 
+x11docker shows warnings if something is insecure, missing or going wrong.
+Also it shows notes if options don't work and fallbacks are used.
+It might give hints to fix some issues.
 ### Core checks
 
 **1.** Make sure your x11docker version is up to date with `x11docker --update` (latest release) or `x11docker --update-master` (latest beta).
@@ -506,7 +508,7 @@ A special one to check features and container isolation is `x11docker/check`.
 | Desktop environment <br> (most based on Debian)| x11docker command |
 | --- | --- |
 | [Cinnamon](https://github.com/mviereck/dockerfile-x11docker-cinnamon) | `x11docker --desktop --gpu --init=systemd x11docker/cinnamon` |
-| [deepin](https://github.com/mviereck/dockerfile-x11docker-deepin) ([website](https://www.deepin.org/en/dde/)) (3D desktop from China) | `x11docker --desktop --gpu --init=systemd --cap-default --hostipc -- --cap-add=SYS_RESOURCE --cap-add=IPC_LOCK -- x11docker/deepin` |
+| [deepin](https://github.com/mviereck/dockerfile-x11docker-deepin) ([website](https://www.deepin.org/en/dde/)) (3D desktop from China) | `x11docker --desktop --gpu --init=systemd -- --cap-add=IPC_LOCK --security-opt seccomp=unconfined -- x11docker/deepin` |
 | [Enlightenment](https://github.com/mviereck/dockerfile-x11docker-enlightenment) (based on [Void Linux](https://www.voidlinux.org/)) | `x11docker --desktop --gpu --runit x11docker/enlightenment` |
 | [Fluxbox](https://github.com/mviereck/dockerfile-x11docker-fluxbox) (based on Debian, 87 MB) | `x11docker --desktop x11docker/fluxbox` |
 | [FVWM](https://github.com/mviereck/dockerfile-x11docker-fvwm) (based on [Alpine](https://alpinelinux.org/), 22.5 MB) | `x11docker --desktop x11docker/fvwm` |
@@ -539,18 +541,15 @@ For very long option combinations you might want to use option `--preset FILENAM
    Use it like: `x11docker --preset=multimedia jess/vlc`
  - Example deepin desktop: Instead of very long command
    ```
-   x11docker --desktop --gpu --init=systemd --cap-default --hostipc -- --cap-add=SYS_RESOURCE --cap-add=IPC_LOCK -- x11docker/deepin
+   x11docker --desktop --init=systemd -- --cap-add=IPC_LOCK --security-opt seccomp=unconfined -- x11docker/deepin
    ``` 
    you can create a file `~/.config/x11docker/preset/deepin` containing the desired options:
    ```
    --desktop 
-   --gpu
-   --init=systemd 
-   --cap-default 
-   --hostipc 
+   --init=systemd
    -- 
-   --cap-add=SYS_RESOURCE 
-   --cap-add=IPC_LOCK 
+   --cap-add=IPC_LOCK
+   --security-opt seccomp=unconfined
    -- 
    x11docker/deepin
    ```
@@ -573,5 +572,5 @@ More screenshots are stored in [screenshot branch](https://github.com/mviereck/x
 `x11docker --desktop x11docker/lxqt`
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxqt.png "LXQT desktop in docker")
 
-`x11docker --desktop --gpu --init=systemd --cap-default --hostipc -- --cap-add=SYS_RESOURCE --cap-add=IPC_LOCK -- x11docker/deepin`
+`x11docker --desktop --gpu --init=systemd -- --cap-add=IPC_LOCK --security-opt seccomp=unconfined -- x11docker/deepin`
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-deepin.png "deepin desktop in docker")
