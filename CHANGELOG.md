@@ -8,8 +8,14 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
+ - `--runasuser`: Experimental option to add background processes in 
+   `containerrc`. Intended to run e.g. `fcitx` keyboard input daemon.
+   [(#269)](https://github.com/mviereck/x11docker/issues/269)
+   [(x11docker/deepin:#2)](https://github.com/mviereck/dockerfile-x11docker-deepin/issues/2)
  - `--podman`: Experimental `podman` support.
    [(#255)](https://github.com/mviereck/x11docker/issues/255)
+### Changed
+ - `--lang`: Allow multiple times to generate more than one locale.
 ### Fixed
  - `--home=~/DIR`: Replace `~` with `$HOME`.
  - `--hostnet`: set host IP to 127.0.0.1 for options like `--pulseaudio=tcp`.
@@ -17,6 +23,8 @@ Project website: https://github.com/mviereck/x11docker
    [(#266)](https://github.com/mviereck/x11docker/issues/266)
  - Allow `docker logs` to grab container output, too. 
    [(#254)](https://github.com/mviereck/x11docker/issues/254)
+ - `--xpra`: version check failed in few circumstances.
+   [(#287)](https://github.com/mviereck/x11docker/issues/287)
  
 ## [6.6.2](https://github.com/mviereck/x11docker/releases/tag/v6.6.2) - 2022-05-19
 ### Added

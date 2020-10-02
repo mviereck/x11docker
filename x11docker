@@ -214,14 +214,16 @@ Special options:
      --pw FRONTEND     Choose frontend for password prompt. Possible FRONTEND:
                          su sudo gksu gksudo lxsu lxsudo kdesu kdesudo
                          pkexec beesu none
-     --runfromhost CMD Run host command CMD on new X server (you may need & ).
-     --runasroot CMD   Run command CMD as root in container on startup.
-                       Caution: Runs with --privileged host access.
+     --runfromhost CMD Run host command CMD on new X server. (You may need & ).
+     --runasuser CMD   Run command CMD with user privileges in container 
+                       before running image command. Useful e.g. for fcitx.
+     --runasroot CMD   Run command CMD as root in container. (You may need & ).
+                       Caution: Runs with --privileged host access. 
      --runtime RUNTIME Specify docker runtime. Known by x11docker:
                          runc:         Docker default runtime.
                          crun:         Fast replacement for runc written in C.
                          nvidia:       Runtime for nvidia/nvidia-docker images.
-                         kata-runtime: Runtime using a qemu VM.
+                         kata-runtime: Runtime using a QEMU VM.
      --shell SHELL     Set preferred user shell. Example: --shell=/bin/zsh
      --stdin           Forward stdin of x11docker to container command.
      --workdir DIR     Set working directory DIR.
@@ -2355,7 +2357,7 @@ check_xdepends() {              # check dependencies on host for X server option
         Return=1
       } ;;
   esac
-  case $Xserver in
+  case ${1:-} in
     --xpra|--xpra-xwayland)
       [ "$Return" = "1" ] || {
         # check xpra version
@@ -3891,6 +3893,7 @@ check_containerhome() {         # options --home, --homedir, --homebasedir: chec
     ;;
   esac
   Containeruserhome="${Containeruserhome:-$Containeruserhomebasefolder/$Containeruser}"
+  store_runoption env "HOME=$Containeruserhome"
   
   case $Sharehome in
     host)  
@@ -3899,7 +3902,7 @@ check_containerhome() {         # options --home, --homedir, --homebasedir: chec
         [ "$Startuser" = "root" ] && su $Containeruser -c "mkdir -p '$Persistanthomevolume'"
         [ "$Containeruser" = "$Hostuser" ] && unpriv "mkdir -p '$Persistanthomevolume'" && {
           # create symbolic link to ~/x11docker
-          echo "$Persistanthomevolume" | grep -q .local/share/x11docker && [ ! -e "$Containeruserhome/x11docker" ] && unpriv "ln -s '$Hosthomebasefolder' '$Containeruserhome/x11docker'" ||:
+          echo "$Persistanthomevolume" | grep -q .local/share/x11docker && [ ! -e "$Hostuserhome/x11docker" ] && unpriv "ln -s '$Hosthomebasefolder' '$Hostuserhome/x11docker'" ||:
         }
       }
       [ -d "$Persistanthomevolume" ] || error "Option --home: Could not create persistent home folder for
@@ -5073,7 +5076,6 @@ exit 0\" >> /etc/rc.local"
                     com.deepin.daemon.Audio
                     com.deepin.daemon.Bluetooth
                     com.deepin.daemon.Grub2
-                    com.deepin.daemon.InputDevices
                     com.deepin.daemon.Network
                     com.deepin.daemon.Power
                     com.deepin.sync.Daemon
@@ -5255,18 +5257,20 @@ reload() {
   echo "rocknroll || exit 64"
   echo ""
 
-  [ "$Langwunsch" ] && {
+  # --lang
+  while read Line; do
     echo "# --lang: Language locale"
-    echo "verbose \"Searching for language locale matching $Langwunsch\""
+    echo "verbose \"Searching for language locale matching $Line\""
     echo "Locales=\"\$(locale -a)\""
     echo "Langall=\"\$(cat /usr/share/i18n/SUPPORTED | grep -E 'UTF-8|utf8' | cut -d' ' -f1 | cut -d. -f1 | cut -d@ -f1 | sort | uniq)\""
-    echo "Langland=\"\$(echo $Langwunsch | cut -d. -f1)\""
+    echo "Langland=\"\$(echo $Line | cut -d. -f1)\""
+    echo "Langcontainer=''"
     echo ""
     echo "echo \"\$Langland\" | grep -q '_' || {"
     echo "  Langland=\"\$(echo \$Langland | tr '[:upper:]' '[:lower:]')_\$(echo \$Langland | tr '[:lower:]' '[:upper:]')\""
     echo "  echo \"\$Langall\" | grep -q \"\$Langland\" || {"
-    echo "    echo \"\$Langall\" | grep -i -q \"$Langwunsch\" && {"
-    echo "      Langland=\"\$(echo \"\$Langall\" | grep -i -m1 \"$Langwunsch\")\""
+    echo "    echo \"\$Langall\" | grep -i -q \"$Line\" && {"
+    echo "      Langland=\"\$(echo \"\$Langall\" | grep -i -m1 \"$Line\")\""
     echo "    }"
     echo "  }"
     echo "}"
@@ -5302,8 +5306,10 @@ reload() {
     echo "[ \"\$Langcontainer\" ] && {"
     echo '  storeinfo locale="$Langcontainer"'
     echo "  echo \"LANG=\$Langcontainer\" > /etc/default/locale"
-    echo "} || note 'Option --lang: Desired locale for '$Langwunsch' not found and not generated.'"
+    echo "} || note 'Option --lang: Desired locale for '$Line' not found and not generated.'"
     echo ""
+  done < <(tac <<< "$Langwunsch" | grep . ||:)
+  [ "$Langwunsch" ] && {
     echo "debugnote \"Option --lang: Output of locale -a:"
     echo "\$(locale -a)\""
     echo ""
@@ -5800,6 +5806,16 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   
   [ "$Initsystem" = "systemd" ] && {
     echo   "  echo 'systemctl --user start  dbus'"
+    echo   "  echo ''"
+  }
+  
+  
+  # --runasuser commands added here
+  [ "$Runasuser" ] && {
+    echo   "  echo '# Custom daemon commands added with option --runasuser'"
+    for Line in "$Runasuser"; do
+      echo "  echo '$Line'"
+    done
     echo   "  echo ''"
   }
   
@@ -6768,7 +6784,7 @@ check_option_interferences() {  # check multiple option interferences, change se
       esac
       Initsystem=""
       Dbusrunsession="no"
-      Createcontaineruser="no"
+      #Createcontaineruser="no"
       Langwunsch=""
       Noentrypoint="no"
       Runasroot=""
@@ -7610,7 +7626,8 @@ option_messages() {             # some messages depending on options, but not ch
       [ "$Sharegpu" = "yes" ] && note "If performance of GPU acceleration with $Xserver
   is not satisfying, you can try insecure '--hostdisplay --gpu'."
       note "Option --xpra: If you encounter issues with xpra, 
-  you can try --nxagent instead."
+  you can try --nxagent instead.
+  Rather use xpra from www.xpra.org than from distribution repositories."
     ;;
 
     --xephyr) note "Xephyr is a quite stable nested X server.
@@ -8123,6 +8140,7 @@ declare_variables() {           # declare global variables
   Sudo=""                                         # "sudo", "sudo -n", or empty. Added as prefix to some privileged commands, especially docker.
   
   # Custom additional commands
+  Runasuser=""                                       # --runasuser: Add container command to containerrc
   Runasroot=""                                    # --runasroot: Add container command to container setup script running as root
   Runfromhost=""                                  # --runfromhost: Add host command to xinitrc
   
@@ -8244,7 +8262,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,group-add:,hostuser:,sudouser,user:,shell:"                                                    # Container user
   Longoptions="$Longoptions,dbus::,init::,hostdbus,sharecgroup"                                                            # Container init and DBus
   Longoptions="$Longoptions,stdin,interactive"                                                                             # Container interaction
-  Longoptions="$Longoptions,runfromhost:,runasroot:"                                                                       # Additional commands to execute
+  Longoptions="$Longoptions,runasuser:,runfromhost:,runasroot:"                                                            # Additional commands to execute
   Longoptions="$Longoptions,showenv,showid,showinfofile,showpid1,showcache"                                                # Output of vars on stdout
   Longoptions="$Longoptions,debug,quiet,verbose"                                                                           # Verbose options
   Longoptions="$Longoptions,cleanup,help,launcher,licence,license,version,wmlist"                                          # Special options without starting X or container
@@ -8386,11 +8404,13 @@ parse_options() {               # parse cli options
          --alsa)              Sharealsa="yes"                        # ALSA sound (shares /dev/snd)
                               Alsacard="${2:-$Alsacard}" ; shift ;;
       -c|--clipboard)         Shareclipboard="yes"  ;;               # Clipboard sharing
-      -l)                     Langwunsch="${LANG:-}" ;               # Locale/language setting
+      -l)                     Langwunsch="$Langwunsch
+${LANG:-}"                                                           # Locale/language setting
                               Langwunsch="${Langwunsch:-$LC_ALL}"
                               [ "$Langwunsch" ] || note "Option --lang: Environment variable \$LANG is empty.
   Please specify desired language locale with e.g. --lang=en_US or --lang=zh_CN." ;;
-         --lang)              Langwunsch="${2:-${LANG:-}}" ; shift   # Locale/language setting
+         --lang)              Langwunsch="$Langwunsch
+${2:-${LANG:-}}" ; shift                                             # Locale/language setting
                               Langwunsch="${Langwunsch:-$LC_ALL}"
                               [ "$Langwunsch" ] || note "Option --lang: Environment variable \$LANG is empty.
   Please specify desired language locale with e.g. --lang=en_US or --lang=zh_CN." ;;
@@ -8474,7 +8494,15 @@ ${2:-}"                       ; shift ;;                             # Add custo
          --iglx)              Iglx="yes" ;               note "Option --iglx: experimental only." ;;            # Indirect rendering; broken since Xorg ~18.2
          --keepcache)         Preservecachefiles="yes" ; note "Option --keepcache: experimental only." ;;            
          --no-setup)          Containersetup="no" ;      note "Option --no-setup: experimental only." ;;            
-         --podman)            Podman="yes" ;             note "Option --podman: experimental only." ;;            
+         --podman)            Podman="yes" ;             note "Option --podman: experimental only.
+  To avoid a prompt for root password, you might have to execute:
+    sysctl -w kernel.unprivileged_userns_clone=1
+  Please report issues at: https://github.com/mviereck/x11docker/issues/255" ;;
+         --runasuser)         Runasuser="$Runasuser
+${2:-}"                       
+                              shift 
+                              
+                              note "Option --runasuser: experimental only." ;;                             # Add custom root command in container setup script            
          --xcomposite)        Xcomposite="yes" ;         note "Option --xcomposite: experimental only." ;;      # Enable X extension COMPOSITE
          --xorgconf)          Xorgconf="${2:-}" ;        note "Option --xorgconf: eperimental only" ; shift ;;  # Custom xorg.conf
       
