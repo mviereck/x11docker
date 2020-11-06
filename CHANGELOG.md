@@ -14,6 +14,8 @@ Project website: https://github.com/mviereck/x11docker
    [(x11docker/deepin:#2)](https://github.com/mviereck/dockerfile-x11docker-deepin/issues/2)
  - `--podman`: Experimental `podman` support.
    [(#255)](https://github.com/mviereck/x11docker/issues/255)
+ - `--xopt`: Experimental option to add custom X server options.
+   [(#296)](https://github.com/mviereck/x11docker/issues/296)
 ### Changed
  - `--lang`: Allow multiple times to generate more than one locale.
 ### Fixed
@@ -25,6 +27,8 @@ Project website: https://github.com/mviereck/x11docker
    [(#254)](https://github.com/mviereck/x11docker/issues/254)
  - `--xpra`: version check failed in few circumstances.
    [(#287)](https://github.com/mviereck/x11docker/issues/287)
+ - `--gpu`: share `/dev/nvmap` and `/dev/nvhost*` if present.
+   [(#290)](https://github.com/mviereck/x11docker/issues/290)
  
 ## [6.6.2](https://github.com/mviereck/x11docker/releases/tag/v6.6.2) - 2022-05-19
 ### Added
