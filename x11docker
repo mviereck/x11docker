@@ -87,6 +87,8 @@ Basic settings: (especially influencing automatical choice of X server)
  -g, --gpu             GPU access for hardware accelerated OpenGL rendering. 
                        Works best with open source drivers on host and in image.
                        For closed source nvidia drivers regard terminal output.
+ -I                    Allow internet access. (Compare --network below.)
+                       (Currently enabled by default, will change in future.)
  -w, --wm [=ARG]       Provide a window manager to container applications.
                        If available, image x11docker/openbox will be used.
                        Otherwise x11docker looks for a host window manager.
@@ -201,7 +203,6 @@ Special options:
  -i, --interactive     Run with an interactive tty to allow shell commands.
      --mobyvm          Use MobyVM (for WSL2 only that defaults to linux docker).
      --name NAME       Specify container name NAME.
-     --no-internet     Disable internet access for container.
      --no-entrypoint   Disable ENTRYPOINT in image to allow other commands, too
      --enforce-i       Run x11docker in interactive bash mode to allow tty 
                        access. Can help to run weston-launch on special systems.
@@ -264,12 +265,16 @@ Container capabilities:
                        Severe reduction of container isolation! Shares
                        host interprocess communication and shared memory.
                        Allows MIT-SHM extension of X servers.
-     --hostnet         Set docker run option --network=host. Disables network
-                       namespacing. Severe reduction of container isolation!
      --limit [=FACTOR] Limit CPU and RAM usage of container to 
                        currently free RAM x FACTOR and available CPUs x FACTOR.
                        Allowed range is 0 < FACTOR <= 1. 
                        Default for --limit without argument FACTOR: 0.5
+ -I, --network [=NETWORK] Connect a container to a network. NETWORK can be:
+                         bridge : Default Docker bridge. (current default)
+                         none   : No networking.        (upcoming default)
+                         container:<name|id> : Connect to another container.
+                         host   : Use host network stack
+                         <network-name>|<network-id> : User-defined network
      --newprivileges [=yes|no|auto]  Set or unset docker run option 
                        --security-opt=no-new-privileges. Default with no
                        argument is 'yes'. Default for most cases is 'no'.
@@ -1783,10 +1788,10 @@ setup_hostdbus() {              # option --hostdbus: connect to host DBus sessio
     store_runoption env "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS"
     [ "${DBUS_SESSION_BUS_PID:-}" ]      && store_runoption env  "${DBUS_SESSION_BUS_PID:-}"
     [ "${DBUS_SESSION_BUS_WINDOWID:-}" ] && store_runoption env  "${DBUS_SESSION_BUS_WINDOWID:-}"
-    Sharehostnet="yes"
+    Network="host"
     warning "Option --hostdbus: Did not find a DBus session socket file
   but an abstract unix socket. To allow access for container,
-  x11docker sets docker run option '--network=host' (option --hostnet).
+  x11docker sets option '--network=host'.
   This degrades container isolation. Container shares host network stack."
   }
   return 0
@@ -4066,6 +4071,13 @@ create_dockercommand() {        ### create command to run docker
     Dockercommand="$Dockercommand \\
   --runtime='$Runtime'"
   }
+
+  ## option --hostipc
+  [ "$Sharehostipc" = "yes" ]      && Dockercommand="$Dockercommand \\
+  --ipc host"
+  ## option --network
+  Dockercommand="$Dockercommand \\
+  --network $Network"
       
   # capabilities
   [ "$Capdropall" = "yes" ] && Dockercommand="$Dockercommand \\
@@ -4074,7 +4086,7 @@ create_dockercommand() {        ### create command to run docker
      Dockercommand="$Dockercommand \\
   --cap-add $Line"
   done < <(store_runoption dump cap)
-
+  
   # default no, do not gain privileges
   [ "$Allownewprivileges" = "no" ] && Dockercommand="$Dockercommand \\
   --security-opt no-new-privileges"
@@ -4204,14 +4216,6 @@ create_dockercommand() {        ### create command to run docker
     esac
   }
 
-  ## options --hostipc and --hostnet
-  [ "$Sharehostipc" = "yes" ]      && Dockercommand="$Dockercommand \\
-  --ipc host"
-  [ "$Sharehostnet" = "yes" ]      && Dockercommand="$Dockercommand \\
-  --network host"
-  ## option --no-internet
-  [ "$Internetaccess" = "no" ]     && Dockercommand="$Dockercommand \\
-  --net none"
   ## option --pulseaudio
   [ "$Pulseaudiomode" = "socket" ] && Dockercommand="$Dockercommand \\
   --volume $Pulseaudioconf:/etc/pulse/client.conf:ro"
@@ -6407,9 +6411,9 @@ check_host() {                  # check host environment
   # Check host IP. Needed for --pulseaudio=tcp, --printer=tcp, --xoverip and --xwin
   case $Winsubsystem in
     "")
-      case $Sharehostnet in
-        yes) Hostip="127.0.0.1" ;;
-        no)
+      case $Network in
+        host) Hostip="127.0.0.1" ;;
+        *)
                            Hostip="$(ip -4 -o a | grep 'docker0' | awk '{print $4}' | cut -d/ -f1 | grep 172.17.0.1 ||: )"
           #[ "$Hostip" ] || Hostip="$($Dockerexe network inspect bridge --format='{{.IPAM.Config}}' 2>/dev/null | awk '{print $2}')"
           [ "$Hostip" ] || Hostip="$(ip -4 -o a | grep 'docker0' | awk '{print $4}' | cut -d/ -f1 | head -n1)"
@@ -6759,9 +6763,9 @@ check_option_interferences() {  # check multiple option interferences, change se
   and GPU rootkits (compare proof of concept: jellyfish)."
     case $Xoverip in
       yes)
-        [ "$Sharehostnet" = "no" ] && note "Option --gpu: With X over IP the host network stack must
-  be shared to allow GPU access. Enabling option --hostnet."
-        Sharehostnet="yes"
+        [ "$Network" != "host" ] && note "Option --gpu: With X over IP the host network stack must
+  be shared to allow GPU access. Enabling option --network=host."
+        Network="host"
       ;;
     esac
     case $Podman in
@@ -6780,12 +6784,12 @@ check_option_interferences() {  # check multiple option interferences, change se
 
   # --hostdisplay with SSH
   [ "$Xserver" = "--hostdisplay" ] && [ "$Runsoverssh" = "yes" ] && {
-    [ "$Trusted" = "no" ] || [ "$Sharehostnet" = "no" ]  && {
+    [ "$Trusted" = "no" ] || [ "$Network" != "host" ]  && {
       note "For SSH connection with option --hostdisplay
-  x11docker must enable option --hostnet and allow trusted cookies.
+  x11docker must enable option --network=host and allow trusted cookies.
   It is recommended to use other X server options
   like --xpra, --xephyr or --nxagent."
-      Sharehostnet="yes"
+      Network="host"
       Trusted="yes"
     }
   }
@@ -6893,15 +6897,6 @@ check_option_interferences() {  # check multiple option interferences, change se
   x11docker must share host IPC namespace with container (option --hostipc)
   to allow shared memory for X extension MIT-SHM."
     Sharehostipc="yes"
-  }
-
-  # --hostnet --no-internet
-  [ "$Sharehostnet" = "yes" ] && [ "$Internetaccess" = "no" ] && {
-    note "You have chosen --hostnet and --no-internet. That does not work.
-  You can not share host network stack (--hostnet) and forbid internet access
-  at the same time (except you disconnect your host from internet).
-  Fallback: disabling option --hostnet, keeping --no-internet."
-    Sharehostnet="no"
   }
 
   # --scale
@@ -7249,10 +7244,10 @@ check_option_interferences() {  # check multiple option interferences, change se
   --runtime=kata-runtime. Fallback: Disabling option --webcam."
         Sharewebcam="no"
       }
-      [ "$Sharehostnet" = "yes" ] && {
-        note "Option --hostnet: Sharing host network stack does not work with
-  --runtime=kata-runtime. Fallback: Disabling option --hostnet."
-        Sharehostnet="no"
+      [ "$Network" = "host" ] && {
+        note "Option --network=host: Sharing host network stack does not work
+  with --runtime=kata-runtime. Fallback: Setting --network=bridge."
+        Network="bridge"
       }
       [ "$Sharehostipc" = "yes" ] && {
         note "Option --hostipc: Only IPC of the the qemu VM is shared with
@@ -7742,11 +7737,13 @@ option_messages() {             # some messages depending on options, but not ch
   [ "$Sharehostipc" = "yes" ] && warning "Option --hostipc severely degrades 
   container isolation. IPC namespace remapping is disabled."
 
-  # --hostnet
-  [ "$Sharehostnet" = "yes" ] && warning "Option --hostnet severly degrades 
+  # --network
+  [ "$Network" = "host" ] && warning "Option --network=host severly degrades 
   container isolation. Network namespacing is disabled. 
-  Container shares host network stack. Spying on network traffic may be possible. 
-  Access to host X server $Hostdisplay may be possible through abstract unix socket."
+  Container shares host network stack. 
+  Spying on network traffic may be possible. 
+  Access to host X server $Hostdisplay may be possible 
+  through abstract unix socket."
   
   # --webcam
   [ "$Sharewebcam" = "yes" ] && warning "Option --webcam: Container applications might look 
@@ -7762,9 +7759,9 @@ option_messages() {             # some messages depending on options, but not ch
     ;;
   esac
   
-  [ "$Sudouser" = "yes" ] && [ "$Containeruseruid" != "0" ] && [ "$Sharehostnet" = "no" ] && [ -z "$Xoverip" ] && note "Option --sudouser: If you want to run GUI application
+  [ "$Sudouser" = "yes" ] && [ "$Containeruseruid" != "0" ] && [ "$Network" != "host" ] && [ -z "$Xoverip" ] && note "Option --sudouser: If you want to run GUI application
   with su or sudo, you might need to add either option --xoverip 
-  or (discouraged) option --hostnet."
+  or (discouraged) option --network=host."
   
   [ "$Customdockeroptions" ] && {
     warning "Found custom DOCKER_RUN_OPTIONS.
@@ -7775,10 +7772,22 @@ option_messages() {             # some messages depending on options, but not ch
   in custom docker run options. That is A VERY BAD IDEA.
   A privileged setup allows unrestriced access from container to host.
   Malicious applications can cause arbitrary harm."
+    grep -q -i -- '--cap-add.ALL' <<< "$Customdockeroptions" && warning "Found option --cap-add=ALL
+  in custom docker run options. That is A VERY BAD IDEA.
+  This is a very privileged setup.
+  Malicious applications may harm to the host."
+    grep -q -i -- '--cap-add.SYS_ADMIN' <<< "$Customdockeroptions" && warning "Found option --cap-add=SYS_ADMIN
+  in custom docker run options. That is A VERY BAD IDEA.
+  This is a very privileged setup.
+  Malicious applications may harm to the host."
     grep -q -- '--entrypoint' <<< "$Customdockeroptions" && warning "Found option --entrypoint
   in custom docker run options. x11docker uses this option, too.
   This setup will probably fail. Use x11docker option --no-entrypoint instead
   and add desired command as container command after the image name."
+    grep -q -- "--runtime"    <<< "$Customdockeroptions" && note "Found option --runtime in custom DOCKER_RUN_OPTIONS.
+  Please use x11docker option --runtime instead."
+    grep -q -- "--network"    <<< "$Customdockeroptions" && note "Found option --network in custom DOCKER_RUN_OPTIONS.
+  Please use x11docker option --network instead."
   }
   
   return 0
@@ -8132,8 +8141,7 @@ declare_variables() {           # declare global variables
   
   # Host integration
   Alsacard="$ALSA_CARD"                           # --alsa: Specified ALSA card
-  Hosthomebasefolder=""                               # --homebasedir: Base directory for container home with --home
-  Internetaccess="yes"                            # --no-internet: Disable internet access
+  Hosthomebasefolder=""                           # --homebasedir: Base directory for container home with --home
   Langwunsch=""                                   # --lang: Search or create UTF-8 locale in container and set LANG
   Pulseaudioconf="pulseaudio.client.conf"         # --pulseaudio: Client config in container
   Pulseaudiocookie="pulseaudio.cookie"            # --pulseaudio: possible pulse cookie from host to share
@@ -8166,11 +8174,11 @@ declare_variables() {           # declare global variables
   Imagename=""                                    # Image to run
   Interactive="no"                                # --interactive: Run docker with interactive tty yes/no
   Limitresources=""                               # --limit: Limit access to CPU and RAM, 0.1 ... 1.0
+  Network="bridge"                                # --network
   Noentrypoint="no"                               # --no-entrypoint: Disable entrypoint in image yes/no
   Podman="no"                                     # --podman: Use podman instead of docker
   Runtime=""                                      # Runtime to use. runc|nvidia|kata-runtime|crun
   Sharehostipc="no"                               # --hostipc: Set --ipc=host.
-  Sharehostnet="no"                               # --hostnet: Set --network=host
   Stopsignal=""                                   # Signal to send on 'docker stop'
   Sudouser="no"                                   # --sudouser: Create user with sudo permissions and root user with password 'x11docker'
   Switchcontaineruser="no"                        # --init=systemd|openrc|runit|sysvinit: User switching to trigger login services yes/no
@@ -8305,7 +8313,7 @@ stdout() {
 }
 parse_options() {               # parse cli options
   local Shortoptions Longoptions Parsedoptions Presetoptions Presetfile Parsererror Parsererrorfile
-  Shortoptions="aAcdDefFghHiKlmnpPqtTvVwWxXyY"
+  Shortoptions="aAcdDefFghHiIKlmnpPqtTvVwWxXyY"
   Longoptions="exe,xonly"                                                                                                  # Alternate setups of x11docker
   Longoptions="$Longoptions,auto,desktop,tty,wayland,wm::"                                                                 # Influencing auto-setup of X/Wayland/x11docker
   Longoptions="$Longoptions,hostdisplay,nxagent,xdummy,xephyr,xpra,xorg,xvfb,xwin"                                         # X servers
@@ -8317,7 +8325,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,cachebasedir:,home::,homebasedir:,share:"                                                      # Host folders
   Longoptions="$Longoptions,alsa::,clipboard,gpu,lang::,printer::,pulseaudio::,webcam"                                     # Host integration features
   Longoptions="$Longoptions,env:,mobyvm,name:,no-entrypoint,runtime:,workdir:"                                             # Container config
-  Longoptions="$Longoptions,cap-default,hostipc,hostnet,limit::,newprivileges::,no-internet"                               # Container capabilities
+  Longoptions="$Longoptions,cap-default,hostipc,limit::,newprivileges::,network::"                                         # Container capabilities
   Longoptions="$Longoptions,group-add:,hostuser:,sudouser,user:,shell:"                                                    # Container user
   Longoptions="$Longoptions,dbus::,init::,hostdbus,sharecgroup"                                                            # Container init and DBus
   Longoptions="$Longoptions,stdin,interactive"                                                                             # Container interaction
@@ -8328,7 +8336,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,install,remove,update,update-master"                                                           # Installation
   #
   Longoptions="$Longoptions,iglx,keepcache,no-setup,podman,xcomposite,xopt:,xorgconf:,runx"                                # Experimental
-  Longoptions="$Longoptions,dbus-system,homedir:,no-xhost,sharedir:,sharessh,systemd"                                      # Deprecated
+  Longoptions="$Longoptions,dbus-system,homedir:,hostnet,no-internet,no-xhost,sharedir:,sharessh,systemd"                  # Deprecated
   Longoptions="$Longoptions,cachedir:,no-init,nothing,no-xtest,openrc,ps,runit,silent,starter,stderr,stdout"               # Removed
   Longoptions="$Longoptions,sys-admin,sysvinit,tini,trusted,untrusted,vcxsrv"                                              # Removed
 
@@ -8508,13 +8516,13 @@ ${2:-}"                       ; shift ;;                             # Add custo
          --env)               store_runoption env "${2:-}"           # Set container environment variables
                               shift ;;
          --hostipc)           Sharehostipc="yes" ;;                  # docker run option --ipc=host
-         --hostnet)           Sharehostnet="yes" ;;                  # docker run option --network=host
          --limit)             Limitresources="${2:-0.5}" ; shift ;;  # Limited CPU and RAM access
          --mobyvm)            Mobyvm="yes" ;;                        # Use MobyVM in WSL2
          --name)              Containername="${2:-}" ; shift ;;      # Set container name
+      -I)                     Network="bridge" ;;
+         --network)           Network="${2:-bridge}" ; shift ;;
          --newprivileges)     Allownewprivileges="${2:-yes}" ; shift ;; # [Don't] set --security-opt=no-new-privileges
          --no-entrypoint)     Noentrypoint="yes" ;;                  # Disable ENTRYPOINT of image
-         --no-internet)       Internetaccess="no" ;;                 # Disallow internet access
          --runtime)           Runtime="${2:-}" ; shift               # Runtime=runc|nvidia|kata-runtime|crun
                               [ "$Runtime" = "kata" ] && Runtime="kata-runtime" ;;
          --stdin)             Forwardstdin="yes" ;;                  # Forward stdin to container command
@@ -8572,6 +8580,12 @@ ${2:-}"
   Fallback: Enabling options --dbus=system --cap-default"
                               Dbusrunsession="system"
                               Capdropall="no" ;;
+         --hostnet)           Network="host" 
+                              note "Option --hostnet is deprecated.
+  Please use --network=host instead." ;;
+         --no-internet)       Network="none"
+                              note "Option --no-internet is deprecated.
+  Please use --network=none instead." ;;
          --sharessh)          [ -e "${SSH_AUTH_SOCK:-}" ] && {       # SSH socket sharing
                                 store_runoption volume "$(dirname $SSH_AUTH_SOCK)"
                                 store_runoption env "SSH_AUTH_SOCK=$(escapestring "${SSH_AUTH_SOCK:-}")"
@@ -8618,12 +8632,12 @@ ${2:-}"
     shift
   done
   
+  Customdockeroptions="$(sed "s/--cap-add' '/--cap-add=/" <<< "$Customdockeroptions")"
+  Customdockeroptions="$(sed "s/--runtime' '/--runtime=/" <<< "$Customdockeroptions")"
   grep -q -- "--runtime.kata"   <<< "$Customdockeroptions" && Runtime="kata-runtime"
   grep -q -- "--runtime.nvidia" <<< "$Customdockeroptions" && Runtime="nvidia"
   grep -q -- "--runtime.runc"   <<< "$Customdockeroptions" && Runtime="runc"
   grep -q -- "--runtime.crun"   <<< "$Customdockeroptions" && Runtime="crun"
-  grep -q -- "--runtime"        <<< "$Customdockeroptions" && note "Found option --runtime in custom DOCKER_RUN_OPTIONS.
-  Please use x11docker option --runtime instead."
   
   [ -n "$Xserver" ] && Autochooseserver="no"
   

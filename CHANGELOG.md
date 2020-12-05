@@ -8,6 +8,9 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
+ - `-I, --network`: New option to set network mode.
+   `-I` will be mandatory in future to allow internet access.
+   Replaces `--no-internet` and `--hostnet`.
  - `--runasuser`: Experimental option to add background processes in 
    `containerrc`. Intended to run e.g. `fcitx` keyboard input daemon.
    [(#269)](https://github.com/mviereck/x11docker/issues/269)
@@ -29,7 +32,12 @@ Project website: https://github.com/mviereck/x11docker
    [(#287)](https://github.com/mviereck/x11docker/issues/287)
  - `--gpu`: share `/dev/nvmap` and `/dev/nvhost*` if present.
    [(#290)](https://github.com/mviereck/x11docker/issues/290)
- 
+ - `--preset`: Parse with `eval` to catch strings.
+   [(x11docker/deepin:#20)](https://github.com/mviereck/dockerfile-x11docker-deepin/issues/20)
+### Deprecated
+ - `--hostnet`: Use `--network=host` instead.
+ - `--no-internet`: Use `--network=none` instead.
+
 ## [6.6.2](https://github.com/mviereck/x11docker/releases/tag/v6.6.2) - 2022-05-19
 ### Added
  - `--home=VOLUME`, `--share=VOLUME`: Support of docker volumes.
