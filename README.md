@@ -293,7 +293,7 @@ _Most important:_
     - Danger of abuse is reduced providing so-called untrusted cookies, but do not rely on this. 
     - If additionally using `--gpu` or `--clipboard`, option `--hostipc` and trusted cookies are enabled and no protection against X security leaks is left. 
     - If you don't care about container isolation, `x11docker --hostdisplay --gpu` is an insecure but quite fast setup without any overhead.
-  - `--gpu` allows access to GPU hardware. This can be abused to get window content from host ([palinopsia bug](https://hsmr.cc/palinopsia/)) and makes [GPU rootkits](https://github.com/x0r1/jellyfish) possible.
+  - `--gpu` allows access to GPU hardware. This can be abused to get window content from host ([palinopsia bug](https://hsmr.cc/palinopsia/)) and makes [GPU rootkits](https://github.com/LucaBongiorni/jellyfish) like [keyloggers](http://www.cs.columbia.edu/~mikepo/papers/gpukeylogger.eurosec13.pdf) possible.
   - `--pulseaudio` and `--alsa` allow catching audio output and microphone input from host.
   
 _Rather special options reducing security, but not needed for regular use:_
@@ -521,7 +521,6 @@ A special one to check features and container isolation is `x11docker/check`.
 | [LXDE with wine and PlayOnLinux](https://github.com/mviereck/dockerfile-x11docker-lxde-wine) and <br> a persistent `HOME` folder to preserve <br> installed Windows applications, <br> and with Pulseaudio sound. | `x11docker --desktop --home --pulseaudio x11docker/lxde-wine` |
 | [LXQt](https://github.com/mviereck/dockerfile-x11docker-lxqt) | `x11docker --desktop x11docker/lxqt` |
 | [Mate](https://github.com/mviereck/dockerfile-x11docker-mate) | `x11docker --desktop x11docker/mate` |
-| [Sway](https://github.com/mviereck/dockerfile-x11docker-sway) Wayland compositor ([website](https://swaywm.org/))| `x11docker --gpu x11docker/sway` |
 | [Trinity](https://github.com/mviereck/dockerfile-x11docker-trinity) ([website](https://www.trinitydesktop.org/)) (successor of KDE 3) | `x11docker --desktop x11docker/trinity` |
 | [Xfce](https://github.com/mviereck/dockerfile-x11docker-xfce) | `x11docker --desktop x11docker/xfce` |
 
