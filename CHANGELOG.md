@@ -11,8 +11,8 @@ Project website: https://github.com/mviereck/x11docker
  - `-I, --network`: New option to set network mode.
    `-I` will be mandatory in future to allow internet access.
    Replaces `--no-internet` and `--hostnet`.
- - `--runasuser`: Experimental option to add background processes in 
-   `containerrc`. Intended to run e.g. `fcitx` keyboard input daemon.
+ - `--runasuser`: New option to add (background) commands in 
+   `cmdrc`. Intended to run e.g. `fcitx` keyboard input daemon.
    [(#269)](https://github.com/mviereck/x11docker/issues/269)
    [(x11docker/deepin:#2)](https://github.com/mviereck/dockerfile-x11docker-deepin/issues/2)
  - `--podman`: Experimental `podman` support.

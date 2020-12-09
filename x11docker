@@ -215,10 +215,10 @@ Special options:
      --pw FRONTEND     Choose frontend for password prompt. Possible FRONTEND:
                          su sudo gksu gksudo lxsu lxsudo kdesu kdesudo
                          pkexec beesu none
-     --runfromhost CMD Run host command CMD on new X server. (You may need & ).
+     --runfromhost CMD Run host command CMD on new X server. (You may need '&').
      --runasuser CMD   Run command CMD with user privileges in container 
-                       before running image command. Useful e.g. for fcitx.
-     --runasroot CMD   Run command CMD as root in container. (You may need & ).
+                       before running image command. (You ma need '&').
+     --runasroot CMD   Run command CMD as root in container. (You may need '&').
                        Caution: Runs with --privileged host access. 
      --runtime RUNTIME Specify docker runtime. Known by x11docker:
                          runc:         Docker default runtime.
@@ -5880,40 +5880,57 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
     echo   "  echo ''"
   }
   
-  
-  # --runasuser commands added here
-  [ "$Runasuser" ] && {
-    echo   "  echo '# Custom daemon commands added with option --runasuser'"
-    for Line in "$Runasuser"; do
-      echo "  echo '$Line'"
-    done
-    echo   "  echo ''"
-  }
-  
-  echo     "  echo \"debugnote \\\"$(basename $Containerrc): Running container command: 
-  \\\$Dbus \$Entrypoint \$Containercommand
-  \\\"\""
-  echo     "  echo ''"
-  
-#  echo     "  echo 'exec 1>&6 2>&7 6>&- 7>&-'"
   case $Interactive in
     no)
       echo "  echo 'tail -f $(convertpath share $Cmdstdoutlogfile)     2>/dev/null &'"
       echo "  echo 'tail -f $(convertpath share $Cmdstderrlogfile) >&2 2>/dev/null &'"
-      echo "  echo \"\$Exec \\\$Dbus \$Entrypoint \$Containercommand $( [ "$Forwardstdin" = "yes" ] && echo "<$(convertpath share $Cmdstdinfifo)") >>$(convertpath share $Cmdstdoutlogfile) 2>>$(convertpath share $Cmdstderrlogfile)\""
+      echo "  echo \"exec \\\$Dbus sh $(convertpath share $Cmdrc) >>$(convertpath share $Cmdstdoutlogfile) 2>>$(convertpath share $Cmdstderrlogfile)\""
     ;;
     yes)
       echo "  echo \"\$Exec \\\$Dbus \$Entrypoint \$Containercommand\""
     ;;
   esac
-  echo     "  echo '[ -h \"\$Homesoftlink\" ] && rm \$Homesoftlink'"
-  echo     "  echo \"storeinfo cmdexitcode=\\\$?\""
   echo     "} >> $Containerrc"
   echo     "######## End of containerrc ########"
   echo ""
   
   echo "# Write containerrc into x11docker.log"
   echo "nl -ba >> $Logfile < $Containerrc"
+  echo ""
+
+  
+  
+  echo     "######## Create $(basename $Cmdrc) ########"
+  echo     "{ echo '#! /bin/sh'"
+  echo     "  echo '# Created startscript for cmdrc containing final container command'"
+  echo     "  echo ''"
+  echo     "  echo '$(declare -f storeinfo)'"
+  echo     "  echo '$Messagefifofuncs'"
+  echo     "  echo 'Messagefile=$(convertpath share $Messagefifo)'"
+  # --runasuser commands added here
+  [ "$Runasuser" ] && {
+    echo   "  echo '# Custom daemon commands added with option --runasuser'"
+    for Line in "$Runasuser"; do
+    echo   "  echo \"debugnote \\\"$(basename $Cmdrc): Adding command:
+  $Line\""
+      echo "  echo '$Line'"
+    done
+    echo   "  echo ''"
+  }
+  echo     "  echo \"debugnote \\\"$(basename $Cmdrc): Running container command: 
+  \$Entrypoint \$Containercommand
+  \\\"\""
+  echo     "  echo ''"
+  echo     "  echo \"\$Entrypoint \$Containercommand $( [ "$Forwardstdin" = "yes" ] && echo "<$(convertpath share $Cmdstdinfifo)" ) \""
+  echo     "  echo ''"
+  echo     "  echo '[ -h \"\$Homesoftlink\" ] && rm \$Homesoftlink'"
+  echo     "  echo \"storeinfo cmdexitcode=\\\$?\""
+  echo     "} >> $Cmdrc"
+  echo     "######## End of cmdrc ########"
+  echo ""
+  
+  echo "# Write cmdrc into x11docker.log"
+  echo "nl -ba >> $Logfile < $Cmdrc"
   echo ""
 
 
@@ -7527,6 +7544,7 @@ $Hostuserhome/.cache/x11docker/symlink
   Xtermrc="$Cachefolder/$Xtermrc"                                   && mkfile $Xtermrc
   
   # Files in $Sharefolder: shared to /x11docker in container
+  Cmdrc="$Sharefolder/$Cmdrc"                                       && mkfile $Cmdrc
   Cmdstderrlogfile="$Sharefolder/$Cmdstderrlogfile"                 && mkfile $Cmdstderrlogfile 666
   Cmdstdinfifo="$Sharefolder/$Cmdstdinfifo"
   Cmdstdoutlogfile="$Sharefolder/$Cmdstdoutlogfile"                 && mkfile $Cmdstdoutlogfile 666
@@ -7996,7 +8014,8 @@ declare_variables() {           # declare global variables
   
   # Generated scripts
   Clipboardrc="clipboardrc"                       # --clipboard: Generated script for text clipboard sharing
-  Containerrc="containerrc"                       # Generated script starting container command
+  Cmdrc="cmdrc"                                   # Generated script starting container command
+  Containerrc="containerrc"                       # Generated script starting cmdrc
   Containerrootrc="containerrootrc"               # Generated script to set up container, e.g. user creation. Runs as root in container.
   Dockerrc="dockerrc"                             # Generated script to check image, set up host and create $Containerrc
   Xinitrc="xinitrc"                               # Generated script to set up X, e.g. cookie and xrandr
@@ -8518,6 +8537,9 @@ ${2:-${LANG:-}}" ; shift                                             # Locale/la
          --pw)                Passwordfrontend="${2:-}" ; shift ;;   # Password prompt frontend
          --runasroot)         Runasroot="$Runasroot
 ${2:-}"                       ; shift ;;                             # Add custom root command in container setup script
+         --runasuser)         Runasuser="$Runasuser
+${2:-}"                       
+                              shift ;;                               # Add custom user command in cmdrc   
          --runfromhost)       Runfromhost="$Runfromhost
 ${2:-}"                       ; shift ;;                             # Add custom host command in xinitrc
 
@@ -8583,17 +8605,12 @@ ${2:-}"                       ; shift ;;                             # Add custo
          --launcher)          Createlauncher="yes" ;;                # Create application launcher on desktop and exit
       
      #### Experimental options
-         --iglx)              Iglx="yes" ;               note "Option --iglx: experimental option." ;;            # Indirect rendering; broken since Xorg ~18.2
+         --iglx)              Iglx="yes" ;               note "Option --iglx: experimental option." ;;              # Indirect rendering; broken since Xorg ~18.2
          --keepcache)         Preservecachefiles="yes" ; note "Option --keepcache: experimental option." ;;            
          --no-setup)          Containersetup="no" ;      note "Option --no-setup: experimental option." ;;            
          --podman)            Podman="yes" ; note "Option --podman: experimental option.
-  Please report issues at: https://github.com/mviereck/x11docker/issues/255" ;;
-         --runasuser)         Runasuser="$Runasuser
-${2:-}"                       
-                              shift 
-                              
-                              note "Option --runasuser: experimental option." ;;                                   # Add custom root command in container setup script            
-         --xcomposite)        Xcomposite="yes" ;         note "Option --xcomposite: experimental option." ;;       # Enable X extension COMPOSITE
+  Please report issues at: https://github.com/mviereck/x11docker/issues/255" ;;         
+         --xcomposite)        Xcomposite="yes" ;         note "Option --xcomposite: experimental option." ;;        # Enable X extension COMPOSITE
          --xopt)              Xserveroptions="${2:-}" ;  note "Option --xopt: experimental option." ; shift ;;      # Custom X server options
          --xorgconf)          Xorgconf="${2:-}" ;        note "Option --xorgconf: experimental option." ; shift ;;  # Custom xorg.conf
       
