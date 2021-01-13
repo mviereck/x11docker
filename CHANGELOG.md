@@ -15,6 +15,8 @@ Project website: https://github.com/mviereck/x11docker
    `cmdrc`. Intended to run e.g. `fcitx` keyboard input daemon.
    [(#269)](https://github.com/mviereck/x11docker/issues/269)
    [(x11docker/deepin:#2)](https://github.com/mviereck/dockerfile-x11docker-deepin/issues/2)
+ - `--fallback=no`: New option to deny fallbacks for failing options.
+ - `--no-setup`: Experimental option to disable x11docker setup in container.
  - `--podman`: Experimental `podman` support.
    [(#255)](https://github.com/mviereck/x11docker/issues/255)
  - `--xopt`: Experimental option to add custom X server options.
