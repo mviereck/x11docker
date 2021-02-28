@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [6.7.0](https://github.com/mviereck/x11docker/releases/tag/v6.7.0) - 2021-02-28
 ### Added
  - `-I, --network`: New option to set network mode.
    `-I` will be mandatory in future to allow internet access.
@@ -36,11 +36,14 @@ Project website: https://github.com/mviereck/x11docker
    [(#290)](https://github.com/mviereck/x11docker/issues/290)
  - `--preset`: Parse with `eval` to catch strings.
    [(x11docker/deepin:#20)](https://github.com/mviereck/dockerfile-x11docker-deepin/issues/20)
+ - MS Windows: IP check / no docketNAT interface anymore.
+   [(runx:#6)](https://github.com/mviereck/runx/issues/6)
+   [(#325)](https://github.com/mviereck/x11docker/issues/325)
 ### Deprecated
  - `--hostnet`: Use `--network=host` instead.
  - `--no-internet`: Use `--network=none` instead.
 
-## [6.6.2](https://github.com/mviereck/x11docker/releases/tag/v6.6.2) - 2022-05-19
+## [6.6.2](https://github.com/mviereck/x11docker/releases/tag/v6.6.2) - 2020-05-19
 ### Added
  - `--home=VOLUME`, `--share=VOLUME`: Support of docker volumes.
    [ehough/docker-kodi#33](https://github.com/ehough/docker-kodi/issues/33)
@@ -53,7 +56,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--sharessh`: Please use (directly or with help of option `--preset`):
    `--share $(dirname $SSH_AUTH_SOCK) --env SSH_AUTH_SOCK="$SSH_AUTH_SOCK"`
 
-## [6.6.1](https://github.com/mviereck/x11docker/releases/tag/v6.6.1) - 2022-03-19
+## [6.6.1](https://github.com/mviereck/x11docker/releases/tag/v6.6.1) - 2020-03-19
 ### Fixed
  - `--runx`: Fix `XAUTHORITY` copy bug. 
    [(#219)](https://github.com/mviereck/x11docker/issues/219)

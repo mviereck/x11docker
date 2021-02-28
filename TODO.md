@@ -34,12 +34,9 @@ x11docker ToDo notes
  - `elogind` in void container: loginctl is empty. ck-list-sessions, too.
 
 ## Needs investigation and probably 3d party bug report
-  - `--weston-xwayland`: Weston is resizeable now, but Xwayland root window does not draw new area
   - `--xpra-xwayland`, `--weston-xwayland`: Xwayland does not fit Weston window size if parts of weston window are offscreen
   - `startplasmacompositor`: hardcoded `--libinput` causes failure if running nested
   - `kwin_wayland` needs `CAP_SYS_RESOURCE` even if running nested
-  - `--xpra-xwayland --desktop`: resize & redraw issues
-  - `--xpra --desktop`: sometimes redraw issues on resize
   - `--xpra --desktop --xdummy`: --size modeline does not work, might not even appear in xrandr although set in xdummy.xorg.conf
   - `Xwayland` does not support X over IP (`-listen tcp`)
 
@@ -61,8 +58,7 @@ x11docker ToDo notes
  - avoid loosing `dockerstopshell` from process tree
  - avoid loosing hostexe from process tree
  - `dockerstopshell` does not react if fifofile is deleted.
- - reduce number of variables with `storeinfo()`
- - dependeny wiki: Cygwin packages
+ - dependency wiki: Cygwin packages
  - `capsh`: replace `su` with `capsh`? (missing in alpine) But how to trigger login?
  - `x11docker/check`: palinopsia: check video RAM size with `glxinfo`, adjust requested RAM size.
  - further checks of `/etc/pam.d`

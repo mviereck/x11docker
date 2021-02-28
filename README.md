@@ -25,7 +25,7 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
    - Restricts container capabilities to bare minimum.
    - Container user is same as host user to avoid root in container.
  - Low [dependencies](#dependencies):
-   - No obliging dependencies on host beside X and Docker. Recommended: `xpra` and `Xephyr`.
+   - No obliging dependencies on host beside X and Docker. Recommended: `nxagent` and `Xephyr`.
    - No dependencies inside of Docker images except for some optional features.
  - Several [optional features](#options) like [GPU](#gpu-hardware-acceleration), [sound](#sound), [webcam](#webcam) and [printer](#printer) support.
  - Remote access with [SSH](https://github.com/mviereck/x11docker/wiki/Remote-access-with-SSH), [VNC](https://github.com/mviereck/x11docker/wiki/VNC) 
@@ -125,17 +125,17 @@ Description of some commonly used feature [options](https://github.com/mviereck/
  - For often used option combinations you can make shortcuts with [option `--preset`](#option---preset).
 
 ### Choice of X servers and Wayland compositors
-If no X server option is specified, x11docker automatically chooses one depending on installed [dependencies](#dependencies) and on given or missing options `--desktop`, `--gpu` and `--wayland`. Most recommended are `xpra` and `Xephyr`.
+If no X server option is specified, x11docker automatically chooses one depending on installed [dependencies](#dependencies) and on given or missing options `--desktop`, `--gpu` and `--wayland`. Most recommended are `nxagent` and `Xephyr`.
  - [Overview of all possible X server and Wayland options.](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options)
    - [Hints to use option `--xorg` within X.](https://github.com/mviereck/x11docker/wiki/Setup-for-option---xorg)
    - Use option `-t, --tty` to run without X at all.
 
 ### Desktop or seamless mode
 x11docker assumes that you want to run a single application in seamless mode, i.e. a single window on your regular desktop. If you want to run a desktop environment in image, add option `--desktop`. 
- - Seamless mode is supported with options `--xpra` and `--nxagent`. As a fallback insecure option `--hostdisplay` is possible.
+ - Seamless mode is supported with options `--nxagent` and `--xpra`. As a fallback insecure option `--hostdisplay` is possible.
  - Desktop mode with `--desktop` is supported with all X server options except `--hostdisplay`. If available, x11docker prefers `--xephyr` and `--nxagent`.
  - Special case: Single applications with a window manager (option `--wm`).
-   - If neither `xpra` nor `nxagent` are installed, but x11docker finds a desktop capable X server like `Xephyr`, it avoids insecure option `--hostdisplay` and runs Xephyr with a window manager.
+   - If neither `nxagent` nor `xpra` are installed, but x11docker finds a desktop capable X server like `Xephyr`, it avoids insecure option `--hostdisplay` and runs Xephyr with a window manager.
    - If available, x11docker uses image `x11docker/openbox` to run a window manager in its own container. 
    - Another window manager image an be specified with e.g. `--wm=x11docker/lxde`.
    - As a fallback x11docker runs a window manager from host, either autodetected or specified with e.g. `--wm=xfwm4`. 
@@ -386,7 +386,7 @@ x11docker can run with standard system utilities without additional dependencies
  - x11docker checks dependencies for chosen options on startup and shows terminal messages if some are missing. 
 
 For advanced usage of x11docker it is recommended to install some additional packages.
-The recommended base commands are: `xpra` `Xephyr` `weston` `Xwayland` `xdotool` `xauth` `xinit` `xclip` `xhost` `xrandr` `xdpyinfo`. Some of them are probably already installed.
+The recommended base commands are: `nxagent` `Xephyr` `weston` `Xwayland` `xdotool` `xauth` `xinit` `xclip` `xhost` `xrandr` `xdpyinfo`. Some of them are probably already installed.
  - To provide these base commands see [wiki: Dependencies - Recommended base](https://github.com/mviereck/x11docker/wiki/Dependencies#recommended-base) for a package list matching your distribution.
 
 Some feature options have additional dependencies on host and/or in image. This affects especially options `--gpu`, `--printer` and `--pulseaudio`.
