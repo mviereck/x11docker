@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="6.7.1-beta-4"
+Version="6.7.1-beta-5"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -208,8 +208,12 @@ Container user settings:
      --group-add GROUP Add container user to group GROUP.
      --hostuser USER   Run X (and container user) as user USER. Default is
                        result of \$(logname). (x11docker must run as root).
-     --sudouser        Allow su and sudo for container user. Use with care,
+     --password WORD   Change container user password and exit.
+                       Stored encrypted in ~/.config/x11docker/passwd.
+     --sudouser [=nopasswd] Allow su and sudo for container user. Use with care,
                        severe reduction of default x11docker security!
+                       Optionally passwordless sudo with argument nopasswd.
+                       Default password is 'x11docker'.
      --user N          Create container user N (N=name or N=uid). Default:
                        same as host user. N can also be an unknown user id.
                        You can specify a group id with N being 'user:gid'.
@@ -4015,9 +4019,32 @@ check_containeruser() {         # check container user and shared home folder (a
     Containerusergid="0"
     Containerusergroup="root"
     Containeruserhosthome="/root"
-    Sudouser="yes" && note "Option --user=root: Enabling option --sudouser."
+    Sudouser="${Sudouser:-yes}" && note "Option --user=root: Enabling option --sudouser."
   }
   
+  # --password
+  [ -n "$Containeruserpassword" ] && {
+    command -v perl >/dev/null || error "Option --password: command 'perl' not found.
+  perl is needed to generate an encrypted password."
+    Containeruserpassword="$(perl -e "print crypt(\"$Containeruserpassword\", \"salt\")")"
+    mkdir -p "$(dirname "$Passwordfile")"
+    echo "$Containeruserpassword" > "$Passwordfile"
+    chmod 600                       "$Passwordfile"
+    note "Option --password: Password changed, exiting."
+    finish
+  }
+  [ -f "$Passwordfile" ] && {
+    verbose "Found password file $Passwordfile"
+    Containeruserpassword="$(cat "$Passwordfile")"
+    case "$(stat -c '%a' "$Passwordfile")" in
+      600|400) ;;
+      *) warning "File $Passwordfile
+  should be readable by current user only.
+  Please set access permissions to 600 or 400." ;;
+    esac
+  }
+  [ -z "$Containeruserpassword" ] && Containeruserpassword='sac19FwGGTx/A' # password: x11docker
+
   store_runoption env "USER=$Containeruser"
   debugnote "container user: $Containeruser $Containeruseruid:$Containerusergid $Containeruserhosthome"
 
@@ -4306,7 +4333,7 @@ create_dockercommand() {        ### create command to run docker
 setup_capabilities() {          # check linux capabilities needed by container
   # compare: man capabilities
 
-  [ "$Sudouser" = "yes" ]       && Adminusercaps="yes"
+  [ "$Sudouser" ]               && Adminusercaps="yes"
   [ "$Capdropall" = "no" ]      && [ "$Allownewprivileges" = "auto" ] && { 
     note "Option --cap-default: Enabling option --newprivileges=yes.
   You can avoid this with --newprivileges=no"
@@ -4314,10 +4341,10 @@ setup_capabilities() {          # check linux capabilities needed by container
   }
   
   # --sudouser
-  [ "$Sudouser" = "yes" ] && warning "Option --sudouser severly reduces container security.
+  [ "$Sudouser" ] && warning "Option --sudouser severly reduces container security.
   Container gains additional capabilities to allow sudo and su.
   If an application breaks out of container, it can harm your system
-  in many ways without you noticing. Password: x11docker"
+  in many ways without you noticing. Default password: x11docker"
 
   # enable dbus
   case $Initsystem in
@@ -4792,8 +4819,8 @@ Exec=/usr/local/bin/x11docker-xrandr
       echo "rm -v /etc/shadow || warning 'Cannot change /etc/shadow. That may be a security risk.'"
       echo "echo \"$Containeruser:$Containeruserpassword:17293:0:99999:7:::\" > /etc/shadow"
       case $Sudouser in
-        no)  echo "echo 'root:*:17219:0:99999:7:::' >> /etc/shadow" ;;
-        yes) echo "echo 'root:$Containeruserpassword:17219:0:99999:7:::' >> /etc/shadow  # with option --sudouser, set root password 'x11docker'"
+        "")  echo "echo 'root:*:17219:0:99999:7:::' >> /etc/shadow" ;;
+        *)   echo "echo 'root:$Containeruserpassword:17219:0:99999:7:::' >> /etc/shadow  # with option --sudouser, set root password 'x11docker'"
              echo "sed -i 's%root:-:%root:x:%' /etc/passwd                               # allow password in /etc/shadow"
         ;;
       esac
@@ -4811,11 +4838,14 @@ Exec=/usr/local/bin/x11docker-xrandr
       echo "echo '# /etc/sudoers created by x11docker' > /etc/sudoers"
       echo "echo 'Defaults	env_reset'                >> /etc/sudoers"
       echo "echo 'root ALL=(ALL) ALL'                 >> /etc/sudoers"
-      [ "$Sudouser" = "yes" ] && echo "echo '$Containeruser ALL=(ALL) ALL' >> /etc/sudoers"
+      case $Sudouser in
+        yes)      echo "echo '$Containeruser ALL=(ALL) ALL' >> /etc/sudoers" ;;
+        nopasswd) echo "echo '$Containeruser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers" ;;
+      esac
       echo ""
 
       # try to disable possible custom PAM setups that could allow switch to root in container
-      [ "$Sudouser" = "no" ] && {
+      [ -z "$Sudouser" ] && {
         echo "# Restrict PAM configuration of su and sudo"
         echo "mkdir -p /etc/pam.d"
         echo "[ -e /etc/pam.d/sudo ] && rm -v /etc/pam.d/sudo"
@@ -6077,8 +6107,8 @@ $Wmdockercommand"'
   echo "#### run docker image ####"
   case $Interactive in
     no)  
-#      echo "read Containerid < <($Dockercommand 2>>$Containerlogfile | rmcr)" 
-      echo "read Containerid < <($Dockercommand | rmcr)" 
+      echo "read Containerid < <($Dockercommand 2>>$Containerlogfile | rmcr)" 
+#      echo "read Containerid < <($Dockercommand | rmcr)" 
     ;;
     yes)
       [ "$Winpty" ] && echo "$Winpty bash $Dockercommandfile <&0 &" || echo "$Dockercommand <&0 &"
@@ -7891,14 +7921,14 @@ option_messages() {             # some messages depending on options, but not ch
   # --user=RETAIN / keep container defined in image
   case $Createcontaineruser in
     no)
-      [ "$Sudouser" = "yes" ] && note "Option --sudouser has limited support with --user=RETAIN.
+      [ "$Sudouser" ] && note "Option --sudouser has limited support with --user=RETAIN.
   x11docker will only set needed capabilities. 
   User setup and /etc/sudoers won't be touched.
   Option --group-add=sudo might be useful."
     ;;
   esac
   
-  [ "$Sudouser" = "yes" ] && [ "$Containeruseruid" != "0" ] && [ "$Network" != "host" ] && [ -z "$Xoverip" ] && note "Option --sudouser: If you want to run GUI application
+  [ "$Sudouser" ] && [ "$Containeruseruid" != "0" ] && [ "$Network" != "host" ] && [ -z "$Xoverip" ] && note "Option --sudouser: If you want to run GUI application
   with su or sudo, you might need to add either option --xoverip 
   or (discouraged) option --network=host."
   
@@ -8171,9 +8201,10 @@ declare_variables() {           # declare global variables
   Containerusergroups=""                          # --group-add: Additional groups for container user
   Containeruserhome=""                            # HOME path within container
   Containeruserhosthome=""                        # HOME path of container user on host
-  Containeruserpassword="sac19FwGGTx/A"           # Encrypted password "x11docker", suits /etc/shadow. Generated with:  perl -e 'print crypt("x11docker", "salt"),"\n"'
+  Containeruserpassword=''
   Createcontaineruser="yes"                       # exception: --user=RETAIN
   Lognameuser=""                                  # $(logname) or $SUDO_USER or $PKEXEC_USER
+  Passwordfile="$HOME/.config/x11docker/passwd"
   Persistanthomevolume=""                         # --home: Path to shared host folder or docker volume used as HOME in container.
   Startuser=""                                    # User who started x11docker
   Unpriv=""                                       # Command to run commands as unprivileged user
@@ -8328,7 +8359,7 @@ declare_variables() {           # declare global variables
   Runtime=""                                      # Runtime to use. runc|nvidia|kata-runtime|crun
   Sharehostipc="no"                               # --hostipc: Set --ipc=host.
   Stopsignal=""                                   # Signal to send on 'docker stop'
-  Sudouser="no"                                   # --sudouser: Create user with sudo permissions and root user with password 'x11docker'
+  Sudouser=""                                     # --sudouser: Create user with sudo permissions and root user with password 'x11docker'
   Switchcontaineruser="no"                        # --init=systemd|openrc|runit|sysvinit: User switching to trigger login services yes/no
   Switchcontainerusercaps="no"                    # --init=systemd|openrc|runit|sysvinit, --sudouser, --user=root: Add capabilities for su/sudo user switching
   Systemdconsoleservice="systemd.console-getty.service" # --init=systemd
@@ -8475,7 +8506,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,alsa::,clipboard,gpu,lang::,printer::,pulseaudio::,webcam"                                     # Host integration features
   Longoptions="$Longoptions,env:,mobyvm,name:,no-entrypoint,runtime:,workdir:"                                             # Container config
   Longoptions="$Longoptions,cap-default,hostipc,limit::,newprivileges::,network::"                                         # Container capabilities
-  Longoptions="$Longoptions,group-add:,hostuser:,sudouser,user:,shell:"                                                    # Container user
+  Longoptions="$Longoptions,group-add:,hostuser:,password:,sudouser::,user:,shell:"                                                  # Container user
   Longoptions="$Longoptions,dbus::,init::,hostdbus,sharecgroup"                                                            # Container init and DBus
   Longoptions="$Longoptions,stdin,interactive"                                                                             # Container interaction
   Longoptions="$Longoptions,runasuser:,runfromhost:,runasroot:"                                                            # Additional commands to execute
@@ -8649,8 +8680,9 @@ ${2:-}"                       ; shift ;;                             # Add custo
      #### User settings
          --group-add)         Containerusergroups="$Containerusergroups ${2:-}" ; shift ;; # Additional groups for container user
          --hostuser)          Hostuser="${2:-}" ; shift ;;           # Set host user different from logged in user
+         --password)          Containeruserpassword="${2:-}" ; shift ;; # Change encrypted password in ~/.config/x11docker/passwd
          --shell)             Containerusershell="${2:-}" ; shift ;; # Set preferred user shell
-         --sudouser)          Sudouser="yes" ;;                      # su and sudo for container user with password x11docker
+         --sudouser)          Sudouser="yes" ; [ "${2,,}" = "nopasswd" ] && Sudouser="nopasswd" ; shift ;; # su and sudo for container user with password x11docker
          --user)              Containeruser="${2:-}"  ; shift        # Set container user other than host user
                               [ "$Containeruser" = "RETAIN" ] && Createcontaineruser="no" ;;
                

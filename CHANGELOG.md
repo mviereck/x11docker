@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Added
+ - `--password`: New option to set a container user password.
+   [(#334)](https://github.com/mviereck/x11docker/issues/334)
+### Changed
+ - `--sudouser`: Allow optional argument `nopasswd` for sudo without password.
+
 ## [6.7.0](https://github.com/mviereck/x11docker/releases/tag/v6.7.0) - 2021-02-28
 ### Added
  - `-I, --network`: New option to set network mode.
