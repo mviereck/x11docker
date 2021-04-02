@@ -12,6 +12,11 @@ Project website: https://github.com/mviereck/x11docker
    [(#334)](https://github.com/mviereck/x11docker/issues/334)
 ### Changed
  - `--sudouser`: Allow optional argument `nopasswd` for sudo without password.
+ - `--xoverip --gpu`: Default to `--iglx`.
+   [(#337)](https://github.com/mviereck/x11docker/issues/337)
+### Fixed
+ - `--size`: Regard if no monitor is connected.
+   [(#336)](https://github.com/mviereck/x11docker/issues/336)
 
 ## [6.7.0](https://github.com/mviereck/x11docker/releases/tag/v6.7.0) - 2021-02-28
 ### Added
@@ -43,7 +48,7 @@ Project website: https://github.com/mviereck/x11docker
    [(#290)](https://github.com/mviereck/x11docker/issues/290)
  - `--preset`: Parse with `eval` to catch strings.
    [(x11docker/deepin:#20)](https://github.com/mviereck/dockerfile-x11docker-deepin/issues/20)
- - MS Windows: IP check / no docketNAT interface anymore.
+ - MS Windows: IP check / no dockerNAT interface anymore.
    [(runx:#6)](https://github.com/mviereck/runx/issues/6)
    [(#325)](https://github.com/mviereck/x11docker/issues/325)
 ### Deprecated
