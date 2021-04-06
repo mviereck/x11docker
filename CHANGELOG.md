@@ -8,6 +8,7 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
+ - `--iglx`: Use indirect rendering for OpenGL.
  - `--password`: New option to set a container user password.
    [(#334)](https://github.com/mviereck/x11docker/issues/334)
 ### Changed
