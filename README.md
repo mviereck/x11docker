@@ -228,7 +228,7 @@ Container runtimes known and supported by x11docker are:
  - `oci`: Runtime reported in [#205](https://github.com/mviereck/x11docker/issues/205), no documentation found. Handled by x11docker like `runc`.
  
 Possible runtime configuration in `/etc/docker/daemon.json`:
-```
+```json
 {
   "default-runtime": "runc",
   "runtimes": {
@@ -347,11 +347,11 @@ Copies `x11docker` and `x11docker-gui` to `/usr/bin`. Creates an icon in `/usr/s
 Creates `x11docker.desktop` in `/usr/share/applications`. Copies `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
 ### Shortest way for first installation:
  - For systems using `sudo`:
-   ```
+   ```sh
    curl -fsSL https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker | sudo bash -s -- --update
    ```
  - Directly as `root`:
-   ```
+   ```sh
    curl -fsSL https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker | bash -s -- --update
    ```
    
@@ -556,7 +556,7 @@ For very long option combinations you might want to use option `--preset FILENAM
    
 ### Adjust images for your needs
 For persistent changes of image system adjust Dockerfile and rebuild. To add custom applications to x11docker example images you can create a new Dockerfile based on them. Example:
-```
+```Dockerfile
 # xfce desktop with VLC media player
 FROM x11docker/xfce
 RUN apt-get update && apt-get install -y vlc
