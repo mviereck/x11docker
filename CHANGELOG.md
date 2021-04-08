@@ -6,14 +6,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [6.8.0](https://github.com/mviereck/x11docker/releases/tag/v6.8.0) - 2021-04-08
 ### Added
  - `--iglx`: Use indirect rendering for OpenGL.
  - `--password`: New option to set a container user password.
    [(#334)](https://github.com/mviereck/x11docker/issues/334)
 ### Changed
  - `--sudouser`: Allow optional argument `nopasswd` for sudo without password.
- - `--xoverip --gpu`: Default to `--iglx`.
    [(#337)](https://github.com/mviereck/x11docker/issues/337)
 ### Fixed
  - `--size`: Regard if no monitor is connected.
