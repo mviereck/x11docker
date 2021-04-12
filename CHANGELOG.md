@@ -17,6 +17,8 @@ Project website: https://github.com/mviereck/x11docker
 ### Fixed
  - `--size`: Regard if no monitor is connected.
    [(#336)](https://github.com/mviereck/x11docker/issues/336)
+ - `--init=s6-overlay`: Use `--tmpfs /run:exec`
+   [(#340)](https://github.com/mviereck/x11docker/issues/340)
 
 ## [6.7.0](https://github.com/mviereck/x11docker/releases/tag/v6.7.0) - 2021-02-28
 ### Added
