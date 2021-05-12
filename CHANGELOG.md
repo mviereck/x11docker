@@ -10,7 +10,7 @@ Project website: https://github.com/mviereck/x11docker
 ### Added
  - `--composite`: New option to enable or disable X extension Composite.
    Can help to fix issues with `--nxagent`.
-   [(#347)](https://github.com/mviereck/x11docker/issues/347)
+   [(#345)](https://github.com/mviereck/x11docker/issues/345)
 ### Fixed
  - `--init=s6-overlay`: Use `--tmpfs /run:exec`
    [(#340)](https://github.com/mviereck/x11docker/issues/340)
