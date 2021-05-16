@@ -8,6 +8,10 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
+ - `--backend BACKEND`: Experimental option to choose another backend
+   than `docker`, e.g. `podman` or `nerdctl`.
+   [(#255)](https://github.com/mviereck/x11docker/issues/255)
+   [(#357)](https://github.com/mviereck/x11docker/issues/357)
  - `--composite`: New option to enable or disable X extension Composite.
    Can help to fix issues with `--nxagent`.
    [(#345)](https://github.com/mviereck/x11docker/issues/345)
