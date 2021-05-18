@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="6.9.0-beta-3"
+Version="6.9.0-beta-4"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -258,6 +258,7 @@ Container init system, elogind and DBus daemon:
                        used with one of --init=openrc|runit|sysvinit
 
 Container special configuration:
+     --backend BACKEND Backend to use. Current choice: docker or podman
      --env VAR=value   Set custom environment variable VAR=value
      --name NAME       Specify container name NAME.
      --no-entrypoint   Disable ENTRYPOINT in image to allow other commands, too
@@ -272,7 +273,6 @@ Container special configuration:
      
 Additional commands: (You might need to move them to background with 'CMD &'.)
      --runasroot CMD   Run command CMD as root in container.
-                       Caution: Runs with --privileged host access. 
      --runasuser CMD   Run command CMD with user privileges in container 
                        before running image command.
      --runfromhost CMD Run host command CMD on new X server.
@@ -1729,6 +1729,7 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
     store_runoption volume "$Gpudevice"
   done < <(find /dev/dri /dev/nvidia* /dev/vga_arbiter /dev/nvhost* /dev/nvmap -maxdepth 0 2>/dev/null ||:)
 
+  #Nvidiaversion="304.137"
   [ -z "$Nvidiaversion" ] && return 0
   
   # check for closed source nvidia driver on host, provide automated installation, warn about disadvantages
@@ -1746,6 +1747,12 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
   [ -e "$Nvidiainstallerfile" ] && {
     debugnote "NVIDIA: Found proprietary closed source NVIDIA driver installer
   $Nvidiainstallerfile"
+    [ "$Capdropall" = "yes" ] && warning "Option --gpu: Installing NVIDIA driver in container
+  requires container privileges that x11docker would drop otherwise.
+  Though, they are still within default docker capabilities."
+    Allownewprivileges="yes"
+    store_runoption cap CHOWN
+    store_runoption cap FOWNER
     return 0
   }
   
@@ -4830,6 +4837,7 @@ Exec=/usr/local/bin/x11docker-xrandr
              echo "sed -i 's%root:-:%root:x:%' /etc/passwd                               # allow password in /etc/shadow"
         ;;
       esac
+      echo "chmod 640 /etc/shadow   # can fail depending on available capabilities" 
       echo ""
       echo "# Create user group entry (and delete possibly existing same gid)"
       echo "cat /etc/group | grep -v ':$Containerusergid:'    > /tmp/group"
@@ -4907,8 +4915,12 @@ Exec=/usr/local/bin/x11docker-xrandr
 
   # HOME
   echo "# Create HOME"
-  echo "mkdir -p \$Containeruserhome"
-  echo "chown \$Containeruser:\$(id -g \$Containeruser) \"\$Containeruserhome\""
+  echo '[ -e "$Containeruserhome" ] || {'
+  echo '  mkdir -v -p "$(dirname "$Containeruserhome")"'
+  echo '  mkdir -v -m 777 "$Containeruserhome"'
+  echo '  chown -v "$Containeruser":"$Containerusergroup" "$Containeruserhome" && chmod -v 755 "$Containeruserhome"  # can fail depending on capabilities'
+  echo '}'
+  #echo "chown \$Containeruser:\$(id -g \$Containeruser) \"\$Containeruserhome\""
   echo "ls -la \$Containeruserhome"
   echo ""
 
@@ -6193,11 +6205,11 @@ $(rmcr < '$Containerlogfile' | uniq )"'
   echo ""
   
   [ "$Switchcontaineruser" = "no" ] && [ "$Containersetup" = "yes" ] && {
-    echo "debugnote 'dockerrc(): Starting containerrootrc with privileged docker exec'"
+    echo "debugnote 'dockerrc(): Starting containerrootrc with docker exec'"
     echo "# copy containerrootrc inside of container to avoid possible noexec of host home."
-    echo "$Containerbackendbin exec --privileged $Containername sh -c 'cp $(convertpath share $Containerrootrc) /tmp/containerrootrc ; chmod 644 /tmp/containerrootrc' 2>&1 | rmcr >>$Containerlogfile"
+    echo "$Containerbackendbin exec $Containername sh -c 'cp $(convertpath share $Containerrootrc) /tmp/containerrootrc ; chmod 644 /tmp/containerrootrc' 2>&1 | rmcr >>$Containerlogfile"
     echo "# run container root setup. containerrc will wait until setup script is ready."
-    echo "$Containerbackendbin exec --privileged -u root $Containername /bin/sh /tmp/containerrootrc 2>&1 | rmcr >>$Containerlogfile"
+    echo "$Containerbackendbin exec -u root $Containername /bin/sh /tmp/containerrootrc 2>&1 | rmcr >>$Containerlogfile"
     echo ""
   }
   
@@ -7940,7 +7952,7 @@ option_messages() {             # some messages depending on options, but not ch
   case $Initsystem in
     systemd)
       grep -q cgroup2 /proc/filesystems && note "Option --init=systemd: Found cgroup v2
-  on your system. systemd in container might fail.
+  on your system. systemd in container might fail without an error message.
   As a workaround you can set a kernel boot option to enforce cgroup v1:
     systemd.unified_cgroup_hierarchy=0
   Compare ticket https://github.com/mviereck/x11docker/issues/349"

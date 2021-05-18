@@ -18,6 +18,8 @@ Project website: https://github.com/mviereck/x11docker
 ### Fixed
  - `--init=s6-overlay`: Use `--tmpfs /run:exec`
    [(#340)](https://github.com/mviereck/x11docker/issues/340)
+ - `containerrootrc`: Don't run `docker exec --privileged` for container root
+   setup to avoid possible abuse by corrupted core utils.
 
 ## [6.8.0](https://github.com/mviereck/x11docker/releases/tag/v6.8.0) - 2021-04-08
 ### Added
