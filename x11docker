@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="6.9.0-beta-4"
+Version="6.9.0-beta-5"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -258,10 +258,12 @@ Container init system, elogind and DBus daemon:
                        used with one of --init=openrc|runit|sysvinit
 
 Container special configuration:
-     --backend BACKEND Backend to use. Current choice: docker or podman
+     --backend BACKEND  Backend to use. Current choice: docker podman nerdctl
      --env VAR=value   Set custom environment variable VAR=value
      --name NAME       Specify container name NAME.
      --no-entrypoint   Disable ENTRYPOINT in image to allow other commands, too
+     --no-setup        No x11docker setup in running container. Disallows
+                       several other options. See also --user=RETAIN.
      --runtime RUNTIME  Specify docker runtime. Known by x11docker:
                          runc:         Docker default runtime.
                          crun:         Fast replacement for runc written in C.
@@ -1747,6 +1749,12 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
   [ -e "$Nvidiainstallerfile" ] && {
     debugnote "NVIDIA: Found proprietary closed source NVIDIA driver installer
   $Nvidiainstallerfile"
+    [ "$Containersetup" = "no" ] && {
+      note "Options --no-setup --gpu: Cannot install NVIDIA driver
+  with option --no-setup. Fallback: Disabling option --gpu"
+      Sharegpu="no"
+      return 1
+    }
     [ "$Capdropall" = "yes" ] && warning "Option --gpu: Installing NVIDIA driver in container
   requires container privileges that x11docker would drop otherwise.
   Though, they are still within default docker capabilities."
@@ -1769,7 +1777,7 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
   version $Nvidiaversion in container on every container startup.
   Drawbacks: Container startup is a bit slower and its security will be reduced.
 
-  You can look here for a driver installer:
+  You can look here for a driver installer file:
     https://www.nvidia.com/Download/index.aspx
     https://http.download.nvidia.com/
   A direct download URL is probably:
@@ -4078,7 +4086,11 @@ check_containeruser() {         # check container user and shared home folder (a
 create_dockercommand() {        ### create command to run docker
   local Line= Memory Tini=
   
-  Dockercommand="$Containerbackendbin run --tty"
+  Dockercommand="$Containerbackendbin run"
+  case "$Containerbackend" in
+    nerdctl) ;;
+    *) Dockercommand="$Dockercommand --tty" ;;
+  esac
   Wmdockercommand="$Containerbackendbin run --detach"
   #[ "$Preservecachefiles" = "no" ] && Dockercommand="$Dockercommand --rm"
   case $Interactive in
@@ -4140,9 +4152,9 @@ create_dockercommand() {        ### create command to run docker
       done
       :
     } || {
-      note "Your docker version does not support option --group-add.
+      [ "$Containerusergroups" ] && note "Your backend $Containerbackend does not support option --group-add.
   Could not add container user to groups: $Containerusergroups
-  Possible sound or GPU setup may fail. Please update your docker installation."
+  Possible sound or GPU setup may fail."
     }
   }
   
@@ -4211,8 +4223,11 @@ create_dockercommand() {        ### create command to run docker
   --volume /sys/fs/cgroup:/sys/fs/cgroup:ro"
 
   # Needed especially for --init=systemd and --dbus-daemon
-  Dockercommand="$Dockercommand \\
-  --tmpfs /run:exec --tmpfs /run/lock"
+  case $Containerbackend in
+    nerdctl) ;;
+    *) Dockercommand="$Dockercommand \\
+  --tmpfs /run:exec --tmpfs /run/lock" ;;
+  esac
 
   # shared cache folder
   Dockercommand="$Dockercommand \\
@@ -5666,11 +5681,13 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   case $Pullimage in
     no) ;;
     always) echo "Dockerpull=yes" ;;
-    yes) echo "$Containerbackendbin inspect $Imagename >>$Containerlogfile 2>&1 || Dockerpull=yes" ;;
+#    yes) echo "$Containerbackendbin inspect $Imagename >>$Containerlogfile 2>&1 || Dockerpull=yes" ;;
+    yes) echo "$Containerbackendbin images | grep -q '^$Imagename ' || Dockerpull=yes" ;;
     ask)
       [ "$Runsinterminal" = "yes" ] && {
         echo "grep -x -q '$Imagename' < $Dockerimagelistfile || grep -x -q '$Imagename:latest' < $Dockerimagelistfile || {"
-        echo "  $Containerbackendbin inspect $Imagename >>$Containerlogfile 2>&1 || {"
+#        echo "  $Containerbackendbin inspect $Imagename >>$Containerlogfile 2>&1 || {"
+        echo "  $Containerbackendbin images | grep -q '^$Imagename ' || {"
         echo "    echo 'Image $Imagename not found locally.' >&2"
         echo "    echo 'Do you want to pull it from docker hub?' >&2"
         echo "    askyesno && Dockerpull=yes || error \"Image '$Imagename' not available locally and not pulled from docker hub.\""
@@ -5696,341 +5713,341 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
 
   echo "rocknroll || exit 64"
   echo ""
-    
-  echo "Inspect=\"\$($Containerbackendbin inspect $Imagename --format='{{.Config.User}}|{{.Config.WorkingDir}}|{{.Architecture}}')\""
-  echo ""
-  
-  echo "# Check architecture"
-  echo "Containerarchitecture=\"\$(cut -d'|' -f3 <<< \"\$Inspect\")\""
-  echo "debugnote \"dockerrc: Image architecture: \$Containerarchitecture\""
 
-  echo "# Check CMD"
-  echo "[ -z \"\$Containercommand\" ] && {"
-  echo "  # extract image command from image if not given on cli"
-  echo "  Containercommand=\"\$($Containerbackendbin inspect $Imagename --format='{{.Config.Cmd}}')\""
-  echo "  Containercommand=\"\${Containercommand#[}\""
-  echo "  Containercommand=\"\${Containercommand%]}\""
-  echo "  debugnote \"dockerrc: Image CMD: \$Containercommand\""
-  echo "  echo \"\$Containercommand\" | grep -q $(convertpath share $Containerrc) && error 'Recursion error: Found CMD $(convertpath share $Containerrc) in image.
-  Did you use docker commit with an x11docker container?
-  Please build new images with a Dockerfile instead of using docker commit,
-  or provide a different container command.'"
-  echo "}"
-  echo ""
-  
-  
-  echo "# Check USER"
-  echo "Imageuser=\"\$(cut -d'|' -f1 <<< \"\$Inspect\")\""
-  echo "debugnote \"dockerrc: Image USER: \$Imageuser\""
-  case $Createcontaineruser in
+  case "$Containersetup" in
+    no) ;;
     yes)
-      echo "[ \"\$Imageuser\" ] && note \"Found 'USER \$Imageuser' in image."
-      echo "  If you want to run with user \$Imageuser instead of host user $Containeruser,"
-      echo "  than run with --user=RETAIN.\""
-      echo "storeinfo containeruser=\"$Containeruser\""
-    ;;
-    no)
-      echo 'storeinfo containeruser="${Imageuser:-root}"'
-    ;;
-  esac
-  echo ""
-  
-  case $Noentrypoint in
-    yes) echo "Entrypoint=" ;;
-    no)
-      echo     "# Check ENTRYPOINT"
-      echo     "Entrypoint=\"\$($Containerbackendbin inspect $Imagename --format='{{.Config.Entrypoint}}')\""
-      echo     "Entrypoint=\"\${Entrypoint#[}\""
-      echo     "Entrypoint=\"\${Entrypoint%]}\""
-      echo     "debugnote \"dockerrc: Image ENTRYPOINT: \$Entrypoint\""
-      case $Initsystem in
-        systemd|sysvinit|runit|openrc|tini)
-          echo "echo \"\$Entrypoint\" | grep -qE 'tini|init|systemd' && {"
-          echo "  note \"There seems to be an init system in ENTRYPOINT of image:
-    \$Entrypoint
-  Will disable it as x11docker already runs an init with option --$Initsystem.
-  To allow this ENTRYPOINT, run x11docker with option --init=none.\""
-          echo "  Entrypoint="
-          echo "}"
-          #echo "Exec=exec"
-        ;;
-        s6-overlay)
-          echo "[ \"\$Entrypoint\" = '/init' ] && {"
-          echo "  Entrypoint="
-          echo "  [ \"\$Containercommand\" ] || Containercommand=\"sh -c 'while :; do sleep 10; done'\""
-          echo "}"
-        ;;
-        none)
-          echo "echo \"\$Entrypoint\" | grep -qE 'tini|init|systemd' && {"
-          echo "  note \"There seems to be an init system in ENTRYPOINT of image:
-  \$Entrypoint 
-  Returning exit code of container command will fail.\""
-          echo "  Exec=exec"
-          echo "}"
-        ;;
-      esac
-    ;;
-  esac
-  echo ""
-  
-  [ -z "$Workdir" ] && {
-    echo "# Check WORKDIR"
-    echo "Workdir=\"\$(cut -d'|' -f2 <<< \"\$Inspect\")\""
-    echo "debugnote \"dockerrc: Image WORKDIR: \$Workdir\""
-    echo "[ \"\$Workdir\" ] && note \"Found 'WORKDIR \$Workdir' in image. 
-  You can change it with option --workdir=DIR.\""
-    echo ""
-  }
-
-  echo "[ -z \"\$Containercommand\$Entrypoint\" ] && error 'No container command specified and no CMD or ENTRYPOINT found in image.'"
-  echo ""
-
-  echo     "######## Create $(basename $Containerrc) ########"
-  echo     ""
-  echo     "{ echo '#! /bin/sh'"
-#  [ "$Debugmode" = "yes" ] && echo "echo 'set -x'"
-  echo     "  echo ''"
-  echo     "  echo '# $(basename $Containerrc)'"
-  echo     "  echo '# Created startscript for docker run used as container command.'"
-  echo     "  echo '# Runs as unprivileged user in container.'"
-  echo     "  echo ''"
-
-  
-#  echo     "  echo 'exec 6>&1 7>&2'"
-#  echo     "  echo 'exec >>$(convertpath share $Containerlogfile) 2>&1'"
-  echo     "  echo ''"
-
-  echo     "  echo '$(declare -f mysleep)'"
-  echo     "  echo '$(declare -f rocknroll)'"
-  echo     "  echo '$(declare -f saygoodbye)'"
-  echo     "  echo '$(declare -f storeinfo)'"
-  echo     "  echo '$(declare -f waitforlogentry)'"
-  echo     "  echo '$Messagefifofuncs'"
-  echo     "  echo 'Messagefile=$(convertpath share $Messagefifo)'"
-  echo     "  echo 'Storeinfofile=$(convertpath share $Storeinfofile)'"
-  echo     "  echo 'Timetosaygoodbyefile=$(convertpath share $Timetosaygoodbyefile)'"
-  echo     "  echo ''"
-  
-  echo     "  echo 'waitforlogentry $(basename $Containerrc) \$Storeinfofile containerrootrc=ready "" infinity'"
-
-  echo     "  echo 'debugnote \"Running $(basename $Containerrc): Unprivileged user commands in container\"'"
-  echo     "  echo ''"
-
-  echo     '  echo "Containercommand=\"$Containercommand\""'
-  echo     '  echo "Entrypoint=\"$Entrypoint\""'
-  echo     "  echo ''"
-  echo     "  echo 'verbose \"$(basename $Containerrc): Container system:'"
-  echo     "  echo '\$(cat /etc/os-release 2>&1 ||:)\"'"
-  echo     "  echo ''"
-
-  echo     "} >> $Containerrc"
-
-  [ "$Switchcontaineruser" = "yes" ] && {   ### FIXME try --format '{{json .ContainerConfig.Env}}'
-    echo "echo '# Environment variables found in image:'   >> $Containerrc"
-    echo "IFS=$'\n'"
-    echo "while read -r Line; do"
-    echo "  echo \"export \$(escapestring \"\$Line\")\"  >> $Containerrc"
-    echo "done < <($Containerbackendbin run --rm --entrypoint env $Imagename env 2>>$Containerlogfile | rmcr | grep -v 'HOSTNAME=' )"
-    echo "IFS=$' \t\n'"
-  }
-
-  echo     "{"
-  echo     "  echo ''"
-  echo     "  echo '# USER and HOME'"
-  echo     "  echo 'Containeruser=\"\$(storeinfo dump containeruser)\"'"
-  case $Createcontaineruser in
-    yes)
-      echo "  echo 'Containeruserhome=\"$Containeruserhome\"'"
-    ;;
-    no)
-      case $Sharehome in
-        no)
-          echo "  echo 'Containeruserhome=\"\$(cat /etc/passwd | grep \"\$Containeruser:.:\" | cut -d: -f6)\"'"
-          echo "  echo 'Containeruserhome=\"\${Containeruserhome:-/tmp/\$Containeruser}\"'"
-          echo "  echo 'mkdir -p \"\$Containeruserhome\"'"
-        ;;
-        volume)
-          echo "  echo 'Containeruserhome=\"$Containeruserhome\"'"    
-        ;;
-      esac
-    ;;
-  esac
-  echo     "  echo 'export USER=\"\$Containeruser\"'"
-  echo     "  echo '[ \"\$Containeruserhome\" ] && {'"
-  echo     "  echo '  export HOME=\"\$Containeruserhome\"'"
-  echo     "  echo '}'"
-  echo     "  echo ''"
-  
-  echo     "  echo '# XDG_RUNTIME_DIR'"
-  echo     "  echo 'Containeruseruid=\$(id -u \$Containeruser)'"
-  echo     "  echo 'export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR'"
-  echo     "  echo '[ -e /run/user/\$Containeruseruid ] && ln -s /run/user/\$Containeruseruid \$XDG_RUNTIME_DIR || mkdir -p -m700 \$XDG_RUNTIME_DIR'"
-  echo     "  echo ''"
+      echo "Inspect=\"\$($Containerbackendbin inspect $Imagename --format='{{.Config.User}}|{{.Config.WorkingDir}}|{{.Architecture}}')\""
+      echo ""
       
-  while read -r Line; do
-    Path="$(convertpath container "$Line")"
-    [ "$(cut -c1-5 <<< "$Line")" != "/dev/" ] && {
-      case "$Line" in
-        "$Containeruserhosthome")
-          echo "  echo '# --share: create soft link of shared $Containeruserhosthome to container home'"
-          echo "  echo 'Homesoftlink=\"\$Containeruserhome/home.host.$Containeruser\"'"
-          echo "  echo '[ -e \"\$Containeruserhome/home.host.$Containeruser\" ] || ln -s \"/home.host/\$Containeruser\" \"\$Homesoftlink\"'"
-          echo "  echo ''"
-          Ungrep="$Ungrep|home.host.$Containeruser"
+      echo "# Check architecture"
+      echo "Containerarchitecture=\"\$(cut -d'|' -f3 <<< \"\$Inspect\")\""
+      echo "debugnote \"dockerrc: Image architecture: \$Containerarchitecture\""
+     
+      echo "# Check CMD"
+      echo "[ -z \"\$Containercommand\" ] && {"
+      echo "  # extract image command from image if not given on cli"
+      echo "  Containercommand=\"\$($Containerbackendbin inspect $Imagename --format='{{.Config.Cmd}}')\""
+      echo "  Containercommand=\"\${Containercommand#[}\""
+      echo "  Containercommand=\"\${Containercommand%]}\""
+      echo "  debugnote \"dockerrc: Image CMD: \$Containercommand\""
+      echo "  echo \"\$Containercommand\" | grep -q $(convertpath share $Containerrc) && error 'Recursion error: Found CMD $(convertpath share $Containerrc) in image.
+      Did you use docker commit with an x11docker container?
+      Please build new images with a Dockerfile instead of using docker commit,
+      or provide a different container command.'"
+      echo "}"
+      echo ""
+      
+      
+      echo "# Check USER"
+      echo "Imageuser=\"\$(cut -d'|' -f1 <<< \"\$Inspect\")\""
+      echo "debugnote \"dockerrc: Image USER: \$Imageuser\""
+      case $Createcontaineruser in
+        yes)
+          echo "[ \"\$Imageuser\" ] && note \"Found 'USER \$Imageuser' in image."
+          echo "  If you want to run with user \$Imageuser instead of host user $Containeruser,"
+          echo "  than run with --user=RETAIN.\""
+          echo "storeinfo containeruser=\"$Containeruser\""
         ;;
-        *)
-          Line="$(convertpath container "$Line")"
-          [ "${Line#$Containeruserhome}" = "$Line" ] || Ungrep="$Ungrep|$(basename "$Line")"
+        no)
+          echo 'storeinfo containeruser="${Imageuser:-root}"'
         ;;
       esac
-    }
-  done < <(store_runoption dump volume)
+      echo ""
+      
+      case $Noentrypoint in
+        yes) echo "Entrypoint=" ;;
+        no)
+          echo     "# Check ENTRYPOINT"
+          echo     "Entrypoint=\"\$($Containerbackendbin inspect $Imagename --format='{{.Config.Entrypoint}}')\""
+          echo     "Entrypoint=\"\${Entrypoint#[}\""
+          echo     "Entrypoint=\"\${Entrypoint%]}\""
+          echo     "debugnote \"dockerrc: Image ENTRYPOINT: \$Entrypoint\""
+          case $Initsystem in
+            systemd|sysvinit|runit|openrc|tini)
+              echo "echo \"\$Entrypoint\" | grep -qE 'tini|init|systemd' && {"
+              echo "  note \"There seems to be an init system in ENTRYPOINT of image:
+        \$Entrypoint
+      Will disable it as x11docker already runs an init with option --$Initsystem.
+      To allow this ENTRYPOINT, run x11docker with option --init=none.\""
+              echo "  Entrypoint="
+              echo "}"
+              #echo "Exec=exec"
+            ;;
+            s6-overlay)
+              echo "[ \"\$Entrypoint\" = '/init' ] && {"
+              echo "  Entrypoint="
+              echo "  [ \"\$Containercommand\" ] || Containercommand=\"sh -c 'while :; do sleep 10; done'\""
+              echo "}"
+            ;;
+            none)
+              echo "echo \"\$Entrypoint\" | grep -qE 'tini|init|systemd' && {"
+              echo "  note \"There seems to be an init system in ENTRYPOINT of image:
+      \$Entrypoint 
+      Returning exit code of container command will fail.\""
+              echo "  Exec=exec"
+              echo "}"
+            ;;
+          esac
+        ;;
+      esac
+      echo ""
+      
+      [ -z "$Workdir" ] && {
+        echo "# Check WORKDIR"
+        echo "Workdir=\"\$(cut -d'|' -f2 <<< \"\$Inspect\")\""
+        echo "debugnote \"dockerrc: Image WORKDIR: \$Workdir\""
+        echo "[ \"\$Workdir\" ] && note \"Found 'WORKDIR \$Workdir' in image. 
+      You can change it with option --workdir=DIR.\""
+        echo ""
+      }
+     
+      echo "[ -z \"\$Containercommand\$Entrypoint\" ] && error 'No container command specified and no CMD or ENTRYPOINT found in image.'"
+      echo ""
+     
+      echo     "######## Create $(basename $Containerrc) ########"
+      echo     ""
+      echo     "{ echo '#! /bin/sh'"
+       [ "$Debugmode" = "yes" ] && echo "echo 'set -x'"
+      echo     "  echo ''"
+      echo     "  echo '# $(basename $Containerrc)'"
+      echo     "  echo '# Created startscript for docker run used as container command.'"
+      echo     "  echo '# Runs as unprivileged user in container.'"
+      echo     "  echo ''"
+     
+      
+      echo     "  echo 'exec 6>&1 7>&2'"
+      echo     "  echo 'exec >>$(convertpath share $Containerlogfile) 2>&1'"
+      echo     "  echo ''"
+     
+      echo     "  echo '$(declare -f mysleep)'"
+      echo     "  echo '$(declare -f rocknroll)'"
+      echo     "  echo '$(declare -f saygoodbye)'"
+      echo     "  echo '$(declare -f storeinfo)'"
+      echo     "  echo '$(declare -f waitforlogentry)'"
+      echo     "  echo '$Messagefifofuncs'"
+      echo     "  echo 'Messagefile=$(convertpath share $Messagefifo)'"
+      echo     "  echo 'Storeinfofile=$(convertpath share $Storeinfofile)'"
+      echo     "  echo 'Timetosaygoodbyefile=$(convertpath share $Timetosaygoodbyefile)'"
+      echo     "  echo ''"
+      
+      echo     "  echo 'waitforlogentry $(basename $Containerrc) \$Storeinfofile containerrootrc=ready "" infinity'"
+     
+      echo     "  echo 'debugnote \"Running $(basename $Containerrc): Unprivileged user commands in container\"'"
+      echo     "  echo ''"
+     
+      echo     '  echo "Containercommand=\"$Containercommand\""'
+      echo     '  echo "Entrypoint=\"$Entrypoint\""'
+      echo     "  echo ''"
+      echo     "  echo 'verbose \"$(basename $Containerrc): Container system:'"
+      echo     "  echo '\$(cat /etc/os-release 2>&1 ||:)\"'"
+      echo     "  echo ''"
+     
+      echo     "} >> $Containerrc"
+     
+      [ "$Switchcontaineruser" = "yes" ] && {   ### FIXME try --format '{{json .ContainerConfig.Env}}'
+        echo "echo '# Environment variables found in image:'   >> $Containerrc"
+        echo "IFS=$'\n'"
+        echo "while read -r Line; do"
+        echo "  echo \"export \$(escapestring \"\$Line\")\"  >> $Containerrc"
+        echo "done < <($Containerbackendbin run --rm --entrypoint env $Imagename env 2>>$Containerlogfile | rmcr | grep -v 'HOSTNAME=' )"
+        echo "IFS=$' \t\n'"
+      }
+     
+      echo     "{"
+      echo     "  echo ''"
+      echo     "  echo '# USER and HOME'"
+      echo     "  echo 'Containeruser=\"\$(storeinfo dump containeruser)\"'"
+      case $Createcontaineruser in
+        yes)
+          echo "  echo 'Containeruserhome=\"$Containeruserhome\"'"
+        ;;
+        no)
+          case $Sharehome in
+            no)
+              echo "  echo 'Containeruserhome=\"\$(cat /etc/passwd | grep \"\$Containeruser:.:\" | cut -d: -f6)\"'"
+              echo "  echo 'Containeruserhome=\"\${Containeruserhome:-/tmp/\$Containeruser}\"'"
+              echo "  echo 'mkdir -p \"\$Containeruserhome\"'"
+            ;;
+            volume)
+              echo "  echo 'Containeruserhome=\"$Containeruserhome\"'"    
+            ;;
+          esac
+        ;;
+      esac
+      echo     "  echo 'export USER=\"\$Containeruser\"'"
+      echo     "  echo '[ \"\$Containeruserhome\" ] && {'"
+      echo     "  echo '  export HOME=\"\$Containeruserhome\"'"
+      echo     "  echo '}'"
+      echo     "  echo ''"
   
-  echo     "  echo '# Copy files from /etc/skel into empty HOME'"
-  echo     "  echo '[ -d \"\$HOME\" ] && {'"
-  echo     "  echo '  [ -d /etc/skel ] && [ -z \"\$(ls -A \"\$Containeruserhome\" 2>/dev/null | grep -v -E \"gnupg$Ungrep\")\" ] && {'"
-  echo     "  echo '    debugnote \"$(basename $Containerrc): HOME is empty. Copying from /etc/skel\"'"
-  echo     "  echo '    cp -n -R /etc/skel/. \$Containeruserhome'"
-  echo     "  echo '    :'"
-  echo     "  echo '  } || {'"
-  echo     "  echo '    debugnote \"$(basename $Containerrc): HOME is not empty. Not copying from /etc/skel\"'"
-  echo     "  echo '  }'"
-  echo     "  echo '}'"
-  echo     "  echo ''"
+      echo     "  echo '# XDG_RUNTIME_DIR'"
+      echo     "  echo 'Containeruseruid=\$(id -u \$Containeruser)'"
+      echo     "  echo 'export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR'"
+      echo     "  echo '[ -e /run/user/\$Containeruseruid ] && ln -s /run/user/\$Containeruseruid \$XDG_RUNTIME_DIR || mkdir -p -m700 \$XDG_RUNTIME_DIR'"
+      echo     "  echo ''"
+      
+      while read -r Line; do
+        Path="$(convertpath container "$Line")"
+        [ "$(cut -c1-5 <<< "$Line")" != "/dev/" ] && {
+          case "$Line" in
+            "$Containeruserhosthome")
+              echo "  echo '# --share: create soft link of shared $Containeruserhosthome to container home'"
+              echo "  echo 'Homesoftlink=\"\$Containeruserhome/home.host.$Containeruser\"'"
+              echo "  echo '[ -e \"\$Containeruserhome/home.host.$Containeruser\" ] || ln -s \"/home.host/\$Containeruser\" \"\$Homesoftlink\"'"
+              echo "  echo ''"
+              Ungrep="$Ungrep|home.host.$Containeruser"
+            ;;
+            *)
+              Line="$(convertpath container "$Line")"
+              [ "${Line#$Containeruserhome}" = "$Line" ] || Ungrep="$Ungrep|$(basename "$Line")"
+            ;;
+          esac
+        }
+      done < <(store_runoption dump volume)
+  
+      echo     "  echo '# Copy files from /etc/skel into empty HOME'"
+      echo     "  echo '[ -d \"\$HOME\" ] && {'"
+      echo     "  echo '  [ -d /etc/skel ] && [ -z \"\$(ls -A \"\$Containeruserhome\" 2>/dev/null | grep -v -E \"gnupg$Ungrep\")\" ] && {'"
+      echo     "  echo '    debugnote \"$(basename $Containerrc): HOME is empty. Copying from /etc/skel\"'"
+      echo     "  echo '    cp -n -R /etc/skel/. \$Containeruserhome'"
+      echo     "  echo '    :'"
+      echo     "  echo '  } || {'"
+      echo     "  echo '    debugnote \"$(basename $Containerrc): HOME is not empty. Not copying from /etc/skel\"'"
+      echo     "  echo '  }'"
+      echo     "  echo '}'"
+      echo     "  echo ''"
 
-  [ -n "$Newdisplay" ] && {
-    echo   "  echo '# Create softlink to X unix socket'"
-    echo   "  echo '[ -e /tmp/.X11-unix/X$Newdisplaynumber ] || ln -s /X$Newdisplaynumber /tmp/.X11-unix'"
-    echo   "  echo ''"
-  }
+      [ -n "$Newdisplay" ] && {
+        echo   "  echo '# Create softlink to X unix socket'"
+        echo   "  echo '[ -e /tmp/.X11-unix/X$Newdisplaynumber ] || ln -s /X$Newdisplaynumber /tmp/.X11-unix'"
+        echo   "  echo ''"
+      }
   
-  [ "$Dbusrunsession" = "yes" ]  && {
-    echo   "  echo '# Check for dbus user daemon command'"
-    echo   "  echo 'command -v dbus-run-session >/dev/null && Dbus=dbus-run-session || note \"Option --dbus: dbus seems to be not installed.
+      [ "$Dbusrunsession" = "yes" ]  && {
+        echo   "  echo '# Check for dbus user daemon command'"
+        echo   "  echo 'command -v dbus-run-session >/dev/null && Dbus=dbus-run-session || note \"Option --dbus: dbus seems to be not installed.
   Cannot run a DBus user session. Please install package dbus in image.\"'"
-    echo   "  echo ''"
-  }
+        echo   "  echo ''"
+      }
   
-  case $Xserver in
-    --tty)
-      echo "  echo 'unset DISPLAY WAYLAND_DISPLAY XAUTHORITY'" ;;
-    --weston|--kwin|--hostwayland)
-      echo "  echo 'unset DISPLAY XAUTHORITY'" ;;
-    *)
-      echo "  echo 'unset WAYLAND_DISPLAY'" ;;
-  esac
-  echo     "  echo ''"
-  [ "$Setupwayland" = "yes" ] && {
-    echo   "  echo '# Wayland environment'"
-    echo   "  echo 'export WAYLAND_DISPLAY=$Newwaylandsocket'"
-    echo   "  echo 'ln -s /$Newwaylandsocket \$XDG_RUNTIME_DIR/$Newwaylandsocket'"
-  } || {
-    echo   "  echo 'export XDG_SESSION_TYPE=x11'"
-  }
-  echo     "  echo ''"
+      case $Xserver in
+        --tty)
+          echo "  echo 'unset DISPLAY WAYLAND_DISPLAY XAUTHORITY'" ;;
+        --weston|--kwin|--hostwayland)
+          echo "  echo 'unset DISPLAY XAUTHORITY'" ;;
+        *)
+          echo "  echo 'unset WAYLAND_DISPLAY'" ;;
+      esac
+      echo     "  echo ''"
+      [ "$Setupwayland" = "yes" ] && {
+        echo   "  echo '# Wayland environment'"
+        echo   "  echo 'export WAYLAND_DISPLAY=$Newwaylandsocket'"
+        echo   "  echo 'ln -s /$Newwaylandsocket \$XDG_RUNTIME_DIR/$Newwaylandsocket'"
+      } || {
+        echo   "  echo 'export XDG_SESSION_TYPE=x11'"
+      }
+      echo     "  echo ''"
 
-  echo     "  echo ''"
-  echo     "  echo 'export TERM=xterm'"
+      echo     "  echo ''"
+      echo     "  echo 'export TERM=xterm'"
 
-  echo     "  echo 'storeinfo test locale && export LANG=\"\$(storeinfo dump locale)\"'"
+      echo     "  echo 'storeinfo test locale && export LANG=\"\$(storeinfo dump locale)\"'"
 
-  echo     "  echo '[ -e \"$Hostlocaltimefile\" ] || export TZ=$Hostutctime'"
-  echo     "  echo '[ \"\$(date -Ihours)\" != \"$(date -Ihours)\" ] && export TZ=$Hostutctime'"
+      echo     "  echo '[ -e \"$Hostlocaltimefile\" ] || export TZ=$Hostutctime'"
+      echo     "  echo '[ \"\$(date -Ihours)\" != \"$(date -Ihours)\" ] && export TZ=$Hostutctime'"
 
-  echo     "  echo '[ \"\$DEBIAN_FRONTEND\" = noninteractive ] && unset DEBIAN_FRONTEND && export DEBIAN_FRONTEND'"
-  echo     "  echo '[ \"\$DEBIAN_FRONTEND\" = newt ]           && unset DEBIAN_FRONTEND && export DEBIAN_FRONTEND'"
+      echo     "  echo '[ \"\$DEBIAN_FRONTEND\" = noninteractive ] && unset DEBIAN_FRONTEND && export DEBIAN_FRONTEND'"
+      echo     "  echo '[ \"\$DEBIAN_FRONTEND\" = newt ]           && unset DEBIAN_FRONTEND && export DEBIAN_FRONTEND'"
 
-  echo     "  echo '# container environment (--env)'"
-  while read -r Line ; do  ### FIXME '\\\' not transmitted
-    echo   "  echo \"export '$Line'\""
-#    echo "$Line" >&2
-#    echo   "  echo \"export $(escapestring "$Line")\""
-#    echo   "  echo \"export $(escapestring "$Line")\"" >&2
-#    echo   "  echo \"export \\\"$(escapestring "$Line")\\\"\"" >&2
-#    echo   "  echo \"export \\\"$(escapestring "$Line")\\\"\""
-  done < <(store_runoption dump env)
-  echo     "  echo ''"
+      echo     "  echo '# container environment (--env)'"
+      while read -r Line ; do  ### FIXME '\\\' not transmitted
+        echo   "  echo \"export '$Line'\""
+#        echo "$Line" >&2
+#        echo   "  echo \"export $(escapestring "$Line")\""
+#        echo   "  echo \"export $(escapestring "$Line")\"" >&2
+#        echo   "  echo \"export \\\"$(escapestring "$Line")\\\"\"" >&2
+#        echo   "  echo \"export \\\"$(escapestring "$Line")\\\"\""
+      done < <(store_runoption dump env)
+      echo     "  echo ''"
 
-  [ "$Xauthentication" = "yes" ] || echo "  echo 'unset XAUTHORITY && export XAUTHORITY'"
+      [ "$Xauthentication" = "yes" ] || echo "  echo 'unset XAUTHORITY && export XAUTHORITY'"
 
-  echo     "  echo '[ -d \"\$HOME\" ] && cd \"\$HOME\"'"
-  echo     '  [ "$Workdir" ] && echo "[ -d \"$Workdir\" ] && cd \"$Workdir\"    # WORKDIR in image"'
-  echo     "  echo ''"
-  echo     "  echo ''"
+      echo     "  echo '[ -d \"\$HOME\" ] && cd \"\$HOME\"'"
+      echo     '  [ "$Workdir" ] && echo "[ -d \"$Workdir\" ] && cd \"$Workdir\"    # WORKDIR in image"'
+      echo     "  echo ''"
+      echo     "  echo ''"
 
-  echo     "  echo 'env >> $(convertpath share $Containerenvironmentfile)'"
-  echo     "  echo 'verbose \"Container environment:'"
-  echo     "  echo '\$(env | sort)\"'"
-  echo     "  echo ''"
+      echo     "  echo 'env >> $(convertpath share $Containerenvironmentfile)'"
+      echo     "  echo 'verbose \"Container environment:'"
+      echo     "  echo '\$(env | sort)\"'"
+      echo     "  echo ''"
   
-  [ "$Initsystem" = "systemd" ] && {
-    echo   "  echo 'systemctl --user start  dbus'"
-    echo   "  echo ''"
-  }
+      [ "$Initsystem" = "systemd" ] && {
+        echo   "  echo 'systemctl --user start  dbus'"
+        echo   "  echo ''"
+      }
   
-  case $Interactive in
-    no)
-      echo "  echo 'tail -f $(convertpath share $Cmdstdoutlogfile)     2>/dev/null &'"
-      echo "  echo 'tail -f $(convertpath share $Cmdstderrlogfile) >&2 2>/dev/null &'"
-      echo "  echo \"exec \\\$Dbus sh $(convertpath share $Cmdrc) >>$(convertpath share $Cmdstdoutlogfile) 2>>$(convertpath share $Cmdstderrlogfile)\""
-    ;;
-    yes)
-      echo "  echo \"\$Exec \\\$Dbus \$Entrypoint \$Containercommand\""
-    ;;
-  esac
-  echo     "} >> $Containerrc"
-  echo     "######## End of containerrc ########"
-  echo ""
+      case $Interactive in
+        no)
+          echo "  echo 'tail -f $(convertpath share $Cmdstdoutlogfile)     2>/dev/null &'"
+          echo "  echo 'tail -f $(convertpath share $Cmdstderrlogfile) >&2 2>/dev/null &'"
+          echo "  echo \"exec \\\$Dbus sh $(convertpath share $Cmdrc) >>$(convertpath share $Cmdstdoutlogfile) 2>>$(convertpath share $Cmdstderrlogfile)\""
+        ;;
+        yes)
+          echo "  echo \"\$Exec \\\$Dbus \$Entrypoint \$Containercommand\""
+        ;;
+      esac
+      echo     "} >> $Containerrc"
+      echo     "######## End of containerrc ########"
+      echo ""
   
-  echo "# Write containerrc into x11docker.log"
-  echo "nl -ba >> $Logfile < $Containerrc"
-  echo ""
-
-  
-  
-  echo     "######## Create $(basename $Cmdrc) ########"
-  echo     "{ echo '#! /bin/sh'"
-  echo     "  echo '# Created startscript for cmdrc containing final container command'"
-  echo     "  echo ''"
-  echo     "  echo '$(declare -f storeinfo)'"
-  echo     "  echo '$Messagefifofuncs'"
-  echo     "  echo 'Messagefile=$(convertpath share $Messagefifo)'"
-  # --runasuser commands added here
-  [ "$Runasuser" ] && {
-    echo   "  echo '# Custom daemon commands added with option --runasuser'"
-    for Line in "$Runasuser"; do
-    echo   "  echo 'debugnote \"$(basename $Cmdrc): Adding command:
+      echo "# Write containerrc into x11docker.log"
+      echo "nl -ba >> $Logfile < $Containerrc"
+      echo ""
+      echo     "######## Create $(basename $Cmdrc) ########"
+      echo     "{ echo '#! /bin/sh'"
+      echo     "  echo '# Created startscript for cmdrc containing final container command'"
+      echo     "  echo ''"
+      echo     "  echo '$(declare -f storeinfo)'"
+      echo     "  echo '$Messagefifofuncs'"
+      echo     "  echo 'Messagefile=$(convertpath share $Messagefifo)'"
+      # --runasuser commands added here
+      [ "$Runasuser" ] && {
+        echo   "  echo '# Custom daemon commands added with option --runasuser'"
+        for Line in "$Runasuser"; do
+        echo   "  echo 'debugnote \"$(basename $Cmdrc): Adding command:
   $Line\"'"
-      echo "  echo '$Line'"
-    done
-    echo   "  echo ''"
-  }
-  echo     "  echo \"debugnote \\\"$(basename $Cmdrc): Running container command: 
+          echo "  echo '$Line'"
+        done
+        echo   "  echo ''"
+      }
+      echo     "  echo \"debugnote \\\"$(basename $Cmdrc): Running container command: 
   \$Entrypoint \$Containercommand
   \\\"\""
-  echo     "  echo ''"
-  echo     "  echo \"\$Entrypoint \$Containercommand $( [ "$Forwardstdin" = "yes" ] && echo "<$(convertpath share $Cmdstdinfifo)" ) \""
-  echo     "  echo ''"
-  echo     "  echo '[ -h \"\$Homesoftlink\" ] && rm \$Homesoftlink'"
-  echo     "  echo \"storeinfo cmdexitcode=\\\$?\""
-  echo     "} >> $Cmdrc"
-  echo     "######## End of cmdrc ########"
-  echo ""
+      echo     "  echo ''"
+      echo     "  echo \"\$Entrypoint \$Containercommand $( [ "$Forwardstdin" = "yes" ] && echo "<$(convertpath share $Cmdstdinfifo)" ) \""
+      echo     "  echo ''"
+      echo     "  echo '[ -h \"\$Homesoftlink\" ] && rm \$Homesoftlink'"
+      echo     "  echo \"storeinfo cmdexitcode=\\\$?\""
+      echo     "} >> $Cmdrc"
+      echo     "######## End of cmdrc ########"
+      echo ""
   
-  echo "# Write cmdrc into x11docker.log"
-  echo "nl -ba >> $Logfile < $Cmdrc"
-  echo ""
+      echo "# Write cmdrc into x11docker.log"
+      echo "nl -ba >> $Logfile < $Cmdrc"
+      echo ""
 
 
-  # check [and create] cgroup mountpoint for systemd or elogind
-  [ "$Sharecgroup" = "yes" ] && [ "$Dbussystem" = "yes" ] && {
-    [ "$Initsystem" = "systemd" ] && Wantcgroup=systemd || Wantcgroup=elogind
-    findmnt /sys/fs/cgroup/$Wantcgroup >/dev/null || {
-      echo   "# Check [and create] cgroup mountpoint for $Wantcgroup"
-      echo   "[ '$Wantcgroup' = 'systemd' ] || $Containerbackendbin run --rm --entrypoint env $Imagename sh -c 'ls /lib/elogind/elogind || ls /usr/sbin/elogind|| ls /usr/libexec/elogind' && {"
-      echo   '  [ "$(id -u)"  = "0" ] && note "Creating cgroup mountpoint for '$Wantcgroup'."'
-      echo   '  [ "$(id -u)" != "0" ] && {'
-      echo   "    note 'Want to create and mount a cgroup for $Wantcgroup.
+      # check [and create] cgroup mountpoint for systemd or elogind
+      [ "$Sharecgroup" = "yes" ] && [ "$Dbussystem" = "yes" ] && {
+        [ "$Initsystem" = "systemd" ] && Wantcgroup=systemd || Wantcgroup=elogind
+        findmnt /sys/fs/cgroup/$Wantcgroup >/dev/null || {
+          echo   "# Check [and create] cgroup mountpoint for $Wantcgroup"
+          echo   "[ '$Wantcgroup' = 'systemd' ] || $Containerbackendbin run --rm --entrypoint env $Imagename sh -c 'ls /lib/elogind/elogind || ls /usr/sbin/elogind|| ls /usr/libexec/elogind' && {"
+          echo   '  [ "$(id -u)"  = "0" ] && note "Creating cgroup mountpoint for '$Wantcgroup'."'
+          echo   '  [ "$(id -u)" != "0" ] && {'
+          echo   "    note 'Want to create and mount a cgroup for $Wantcgroup.
   As x11docker currently does not run as root, this will probably fail.
   Please either run x11docker as root, or run with option --pw=su or --pw=sudo.
     
@@ -6043,20 +6060,23 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
     
   You can restore write protection after cgroup creation with:
     mount -o remount,ro cgroup /sys/fs/cgroup'"
-      [ "$Wantcgroup" = "elogind" ] && echo "note 'If you do not want or need elogind in container,
+          [ "$Wantcgroup" = "elogind" ] && echo "note 'If you do not want or need elogind in container,
   just ignore message above.'"
-      echo   "  }"
-      findmnt /sys/fs/cgroup -O ro >/dev/null && {
-        echo "  mount -o remount,rw cgroup /sys/fs/cgroup >>$Containerlogfile 2>&1"
-        echo "  Remounted=yes"
+          echo   "  }"
+          findmnt /sys/fs/cgroup -O ro >/dev/null && {
+            echo "  mount -o remount,rw cgroup /sys/fs/cgroup >>$Containerlogfile 2>&1"
+            echo "  Remounted=yes"
+          }
+          echo   "  mkdir -p /sys/fs/cgroup/elogind >>$Containerlogfile 2>&1"
+          echo   "  mount -t cgroup cgroup /sys/fs/cgroup/elogind -o none,name=elogind  >>$Containerlogfile 2>&1"
+          echo   '  [ "${Remounted:-}" = "yes" ] && mount -o remount,ro cgroup /sys/fs/cgroup  >>'$Containerlogfile' 2>&1'
+          echo   "}"
+          echo   ""
+        }
       }
-      echo   "  mkdir -p /sys/fs/cgroup/elogind >>$Containerlogfile 2>&1"
-      echo   "  mount -t cgroup cgroup /sys/fs/cgroup/elogind -o none,name=elogind  >>$Containerlogfile 2>&1"
-      echo   '  [ "${Remounted:-}" = "yes" ] && mount -o remount,ro cgroup /sys/fs/cgroup  >>'$Containerlogfile' 2>&1'
-      echo   "}"
-      echo   ""
-    }
-  }
+  
+    ;;
+  esac
   
   echo "# Send signal to run X and wait for X to be ready"
   echo 'storeinfo readyforX=ready'
@@ -6123,9 +6143,10 @@ $Wmdockercommand"'
   
   echo ""
   echo "#### run docker image ####"
+#      echo "$Dockercommand "
   case $Interactive in
     no)  
-      echo "read Containerid < <($Dockercommand 2>>$Containerlogfile | rmcr)" 
+      echo "read Containerid < <($Dockercommand 2>>$Containerlogfile | rmcr)"
 #      echo "read Containerid < <($Dockercommand | rmcr)" 
     ;;
     yes)
@@ -6164,7 +6185,15 @@ $Wmdockercommand"'
 
   echo "# Wait for pid 1 in container"
   echo "for ((Count=1 ; Count<=40 ; Count++)); do"
-  echo "  Pid1pid=\"\$($Containerbackendbin inspect --format '{{.State.Pid}}' $Containername 2>>$Containerlogfile | rmcr)\""
+  case $Containerbackend in
+    nerdctl)
+      echo "  Pid1pid=\"\$($Containerbackendbin inspect $Containername 2>>$Containerlogfile | rmcr)\""
+      echo '  Pid1pid="$(grep "\"Pid\"" <<< "$Pid1pid" | tr -dc "0-9")"'
+    ;;
+    *)
+      echo "  Pid1pid=\"\$($Containerbackendbin inspect --format '{{.State.Pid}}' $Containername 2>>$Containerlogfile | rmcr)\""
+    ;;
+  esac
   echo "  debugnote \"dockerrc: \$Count. check for PID 1: \$Pid1pid\""
     case $Mobyvm in
       no)  echo '  checkpid "$Pid1pid" && break' ;;
@@ -6993,19 +7022,46 @@ check_option_interferences() {  # check multiple option interferences, change se
   case $Containersetup in
     no)
       case $Initsystem in
-        none|tini) ;;
-        *) note "Option --no-setup: Option --init is not supported" ;;
+        none) ;;
+        tini|dockerinit) Initsystem="dockerinit" ;;
+        *) note "Option --no-setup: Option --init=$Initsystem is not supported.
+  Fallback: Setting --init=tini"
+          Initsystem="dockerinit"
+        ;;
       esac
-      Initsystem="none"
-      Dbusrunsession="no"
-      #Createcontaineruser="no"
-      Langwunsch=""
-      Noentrypoint="no"
-      Runasroot=""
+      
+      [ "$Dbusrunsession" ] && {
+        note "Option --no-setup does not support option --dbus
+  Fallback: Disabling option --dbus"
+        Dbusrunsession="no"
+      }
+      [ "$Langwunsch" ] && {
+        note "Option --no-setup does not support option --lang.
+  Fallback: Disabling option --lang, setting '--env LANG=$Langwunsch' only."
+        store_runoption env "LANG=$Langwunsch"
+        Langwunsch=""
+      }
+      [ "$Noentrypoint" = "yes" ] && {
+        note "Option --no-setup does not support option --no-entrypoint.
+  Fallback: Disabling option --no-entrypoint."
+        Noentrypoint="no"
+      }
+      [ "$Runasroot" ] && {
+        note "Option --no-setup does not support option --runasroot.
+  Fallback: Disabling option --runasroot."
+        Runasroot=""
+      }
+      [ "$Runasuser" ] && {
+        note "Option --no-setup does not support option --runasuser.
+  Fallback: Disabling option --runasuser."
+        Runasuser=""
+      }
+      [ "$Sudouser" = "yes" ] && note "Option --no-setup does not support option --sudouser.
+  Fallback: Enables needed container capabilities to allow sudo
+  just in case the container user is set up for su and/or sudo.
+  Consider to use --user=root."
       # --stdin?
-      # --sudouser?
       # --hostdbus
-      # nvidia installer
     ;;
   esac
   
@@ -7031,11 +7087,14 @@ check_option_interferences() {  # check multiple option interferences, change se
     warning "Option --cap-default disables security hardening
   for containers done by x11docker. Default docker capabilities are allowed.
   This is considered to be less secure."
-    [ "$Allownewprivileges" = "auto" ] && {
-      note "Option --cap-default: Enabling option --newprivileges.
+    case "$Allownewprivileges" in
+      "yes"|"no") ;;
+      "auto")
+        note "Option --cap-default: Enabling option --newprivileges.
   You can avoid this with --newprivileges=no"
-      Allownewprivileges="yes"
-    }
+        Allownewprivileges="yes"
+      ;;
+    esac
   }
   
   # --newprivileges
@@ -7445,6 +7504,7 @@ check_option_interferences() {  # check multiple option interferences, change se
   esac
   
   case "$Containerbackend" in
+    docker) ;;
     podman)
       # /proc/sys/kernel/unprivileged_userns_clone might exist on debian only.
       # https://github.com/mviereck/x11docker/issues/255#issuecomment-758014962
@@ -7453,6 +7513,18 @@ check_option_interferences() {  # check multiple option interferences, change se
     sysctl -w kernel.unprivileged_userns_clone=1"
       store_runoption cap "CHOWN"
     ;;
+    nerdctl) 
+      note "Option --backend=nerdctl: nerdctl only supports a subset
+  of docker options. That limits support of x11docker features."
+      [ "$Containersetup" = "yes" ] && {
+        note "Option --backend=nerdctl: nerdctl does not support 'inspect'
+  for images that is needed to set up some features.
+  Fallback: Enabling option --no-setup."
+        Containersetup="no"
+      }
+    ;;
+    *) note "Option --backend=$Backend: Unknown backend. Will try anyway.
+  You might need option --no-setup." ;;
   esac
   
   # Docker installed in Ubuntu snap
@@ -7936,17 +8008,13 @@ option_messages() {             # some messages depending on options, but not ch
     esac
   }
   
+  # --webcam
+  [ "$Sharewebcam" = "yes" ] && warning "Option --webcam: Container applications might look 
+  at you and also might take screenshots of your Desktop."
+  
   # --hostipc
   [ "$Sharehostipc" = "yes" ] && warning "Option --hostipc severely degrades 
   container isolation. IPC namespace remapping is disabled."
-
-  # --network
-  [ "$Network" = "host" ] && warning "Option --network=host severly degrades 
-  container isolation. Network namespacing is disabled. 
-  Container shares host network stack. 
-  Spying on network traffic may be possible. 
-  Access to host X server $Hostdisplay may be possible 
-  through abstract unix socket."
   
   # --init
   case $Initsystem in
@@ -7958,10 +8026,19 @@ option_messages() {             # some messages depending on options, but not ch
   Compare ticket https://github.com/mviereck/x11docker/issues/349"
     ;;
   esac
+
+  # --network
+  [ "$Network" = "host" ] && warning "Option --network=host severly degrades 
+  container isolation. Network namespacing is disabled. 
+  Container shares host network stack. 
+  Spying on network traffic may be possible. 
+  Access to host X server $Hostdisplay may be possible 
+  through abstract unix socket."
   
-  # --webcam
-  [ "$Sharewebcam" = "yes" ] && warning "Option --webcam: Container applications might look 
-  at you and also might take screenshots of your Desktop."
+  # --sudouser
+  [ "$Sudouser" ] && [ "$Containeruseruid" != "0" ] && [ "$Network" != "host" ] && [ -z "$Xoverip" ] && note "Option --sudouser: If you want to run GUI application
+  with su or sudo, you might need to add either option --xoverip 
+  or (discouraged) option --network=host."
   
   # --user=RETAIN / keep container defined in image
   case $Createcontaineruser in
@@ -7972,10 +8049,6 @@ option_messages() {             # some messages depending on options, but not ch
   Option --group-add=sudo might be useful."
     ;;
   esac
-  
-  [ "$Sudouser" ] && [ "$Containeruseruid" != "0" ] && [ "$Network" != "host" ] && [ -z "$Xoverip" ] && note "Option --sudouser: If you want to run GUI application
-  with su or sudo, you might need to add either option --xoverip 
-  or (discouraged) option --network=host."
   
   [ "$Customdockeroptions" ] && {
     warning "Found custom DOCKER_RUN_OPTIONS.
@@ -8741,6 +8814,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
          --systemd)           Initsystem="systemd" ; note "Option --systemd is deprecated. Please use: --init=systemd" ;;
 
      #### Container configuration
+         --backend)           Containerbackend="${2:-}" ; shift ;;   # container backend to use: docker, podman, nerdctl, others            
          --cap-default)       Capdropall="no" ;;                     # Don't use --cap-drop=ALL --security-opt=no-new-privileges
          --env)               store_runoption env "${2:-}"           # Set container environment variables
                               shift ;;
@@ -8787,11 +8861,8 @@ ${2:-}"                       ; shift ;;                             # Add custo
          --launcher)          Createlauncher="yes" ;;                # Create application launcher on desktop and exit
       
      #### Experimental options
-         --backend)           Containerbackend="${2:-}" ; shift ; note "Option --keepcache: experimental option." ;;            
          --keepcache)         Preservecachefiles="yes" ;          note "Option --keepcache: experimental option." ;;            
          --no-setup)          Containersetup="no" ;               note "Option --no-setup: experimental option." ;;            
-         --podman)            Containerbackend="podman" ;         note "Option --podman is deprecated. Use --backend=podman instead.
-  Please report issues at: https://github.com/mviereck/x11docker/issues/255" ;;         
          --xopt)              Xserveroptions="${2:-}" ;   shift ; note "Option --xopt: experimental option." ;;      # Custom X server options
          --xorgconf)          Xorgconf="${2:-}" ;         shift ; note "Option --xorgconf: experimental option." ;;  # Custom xorg.conf
       
@@ -8808,6 +8879,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
          --no-internet)       Network="none"
                               note "Option --no-internet is deprecated.
   Please use --network=none instead." ;;
+         --podman)            Containerbackend="podman" ;         note "Option --podman is deprecated. Use --backend=podman instead." ;;         
          --sharessh)          [ -e "${SSH_AUTH_SOCK:-}" ] && {       # SSH socket sharing
                                 store_runoption volume "$(dirname $SSH_AUTH_SOCK)"
                                 store_runoption env "SSH_AUTH_SOCK=$(escapestring "${SSH_AUTH_SOCK:-}")"
@@ -8910,7 +8982,7 @@ main() {
 
   debugnote "
 x11docker version: $Version
-docker version:    $($Containerbackendbin --version 2>&1)
+Backend version:   $($Containerbackendbin --version 2>&1)
 Host system:       $(grep '^PRETTY_NAME' /etc/os-release 2>/dev/null | cut -d= -f2 || echo "$Hostsystem")
 Host architecture: $Hostarchitecture
 Command:           '$0' $(for Line in "$@"; do echo -n "'$Line' " ; done)
@@ -8940,7 +9012,7 @@ Parsed options:    $Parsedoptions_global"
   setup_fifo                     # open message channels for container, dockerrc, xinitrc and watchpidlist()
   check_screensize               # size of host X and of new X server             # --size #time0,213
   [ "$Windowmanagermode" ]       && check_windowmanager                           # --wm  
-  [ "$Sharegpu" = "yes" ]        && setup_gpu                                     # --gpu
+  [ "$Sharegpu" = "yes" ]        && setup_gpu ||:                                 # --gpu
   [ "$Sharewebcam" = "yes" ]     && setup_webcam                                  # --webcam
   [ "$Sharecupsmode" ]           && setup_printer                                 # --printer
   [ "$Pulseaudiomode" ]          && setup_sound_pulseaudio                        # --pulseaudio
