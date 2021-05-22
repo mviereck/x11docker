@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="6.9.0-beta-5"
+Version="6.9.0-beta-6"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -21,10 +21,11 @@ esac
 
 usage() {                       # --help: show usage information
   echo "
-x11docker: Run GUI applications and desktop environments in Docker containers.
+x11docker: Run GUI applications and desktop environments in containers.
+           Supports Docker, podman and nerdctl.
 
 Usage:
-To run a Docker container on a new X server:
+To run a container on a new X server:
   x11docker IMAGE
   x11docker [OPTIONS] IMAGE [COMMAND]
   x11docker [OPTIONS] -- IMAGE [COMMAND [ARG1 ARG2 ...]]
@@ -60,7 +61,8 @@ than with a regular 'docker run' command due to these security restrictions.
 Achieve a less restricted setup with --cap-default, --sudouser or --user=root.
 
 Dependencies on host:
-  For core functionality x11docker only needs bash, docker and an X server.
+  For core functionality x11docker only needs bash, an X server and one of
+  Docker, podman or nerdctl.
   Depending on chosen options x11docker might need some additional tools.
   It checks for them on startup and shows messages if some are missing.
   Core list of recommended tools:
@@ -79,7 +81,7 @@ Dependencies in image:
   
 Options: (short options do not accept arguments)
      --help            Display this message and exit.
- -e, --exe             Execute host application instead of docker container.
+ -e, --exe             Execute host application instead of a container.
      --xonly           Only create empty X server.
 
 Basic settings:
@@ -183,8 +185,8 @@ X and Wayland appearance options:
                        Otherwise x11docker looks for a host window manager.
                        Possible ARG:
                          host: Enforce autodetection of a host window manager.
-                         COMMAND: COMMAND can be a desired host window manager.
-                         IMAGE: IMAGE can be a local docker image with a WM.
+                         COMMAND: can be a desired host window manager.
+                         IMAGE: can be a local image with a window manager.
                          none: Run without a window manager. Same as --desktop.
  -F, --xfishtank       Show fish tank on new X server.
 
@@ -229,9 +231,9 @@ Container capabilities:
   In most setups x11docker sets --cap-drop=ALL --security-opt=no-new-privileges
   and shows warnings if doing otherwise.
   Custom capabilities can be added with --cap-add=CAP after  --
-     --cap-default     Allow default docker container capabilities.
+     --cap-default     Allow default container capabilities.
                        Includes --newprivileges=yes.
-     --hostipc         Sets docker option --ipc=host. Disables IPC namespacing.
+     --hostipc         Sets run option --ipc=host. Disables IPC namespacing.
                        Severe reduction of container isolation! Shares
                        host interprocess communication and shared memory.
                        Allows MIT-SHM extension of X servers.
@@ -239,7 +241,7 @@ Container capabilities:
                        currently free RAM x FACTOR and available CPUs x FACTOR.
                        Allowed range is 0 < FACTOR <= 1. 
                        Default for --limit without argument FACTOR: 0.5
-     --newprivileges [=yes|no|auto]  Set or unset docker run option 
+     --newprivileges [=yes|no|auto]  Set or unset run option 
                        --security-opt=no-new-privileges. Default with no
                        argument is 'yes'. Default for most cases is 'no'.
 
@@ -259,12 +261,14 @@ Container init system, elogind and DBus daemon:
 
 Container special configuration:
      --backend BACKEND  Backend to use. Current choice: docker podman nerdctl
+                       (If using nerdctl please provide a container command
+                       to allow all x11docker features.)
      --env VAR=value   Set custom environment variable VAR=value
      --name NAME       Specify container name NAME.
      --no-entrypoint   Disable ENTRYPOINT in image to allow other commands, too
      --no-setup        No x11docker setup in running container. Disallows
                        several other options. See also --user=RETAIN.
-     --runtime RUNTIME  Specify docker runtime. Known by x11docker:
+     --runtime RUNTIME  Specify container runtime. Known by x11docker:
                          runc:         Docker default runtime.
                          crun:         Fast replacement for runc written in C.
                          nvidia:       Runtime for nvidia/nvidia-docker images.
@@ -4824,7 +4828,8 @@ Exec=/usr/local/bin/x11docker-xrandr
   echo ""
 
   echo "# Check container user"
-  echo "Containeruser=\"\$(storeinfo dump containeruser)\"" # reading root access
+  echo "Containeruser=\"\$(storeinfo dump containeruser)\""
+  echo "Containeruser=\"\${Containeruser:-$Containeruser}\""
   echo ""
   case $Createcontaineruser in
     yes)
@@ -5720,7 +5725,7 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   echo "rocknroll || exit 64"
   echo ""
 
-  case "$Containersetup" in
+  case "$Inspectimage" in
     no) ;;
     yes)
       echo "Inspect=\"\$($Containerbackendbin inspect $Imagename --format='{{.Config.User}}|{{.Config.WorkingDir}}|{{.Architecture}}')\""
@@ -5807,14 +5812,18 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
       You can change it with option --workdir=DIR.\""
         echo ""
       }
-     
-      echo "[ -z \"\$Containercommand\$Entrypoint\" ] && error 'No container command specified and no CMD or ENTRYPOINT found in image.'"
+    ;;
+  esac
+  
+  case "$Containersetup" in
+    no) ;;
+    yes)      echo "[ -z \"\$Containercommand\$Entrypoint\" ] && error 'No container command specified and no CMD or ENTRYPOINT found in image.'"
       echo ""
      
       echo     "######## Create $(basename $Containerrc) ########"
       echo     ""
       echo     "{ echo '#! /bin/sh'"
-       [ "$Debugmode" = "yes" ] && echo "echo 'set -x'"
+      #[ "$Debugmode" = "yes" ] && echo "echo 'set -x'"
       echo     "  echo ''"
       echo     "  echo '# $(basename $Containerrc)'"
       echo     "  echo '# Created startscript for docker run used as container command.'"
@@ -7129,6 +7138,20 @@ check_option_interferences() {  # check multiple option interferences, change se
   to allow shared memory for X extension MIT-SHM."
     Sharehostipc="yes"
   }
+  
+  # --keymap: XKB keyboard layount
+  [ -n "$Xkblayout" ] && {
+    case $Xserver in
+      --kwin|--kwin-xwayland)
+        [ "$Runsonconsole" = "yes" ] && note "Option --keymap does not work with option $Xserver
+  if running from console."
+      ;;
+    esac
+    [ "$Xkblayout" = "clone" ] && case $Xserver in
+      --nxagent) ;;
+      *) Xkblayout="" ;;
+    esac
+  }
 
   # --scale
   [ "$Scaling" ] && {
@@ -7415,20 +7438,6 @@ check_option_interferences() {  # check multiple option interferences, change se
   It only restricts memory and CPU usage."
   }
   
-  # --keymap: XKB keyboard layount
-  [ -n "$Xkblayout" ] && {
-    case $Xserver in
-      --kwin|--kwin-xwayland)
-        [ "$Runsonconsole" = "yes" ] && note "Option --keymap does not work with option $Xserver
-  if running from console."
-      ;;
-    esac
-    [ "$Xkblayout" = "clone" ] && case $Xserver in
-      --nxagent) ;;
-      *) Xkblayout="" ;;
-    esac
-  }
-  
   # --pulseaudio
   case $Pulseaudiomode in
     "") ;;
@@ -7530,12 +7539,32 @@ check_option_interferences() {  # check multiple option interferences, change se
     nerdctl) 
       note "Option --backend=nerdctl: nerdctl only supports a subset
   of docker options. That limits support of x11docker features."
-      [ "$Containersetup" = "yes" ] && {
-        note "Option --backend=nerdctl: nerdctl does not support 'inspect'
-  for images that is needed to set up some features.
+      Inspectimage="no"
+      case "$Containercommand" in
+        "")
+          [ "$Containersetup" = "yes" ] && {
+            note "Option --backend=nerdctl: nerdctl does not support 'inspect'
+  for images that is needed to check ENTRYPOINT and CMD 
+  that in turn is needed to set up some x11docker features.
+  To allow more features, please provide a container command to execute.
   Fallback: Enabling option --no-setup."
-        Containersetup="no"
-      }
+            Containersetup="no"
+          }
+        ;;
+        *)
+          Switchcontaineruser="yes"
+          [ "$Capdropall" = "yes" ] && note "Option --backend=nerdctl: x11docker
+  will allow some user switching capabilities that would be dropped with
+  other backends. (Because 'nerdctl --exec' does not support option --user.)"
+          [ "$Noentrypoint" = "yes" ] || {
+            note "Option --backend=nerdctl: nerdctl does not support 'inspect'
+  for images that is needed to check ENTRYPOINT and CMD 
+  that in turn is needed to set up some x11docker features.
+  Fallback: Disabling ENTRYPOINT with option --no-entrypoint."
+            Noentrypoint="yes"
+          }
+        ;;
+      esac
     ;;
     *) note "Option --backend=$Containerbackend: Unknown backend. Will try anyway.
   You might need option --no-setup." ;;
@@ -8485,6 +8514,7 @@ declare_variables() {           # declare global variables
   Containersetup="yes"
   Customdockeroptions=""                          # -- [...] -- : Custom options for "docker run".
   Imagename=""                                    # Image to run
+  Inspectimage="yes"
   Interactive="no"                                # --interactive: Run docker with interactive tty yes/no
   Limitresources=""                               # --limit: Limit access to CPU and RAM, 0.1 ... 1.0
   Network=""                                      # --network
@@ -8840,6 +8870,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
          --network)           Network="${2:-}" ; shift ;;
          --newprivileges)     Allownewprivileges="${2:-yes}" ; shift ;; # [Don't] set --security-opt=no-new-privileges
          --no-entrypoint)     Noentrypoint="yes" ;;                  # Disable ENTRYPOINT of image
+         --no-setup)          Containersetup="no" ;;                 # No setup of x11docker inside of container (noteable disables containerrootrc() )            
          --runtime)           Runtime="${2:-}" ; shift               # Runtime=runc|nvidia|kata-runtime|crun
                               [ "$Runtime" = "kata" ] && Runtime="kata-runtime" ;;
          --stdin)             Forwardstdin="yes" ;;                  # Forward stdin to container command
@@ -8876,7 +8907,6 @@ ${2:-}"                       ; shift ;;                             # Add custo
       
      #### Experimental options
          --keepcache)         Preservecachefiles="yes" ;          note "Option --keepcache: experimental option." ;;            
-         --no-setup)          Containersetup="no" ;               note "Option --no-setup: experimental option." ;;            
          --xopt)              Xserveroptions="${2:-}" ;   shift ; note "Option --xopt: experimental option." ;;      # Custom X server options
          --xorgconf)          Xorgconf="${2:-}" ;         shift ; note "Option --xorgconf: experimental option." ;;  # Custom xorg.conf
       
@@ -9077,7 +9107,7 @@ Parsed options:    $Parsedoptions_global"
     create_dockercommand        # create 'docker run' command #time0,631
     echo "$Dockercommand" >> $Dockercommandfile
     
-    debugnote "Docker command:
+    debugnote "$Containerbackend command:
   $Dockercommand"
     
     #### Create helper scripts to set up container
