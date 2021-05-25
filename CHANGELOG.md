@@ -21,6 +21,8 @@ Project website: https://github.com/mviereck/x11docker
    [(#340)](https://github.com/mviereck/x11docker/issues/340)
  - `containerrootrc`: Don't run `docker exec --privileged` for container root
    setup to avoid possible abuse by corrupted core utils.
+ - `--limit`: Change free memory check.
+   [(#360)](https://github.com/mviereck/x11docker/issues/360)
 ### Deprecated
  - `--podman`: Use `--backend=podman` instead. (Formerly experimental)
 
