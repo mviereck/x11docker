@@ -8,8 +8,8 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
- - `--backend=BACKEND`: Experimental option to choose a container backend
-   out of `docker`, `podman` and `nerdctl`.
+ - `--backend=BACKEND`: Experimental option to choose a container backend.
+   Currently supported: `docker`, `podman` and `nerdctl`.
    [(#255)](https://github.com/mviereck/x11docker/issues/255)
    [(#357)](https://github.com/mviereck/x11docker/issues/357)
  - `--composite`: New option to enable or disable X extension Composite.
@@ -17,6 +17,8 @@ Project website: https://github.com/mviereck/x11docker
    [(#345)](https://github.com/mviereck/x11docker/issues/345)
  - `--no-setup`: Disable x11docker setup in container. (Formerly experimental.)
 ### Fixed
+ - `x11docker-gui`: Fixed `--share` bug.
+   [(#358)](https://github.com/mviereck/x11docker/issues/358)
  - `--init=s6-overlay`: Use `--tmpfs /run:exec`
    [(#340)](https://github.com/mviereck/x11docker/issues/340)
  - `containerrootrc`: Don't run `docker exec --privileged` for container root

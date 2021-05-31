@@ -2,6 +2,13 @@
 x11docker ToDo notes
 
 ## Actually to fix
+ - `x11docker-gui`: add new options that might still miss, check changed options like `--share=`
+ - `--xhost`: Allow empty arg to set +SI:localuser:$USER
+ - `--pw` argument should be optional; allows choice between rootful and rootless mode especially with nerdctl.
+ - replace word 'docker' in messages and variable names to generalize for podman and nerdctl, too.
+ - check, maybe drop container wm using `x11docker/openbox`. Currently likely fails with different backends.
+
+## Old issues to fix
  - `--gpu --webcam` adds user to group `video` twice.
  - `--xorg` does not enable `--wm` but should do it.
  - docker-for-win: DOS newline mess in `error()` #219.
@@ -14,7 +21,7 @@ x11docker ToDo notes
 
 ## Nice to fix
  - `--init=systemd`: check systemd warnings on x11docker services
- - `--xpra-xwayland --desktop --size`: wrong size
+ - `--xpra-xwayland --desktop`: resizing window does not work
  - `--printer`: regard host environment variable `CUPS_SERVER`. Maybe already done by `lpadmin`.
  - `pspid()`: On some systems (busybox) `ps -p` is not supported
  - `--runtime=kata-runtime`: `x11docker/lxde` needs `--init=systemd`, why? Sort of `menud` issue.
@@ -34,7 +41,6 @@ x11docker ToDo notes
  - `elogind` in void container: loginctl is empty. ck-list-sessions, too.
 
 ## Needs investigation and probably 3d party bug report
-  - `--xpra-xwayland`, `--weston-xwayland`: Xwayland does not fit Weston window size if parts of weston window are offscreen
   - `startplasmacompositor`: hardcoded `--libinput` causes failure if running nested
   - `kwin_wayland` needs `CAP_SYS_RESOURCE` even if running nested
   - `--xpra --desktop --xdummy`: --size modeline does not work, might not even appear in xrandr although set in xdummy.xorg.conf
@@ -48,7 +54,7 @@ x11docker ToDo notes
  - `--kwin*`: wrong fullscreen and crashes in gnome-wayland, strange in weston, WAYLAND_DISPLAY="" does not help, probably bug in kwin
  - scale>1 Xwayland in Weston is too large (Xwayland bug), rendering issues on tty (switching scaled/unscaled Xwayland on keyboard/mouse events). 
    https://bugzilla.redhat.com/show_bug.cgi?id=1498669
- - x11docker-gui in weston freezes weston in combo boxes. Weston bug ? QT3/4 bug?
+ - x11docker-gui in weston freezes weston in combo boxes. Weston bug? QT3/4 bug?
  - debian bug report lightdm/sddm contra gdm, dm can crash on tty switch if multiple graphical sessions are running
   
 ## Improvements
