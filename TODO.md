@@ -3,8 +3,6 @@ x11docker ToDo notes
 
 ## Actually to fix
  - `x11docker-gui`: add new options that might still miss, check changed options like `--share=`
- - `--xhost`: Allow empty arg to set +SI:localuser:$USER
- - `--pw` argument should be optional; allows choice between rootful and rootless mode especially with nerdctl.
  - replace word 'docker' in messages and variable names to generalize for podman and nerdctl, too.
  - check, maybe drop container wm using `x11docker/openbox`. Currently likely fails with different backends.
 

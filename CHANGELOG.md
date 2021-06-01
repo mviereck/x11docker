@@ -16,6 +16,11 @@ Project website: https://github.com/mviereck/x11docker
    Can help to fix issues with `--nxagent`.
    [(#345)](https://github.com/mviereck/x11docker/issues/345)
  - `--no-setup`: Disable x11docker setup in container. (Formerly experimental.)
+### Changed
+ - `--pw [=FRONTEND]`: Argument `FRONTEND` is optional now to allow easy
+   switch to rootful nerdctl or podman. Setting `FRONTEND` requires `=`.
+ - `--xhost [=STR]`: Agument `STR` is optional now. If empty, set to
+   `+SI:localuser:$USER`. Setting `STR` requires `=`.
 ### Fixed
  - `x11docker-gui`: Fixed `--share` bug.
    [(#358)](https://github.com/mviereck/x11docker/issues/358)
