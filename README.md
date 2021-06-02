@@ -2,15 +2,15 @@
 ## Avoid X security leaks and enhance container security
 [![DOI](http://joss.theoj.org/papers/10.21105/joss.01349/status.svg)](https://doi.org/10.21105/joss.01349)
 ### Introduction
-x11docker allows to run graphical desktop applications (and entire desktops) in Docker Linux containers.
- - [Docker](https://en.wikipedia.org/wiki/Docker_(software)) allows to run applications in an isolated [container](https://en.wikipedia.org/wiki/Operating-system-level_virtualization) environment. 
+x11docker allows to run graphical desktop applications (and entire desktops) in Linux containers.
+ - Container tools like [Docker](https://en.wikipedia.org/wiki/Docker_(software)), [podman](http://docs.podman.io/en/latest/) and [nerdctl](https://github.com/containerd/nerdctl) allow to run applications in an isolated [container](https://en.wikipedia.org/wiki/Operating-system-level_virtualization) environment. 
    Containers need much less resources than [virtual machines](https://en.wikipedia.org/wiki/Virtual_machine) for similar tasks.
- - Docker does not provide a [display server](https://en.wikipedia.org/wiki/Display_server) that would allow to run applications with a [graphical user interface](https://en.wikipedia.org/wiki/Graphical_user_interface).
- - x11docker fills the gap. It runs an [X display server](https://en.wikipedia.org/wiki/X_Window_System) on the host system and provides it to Docker containers.
+ - Docker, podman and nerdctl do not provide a [display server](https://en.wikipedia.org/wiki/Display_server) that would allow to run applications with a [graphical user interface](https://en.wikipedia.org/wiki/Graphical_user_interface).
+ - x11docker fills the gap. It runs an [X display server](https://en.wikipedia.org/wiki/X_Window_System) on the host system and provides it to containers.
  - Additionally x11docker does some [security setup](https://github.com/mviereck/x11docker#security) to enhance container isolation and to avoid X security leaks. 
    This allows a [sandbox](#sandbox) environment that fairly well protects the host system from possibly malicious or buggy software.
 
-Software can be installed in a deployable Docker image with a rudimentary Linux system inside. 
+Software can be installed in a deployable image with a rudimentary Linux system inside. 
 This can help to run or deploy software that is difficult to install on several systems due to dependency issues. It is possible to run outdated versions or latest development versions side by side. 
 Files to work on can be shared between host and container.
 
@@ -25,8 +25,8 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
    - Restricts container capabilities to bare minimum.
    - Container user is same as host user to avoid root in container.
  - Low [dependencies](#dependencies):
-   - No obliging dependencies on host beside X and Docker. Recommended: `nxagent` and `Xephyr`.
-   - No dependencies inside of Docker images except for some optional features.
+   - No obliging dependencies on host beside X and one of `docker`, `podman` or `nerdctl`. Recommended: `nxagent` and `Xephyr`.
+   - No dependencies inside of images except for some optional features.
  - Several [optional features](#options) like [GPU](#gpu-hardware-acceleration), [sound](#sound), [webcam](#webcam) and [printer](#printer) support.
  - Remote access with [SSH](https://github.com/mviereck/x11docker/wiki/Remote-access-with-SSH), [VNC](https://github.com/mviereck/x11docker/wiki/VNC) 
    or [HTML5](https://github.com/mviereck/x11docker/wiki/Container-applications-running-in-Browser-with-HTML5) possible.
@@ -42,6 +42,7 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
  - [GUI for x11docker](#gui-for-x11docker)
  - [Terminal usage](#terminal-usage)
  - [Options](#options)
+   - [Backend docker, podman or nerdctl](#backend-docker-podman-or-nerdctl)
    - [Choice of X servers and Wayland compositors](#choice-of-x-servers-and-wayland-compositors)
    - [Desktop or seamless mode](#desktop-or-seamless-mode)
    - [Shared folders and HOME in container](#shared-folders-docker-volumes-and-home-in-container)
@@ -98,23 +99,23 @@ Just type `x11docker IMAGENAME [COMMAND]`.
    - For desktop environments in image add option `-d, --desktop`.
    - To run without X at all use option `-t, --tty`.
    - Get an interactive TTY with option `-i, --interactive`.
-   - See generated `docker` command (and further infos) with option `--debug`.
+   - See generated container backend command (and further infos) with option `--debug`.
  - If startup fails, look at chapter [Troubleshooting](#troubleshooting).
  
 General syntax:
 ```
-To run a Docker container on a new X server:
+To run a container on a new X server:
   x11docker IMAGE
   x11docker [OPTIONS] IMAGE [COMMAND]
   x11docker [OPTIONS] -- IMAGE [COMMAND [ARG1 ARG2 ...]]
-  x11docker [OPTIONS] -- DOCKER_RUN_OPTIONS -- IMAGE [COMMAND [ARG1 ARG2 ...]]
+  x11docker [OPTIONS] -- RUN_OPTIONS -- IMAGE [COMMAND [ARG1 ARG2 ...]]
 To run a host application on a new X server:
   x11docker [OPTIONS] --exe COMMAND
   x11docker [OPTIONS] --exe -- COMMAND [ARG1 ARG2 ...]
 To run only an empty new X server:
   x11docker [OPTIONS] --xonly
 ```
-`DOCKER_RUN_OPTIONS` are just added to `docker run` command without a serious check by x11docker.
+`RUN_OPTIONS` are just added to the `docker|podman|nerdctl run` command without a serious check by x11docker.
  
  
  
@@ -123,7 +124,14 @@ Description of some commonly used feature [options](https://github.com/mviereck/
  - Some of these options have dependencies on host and/or in image.
    Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
  - For often used option combinations you can make shortcuts with [option `--preset`](#option---preset).
-
+ 
+### Backend docker, podman or nerdctl
+x11docker supports container tools `docker`, `podman` and `nerdctl` with option `--backend=BACKEND`.
+ - By default x11docker tries to run `docker`. Alternatively set option `--backend=podman` or `--backend=nerdctl`.
+ - To switch between rootless or rootful mode of `podman` and `nerdctl` just use (or leave) `sudo` or set (or leave) option `--pw`.
+ - For [rootless docker](https://docs.docker.com/engine/security/rootless/) set environment variable `DOCKER_HOST` accordingly.
+   - Rootless docker does not support options `--home` and `--share`.
+   
 ### Choice of X servers and Wayland compositors
 If no X server option is specified, x11docker automatically chooses one depending on installed [dependencies](#dependencies) and on given or missing options `--desktop`, `--gpu` and `--wayland`. Most recommended are `nxagent` and `Xephyr`.
  - [Overview of all possible X server and Wayland options.](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options)
@@ -140,15 +148,15 @@ x11docker assumes that you want to run a single application in seamless mode, i.
    - Another window manager image an be specified with e.g. `--wm=x11docker/lxde`.
    - As a fallback x11docker runs a window manager from host, either autodetected or specified with e.g. `--wm=xfwm4`. 
    
-### Shared folders, Docker volumes and HOME in container
-Changes in a running Docker container system will be lost, the created Docker container will be discarded. For persistent data storage you can share host directories or Docker volumes:
+### Shared folders, volumes and HOME in container
+Changes in a running container system will be lost, the created container will be discarded. For persistent data storage you can share host directories or volumes:
  - Option `-m, --home` creates a host directory in `~/.local/share/x11docker/IMAGENAME` that is shared with the container and mounted as its `HOME` directory. 
    Files in container home and user configuration changes will persist. 
    x11docker creates a softlink from `~/.local/share/x11docker` to `~/x11docker`.
    - You can specify another host directory for container `HOME` with `--home=DIR`.
-   - You can specify a Docker volume for container `HOME` with `--home=VOLUME`.
+   - You can specify a volume for container `HOME` with `--home=VOLUME`.
  - Option `--share PATH` mounts a host file or folder at the same location in container. 
-   - You can also specify a Docker volume with `--share VOLUME`.
+   - You can also specify a volume with `--share VOLUME`.
    - `--share PATH:ro` restricts to read-only access. 
    - Device files in `/dev` are supported, too.
  - Special cases for `$HOME`:
@@ -263,20 +271,19 @@ Core concept is:
      - If you want root permissions in container, use option `--sudouser` that allows `su` and `sudo` with password `x11docker`. Alternatively you can run with `--user=root`. 
    - If you want to use `USER` specified in image instead, set option `--user=RETAIN`. x11docker won't change container's `/etc/passwd` or `/etc/sudoers` in that case. Option `--home` won't be available.
  - Reduces [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
-   - Sets docker run option `--cap-drop=ALL` to drop all capabilities. Most applications don't need them.
-   - Sets docker run option [`--security-opt=no-new-privileges`](https://www.projectatomic.io/blog/2016/03/no-new-privs-docker/).
+   - Sets run option `--cap-drop=ALL` to drop all capabilities. Most applications don't need them.
+   - Sets run option [`--security-opt=no-new-privileges`](https://www.projectatomic.io/blog/2016/03/no-new-privs-docker/).
    - These restrictions can be disabled with x11docker option `--cap-default` or reduced with `--sudouser`, `--user=root`, `--newprivileges`.
    
-That being said, Docker's default capabilities and its seccomp profile are not bad. 
-I am not aware of an escape from a container without an additional isolation degrading option or configuration.
-However, x11docker follows the [principle of least privilege](https://en.wikipedia.org/wiki/Principle_of_least_privilege). 
-Docker containers should not have capabilities or privileges that they don't need for their job.
+That being said, the default docker capabilities and the seccomp/SELinux/apparmor profiles are set up well to protect the host system.
+Nonetheless, x11docker follows the [principle of least privilege](https://en.wikipedia.org/wiki/Principle_of_least_privilege). 
+Containers should not have capabilities or privileges that they don't need for their job.
 
-Docker's default runtime `runc` uses Linux namespaces to isolate container applications, but shares the kernel from host. 
+Default runtimes like `runc` use Linux namespaces to isolate container applications, but share the kernel from host. 
 If you are concerned about container access to host kernel, consider to use [container runtime](#container-runtime) `kata-runtime` instead.
 
 _Weaknesses:_
- - Possible SELinux restrictions are degraded for x11docker containers with docker run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. 
+ - Possible SELinux restrictions are degraded for x11docker containers with run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. 
    A more restrictive solution is desirable.
    Compare: [SELinux and Docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
  - A possible user namespace remapping setup is disabled to allow options `--home` and `--share` without file ownership issues. 
@@ -299,20 +306,19 @@ _Most important:_
 _Rather special options reducing security, but not needed for regular use:_
   - `--sudouser` and `--user=root` allow `su` and `sudo` with password `x11docker`for container user. 
     If an application somehow breaks out of container, it can harm your host system. Allows many container capabilties that x11docker would drop otherwise.
-  - `--cap-default` disables x11docker's container security hardening and falls back to default Docker container capabilities.
+  - `--cap-default` disables x11docker's container security hardening and falls back to default container capabilities as provided by the backends docker, podman or nerdctl.
     If an application somehow breaks out of container, it can harm your host system.
   - `--init=systemd|sysvinit|openrc|runit` allow some container capabilities that x11docker would drop otherwise. 
     `--init=systemd` also shares access to `/sys/fs/cgroup`. Some processes will run as root in container.
     If a root process somehow breaks out of container, it can harm your host system. Allows many container capabilties that x11docker would drop otherwise.
-  - `--hostipc` sets docker run option `--ipc=host`. Allows MIT-SHM / shared memory. Disables IPC namespacing.
-  - `--hostnet` sets docker run option `--network=host`. Shares host network stack. Disables network namespacing. Container can spy on and maybe manipulate host network traffic.
+  - `--hostipc` sets run option `--ipc=host`. Allows MIT-SHM / shared memory. Disables IPC namespacing.
   - `--hostdbus` allows communication over DBus with host applications.
 
 ### Sandbox
 Container isolation enhanced with x11docker allows to use containers as a [sandbox](https://en.wikipedia.org/wiki/Sandbox_(computer_security)) that fairly well protects the host system from possibly malicious or buggy software.
 Though, no sandbox solution in the wild can provide a perfect secure protection, and Docker even with enhanced security settings from x11docker is no exception.
 
-Using Docker with x11docker as a sandbox is not intended to run obviously evil software. Rather use it as:
+Using x11docker as a sandbox is not intended to run obviously evil software. Rather use it as:
  - Compatibility environment to run software that is hard or impossible to install on host due to dependency issues.
  - Development environment to collect libraries, compiler and so on to keep the host clean.
  - Development environment to mitigate damage caused by unexpected/buggy behaviour.
@@ -325,7 +331,7 @@ For more custom fine tuning have a look at [Docker documentation: Limit a contai
 
 **NOTE**: Internet access is allowed by default. You can disable internet access with `--no-internet`.
 
-**WARNING**: There is no restriction that can prevent the container from flooding the hard disk in Docker's container partition or in shared folders.
+**WARNING**: There is no restriction that can prevent the container from flooding the hard disk storing the container or in shared folders.
 
   
 ### Security and feature check
@@ -334,7 +340,7 @@ To check container isolation and some feature options use image `x11docker/check
  - Add options like `--pulseaudio --alsa --webcam --clipboard --printer` to check their functionality.
   
 ## Installation
-Note that x11docker is just a **bash script** without library dependencies. Basically it is just a wrapper for X servers and Docker. To allow advanced usage of x11docker abilities have a look at chapter [Dependencies](#dependencies).
+Note that x11docker is just a **bash script** without library dependencies. Basically it is just a wrapper for X servers and container backends docker, podman and nerdctl. To allow advanced usage of x11docker abilities have a look at chapter [Dependencies](#dependencies).
 ### Installation options
 As root you can install, update and remove x11docker in system directories to be available system-wide:
  - `x11docker --install` : install x11docker and x11docker-gui from current directory. (Useful to install from an extracted `zip` file or a cloned `git` repository.)
@@ -382,7 +388,7 @@ x11docker will **not** remove:
 
 ## Dependencies
 x11docker can run with standard system utilities without additional dependencies on host or in image. 
- - As a core it only needs `bash`, an `X` server and [`docker`](https://www.docker.com/) to run Docker containers on X.
+ - As a core it only needs `bash`, an `X` server and one of [`docker`](https://www.docker.com/), [`podman`](http://docs.podman.io/en/latest/) or [`nerdctl`](https://github.com/containerd/nerdctl) to run containers on X.
  - x11docker checks dependencies for chosen options on startup and shows terminal messages if some are missing. 
 
 For advanced usage of x11docker it is recommended to install some additional packages.
@@ -424,7 +430,7 @@ One attempt is to allow several privileges until the setup works. Than reduce pr
    
 **2.** Reducing privileges:
  - Drop options one by one in this order: `--privileged --security-opt seccomp=unconfined --cap-add ALL --share /run/udev/data:ro --hostnet --hostipc --cap-default`. Only leave options that are needed to keep the setup working.
- - Option `--cap-default` might already be enough. It allows default container capabilities as Docker would do on itself. 
+ - Option `--cap-default` might already be enough. It allows default container capabilities as docker|podman|nerdctl would do on themself. 
    - You can just stop debugging and reducing here if you like to.
    - You can try to reduce `--cap-default`. Partially remove addional options to find out which one(s) are needed:
      - First try `x11docker --newprivileges -- IMAGENAME`
@@ -452,7 +458,7 @@ One attempt is to allow several privileges until the setup works. Than reduce pr
  - A few applications need systemd and/or a running [DBus](#dbus) system daemon. Install `systemd` in image and try option `--init=systemd`.
 
 **3.** Architecture check of host OS and image
- - The Docker image may not be built for the architecture of your host OS. (ie. Image is built for amd64 but your OS runs on arm, e.g. on a RaspBerry PI). 
+ - The image may not be built for the architecture of your host OS. (ie. Image is built for amd64 but your OS runs on arm, e.g. on a RaspBerry PI). 
    With a mismatch the container will quit unexpectedely & x11docker may emit the error `dockerrc(): Did not receive PID of PID1 in container.`
    - You can check the image architecture with `docker inspect --format {{.Architecture}} IMAGENAME`.
    - You can check the host architecture with `uname -m`.
