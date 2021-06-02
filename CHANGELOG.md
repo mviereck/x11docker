@@ -12,6 +12,8 @@ Project website: https://github.com/mviereck/x11docker
    Currently supported: `docker`, `podman` and `nerdctl`.
    [(#255)](https://github.com/mviereck/x11docker/issues/255)
    [(#357)](https://github.com/mviereck/x11docker/issues/357)
+ - Support of rootless docker.
+   [(#327)](https://github.com/mviereck/x11docker/issues/327)
  - `--composite`: New option to enable or disable X extension Composite.
    Can help to fix issues with `--nxagent`.
    [(#345)](https://github.com/mviereck/x11docker/issues/345)
@@ -22,7 +24,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--xhost [=STR]`: Agument `STR` is optional now. If empty, set to
    `+SI:localuser:$USER`. Setting `STR` requires `=`.
 ### Fixed
- - `x11docker-gui`: Fixed `--share` bug.
+ - `x11docker-gui`: Fixed `--share` bug. Add several missing options.
    [(#358)](https://github.com/mviereck/x11docker/issues/358)
  - `--init=s6-overlay`: Use `--tmpfs /run:exec`
    [(#340)](https://github.com/mviereck/x11docker/issues/340)

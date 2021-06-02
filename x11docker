@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="6.9.0-beta-8"
+Version="6.9.0-beta-9"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -22,14 +22,14 @@ esac
 usage() {                       # --help: show usage information
   echo "
 x11docker: Run GUI applications and desktop environments in containers.
-           Supports Docker, podman and nerdctl.
+           Supports docker, podman and nerdctl.
 
 Usage:
 To run a container on a new X server:
   x11docker IMAGE
   x11docker [OPTIONS] IMAGE [COMMAND]
   x11docker [OPTIONS] -- IMAGE [COMMAND [ARG1 ARG2 ...]]
-  x11docker [OPTIONS] -- DOCKER_RUN_OPTIONS -- IMAGE [COMMAND [ARG1 ARG2 ...]]
+  x11docker [OPTIONS] -- RUN_OPTIONS -- IMAGE [COMMAND [ARG1 ARG2 ...]]
 To run a host application on a new X server:
   x11docker [OPTIONS] --exe COMMAND
   x11docker [OPTIONS] --exe -- COMMAND [ARG1 ARG2 ...]
@@ -54,6 +54,7 @@ Focus on security:
   * Avoids X security leaks using additional X servers.
   * Container user is same as host user to avoid root in container.
   * Restricts container capabilities to bare minimum.
+To switch between docker, podman and nerdctl use option --backend.
 
 x11docker sets up an unprivileged container user with password 'x11docker'
 and restricts container capabilities. Some applications might behave different
@@ -62,7 +63,7 @@ Achieve a less restricted setup with --cap-default, --sudouser or --user=root.
 
 Dependencies on host:
   For core functionality x11docker only needs bash, an X server and one of
-  Docker, podman or nerdctl.
+  docker, podman or nerdctl.
   Depending on chosen options x11docker might need some additional tools.
   It checks for them on startup and shows messages if some are missing.
   Core list of recommended tools:
@@ -113,19 +114,19 @@ Host integration:
                        and in image. Optional arg MODE can be 'socket' or 'tcp'.
      --webcam          Share host webcam device files.
 
-Shared host folders or Docker volumes:
+Shared host folders or volumes:
  -m, --home [=ARG]     Create a persistant HOME folder for data storage.
                        Default: Uses ~/.local/share/x11docker/IMAGENAME.
-                       ARG can be another host folder or a Docker volume.
+                       ARG can be another host folder or a volume.
                        (~/.local/share/x11docker has a softlink to ~/x11docker.)
                        (Use --homebasedir to change this base storage folder.)
-     --share ARG       Share host file or folder ARG. Read-only with ARG:ro
+     --share=ARG       Share host file or folder ARG. Read-only with ARG:ro
                        Device files in /dev can be shared, too.
-                       ARG can also be a Docker volume instead of a host folder.
+                       ARG can also be a volume instead of a host folder.
 
 X server options:
      --auto            Automatically choose X server (default). Influenced
-                       noteable by options --desktop, --gpu, --wayland, --wm.
+                       notably by options --desktop, --gpu, --wayland, --wm.
  -h, --hostdisplay     Share host display :0. Quite bad container isolation!
                        Least overhead of all X server options.
                        Some apps may fail due to restricted untrusted cookies.
@@ -261,9 +262,14 @@ Container init system, elogind and DBus daemon:
                        used with one of --init=openrc|runit|sysvinit
 
 Container special configuration:
-     --backend=BACKEND  Backend to use. Current choice: docker podman nerdctl
-                       (If using nerdctl please provide a container command
-                       to allow all x11docker features.)
+     --backend=BACKEND   Container backend to use: docker, podman or nerdctl.
+                       Default: docker.
+                       For rootful podman or nerdctl use sudo or option --pw.
+                       For rootless docker set DOCKER_HOST accordingly.
+                        - If using nerdctl please provide a container command
+                       to allow all x11docker features; otherwise a restricted
+                       fallback mode with --no-setup is used.)
+                        - rootless docker does not support --home and --share.
      --env VAR=value   Set custom environment variable VAR=value
      --name=NAME       Specify container name NAME.
      --no-entrypoint   Disable ENTRYPOINT in image to allow other commands, too
@@ -294,7 +300,7 @@ Miscellaneous:
      --launcher        Create application launcher with current options
                        on desktop and exit. You can get a menu entry moving
                        the created .desktop file to ~/.local/share/applications
-     --mobyvm          Use MobyVM (for WSL2 only that defaults to linux Docker).
+     --mobyvm          Use MobyVM (for WSL2 only that defaults to Linux Docker).
      --preset=FILE     Read a set of predefined options stored in file FILE.
                        Useful to shortcut often used option combinations.
                        FILE is searched in directory /etc/x11docker/preset,
@@ -4151,8 +4157,14 @@ create_dockercommand() {        ### create command to run docker
     case $Containerbackend in
       podman) Dockercommand="$Dockercommand \\
   --userns=keep-id" ;;
+      docker)
+        [ "$Dockerrootless" ] || {
+          $Containerbackendbin run --help | grep -q -- '--userns' && Dockercommand="$Dockercommand \\
+  --userns=host"
+        }
+      ;;
       *) $Containerbackendbin run --help | grep -q -- '--userns' && Dockercommand="$Dockercommand \\
-  --userns host" ;;
+  --userns=host" ;;
     esac
   }
   
@@ -6614,6 +6626,9 @@ check_host() {                  # check host environment
     ;;
   esac
   
+  # rootless docker
+  grep -q "/run/user/" <<< "${DOCKER_HOST:-}" && Dockerrootless="yes"
+  
   # Check host IP. Needed for --pulseaudio=tcp, --printer=tcp, --xoverip and --xwin
   case $Winsubsystem in
     "")
@@ -7534,7 +7549,22 @@ check_option_interferences() {  # check multiple option interferences, change se
   esac
   
   case "$Containerbackend" in
-    docker) ;;
+    docker) 
+      [ "$Dockerrootless" ] && {
+        [ "$Sharehome" ] && {
+          note "Option --home is not supported in docker rootless mode.
+  Alternatives: --backend=podman, --backend=nerdctl or rootful docker.
+  Fallback: Disabling option --home"
+          Sharehome=""
+        }
+        [ "$Sharedfilelist" ] && {
+          note "Option --share is not supported in docker rootless mode.
+  Alternatives: --backend=podman, --backend=nerdctl or rootful docker.
+  Fallback: Disabling option --share"
+          Sharedfilelist=""
+        }
+      }
+    ;;
     podman)
       # /proc/sys/kernel/unprivileged_userns_clone might exist on debian only.
       # https://github.com/mviereck/x11docker/issues/255#issuecomment-758014962
@@ -8271,6 +8301,7 @@ declare_variables() {           # declare global variables
   CUPS_SERVER=$(check_envvar "${CUPS_SERVER:-}")
   DBUS_SESSION_BUS_ADDRESS=$(check_envvar "${DBUS_SESSION_BUS_ADDRESS:-}")
   DISPLAY=$(check_envvar "${DISPLAY:-}")
+  DOCKER_HOST=$(check_envvar "${DOCKER_HOST:-}")
   GDK_BACKEND=$(check_envvar "${GDK_BACKEND:-}")
   HOME=$(check_envvar "${HOME:-}")
   LANG=$(check_envvar "${LANG:-}")
@@ -8525,6 +8556,7 @@ declare_variables() {           # declare global variables
   Containername=""                                # --name: Container name
   Containersetup="yes"
   Customdockeroptions=""                          # -- [...] -- : Custom options for "docker run".
+  Dockerrootless=""                               # Check for rootful/rootless docker depending on DOCKER_HOST
   Imagename=""                                    # Image to run
   Inspectimage="yes"
   Interactive="no"                                # --interactive: Run docker with interactive tty yes/no
@@ -8532,6 +8564,7 @@ declare_variables() {           # declare global variables
   Network=""                                      # --network
   Noentrypoint="no"                               # --no-entrypoint: Disable entrypoint in image yes/no
   Runtime=""                                      # Runtime to use. runc|nvidia|kata-runtime|crun
+  Sharedfilelist=""                               # --share: Intermediate storage for shared files/folders/volumes
   Sharehostipc="no"                               # --hostipc: Set --ipc=host.
   Stopsignal=""                                   # Signal to send on 'docker stop'
   Sudouser=""                                     # --sudouser: Create user with sudo permissions and root user with password 'x11docker'
@@ -8894,7 +8927,9 @@ ${2:-}"                       ; shift ;;                             # Add custo
                               [ "${1:-}" = "--homedir" ] && note "Option --homedir is deprecated.
   Please use --home=DIR instead."
                               Persistanthomevolume="${2:-}" ; shift ;;
-         --share|--sharedir)  store_runoption volume "${2:-}"        # Share host file, device or directory
+#         --share|--sharedir)  store_runoption volume "${2:-}"        # Share host file, device or directory
+         --share|--sharedir)  Sharedfilelist="$Sharedfilelist
+${2:-}"                                                              # Share host file, device or directory
                               [ "${1:-}" = "--sharedir" ] && note "Option --sharedir is deprecated.
   Please use option --share=PATH instead."
                               shift ;;
@@ -9057,6 +9092,11 @@ Parsed options:    $Parsedoptions_global"
   check_xserver                  # check chosen X server or auto-choose one
   check_option_interferences     # check options, change settings if needed
   option_messages                # some messages depending on options, but not changing anything
+  
+  #                                                                              # --share
+  while read Line; do
+    [ "$Line" ] && store_runoption volume "$Line"
+  done <<< "$Sharedfilelist"
  
   # container user
   check_containeruser            # unprivileged user in container                 # --user

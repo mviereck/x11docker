@@ -2,7 +2,7 @@
 x11docker ToDo notes
 
 ## Actually to fix
- - `x11docker-gui`: add new options that might still miss, check changed options like `--share=`
+ - `--init=systemd`: cgroupv2 support #349
  - replace word 'docker' in messages and variable names to generalize for podman and nerdctl, too.
  - check, maybe drop container wm using `x11docker/openbox`. Currently likely fails with different backends.
 
