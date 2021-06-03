@@ -126,11 +126,17 @@ Description of some commonly used feature [options](https://github.com/mviereck/
  - For often used option combinations you can make shortcuts with [option `--preset`](#option---preset).
  
 ### Backend docker, podman or nerdctl
-x11docker supports container tools `docker`, `podman` and `nerdctl` with option `--backend=BACKEND`.
+x11docker supports container tools [Docker](https://en.wikipedia.org/wiki/Docker_(software)), [podman](http://docs.podman.io/en/latest/) 
+and [nerdctl](https://github.com/containerd/nerdctl) with option `--backend=BACKEND` in rootful and rootless mode.
  - By default x11docker tries to run `docker`. Alternatively set option `--backend=podman` or `--backend=nerdctl`.
+ - For rootless mode `podman` is recommended. 
+   - Only `podman` allows option `--home` in rootless mode yet.
+   - Only `podman` provides useful file ownerships with option `--share` in rootless mode yet.
+ - For rootful mode `docker` or `podman` are recommended.
+ - `nerdctl` has some limitations because it supports only a subset of `docker` cli options yet.
+   - To allow most of x11docker options with `nerdctl` please provide a container command additional to the image name.
  - To switch between rootless or rootful mode of `podman` and `nerdctl` just use (or leave) `sudo` or set (or leave) option `--pw`.
  - For [rootless docker](https://docs.docker.com/engine/security/rootless/) set environment variable `DOCKER_HOST` accordingly.
-   - Rootless docker does not support options `--home` and `--share`.
    
 ### Choice of X servers and Wayland compositors
 If no X server option is specified, x11docker automatically chooses one depending on installed [dependencies](#dependencies) and on given or missing options `--desktop`, `--gpu` and `--wayland`. Most recommended are `nxagent` and `Xephyr`.

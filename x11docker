@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="6.9.0"
+Version="6.9.1-beta-1"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -4158,7 +4158,7 @@ create_dockercommand() {        ### create command to run docker
       podman) Dockercommand="$Dockercommand \\
   --userns=keep-id" ;;
       docker)
-        [ "$Dockerrootless" ] || {
+        [ "$Rootlessbackend" ] || {
           $Containerbackendbin run --help | grep -q -- '--userns' && Dockercommand="$Dockercommand \\
   --userns=host"
         }
@@ -6626,8 +6626,15 @@ check_host() {                  # check host environment
     ;;
   esac
   
-  # rootless docker
-  grep -q "/run/user/" <<< "${DOCKER_HOST:-}" && Dockerrootless="yes"
+  # rootful or rootless
+  case $Containerbackend in
+    docker)
+      grep -q "/run/user/" <<< "${DOCKER_HOST:-}" && Rootlessbackend="yes"
+    ;;
+    podman|nerdctl|*)
+      [ "$(id -u)" = "0" ] && Rootlessbackend="yes"
+    ;;
+  esac
   
   # Check host IP. Needed for --pulseaudio=tcp, --printer=tcp, --xoverip and --xwin
   case $Winsubsystem in
@@ -7518,6 +7525,7 @@ check_option_interferences() {  # check multiple option interferences, change se
       [ "$Sharealsa" = "yes" ] && {
         note "Option --alsa: ALSA sound is not possible with 
   --runtime=kata-runtime. Fallback: Enabling option --pulseaudio."
+        check_fallback
         Sharealsa="no"
         Pulseaudiomode="tcp"
       }
@@ -7535,7 +7543,9 @@ check_option_interferences() {  # check multiple option interferences, change se
       }
       [ "$Sharegpu" = "yes" ] && [ -z "$Nvidiaversion" ] && {
         note "Option --runtime=kata currently does not support option --gpu 
-  except with closed source NVIDIA driver."
+  except with closed source NVIDIA driver.
+  Fallback: Disabling option --gpu"
+        check_fallback
         Sharegpu="no"
       }
       [ "$Sharehostipc" = "yes" ] && {
@@ -7548,23 +7558,24 @@ check_option_interferences() {  # check multiple option interferences, change se
     ;;
   esac
   
-  case "$Containerbackend" in
-    docker) 
-      [ "$Dockerrootless" ] && {
+  # --home rootless
+  [ "$Rootlessbackend" ] && {
+    case $Containerbackend in
+      docker|nerdctl)
         [ "$Sharehome" ] && {
-          note "Option --home is not supported in docker rootless mode.
-  Alternatives: --backend=podman, --backend=nerdctl or rootful docker.
+          note "Option --home is not supported in $Containerbackend rootless mode.
+  In rootless mode only option --backend=podman supports option --home.
+  Alternatively run one of docker, podman or nerdctl in rootful mode.
   Fallback: Disabling option --home"
+          check_fallback
           Sharehome=""
         }
-        [ "$Sharedfilelist" ] && {
-          note "Option --share is not supported in docker rootless mode.
-  Alternatives: --backend=podman, --backend=nerdctl or rootful docker.
-  Fallback: Disabling option --share"
-          Sharedfilelist=""
-        }
-      }
-    ;;
+      ;;
+    esac
+  }
+
+  case "$Containerbackend" in
+    docker) ;;
     podman)
       # /proc/sys/kernel/unprivileged_userns_clone might exist on debian only.
       # https://github.com/mviereck/x11docker/issues/255#issuecomment-758014962
@@ -8556,7 +8567,7 @@ declare_variables() {           # declare global variables
   Containername=""                                # --name: Container name
   Containersetup="yes"
   Customdockeroptions=""                          # -- [...] -- : Custom options for "docker run".
-  Dockerrootless=""                               # Check for rootful/rootless docker depending on DOCKER_HOST
+  Rootlessbackend=""                               # Check for rootful/rootless docker depending on DOCKER_HOST
   Imagename=""                                    # Image to run
   Inspectimage="yes"
   Interactive="no"                                # --interactive: Run docker with interactive tty yes/no
@@ -8564,7 +8575,6 @@ declare_variables() {           # declare global variables
   Network=""                                      # --network
   Noentrypoint="no"                               # --no-entrypoint: Disable entrypoint in image yes/no
   Runtime=""                                      # Runtime to use. runc|nvidia|kata-runtime|crun
-  Sharedfilelist=""                               # --share: Intermediate storage for shared files/folders/volumes
   Sharehostipc="no"                               # --hostipc: Set --ipc=host.
   Stopsignal=""                                   # Signal to send on 'docker stop'
   Sudouser=""                                     # --sudouser: Create user with sudo permissions and root user with password 'x11docker'
@@ -8927,9 +8937,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
                               [ "${1:-}" = "--homedir" ] && note "Option --homedir is deprecated.
   Please use --home=DIR instead."
                               Persistanthomevolume="${2:-}" ; shift ;;
-#         --share|--sharedir)  store_runoption volume "${2:-}"        # Share host file, device or directory
-         --share|--sharedir)  Sharedfilelist="$Sharedfilelist
-${2:-}"                                                              # Share host file, device or directory
+         --share|--sharedir)  store_runoption volume "${2:-}"         # Share host file, device or directory
                               [ "${1:-}" = "--sharedir" ] && note "Option --sharedir is deprecated.
   Please use option --share=PATH instead."
                               shift ;;
@@ -9093,11 +9101,6 @@ Parsed options:    $Parsedoptions_global"
   check_option_interferences     # check options, change settings if needed
   option_messages                # some messages depending on options, but not changing anything
   
-  #                                                                              # --share
-  while read Line; do
-    [ "$Line" ] && store_runoption volume "$Line"
-  done <<< "$Sharedfilelist"
- 
   # container user
   check_containeruser            # unprivileged user in container                 # --user
   check_containerhome            # create persistant container home               # --home, --homebasedir
