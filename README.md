@@ -129,6 +129,10 @@ Description of some commonly used feature [options](https://github.com/mviereck/
 x11docker supports container tools [Docker](https://en.wikipedia.org/wiki/Docker_(software)), [podman](http://docs.podman.io/en/latest/) 
 and [nerdctl](https://github.com/containerd/nerdctl) with option `--backend=BACKEND` in rootful and rootless mode.
  - By default x11docker tries to run `docker`. Alternatively set option `--backend=podman` or `--backend=nerdctl`.
+ - Test status:
+   - x11docker was devolped with rootful `docker`, this is well tested.
+   - Basically tested is `podman`, rootless and rootful.
+   - Barely tested are rootless `docker` and `nerdctl` in rootless and rootful mode.
  - For rootless mode `podman` is recommended. 
    - Only `podman` allows option `--home` in rootless mode yet.
    - Only `podman` provides useful file ownerships with option `--share` in rootless mode yet.
