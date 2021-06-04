@@ -2,10 +2,11 @@
 x11docker ToDo notes
 
 ## Actually to fix
+ - check `--init=` in all backends rootful and rootless.
  - `--user`: Check in all rootless modes, maybe disallow except for `--user=root`.
  - `--user=root --home` in rootless docker and nerdctl: Set up HOME in host user ~/x11docker.
  - `--init=systemd`: cgroupv2 support #349
- - replace word 'docker' in messages and variable names to generalize for podman and nerdctl, too.
+ - replace word 'docker' in messages, variable names and documentation to generalize for podman and nerdctl, too.
  - check, maybe drop container wm using `x11docker/openbox`. Currently likely fails with different backends.
 
 ## Old issues to fix
