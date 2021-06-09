@@ -10,6 +10,9 @@ Project website: https://github.com/mviereck/x11docker
 ### Changed
  - `--backend=nerdctl`: Disallow `--home` in rootless mode.
  - `--backend`: Allow `--share` in all rootless modes.
+### Fixed
+ - `--interactive`: Fix output redirection.
+   [(#364)](https://github.com/mviereck/x11docker/issues/364)
 
 ## [6.9.0](https://github.com/mviereck/x11docker/releases/tag/v6.9.0) - 2021-06-02
 ### Added
