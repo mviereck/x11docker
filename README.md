@@ -3,7 +3,7 @@
 [![DOI](http://joss.theoj.org/papers/10.21105/joss.01349/status.svg)](https://doi.org/10.21105/joss.01349)
 ### Introduction
 x11docker allows to run graphical desktop applications (and entire desktops) in Linux containers.
- - Container tools like [Docker](https://en.wikipedia.org/wiki/Docker_(software)), [podman](http://docs.podman.io/en/latest/) and [nerdctl](https://github.com/containerd/nerdctl) allow to run applications in an isolated [container](https://en.wikipedia.org/wiki/Operating-system-level_virtualization) environment. 
+ - [Container tools](#backend-docker-podman-or-nerdctl) like [Docker](https://en.wikipedia.org/wiki/Docker_(software)), [podman](http://docs.podman.io/en/latest/) and [nerdctl](https://github.com/containerd/nerdctl) allow to run applications in an isolated [container](https://en.wikipedia.org/wiki/Operating-system-level_virtualization) environment. 
    Containers need much less resources than [virtual machines](https://en.wikipedia.org/wiki/Virtual_machine) for similar tasks.
  - Docker, podman and nerdctl do not provide a [display server](https://en.wikipedia.org/wiki/Display_server) that would allow to run applications with a [graphical user interface](https://en.wikipedia.org/wiki/Graphical_user_interface).
  - x11docker fills the gap. It runs an [X display server](https://en.wikipedia.org/wiki/X_Window_System) on the host system and provides it to containers.
@@ -42,7 +42,6 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
  - [GUI for x11docker](#gui-for-x11docker)
  - [Terminal usage](#terminal-usage)
  - [Options](#options)
-   - [Backend docker, podman or nerdctl](#backend-docker-podman-or-nerdctl)
    - [Choice of X servers and Wayland compositors](#choice-of-x-servers-and-wayland-compositors)
    - [Desktop or seamless mode](#desktop-or-seamless-mode)
    - [Shared folders and HOME in container](#shared-folders-docker-volumes-and-home-in-container)
@@ -56,6 +55,7 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
    - [Init system](#init-system)
    - [DBus](#dbus)
    - [Container runtime](#container-runtime)
+   - [Backend docker, podman or nerdctl](#backend-docker-podman-or-nerdctl)
  - [Security](#security)
    - [Options degrading container isolation](#options-degrading-container-isolation)
    - [Sandbox](#sandbox)
@@ -124,23 +124,6 @@ Description of some commonly used feature [options](https://github.com/mviereck/
  - Some of these options have dependencies on host and/or in image.
    Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
  - For often used option combinations you can make shortcuts with [option `--preset`](#option---preset).
- 
-### Backend docker, podman or nerdctl
-x11docker supports container tools [Docker](https://en.wikipedia.org/wiki/Docker_(software)), [podman](http://docs.podman.io/en/latest/) 
-and [nerdctl](https://github.com/containerd/nerdctl) with option `--backend=BACKEND` in rootful and rootless mode.
- - By default x11docker tries to run `docker`. Alternatively set option `--backend=podman` or `--backend=nerdctl`.
- - Test status:
-   - x11docker was devolped with rootful `docker`, this is well tested.
-   - Basically tested is `podman`, rootless and rootful.
-   - Barely tested are rootless `docker` and `nerdctl` in rootless and rootful mode.
- - For rootless mode `podman` is recommended. 
-   - Only `podman` allows option `--home` in rootless mode yet.
-   - Only `podman` provides useful file ownerships with option `--share` in rootless mode yet.
- - For rootful mode `docker` or `podman` are recommended.
- - `nerdctl` has some limitations because it supports only a subset of `docker` cli options yet.
-   - To allow most of x11docker options with `nerdctl` please provide a container command additional to the image name.
- - To switch between rootless or rootful mode of `podman` and `nerdctl` just use (or leave) `sudo` or set (or leave) option `--pw`.
- - For [rootless docker](https://docs.docker.com/engine/security/rootless/) set environment variable `DOCKER_HOST` accordingly.
    
 ### Choice of X servers and Wayland compositors
 If no X server option is specified, x11docker automatically chooses one depending on installed [dependencies](#dependencies) and on given or missing options `--desktop`, `--gpu` and `--wayland`. Most recommended are `nxagent` and `Xephyr`.
@@ -245,6 +228,8 @@ Container runtimes known and supported by x11docker are:
  - [`crun`](https://github.com/giuseppe/crun): Fast and lightweight alternative to `runc` with same functionality.
  - `oci`: Runtime reported in [#205](https://github.com/mviereck/x11docker/issues/205), no documentation found. Handled by x11docker like `runc`.
  
+Using different runtimes is well tested for rootful Docker, but not for other [backend setups](#backend-docker-podman-or-nerdctl).
+ 
 Possible runtime configuration in `/etc/docker/daemon.json`:
 ```json
 {
@@ -267,6 +252,24 @@ Possible runtime configuration in `/etc/docker/daemon.json`:
   }
 }
 ```
+ 
+### Backend docker, podman or nerdctl
+x11docker supports container tools [Docker](https://en.wikipedia.org/wiki/Docker_(software)), [podman](http://docs.podman.io/en/latest/) 
+and [nerdctl](https://github.com/containerd/nerdctl) with option `--backend=BACKEND` in rootful and rootless mode.
+ - By default x11docker tries to run `docker`. Alternatively set option `--backend=podman` or `--backend=nerdctl`.
+ - Test status:
+   - x11docker was devolped with rootful `docker`, this is well tested.
+   - Basically tested is `podman`, rootless and rootful.
+   - Barely tested are rootless `docker` and `nerdctl` in rootless and rootful mode.
+   - Some fixes and adjustments for the less tested setups can be expected.
+ - For rootless mode `podman` is recommended. 
+   - Only `podman` allows option `--home` in rootless mode yet.
+   - Only `podman` provides useful file ownerships with option `--share` in rootless mode yet.
+ - For rootful mode `docker` or `podman` are recommended.
+ - `nerdctl` has some limitations because it supports only a subset of `docker` cli options yet.
+   - To allow most of x11docker options with `nerdctl` please provide a container command additional to the image name.
+ - To switch between rootless or rootful mode of `podman` and `nerdctl` just use (or leave) `sudo` or set (or leave) option `--pw`.
+ - For [rootless docker](https://docs.docker.com/engine/security/rootless/) set environment variable `DOCKER_HOST` accordingly.
  
 ## Security 
 Scope of x11docker is to run containerized GUI applications while preserving and improving container isolation.
@@ -358,9 +361,13 @@ As root you can install, update and remove x11docker in system directories to be
  - `x11docker --update-master` : download and install latest master version from github.
  - `x11docker --remove` : remove all files installed by x11docker.
    - Note: This does not remove `~/.local/share/x11docker` where it stores persistent files of option `--home`.
+
+What the installation does (just for information):
+ - Copies `x11docker` and `x11docker-gui` to `/usr/bin`. 
+ - Creates an icon in `/usr/share/icons`. 
+ - Creates `x11docker.desktop` in `/usr/share/applications`. 
+ - Copies `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
  
-Copies `x11docker` and `x11docker-gui` to `/usr/bin`. Creates an icon in `/usr/share/icons`. 
-Creates `x11docker.desktop` in `/usr/share/applications`. Copies `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
 ### Shortest way for first installation:
  - For systems using `sudo`:
    ```sh
