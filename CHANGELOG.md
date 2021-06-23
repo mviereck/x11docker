@@ -10,6 +10,7 @@ Project website: https://github.com/mviereck/x11docker
 ### Changed
  - `--backend=nerdctl`: Disallow `--home` in rootless mode.
  - `--backend`: Allow `--share` in all rootless modes.
+ - Use `python` to parse json output of `inspect`.
 ### Fixed
  - `--interactive`: Fix output redirection.
    [(#364)](https://github.com/mviereck/x11docker/issues/364)

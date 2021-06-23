@@ -260,14 +260,14 @@ and [nerdctl](https://github.com/containerd/nerdctl) with option `--backend=BACK
  - Test status:
    - x11docker was devolped with rootful `docker`, this is well tested.
    - Basically tested is `podman`, rootless and rootful.
-   - Barely tested are rootless `docker` and `nerdctl` in rootless and rootful mode.
+   - Barely tested:
+     - rootless `docker`
+     - `nerdctl` in rootless and rootful mode.
    - Some fixes and adjustments for the less tested setups can be expected.
  - For rootless mode `podman` is recommended. 
    - Only `podman` allows option `--home` in rootless mode yet.
    - Only `podman` provides useful file ownerships with option `--share` in rootless mode yet.
  - For rootful mode `docker` or `podman` are recommended.
- - `nerdctl` has some limitations because it supports only a subset of `docker` cli options yet.
-   - To allow most of x11docker options with `nerdctl` please provide a container command additional to the image name.
  - To switch between rootless or rootful mode of `podman` and `nerdctl` just use (or leave) `sudo` or set (or leave) option `--pw`.
  - For [rootless docker](https://docs.docker.com/engine/security/rootless/) set environment variable `DOCKER_HOST` accordingly.
  
@@ -363,10 +363,10 @@ As root you can install, update and remove x11docker in system directories to be
    - Note: This does not remove `~/.local/share/x11docker` where it stores persistent files of option `--home`.
 
 What the installation does (just for information):
- - Copies `x11docker` and `x11docker-gui` to `/usr/bin`. 
- - Creates an icon in `/usr/share/icons`. 
- - Creates `x11docker.desktop` in `/usr/share/applications`. 
- - Copies `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
+ - Copies scripts `x11docker` and `x11docker-gui` to `/usr/bin`. 
+ - Copies icon `x11docker.png` to `/usr/share/icons`. 
+ - Creates menu entry `x11docker.desktop` in `/usr/share/applications`. 
+ - Copies documentation `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
  
 ### Shortest way for first installation:
  - For systems using `sudo`:
