@@ -2,6 +2,8 @@
 x11docker ToDo notes
 
 ## Actually to fix
+ - `--sudouser=nopasswd`: check for invalid arguments.
+ - `--password, --install, --update, --cleanup`, etc.: give note about dropped options.
  - check `--init=` in all backends rootful and rootless.
  - `--user`: Check in all rootless modes, maybe disallow except for `--user=root`.
  - `--user=root --home` in rootless docker and nerdctl: Set up HOME in host user ~/x11docker.
