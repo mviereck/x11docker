@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="6.9.1-beta-4"
+Version="6.9.1-beta-5"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -343,6 +343,8 @@ Installation options (need root permissions), license and cleanup:
      --license         Show license of x11docker (MIT) and exit.
      --cleanup         Clean up orphaned containers and cache files.
                        Terminates currently running x11docker containers, too.
+--update, --update-master and --remove regard a possible custom installation
+location different from default /usr/bin directory.
                        
 Exit codes:
   0:     Success
@@ -1412,13 +1414,43 @@ installer() {                   # --install, --update, --update-master, --remove
   #   - installs icon in /usr/share/icons
   #   - creates x11docker.desktop file in /usr/share/applications
   # --update:
-  #   - download and install latest release from github
+  #   - download and install latest release from github, regard existing installation location
   # --update-master:
-  #   - download and install latest master version from github
+  #   - download and install latest master version from github, regard existing installation location
   # --remove
   #   - remove installed files
-  local Key1= Key2= Oldversion= Newversion= Format=
-  export PATH="${PATH:-}:/usr/local/bin"  # avoid bug on opensuse where root does not have this in $PATH. Will become obsolete as new default is /usr/bin
+  
+  ### FIXME: (--update)
+  ### do not require sudo if installed x11docker is owned by user
+  ### do not install x11docker-gui if not present
+  ### maybe not install additional files if x11docker is owned by user
+  local Key1= Key2= Oldversion= Newversion= Format= 
+  local Binpath Binowner Bingroup
+  
+  # Detect existing installation location
+  case ${1:-} in
+    --install)
+      Binpath="/usr/bin"
+    ;;
+    --update|--update-master|--remove)
+      grep -q x11docker <<< "$0" && {
+        Binpath="$(dirname "$0")"
+        Binpath="$(myrealpath "$Binpath")"
+        Binowner="$(stat -c '%U' "$0")"
+        Bingroup="$(stat -c '%G' "$0")"
+        [ -d "$Binpath/.git" ] && error "Option ${1:-}: It seems you are within a git directory.
+  Use 'git pull' to update your local git repository.
+  Otherwise, run 'x11docker --install' first
+  before running 'x11docker ${1:-}'
+  so to use a system installation of x11docker."
+        :
+      } || {
+        Binpath="/usr/bin"
+      }
+    ;;
+  esac
+  Binowner="${Binowner:-root}"
+  Bingroup="${Bingroup:-root}"
 
   # Prepairing
   case ${1:-} in
@@ -1471,12 +1503,14 @@ installer() {                   # --install, --update, --update-master, --remove
   # Doing
   case ${1:-} in
     --install|--update|--update-master)
-      note "Installing x11docker and x11docker-gui in /usr/bin"
-      [ -e /usr/local/bin/x11docker ]     && rm -v /usr/local/bin/x11docker
-      [ -e /usr/local/bin/x11docker-gui ] && rm -v /usr/local/bin/x11docker-gui
-      cp x11docker /usr/bin/            || error "Could not copy x11docker to /usr/bin"
-      chmod 755 /usr/bin/x11docker      || error "Could not set executeable bit on x11docker"
-      cp x11docker-gui /usr/bin/  && chmod 755 /usr/bin/x11docker-gui || warning "x11docker-gui not found"
+      note "Installing x11docker and x11docker-gui in $Binpath"
+      cp x11docker "$Binpath/"                                                || error "Could not copy x11docker to $Binpath"
+      chmod 755 "$Binpath/x11docker"                                          || error "Could not set executeable bit on x11docker"
+      chown "$Binowner:$Bingroup" "$Binpath/x11docker"                        || warning "Could not set ownership '$Binowner:$Bingroup' to '$Binpath/x11docker'"
+      cp x11docker-gui "$Binpath/" && {
+        chmod 755 "$Binpath/x11docker-gui"
+        chown "$Binowner:$Bingroup" "$Binpath/x11docker-gui"                  || warning "Could not set ownership '$Binowner:$Bingroup' to '$Binpath/x11docker-gui'"      
+      } || warning "x11docker-gui not found"
 
       note "Installing icon for x11docker with xdg-icon-resource"
       xdg-icon-resource install --context apps --novendor --mode system --size 64 "$(pwd)/x11docker.png" x11docker || warning "Could not install icon for x11docker.
@@ -1484,7 +1518,7 @@ installer() {                   # --install, --update, --update-master, --remove
       xdg-icon-resource uninstall --size 72 x11docker ||:  # deprecated icon size, may still be present.
 
       note "Creating application entry for x11docker."
-      [ -e "/usr/bin/x11docker-gui" ] && {
+      [ -e "$Binpath/x11docker-gui" ] && {
         echo "[Desktop Entry]
   Version=1.0
   Type=Application
@@ -1510,19 +1544,15 @@ installer() {                   # --install, --update, --update-master, --remove
         cp LICENSE.txt  /usr/share/doc/x11docker/
       } || note "Error while creating /usr/share/doc/x11docker"
 
-      Newversion="$(/usr/bin/x11docker --version)"
+      Newversion="$("$Binpath/x11docker" --version)"
       note "Installed x11docker version $Newversion"
     ;;
     --remove)
       note "Removing x11docker from your system."
       cleanup
-      [ -x /usr/local/bin/x11docker ] && {    # from older installations. /usr/bin is default now as /usr/local/bin can miss in $PATH for root
-        rm -v /usr/local/bin/x11docker
-        rm -v /usr/local/bin/x11docker-gui
-      }
-      [ -x /usr/bin/x11docker ] && {
-        rm -v /usr/bin/x11docker
-        rm -v /usr/bin/x11docker-gui
+      [ -x "$Binpath/x11docker" ] && {
+        rm -v "$Binpath/x11docker"
+        rm -v "$Binpath/x11docker-gui"
       }
       [ -e "/usr/share/applications/x11docker.desktop" ] && rm -v /usr/share/applications/x11docker.desktop
       [ -e "/usr/share/doc/x11docker" ]                  && rm -R -v /usr/share/doc/x11docker
@@ -8749,7 +8779,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,hostwayland,kwin,weston"                                                                       # Wayland compositors without X
   Longoptions="$Longoptions,border::,dpi:,fullscreen,output-count:,rotate:,scale:,size:,xfishtank"                         # X/Wayland appearance options
   Longoptions="$Longoptions,clean-xhost,composite::,display:,iglx,keymap:,no-auth,vt:,westonini:,xhost::,xoverip,xtest::"  # X/Wayland config
-  Longoptions="$Longoptions,enforce-i,preset:,pull::,pw::"                                                                 # x11docker config
+  Longoptions="$Longoptions,enforce-i,fallback::,preset:,pull::,pw::"                                                      # x11docker config
   Longoptions="$Longoptions,cachebasedir:,home::,homebasedir:,share:"                                                      # Host folders
   Longoptions="$Longoptions,alsa::,clipboard,gpu,lang::,printer::,pulseaudio::,webcam"                                     # Host integration features
   Longoptions="$Longoptions,env:,mobyvm,name:,no-entrypoint,runtime:,workdir:"                                             # Container config
@@ -8916,6 +8946,7 @@ ${2:-${LANG:-}}" ; shift                                             # Locale/la
 
      #### Special options
          --enforce-i)         ;;                                     # Run in bash interactive mode. Parsed at begin of script, nothing to do here.
+         --fallback)          Fallback="${2:-yes}" ; shift ;;        # Allow/deny fallbacks for impossible options
       -i|--interactive)       Interactive="yes" ;;                   # Interactive terminal
          --pull)              Pullimage="${2:-yes}" ; shift ;;       # Allow 'docker pull'
          --pw)                Passwordfrontend="${2:-auto}" ; shift ;;   # Password prompt frontend
@@ -9128,6 +9159,10 @@ Parsed options:    $Parsedoptions_global"
   }
 
   # check options
+  case "$Fallback" in
+    yes|no) ;;
+    *) error "Option --fallback: Unknown argument '$Fallback'" ;;
+  esac
   check_xserver                  # check chosen X server or auto-choose one
   check_option_interferences     # check options, change settings if needed
   option_messages                # some messages depending on options, but not changing anything

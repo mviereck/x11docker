@@ -11,7 +11,12 @@ Project website: https://github.com/mviereck/x11docker
  - `--backend=nerdctl`: Disallow `--home` in rootless mode.
  - `--backend`: Allow `--share` in all rootless modes.
  - Use `python` to parse json output of `inspect`.
+ - `--update, --update-master, --remove`: detect and use current installation 
+   directory.
+   [(#371)](https://github.com/mviereck/x11docker/issues/371)
 ### Fixed
+ - `--fallback`: Add missing switch in option parsing.
+   [(#372)](https://github.com/mviereck/x11docker/issues/372)
  - `--interactive`: Fix output redirection.
    [(#364)](https://github.com/mviereck/x11docker/issues/364)
 
