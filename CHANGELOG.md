@@ -19,6 +19,8 @@ Project website: https://github.com/mviereck/x11docker
    [(#372)](https://github.com/mviereck/x11docker/issues/372)
  - `--interactive`: Fix output redirection.
    [(#364)](https://github.com/mviereck/x11docker/issues/364)
+ - `python` dependency check: check for `python3`, too.
+   [(x11docker/mate #2)](https://github.com/mviereck/dockerfile-x11docker-mate/issues/2)
 
 ## [6.9.0](https://github.com/mviereck/x11docker/releases/tag/v6.9.0) - 2021-06-02
 ### Added

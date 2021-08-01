@@ -930,8 +930,8 @@ parse_inspect() {               # parse json of inspect output using python
   local Parserscript
   
   Parserscript="$Cachefolder/parse_inspect.py"
-  Parserscript="$(cat << EOF
-#! /usr/bin/env python
+  Parserscript="#! $Pythonbin
+$(cat << EOF
 import json,sys
 
 def parse_inspect(*args):
@@ -975,7 +975,7 @@ def parse_inspect(*args):
 parse_inspect(*sys.argv)
 EOF
   )"
-  echo "$Parserscript" | python - "$@"
+  echo "$Parserscript" | $Pythonbin - "$@"
 }
 storeinfo() {                   # store some information for later use
   # store and provide pieces of information
@@ -1451,6 +1451,8 @@ installer() {                   # --install, --update, --update-master, --remove
   esac
   Binowner="${Binowner:-root}"
   Bingroup="${Bingroup:-root}"
+  [ "$Binpath" != "/usr/bin" ] && note "Option ${1:-}: Detected custom installation path:
+  $Binpath"
 
   # Prepairing
   case ${1:-} in
@@ -2815,7 +2817,8 @@ check_xserver() {               # check chosen X server, auto-choose X server
       "") 
         error "Did not find a possibility to provide a display.
   Recommendations:
-    To run within an already running X server, install one or all of:
+    To run within an already running X server, 
+    install 'xinit' and one or all of:
       Xephyr xpra nxagent
     To run with GPU acceleration, install:
       weston and Xwayland, optionally also: xpra and xdotool
@@ -5701,6 +5704,7 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   echo "Messagefile='$Messagefifo'"
   echo "Newxenv='$Newxenv'"
   echo "export PATH='$PATH'"
+  echo "Pythonbin='$Pythonbin'"
   echo "Storeinfofile='$Storeinfofile'"
   echo "Storepidfile='$Storepidfile'"
   echo "Timetosaygoodbyefile='$Timetosaygoodbyefile'"
@@ -5832,94 +5836,90 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   echo "rocknroll || exit 64"
   echo ""
 
-  case "$Inspectimage" in
-    no) ;;
+  echo "Inspect=\"\$($Containerbackendbin inspect $Imagename)\""
+  
+  echo "# Check architecture"
+  echo 'Containerarchitecture=$(parse_inspect "$Inspect" "Architecture")'
+  echo "debugnote \"dockerrc: Image architecture: \$Containerarchitecture\""
+  
+  echo "# Check CMD"
+  echo "[ -z \"\$Containercommand\" ] && {"
+  echo "  # extract image command from image if not given on cli"
+  echo '  Containercommand="$(parse_inspect "$Inspect" "Config" "Cmd")"'
+  echo "  debugnote \"dockerrc: Image CMD: \$Containercommand\""
+  echo "  echo \"\$Containercommand\" | grep -q $(convertpath share $Containerrc) && error 'Recursion error: Found CMD $(convertpath share $Containerrc) in image.
+  Did you use 'docker commit' with an x11docker container?
+  Please build new images with a Dockerfile instead of using docker commit,
+  or provide a different container command.'"
+  echo "}"
+  echo ""
+  
+  
+  echo "# Check USER"
+  echo 'Imageuser="$(parse_inspect "$Inspect" "Config" "User")"'
+  echo "debugnote \"dockerrc: Image USER: \$Imageuser\""
+  case $Createcontaineruser in
     yes)
-      echo "Inspect=\"\$($Containerbackendbin inspect $Imagename)\""
-      
-      echo "# Check architecture"
-      echo 'Containerarchitecture=$(parse_inspect "$Inspect" "Architecture")'
-      echo "debugnote \"dockerrc: Image architecture: \$Containerarchitecture\""
-     
-      echo "# Check CMD"
-      echo "[ -z \"\$Containercommand\" ] && {"
-      echo "  # extract image command from image if not given on cli"
-      echo '  Containercommand="$(parse_inspect "$Inspect" "Config" "Cmd")"'
-      echo "  debugnote \"dockerrc: Image CMD: \$Containercommand\""
-      echo "  echo \"\$Containercommand\" | grep -q $(convertpath share $Containerrc) && error 'Recursion error: Found CMD $(convertpath share $Containerrc) in image.
-      Did you use 'docker commit' with an x11docker container?
-      Please build new images with a Dockerfile instead of using docker commit,
-      or provide a different container command.'"
-      echo "}"
-      echo ""
-      
-      
-      echo "# Check USER"
-      echo 'Imageuser="$(parse_inspect "$Inspect" "Config" "User")"'
-      echo "debugnote \"dockerrc: Image USER: \$Imageuser\""
-      case $Createcontaineruser in
-        yes)
-          echo "[ \"\$Imageuser\" ] && note \"Found 'USER \$Imageuser' in image."
-          echo "  If you want to run with user \$Imageuser instead of host user $Containeruser,"
-          echo "  than run with --user=RETAIN.\""
-          echo "storeinfo containeruser=\"$Containeruser\""
-        ;;
-        no)
-          echo 'storeinfo containeruser="${Imageuser:-root}"'
-        ;;
-      esac
-      echo ""
-      
-      case $Noentrypoint in
-        yes) echo "Entrypoint=" ;;
-        no)
-          echo     "# Check ENTRYPOINT"
-          echo     'Entrypoint="$(parse_inspect "$Inspect" "Config" "Entrypoint")"'
-          echo     "debugnote \"dockerrc: Image ENTRYPOINT: \$Entrypoint\""
-          case $Initsystem in
-            systemd|sysvinit|runit|openrc|tini)
-              echo "echo \"\$Entrypoint\" | grep -qE 'tini|init|systemd' && {"
-              echo "  note \"There seems to be an init system in ENTRYPOINT of image:
-        \$Entrypoint
-      Will disable it as x11docker already runs an init with option --$Initsystem.
-      To allow this ENTRYPOINT, run x11docker with option --init=none.\""
-              echo "  Entrypoint="
-              echo "}"
-              #echo "Exec=exec"
-            ;;
-            s6-overlay)
-              echo "[ \"\$Entrypoint\" = '/init' ] && {"
-              echo "  Entrypoint="
-              echo "  [ \"\$Containercommand\" ] || Containercommand=\"sh -c 'while :; do sleep 10; done'\""
-              echo "}"
-            ;;
-            none)
-              echo "echo \"\$Entrypoint\" | grep -qE 'tini|init|systemd' && {"
-              echo "  note \"There seems to be an init system in ENTRYPOINT of image:
-      \$Entrypoint 
-      Returning exit code of container command will fail.\""
-              echo "  Exec=exec"
-              echo "}"
-            ;;
-          esac
-        ;;
-      esac
-      echo ""
-      
-      [ -z "$Workdir" ] && {
-        echo "# Check WORKDIR"
-        echo 'Workdir="$(parse_inspect "$Inspect" "Config" "Workdir")"'
-        echo "debugnote \"dockerrc: Image WORKDIR: \$Workdir\""
-        echo "[ \"\$Workdir\" ] && note \"Found 'WORKDIR \$Workdir' in image. 
-      You can change it with option --workdir=DIR.\""
-        echo ""
-      }
+      echo "[ \"\$Imageuser\" ] && note \"Found 'USER \$Imageuser' in image."
+      echo "  If you want to run with user \$Imageuser instead of host user $Containeruser,"
+      echo "  than run with --user=RETAIN.\""
+      echo "storeinfo containeruser=\"$Containeruser\""
+    ;;
+    no)
+      echo 'storeinfo containeruser="${Imageuser:-root}"'
     ;;
   esac
+  echo ""
+  
+  case $Noentrypoint in
+    yes) echo "Entrypoint=" ;;
+    no)
+      echo     "# Check ENTRYPOINT"
+      echo     'Entrypoint="$(parse_inspect "$Inspect" "Config" "Entrypoint")"'
+      echo     "debugnote \"dockerrc: Image ENTRYPOINT: \$Entrypoint\""
+      case $Initsystem in
+        systemd|sysvinit|runit|openrc|tini)
+          echo "echo \"\$Entrypoint\" | grep -qE 'tini|init|systemd' && {"
+          echo "  note \"There seems to be an init system in ENTRYPOINT of image:
+    \$Entrypoint
+  Will disable it as x11docker already runs an init with option --$Initsystem.
+  To allow this ENTRYPOINT, run x11docker with option --init=none.\""
+          echo "  Entrypoint="
+          echo "}"
+          #echo "Exec=exec"
+        ;;
+        s6-overlay)
+          echo "[ \"\$Entrypoint\" = '/init' ] && {"
+          echo "  Entrypoint="
+          echo "  [ \"\$Containercommand\" ] || Containercommand=\"sh -c 'while :; do sleep 10; done'\""
+          echo "}"
+        ;;
+        none)
+          echo "echo \"\$Entrypoint\" | grep -qE 'tini|init|systemd' && {"
+          echo "  note \"There seems to be an init system in ENTRYPOINT of image:
+  \$Entrypoint 
+  Returning exit code of container command will fail.\""
+          echo "  Exec=exec"
+          echo "}"
+        ;;
+      esac
+    ;;
+  esac
+  echo ""
+  
+  [ -z "$Workdir" ] && {
+    echo "# Check WORKDIR"
+    echo 'Workdir="$(parse_inspect "$Inspect" "Config" "Workdir")"'
+    echo "debugnote \"dockerrc: Image WORKDIR: \$Workdir\""
+    echo "[ \"\$Workdir\" ] && note \"Found 'WORKDIR \$Workdir' in image. 
+  You can change it with option --workdir=DIR.\""
+    echo ""
+  }
   
   case "$Containersetup" in
     no) ;;
-    yes)      echo "[ -z \"\$Containercommand\$Entrypoint\" ] && error 'No container command specified and no CMD or ENTRYPOINT found in image.'"
+    yes)      
+      echo "[ -z \"\$Containercommand\$Entrypoint\" ] && error 'No container command specified and no CMD or ENTRYPOINT found in image.'"
       echo ""
      
       echo     "######## Create $(basename $Containerrc) ########"
@@ -7204,16 +7204,13 @@ check_option_interferences() {  # check multiple option interferences, change se
     ;;
   esac
   
-  command -v python >/dev/null || {
-    [ "$Containersetup" = "yes" ] && {
-      note "x11docker needs 'python' to parse output of '$Containerbackend inspect'.
+  Pythonbin="$(command -v python)"
+  [ -z "$Pythonbin" ] && Pythonbin="$(command -v python3)"
+  [ -z "$Pythonbin" ] && Pythonbin="$(command -v python2)"
+  [ -z "$Pythonbin" ] && error "x11docker needs 'python' to parse output of '$Containerbackend inspect'.
   This is needed to check ENTRYPOINT and CMD that in turn is needed to set up
-  some x11docker features. To allow more features, please install 'python' 
-  or provide a container command to execute.
-  Fallback: Enabling option --no-setup."
-      Containersetup="no"
-    }
-  }
+  some x11docker features. To allow more features, please install 'python'
+  version 2.x or 3.x"
   
   # --cap-default
   [ "$Capdropall" = "no" ] && { 
@@ -8505,6 +8502,7 @@ declare_variables() {           # declare global variables
   Nvidiacontainerfile="/usr/local/bin/NVIDIA-installer.run"  # --gpu: Path to nvidia installer in container
   Nvidiaversion=""                                # --gpu: Proprietary nvidia driver version on host
   Nvidiainstallerfile=""                          # --gpu: Proprietary nvidia driver installer for container in [...]local/share/x11docker
+  Pythonbin=""                                    # path to python binary
   
   # MS Windows
   Winpty=""                                       # Path to winpty for --interactive on MS Windows
@@ -8630,7 +8628,6 @@ declare_variables() {           # declare global variables
   Customdockeroptions=""                          # -- [...] -- : Custom options for "docker run".
   Rootlessbackend=""                               # Check for rootful/rootless docker depending on DOCKER_HOST
   Imagename=""                                    # Image to run
-  Inspectimage="yes"
   Interactive="no"                                # --interactive: Run docker with interactive tty yes/no
   Limitresources=""                               # --limit: Limit access to CPU and RAM, 0.1 ... 1.0
   Network=""                                      # --network
