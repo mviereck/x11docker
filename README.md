@@ -546,6 +546,7 @@ A special one to check features and container isolation is `x11docker/check`.
 | [Mate](https://github.com/mviereck/dockerfile-x11docker-mate) | `x11docker --desktop x11docker/mate` |
 | [Trinity](https://github.com/mviereck/dockerfile-x11docker-trinity) ([website](https://www.trinitydesktop.org/)) (successor of KDE 3) | `x11docker --desktop x11docker/trinity` |
 | [Xfce](https://github.com/mviereck/dockerfile-x11docker-xfce) | `x11docker --desktop x11docker/xfce` |
+| [umberwm](https://github.com/mviereck/dockerfile-x11docker-umberwm) | `x11docker --desktop yazgoo/umberwm` |
 
 ### Option --preset
 For very long option combinations you might want to use option `--preset FILENAME` to have a command shortcut. 
