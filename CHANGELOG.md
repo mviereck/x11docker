@@ -44,7 +44,7 @@ Project website: https://github.com/mviereck/x11docker
 ### Changed
  - `--pw [=FRONTEND]`: Argument `FRONTEND` is optional now to allow easy
    switch to rootful nerdctl or podman. Setting `FRONTEND` requires `=`.
- - `--xhost [=STR]`: Agument `STR` is optional now. If empty, set to
+ - `--xhost [=STR]`: Argument `STR` is optional now. If empty, set to
    `+SI:localuser:$USER`. Setting `STR` requires `=`.
 ### Fixed
  - `x11docker-gui`: Fixed `--share` bug. Add several missing options.
@@ -259,7 +259,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--home`: Allow optional host folder DIR with `--home=DIR`.
  - `--printer`: Allow optional argument `tcp|socket`.
    Allows CUPS printing for `--runtime=kata-runtime`.
- - `--share`: Dont share `--volume` along with `--device`. 
+ - `--share`: Don't share `--volume` along with `--device`.
    Has been a workaround for an old Docker bug setting wrong file ownerships.
    [#24](https://github.com/mviereck/x11docker/pull/24)
 ### Deprecated
@@ -377,7 +377,7 @@ Project website: https://github.com/mviereck/x11docker
  - Execute `containerrootrc` in `/tmp` of container to circumvent possible
    issues with access `700` of `~/.cache` on host.
    [(#131)](https://github.com/mviereck/x11docker/issues/131)
- - Check repeatly for PID1 of container to avoid race condition on slow systems.
+ - Check repeatedly for PID1 of container to avoid race condition on slow systems.
    [(#133)](https://github.com/mviereck/x11docker/issues/133)
 
 ## [5.4.4](https://github.com/mviereck/x11docker/releases/tag/v5.4.4) - 2019-02-24
@@ -643,7 +643,7 @@ Project website: https://github.com/mviereck/x11docker
 ### Fixed
  - Check for running docker daemon in dockerrc instead of using `pidof`.
    [(#49)](https://github.com/mviereck/x11docker/issues/49)
- - Show error message if X server fails to start. Supress warning if needless.
+ - Show error message if X server fails to start. Suppress warning if needless.
  - `--xpra`: Do not exit on `failed` in xpra server log. (seen on Ubuntu 18.04).
  - `--xorg`: Show `Xwrapper.config` warning if `needs_root_rights=yes` is 
    missing. (Seen on Ubuntu 18.04).
@@ -726,7 +726,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--nxagent`: Fixed keyboard layout issue, don't use setxkbmap.
  - `--nxagent`:  Regard `--keymap`.
  - `--nxagent`: Removed extension Composite, caused some issues.
- - `--exe`: Don't pass file descriptors to host executeable.
+ - `--exe`: Don't pass file descriptors to host executable.
  - `--wayland` Works with prissy GTK3 applications (e.g. xfce4-terminal) again,
    needed user switching in `--dbus-system` for unknown reasons.
  - `--showid` failed with sudo due to missing file descriptors. Using mkfifo now.
@@ -753,8 +753,8 @@ Project website: https://github.com/mviereck/x11docker
    Similar to already existing `--exe`, but integrates with container.
  - `--runasroot`: New option to run command as root in container on startup.
 ### Changed
- - `--gpu`: Support for automatical installation of NVIDIA drivers in container. 
-   Limited to `glibc` based image systems. 
+ - `--gpu`: Support for automatic installation of NVIDIA drivers in container.
+   Limited to `glibc` based image systems.
    [(#41)](https://github.com/mviereck/x11docker/issues/41)
  - `elogind` support for `--sysvinit`, `--openrc` and `--runit`.
    See also [elogind in container: elogind#52](https://github.com/elogind/elogind/issues/52)
@@ -805,7 +805,7 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [4.1.0](https://github.com/mviereck/x11docker/releases/tag/v4.1.0) - 2018-04-08
 ### Added
- - `--update-master` updates to lastest x11docker master version. 
+ - `--update-master` updates to latest x11docker master version.
    (Formerly job of `--update`).
 ### Changed
  - `--update` updates to latest x11docker release on github. 
@@ -872,8 +872,8 @@ Project website: https://github.com/mviereck/x11docker
  - Removed `Xtermlogfile`, using `Dockerlogfile` instead. 
    Strange: solved missing output with `--pw=su` or `--pw=sudo`, too.
 ### Fixed
- - Escape special characters in `--env`, `ENV` and image command. 
-   (Adresses [#34](https://github.com/mviereck/x11docker/issues/34), too, now solved better). _(Note: still have to escape some other optional arguments)_
+ - Escape special characters in `--env`, `ENV` and image command.
+   (Addresses [#34](https://github.com/mviereck/x11docker/issues/34), too, now solved better). _(Note: still have to escape some other optional arguments)_
 
 ## [3.9.7.9](https://github.com/mviereck/x11docker/blob/7776de0f3128a679239037567626cca09f472ee5/x11docker) - 2018-03-31
 ### Changed
@@ -1045,7 +1045,7 @@ Project website: https://github.com/mviereck/x11docker
  - create `/x11docker/environment` to store and provide container environment variables.
 ### Fixed
  - correct date/year in changelog. ([#21](https://github.com/mviereck/x11docker/issues/21))
- - `finish()`: wrong warning although terminating bgpid was successfull.
+ - `finish()`: wrong warning although terminating bgpid was successful.
 
 ## [3.9.2](https://github.com/mviereck/x11docker/blob/64556a1096470761e66f15c21b5054a6cba7a734/x11docker) - 2018-01-21
 ### Changed
@@ -1144,7 +1144,7 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [3.9.0.2](https://github.com/mviereck/x11docker/blob/55923adf38ae3a5bb13373419e8e7473ab4e88eb/x11docker) - 2017-12-16
 ### Changed
- - `/etc/sudoers[.d/]`: replace completly to avoid possible evil image setups.
+ - `/etc/sudoers[.d/]`: replace completely to avoid possible evil image setups.
  - `--cap-add CHOWN` as default to allow `/home/$Benutzer` with `--sharedir`
 
 ## [3.9.0.1](https://github.com/mviereck/x11docker/blob/f95bdb31a51255c8fb8515d6d2d03542383a7301/x11docker) - 2017-12-16
@@ -1410,8 +1410,8 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [3.6.1.10](https://github.com/mviereck/x11docker/blob/cbb904ef2b2c94ccda76aec9f6a59b68dcb854c2/x11docker) - 2017-08-27
 ### Changed
- -  `--nothing`: no check for successfull startup, avoids error message for short-timed cli commands
- -  `--showenv`: wait with output until X is ready and accessable
+ -  `--nothing`: no check for successful startup, avoids error message for short-timed cli commands
+ -  `--showenv`: wait with output until X is ready and accessible
 
 ## [3.6.1.9](https://github.com/mviereck/x11docker/blob/d50ecb314b5d96110b59796493bc983a46a5c780/x11docker) - 2017-08-25
 ### Fixed
@@ -1420,7 +1420,7 @@ Project website: https://github.com/mviereck/x11docker
 ## [3.6.1.8](https://github.com/mviereck/x11docker/blob/e3a49cbe95522a79128e9af8feede4b04074a96b/x11docker) - 2017-08-25
 ### Changed
  - provide stdin to host exe, too (`--exe`)
- - `--silent`: supress error dialog box, too
+ - `--silent`: suppress error dialog box, too
  - more reliable exit code 1 on error
 ### Fixed
  - `--orphaned`: did not find cache folder
@@ -1482,7 +1482,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--stdout`: show stdout of image command on stdout
  - `--stderr`: show stderr of image command on stderr
  - forward stdin of x11docker to image command
- - `--silent`: supress all x11docker terminal messages
+ - `--silent`: suppress all x11docker terminal messages
 ### Changed
  - x11docker-gui trys to use image `x11docker/kaptain` if `kaptain` is not installed
 
@@ -1540,7 +1540,7 @@ Project website: https://github.com/mviereck/x11docker
  - reduce dependency warnings for `--auto`
  - prefer $Hostenv instead of $Newxenv for password prompt -> better support for gksu
  - show `docker pull` output in a terminal window
- - allow `--hostdisplay` with `--xonly`. May at least be usefull to create an untrusted cookie.
+ - allow `--hostdisplay` with `--xonly`. May at least be useful to create an untrusted cookie.
  - outsourced docker startup from xinitrc
  - copy host cookie into $Cachefolder for compatibility with gksu
  - use gksu/gksudo if available
@@ -1827,7 +1827,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--nothing`: Provide no X or Wayland server
  - `--sharewayland`: Share host wayland socket and set WAYLAND_DISPLAY
  - `--setwaylandenv`: setting environment variables for toolkits like QT and GTK to use wayland
- - `--env`: set custom envionment variables (formerly `--env` had role of new `--showenv`)
+ - `--env`: set custom environment variables (formerly `--env` had role of new `--showenv`)
  - `--dbus`: run image command with `dbus-launch`
  - `--xhost+`: set `xhost +` on new X server
  - `--showenv`: formerly `--env`, show environment variables to access new X server

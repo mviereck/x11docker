@@ -258,7 +258,7 @@ x11docker supports container tools [Docker](https://en.wikipedia.org/wiki/Docker
 and [nerdctl](https://github.com/containerd/nerdctl) with option `--backend=BACKEND` in rootful and rootless mode.
  - By default x11docker tries to run `docker`. Alternatively set option `--backend=podman` or `--backend=nerdctl`.
  - Test status:
-   - x11docker was devolped with rootful `docker`, this is well tested.
+   - x11docker was developed with rootful `docker`, this is well tested.
    - Basically tested is `podman`, rootless and rootful.
    - Barely tested:
      - rootless `docker`
@@ -317,13 +317,13 @@ _Most important:_
   - `--pulseaudio` and `--alsa` allow catching audio output and microphone input from host.
   
 _Rather special options reducing security, but not needed for regular use:_
-  - `--sudouser` and `--user=root` allow `su` and `sudo` with password `x11docker`for container user. 
-    If an application somehow breaks out of container, it can harm your host system. Allows many container capabilties that x11docker would drop otherwise.
+  - `--sudouser` and `--user=root` allow `su` and `sudo` with password `x11docker`for container user.
+    If an application somehow breaks out of container, it can harm your host system. Allows many container capabilities that x11docker would drop otherwise.
   - `--cap-default` disables x11docker's container security hardening and falls back to default container capabilities as provided by the backends docker, podman or nerdctl.
     If an application somehow breaks out of container, it can harm your host system.
   - `--init=systemd|sysvinit|openrc|runit` allow some container capabilities that x11docker would drop otherwise. 
     `--init=systemd` also shares access to `/sys/fs/cgroup`. Some processes will run as root in container.
-    If a root process somehow breaks out of container, it can harm your host system. Allows many container capabilties that x11docker would drop otherwise.
+    If a root process somehow breaks out of container, it can harm your host system. Allows many container capabilities that x11docker would drop otherwise.
   - `--hostipc` sets run option `--ipc=host`. Allows MIT-SHM / shared memory. Disables IPC namespacing.
   - `--hostdbus` allows communication over DBus with host applications.
 
@@ -379,7 +379,7 @@ What the installation does (just for information):
    ```
    
 ### Minimal installation
-You can run x11docker from an arbitray location with `bash x11docker`.
+You can run x11docker from an arbitrary location with `bash x11docker`.
 For minimal system-wide installation make `x11docker` executable with `chmod +x x11docker` and move it to `/usr/bin` (or another location in `PATH`).
 Other files than script `x11docker` itself are not essential.
 
@@ -389,14 +389,14 @@ x11docker can run natively on MS Windows electively in one of:
  - [Cygwin](https://www.cygwin.com/) 
  - [MSYS2](https://www.msys2.org/)
 
-Further informations at [wiki: x11docker on MS Windows](https://github.com/mviereck/x11docker/wiki/x11docker-on-MS-Windows).
+Further information at [wiki: x11docker on MS Windows](https://github.com/mviereck/x11docker/wiki/x11docker-on-MS-Windows).
 
 ### Deinstallation
 You can remove x11docker with `x11docker --remove`. That will remove the [files listed above](#installation-options).
 It will also remove `~/.cache/x11docker` and stop all running x11docker containers.
 x11docker will **not** remove:
- - Files and folders for persistant data storage with option `--home`. These are:
-   - `~/.local/share/x11docker` where persistant data is stored.
+ - Files and folders for persistent data storage with option `--home`. These are:
+   - `~/.local/share/x11docker` where persistent data is stored.
    - Softlink `~/x11docker` that points there.
  - Folders you might have created yourself for x11docker: 
    - `~/.local/share/x11docker` 
@@ -449,7 +449,7 @@ One attempt is to allow several privileges until the setup works. Than reduce pr
  - Drop options one by one in this order: `--privileged --security-opt seccomp=unconfined --cap-add ALL --share /run/udev/data:ro --hostnet --hostipc --cap-default`. Only leave options that are needed to keep the setup working.
  - Option `--cap-default` might already be enough. It allows default container capabilities as docker|podman|nerdctl would do on themself. 
    - You can just stop debugging and reducing here if you like to.
-   - You can try to reduce `--cap-default`. Partially remove addional options to find out which one(s) are needed:
+   - You can try to reduce `--cap-default`. Partially remove additional options to find out which one(s) are needed:
      - First try `x11docker --newprivileges -- IMAGENAME`
      - Than try and reduce: `x11docker --newprivileges -- --cap-add=SETPCAP --cap-add=MKNOD --cap-add=AUDIT_WRITE --cap-add=CHOWN --cap-add=NET_RAW --cap-add=DAC_OVERRIDE --cap-add=FOWNER --cap-add=FSETID --cap-add=KILL --cap-add=SETGID --cap-add=SETUID --cap-add=NET_BIND_SERVICE --cap-add=SYS_CHROOT --cap-add=SETFCAP -- IMAGENAME`
  - `--cap-add ALL` should not be considered to be a solution. 
@@ -458,8 +458,8 @@ One attempt is to allow several privileges until the setup works. Than reduce pr
    - Many of these capabilities are rather dangerous and should not be allowed for a container. Especially to mention is `SYS_ADMIN`.
  - Option `--privileged` should not be considered to be a solution. Basically it allows arbitrary access to the host for container applications.
    - Likely you need to share a device file in `/dev`, e.g. something like `--share /dev/vboxdrv`.
- - `--hostipc` and `--hostnet` severly reduce container isolation. Better solutions are desireable.
-   
+ - `--hostipc` and `--hostnet` severely reduce container isolation. Better solutions are desirable.
+
 **3.** Open a ticket to ask for possibilities how to optimize the privilege setup.
 
 ### Other checks
@@ -475,8 +475,8 @@ One attempt is to allow several privileges until the setup works. Than reduce pr
  - A few applications need systemd and/or a running [DBus](#dbus) system daemon. Install `systemd` in image and try option `--init=systemd`.
 
 **3.** Architecture check of host OS and image
- - The image may not be built for the architecture of your host OS. (ie. Image is built for amd64 but your OS runs on arm, e.g. on a RaspBerry PI). 
-   With a mismatch the container will quit unexpectedely & x11docker may emit the error `dockerrc(): Did not receive PID of PID1 in container.`
+ - The image may not be built for the architecture of your host OS. (ie. Image is built for amd64 but your OS runs on arm, e.g. on a RaspBerry PI).
+   With a mismatch the container will quit unexpectedly & x11docker may emit the error `dockerrc(): Did not receive PID of PID1 in container.`
    - You can check the image architecture with `docker inspect --format {{.Architecture}} IMAGENAME`.
    - You can check the host architecture with `uname -m`.
    - For further information and multi-arch setups look at [wiki: Multi-arch setups with QEMU](https://github.com/mviereck/x11docker/wiki/Multiarch-setups-with-QEMU).
