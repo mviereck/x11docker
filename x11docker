@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="6.9.1-beta-7"
+Version="6.9.1-beta-8"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -1105,13 +1105,21 @@ convertpath() {                 # convert unix and windows pathes
     return 0
   }
 
+  Containerpath="$Path"
+  [ "$Sharehome" = "host" ] || {
+    grep -q "^$Containeruserhome" <<< "$Path" && Containerpath="$(sed "s%^$Containeruserhome%/home.host%" <<< "$Containerpath")"
+  }
+  [ "$Containerpath" = "$Containeruserhosthome" ] && [ "$Persistanthomevolume" != "$Containeruserhosthome" ] && Containerpath="/home.host/$Containeruser"
+  
   # not on Windows
   [ -z "$Winsubsystem" ] && {
     case $Mode in
       unix|subsystem) echo "$Path" ;;
       windows)        warning "convertpath(): Nonsense path conversion $Mode: $Path" ; return 1 ;;
-      volume)         echo "'$Path':'${3:-$Path}'$Readwritemode" ;;
-      container)      echo "${3:-$Path}" ;;
+      #volume)         echo "'$Path':'${3:-$Path}'$Readwritemode" ;;
+      #container)      echo "${3:-$Path}" ;;
+      volume)         echo "'$Path':'${3:-$Containerpath}'$Readwritemode" ;;
+      container)      echo "${3:-$Containerpath}" ;;
     esac
     return 0
   }
@@ -1425,12 +1433,13 @@ installer() {                   # --install, --update, --update-master, --remove
   ### do not install x11docker-gui if not present
   ### maybe not install additional files if x11docker is owned by user
   local Key1= Key2= Oldversion= Newversion= Format= 
-  local Binpath Binowner Bingroup
+  local Binpath Binowner Bingroup Binpathdefault
   
+  Binpathdefault="/usr/bin"
   # Detect existing installation location
   case ${1:-} in
     --install)
-      Binpath="/usr/bin"
+      Binpath="$Binpathdefault"
     ;;
     --update|--update-master|--remove)
       grep -q x11docker <<< "$0" && {
@@ -1443,16 +1452,27 @@ installer() {                   # --install, --update, --update-master, --remove
   Otherwise, run 'x11docker --install' first
   before running 'x11docker ${1:-}'
   so to use a system installation of x11docker."
-        :
-      } || {
-        Binpath="/usr/bin"
       }
     ;;
   esac
+  Binpath="${Binpath:-$Binpathdefault}"
   Binowner="${Binowner:-root}"
   Bingroup="${Bingroup:-root}"
-  [ "$Binpath" != "/usr/bin" ] && note "Option ${1:-}: Detected custom installation path:
+  [ "$Binpath" != "$Binpathdefault" ] && note "Option ${1:-}: Detected custom installation path:
   $Binpath"
+  
+  [ "$Startuser" != "root" ] && {
+    case "$Winsubsystem" in
+      CYGWIN|MSYS2) ;;
+      *) 
+        case "$Binowner" in
+          root) error "Must run as root to install, update or remove x11docker system wide." ;;
+          *) warning "Option ${1:-}: Not running as root.
+  Installing or updating non-essential files in system wide folders might fail." ;;
+        esac
+      ;;
+    esac
+  }
 
   # Prepairing
   case ${1:-} in
@@ -4362,26 +4382,19 @@ create_dockercommand() {        ### create command to run docker
   
   # --share
   while read -r Line; do
-    case "$Line" in
-      "$Containeruserhosthome") 
-        Dockercommand="$Dockercommand \\
-  --volume $(convertpath volume "$Containeruserhosthome" "/home.host/$Containeruser")" 
-      ;;
-      *)  
-        case "$(cut -c1-5 <<< "$Line")" in
-          "/dev/")
-             Dockercommand="$Dockercommand \\
+    case "$(cut -c1-5 <<< "$Line")" in
+      "/dev/")
+         Dockercommand="$Dockercommand \\
   --device $(convertpath volume "$Line")"
-            warning "Sharing device file: $Line"
-          ;;
-          *)
-            Dockercommand="$Dockercommand \\
+        warning "Sharing device file: $Line"
+      ;;
+      *)
+        Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$Line")" 
-          ;;
-        esac
       ;;
     esac
   done < <(store_runoption dump volume)
+  
   [ "$Xauthentication" = "yes" ] && Wmdockercommand="$Wmdockercommand \\
   --volume $(convertpath volume "$Xclientcookie" "$(convertpath share $Xclientcookie)")"
   
@@ -6004,24 +6017,27 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
       echo     "  echo '[ -e /run/user/\$Containeruseruid ] && ln -s /run/user/\$Containeruseruid \$XDG_RUNTIME_DIR || mkdir -p -m700 \$XDG_RUNTIME_DIR'"
       echo     "  echo ''"
       
-      while read -r Line; do
-        Path="$(convertpath container "$Line")"
-        [ "$(cut -c1-5 <<< "$Line")" != "/dev/" ] && {
-          case "$Line" in
-            "$Containeruserhosthome")
-              echo "  echo '# --share: create soft link of shared $Containeruserhosthome to container home'"
-              echo "  echo 'Homesoftlink=\"\$Containeruserhome/home.host.$Containeruser\"'"
-              echo "  echo '[ -e \"\$Containeruserhome/home.host.$Containeruser\" ] || ln -s \"/home.host/\$Containeruser\" \"\$Homesoftlink\"'"
-              echo "  echo ''"
-              Ungrep="$Ungrep|home.host.$Containeruser"
-            ;;
-            *)
-              Line="$(convertpath container "$Line")"
-              [ "${Line#$Containeruserhome}" = "$Line" ] || Ungrep="$Ungrep|$(basename "$Line")"
-            ;;
-          esac
-        }
-      done < <(store_runoption dump volume)
+      # softlinks from shared folders to HOME
+      [ "$Persistanthomevolume" != "$Containeruserhosthome" ] && { # not for --home=$HOME
+        while read -r Line; do
+          Path="$(convertpath container "$Line")"
+          [ "$(cut -c1-5 <<< "$Line")" != "/dev/" ] && {
+            [ "$Line" != "$Path" ] && {   # different for pathes in HOME without --home
+              case $Line in
+                "$Containeruserhosthome") # --share=$HOME
+                  echo "  echo 'ln -s \"$Path\" \"$Containeruserhome/home.host.$Containeruser\"'"                
+                  Ungrep="$Ungrep|home.host.$Containeruser"
+                ;;
+                *)
+                  echo "  echo 'mkdir -p $(dirname "$Line")'"
+                  echo "  echo 'ln -s \"$Path\" \"$(dirname "$Line")\"'"
+                  Ungrep="$Ungrep|$(basename "$Line")"
+                ;;
+              esac
+            }
+          }
+        done < <(store_runoption dump volume)
+      }
   
       echo     "  echo '# Copy files from /etc/skel into empty HOME'"
       echo     "  echo '[ -d \"\$HOME\" ] && {'"
@@ -9151,7 +9167,6 @@ Parsed options:    $Parsedoptions_global"
   [ "$Createlauncher" = "yes" ] && { create_launcher ; exit ; }                   # --launcher: Create application launcher icon on desktop
   [ "$Cleanup" = "yes" ]        && { cleanup ;         exit ; }                   # --cleanup: Clean up cache and orphaned x11docker containers
   [ "$Installermode" ]          && {                                              # --install, --update, --update-master, --remove
-    [ "$Startuser" = "root" ] || [ "$Winsubsystem" = "CYGWIN" ] || [ "$Winsubsystem" = "MSYS2" ] || error "Must run as root to install, update or remove x11docker."
     installer $Installermode
     exit
   }
