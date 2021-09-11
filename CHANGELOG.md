@@ -15,6 +15,8 @@ Project website: https://github.com/mviereck/x11docker
    directory.
    [(#371)](https://github.com/mviereck/x11docker/issues/371)
 ### Fixed
+ - Return exit code of container command (regression fix).
+   [(#383)](https://github.com/mviereck/x11docker/issues/383)
  - `--share`: If path is in `HOME`, change container path and create softlink.
    Otherwise `HOME` might not be writeable.
  - `--fallback`: Add missing switch in option parsing.
