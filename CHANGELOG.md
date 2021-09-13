@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
+### Added
+ - `--snap`: New option to enable fallback mode to support Docker in snap.
+   [(#375)](https://github.com/mviereck/x11docker/issues/375)
 ### Changed
  - `--backend=nerdctl`: Disallow `--home` in rootless mode.
  - `--backend`: Allow `--share` in all rootless modes.
