@@ -342,7 +342,7 @@ As default `--limit` restricts to 50% of available CPUs and 50% of currently fre
 
 For more custom fine tuning have a look at [Docker documentation: Limit a container's resources](https://docs.docker.com/config/containers/resource_constraints).
 
-**NOTE**: Internet access is allowed by default. You can disable internet access with `--no-internet`.
+**NOTE**: Internet access is allowed by default. You can disable internet access with `--network=none`.
 
 **WARNING**: There is no restriction that can prevent the container from flooding the hard disk storing the container or in shared folders.
 
@@ -523,7 +523,7 @@ A special one to check features and container isolation is `x11docker/check`.
 | [Telegram messenger](https://telegram.org/) with persistent <br> `HOME` for configuration storage | `x11docker --home xorilog/telegram` |
 | Firefox with shared `Download` folder. | `x11docker --share $HOME/Downloads -- --tmpfs /dev/shm -- jess/firefox` |
 | [Tor browser](https://www.torproject.org/projects/torbrowser.html) | `x11docker jess/tor-browser` |
-| Chromium browser | `x11docker -- jess/chromium --no-sandbox` |
+| Chromium browser with restricted resource usage | `x11docker --limit -- jess/chromium --no-sandbox` |
 | VLC media player with shared `Videos` <br> folder and Pulseaudio sound | `x11docker --pulseaudio --share=$HOME/Videos jess/vlc` |
 | [GNU Octave Scientific Programming Language](https://www.gnu.org/software/octave/) built for arm & arm64 | `x11docker aptman/dbhi:bionic-octave octave` | 
 
