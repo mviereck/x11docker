@@ -63,10 +63,10 @@ x11docker ToDo notes
   
 ## Improvements
  - `--update`: regard possible location in `/opt`
- - `--cleanup`: avoid hardcoded pathes
+ - `--cleanup`: avoid hardcoded paths
  - support `--exe --user` ?
- - avoid loosing `dockerstopshell` from process tree
- - avoid loosing hostexe from process tree
+ - avoid losing `dockerstopshell` from process tree
+ - avoid losing hostexe from process tree
  - `dockerstopshell` does not react if fifofile is deleted.
  - dependency wiki: Cygwin packages
  - `capsh`: replace `su` with `capsh`? (missing in alpine) But how to trigger login?
