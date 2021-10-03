@@ -11,6 +11,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--snap`: New option to enable fallback mode to support Docker in snap.
    [(#375)](https://github.com/mviereck/x11docker/issues/375)
 ### Changed
+ - `--wm=container`: drop containerized window manager support. 
  - `--backend=nerdctl`: Disallow `--home` in rootless mode.
  - `--backend`: Allow `--share` in all rootless modes.
  - Use `python` to parse json output of `inspect`.

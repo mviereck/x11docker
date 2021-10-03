@@ -137,9 +137,6 @@ x11docker assumes that you want to run a single application in seamless mode, i.
  - Desktop mode with `--desktop` is supported with all X server options except `--hostdisplay`. If available, x11docker prefers `--xephyr` and `--nxagent`.
  - Special case: Single applications with a window manager (option `--wm`).
    - If neither `nxagent` nor `xpra` are installed, but x11docker finds a desktop capable X server like `Xephyr`, it avoids insecure option `--hostdisplay` and runs Xephyr with a window manager.
-   - If available, x11docker uses image `x11docker/openbox` to run a window manager in its own container. 
-   - Another window manager image an be specified with e.g. `--wm=x11docker/lxde`.
-   - As a fallback x11docker runs a window manager from host, either autodetected or specified with e.g. `--wm=xfwm4`. 
    
 ### Shared folders, volumes and HOME in container
 Changes in a running container system will be lost, the created container will be discarded. For persistent data storage you can share host directories or volumes:
