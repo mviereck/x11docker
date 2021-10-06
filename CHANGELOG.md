@@ -8,6 +8,7 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
+ - `--build`: New option to build an image from x11docker repository.
  - `--snap`: New option to enable fallback mode to support Docker in snap.
    [(#375)](https://github.com/mviereck/x11docker/issues/375)
 ### Changed

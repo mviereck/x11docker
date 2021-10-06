@@ -507,8 +507,17 @@ Volksbank Kirchheim-Nürtingen
 I personally know some of the people behind this. I assure that they are trustworthy and have a great heart and soul and do a good thing.
 
 ## Examples
-[x11docker image examples with desktop environments can be found on docker hub.](https://hub.docker.com/u/x11docker/)
+[Some x11docker image examples with desktop environments can be found on docker hub.](https://hub.docker.com/u/x11docker/)
 A special one to check features and container isolation is `x11docker/check`.
+
+Docker does not provide automated builds for free anymore, so the images are becoming outdated.
+Instead of pulling them, rather build them locally with x11docker option '--build`.
+
+Some x11docker Dockerfiles are provided at https://github.com/mviereck?tab=repositories; look for repositories beginning with `dockerfile-x11docker`.
+You can build locally from these Dockerfiles with x11docker option `--build`. Example:
+```
+x11docker --build x11docker/fvwm`
+```
 
 ### Single applications
 | Application | x11docker command |

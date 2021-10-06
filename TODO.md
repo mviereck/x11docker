@@ -2,7 +2,6 @@
 x11docker ToDo notes
 
 ## Actually to fix
- - `--build`: new option to build x11docker images from github. 
  - `--update`: Check if root is needed in custom installation path. Do not install other files then.
  - `--password, --install, --update, --cleanup`, etc.: give note about dropped options.
    Maybe change to $1 mode without `--`
@@ -16,10 +15,8 @@ x11docker ToDo notes
 
 ## Old issues to fix
  - `--gpu --webcam` adds user to group `video` twice.
- - `--xorg` does not enable `--wm` but should do it.
  - docker-for-win: DOS newline mess in `error()` #219.
  - docker-for-win: Double entries in log.
- - `--wm`: XTEST warning does not appear if dockerrc runs host wm as a fallback.
  - `--install`/`--update`: first install shows entire `CHANGELOG.md`. Should only show most recent release notes.
  - replace `find` in `containerrootrc`, missing in fedora images.
  - error message window in Wayland fails: xterm: no display. x11docker should use `konsole` or `xfce4-terminal`.

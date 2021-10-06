@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="6.9.1-beta-13"
+Version="6.10.0-beta-1"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -83,7 +83,9 @@ Dependencies in image:
 Options: (short options do not accept arguments)
      --help            Display this message and exit.
  -e, --exe             Execute host application instead of a container.
-     --xonly           Only create empty X server.
+     --license         Show license of x11docker (MIT) and exit.
+     --version         Show x11docker version and exit.
+     --xonly           Only start empty X server.
 
 Basic settings:
  -d, --desktop         Indicate a desktop environment in image.
@@ -288,6 +290,11 @@ Additional commands: (You might need to move them to background with 'CMD &'.)
      --runfromhost=CMD Run host command CMD on new X server.
 
 Miscellaneous:
+     --build IMAGE     Build an image from a Dockerfile from x11docker 
+                       repository. Example: 'x11docker --build x11docker/fvwm'
+                       Works for all repositories beginning with 'dockerfile'
+                       at https://github.com/mviereck?tab=repositories
+                       Regards (only) option --backend=BACKEND.
      --cachebasedir=DIR  Custom base folder for cache files.
      --homebasedir=DIR   Custom base folder for option --home.
      --enforce-i       Run x11docker in interactive bash mode to allow tty 
@@ -331,19 +338,20 @@ Verbosity options:
  -v, --verbose         Be verbose. Output of x11docker.log on stderr.
  -V                    Be verbose with colored output. 
 
-Installation options (need root permissions), license and cleanup:
+Installation options and cleanup (need root permissions):
      --install         Install x11docker and x11docker-gui from current folder.
                        Useful to install from an extracted zip file.
      --update          Download and install latest release from github.
      --update-master   Download and install latest master version from github.
      --remove          Remove x11docker from your system. Includes --cleanup.
                        Preserves ~/.local/share/x11docker from option --home.
-     --license         Show license of x11docker (MIT) and exit.
      --cleanup         Clean up orphaned containers and cache files.
                        Terminates currently running x11docker containers, too.
+                       Regards (only) option --backend=BACKEND.
 --update, --update-master and --remove regard a possible custom installation
-location different from default /usr/bin directory.
-                       
+path different from default /usr/bin directory. 
+Additional options are disregarded.
+
 Exit codes:
   0:     Success
   64:    x11docker error
@@ -1289,6 +1297,37 @@ writeaccess() {                 # check if useruid $1 has write access to folder
 }
 
 #### special jobs of x11docker (not running X or docker)
+
+buildimage() {                  # --build: build image from x11docker repository Dockerfile
+  # Build image $1 from x11docker repository
+  
+  local Wwwpath Buildpath Imagename
+  
+  # check image name, should have leading 'x11docker/'
+  Imagename="${1:-}"
+  grep -q "x11docker" <<< "$Imagename" || Imagename="x11docker/$Imagename"
+  
+  # remote and local pathes
+  Wwwpath="https://raw.githubusercontent.com/mviereck/dockerfile-$(tr / - <<< "$Imagename")/master/Dockerfile"
+  Buildpath="${TMPDIR:-/tmp}/x11docker-build-$(unspecialstring "$Imagename")"
+  
+  grep -q "dockerfile-x11docker-" <<< "$Wwwpath" || error "Option --build: x11docker only supports building of
+  images provided at x11docker repository https://github.com/mviereck"
+  
+  mkdir -p "$Buildpath"
+  cd $Buildpath
+  download || error "Option --build: Please install 'curl' or 'wget' to allow a download"
+  
+  note "Download of $Wwwpath"
+  download "$Wwwpath" "$Buildpath/Dockerfile" || error "Option --build: Did not find a Dockerfile for $Imagename
+  at $Wwwpath"
+  
+  note "Building $Imagename"
+  $Containerbackendbin build -t "$Imagename" "$Buildpath" || error "Option --build: Building image '$Imagename' failed."
+  
+  rm -rf "$Buildpath"
+  return 0
+}
 cleanup() {                     # --cleanup : check for non-removed containers and left cache files
   # Cleans x11docker cache and removes running and stopped x11docker containers.
   # Does not change --home folders.
@@ -1307,7 +1346,7 @@ cleanup() {                     # --cleanup : check for non-removed containers a
   Orphanedcontainers="$($Containerbackendbin ps -a | grep x11docker_X | rev | cut -d' ' -f1 | rev)"
   Orphanedcontainers="$Orphanedcontainers $(find "$Cachebasefolder" -mindepth 2 -maxdepth 2 -type f -name 'container.id' -exec cat {} \;)"
   Orphanedcontainers="$(env IFS='' echo $Orphanedcontainers)"
-  
+
   # check for double entrys name/id, check for already non-existing containers
   for Line in $Orphanedcontainers; do
     Inspect="$($Containerbackendbin inspect $Line 2>/dev/null)"
@@ -5775,6 +5814,9 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
       [ "$Runsinterminal" = "yes" ] && {
         echo "grep -x -q '$Imagename' < $Dockerimagelistfile || grep -x -q '$Imagename:latest' < $Dockerimagelistfile || {"
         echo "  $Containerbackendbin images | grep -q '^$Imagename ' || {"
+        echo "    echo $Imagename | grep -q 'x11docker/' && echo 'You can build images from x11docker repository with e.g.:
+  x11docker --build $Imagename
+'"
         echo "    echo 'Image $Imagename not found locally.' >&2"
         echo "    echo 'Do you want to pull it from docker hub?' >&2"
         echo "    askyesno && Imagepull=yes || error \"Image '$Imagename' not available locally and not pulled from docker hub.\""
@@ -8573,6 +8615,7 @@ declare_variables() {           # declare global variables
   Runfromhost=""                                  # --runfromhost: Add host command to xinitrc
   
   # Miscellaneous
+  Buildimage=""                                   # --build: x11docker image to build from repo Dockerfile
   Cachenumber="$(date +%s%N | cut -c6-16)"        # Number to use for cache folder
   [ -z "$Cachenumber" ] && Cachenumber="$(makecookie)"
   Codename=""                                     # created from image name and command without special chars for use with container name and cache folder
@@ -8693,7 +8736,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,runasuser:,runfromhost:,runasroot:"                                                            # Additional commands to execute
   Longoptions="$Longoptions,showenv,showid,showinfofile,showpid1,showcache"                                                # Output of vars on stdout
   Longoptions="$Longoptions,debug,quiet,verbose"                                                                           # Verbose options
-  Longoptions="$Longoptions,cleanup,help,launcher,licence,license,version,wmlist"                                          # Special options without starting X or container
+  Longoptions="$Longoptions,build,cleanup,help,launcher,licence,license,version,wmlist"                                    # Special options without starting X or container
   Longoptions="$Longoptions,install,remove,update,update-master"                                                           # Installation
   #
   Longoptions="$Longoptions,backend:,keepcache,no-setup,podman,xopt:,xorgconf:"                                            # Experimental
@@ -8921,6 +8964,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
          --showpid1)          Showcontainerpid1pid="yes" ;;          # Output of host PID of container PID 1
 
      #### Special options not starting X or docker
+         --build)             Buildimage="yes" ;;                    # Build an image from x11docker repository
          --cleanup)           Cleanup="yes"  ;;                      # Remove orphaned containers and cache files
          --install|--update|--update-master|--remove) Installermode="${1:-}" ;;   # Installer
          --launcher)          Createlauncher="yes" ;;                # Create application launcher on desktop and exit
@@ -9055,10 +9099,8 @@ Parsed options:    $Parsedoptions_global"
   # Special x11docker jobs
   [ "$Createlauncher" = "yes" ] && { create_launcher ; exit ; }                   # --launcher: Create application launcher icon on desktop
   [ "$Cleanup" = "yes" ]        && { cleanup ;         exit ; }                   # --cleanup: Clean up cache and orphaned x11docker containers
-  [ "$Installermode" ]          && {                                              # --install, --update, --update-master, --remove
-    installer $Installermode
-    exit
-  }
+  [ "$Installermode" ]          && { installer "$Installermode" ; exit ; }        # --install, --update, --update-master, --remove
+  [ "$Buildimage" ]             && { buildimage "$Imagename" ; exit ; }           # --build: Build image from x11docker repository
 
   # check options
   case "$Fallback" in
