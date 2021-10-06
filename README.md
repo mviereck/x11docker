@@ -511,12 +511,12 @@ I personally know some of the people behind this. I assure that they are trustwo
 A special one to check features and container isolation is `x11docker/check`.
 
 Docker does not provide automated builds for free anymore, so the images are becoming outdated.
-Instead of pulling them, rather build them locally with x11docker option '--build`.
+Instead of pulling them, rather build them locally with x11docker option `--build`.
 
 Some x11docker Dockerfiles are provided at https://github.com/mviereck?tab=repositories; look for repositories beginning with `dockerfile-x11docker`.
 You can build locally from these Dockerfiles with x11docker option `--build`. Example:
 ```
-x11docker --build x11docker/fvwm`
+x11docker --build x11docker/fvwm
 ```
 
 ### Single applications
