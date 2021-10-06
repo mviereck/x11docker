@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [6.10.0](https://github.com/mviereck/x11docker/releases/tag/v6.10.0) - 2021-10-06
 ### Added
  - `--build`: New option to build an image from x11docker repository.
  - `--snap`: New option to enable fallback mode to support Docker in snap.
