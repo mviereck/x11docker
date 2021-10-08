@@ -6,13 +6,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+### Unreleased
+### Deprecated
+ - `--pull`: Use `docker pull IMAGE` or `x11docker --build IMAGE` instead.
+
 ## [6.10.0](https://github.com/mviereck/x11docker/releases/tag/v6.10.0) - 2021-10-06
 ### Added
  - `--build`: New option to build an image from x11docker repository.
  - `--snap`: New option to enable fallback mode to support Docker in snap.
    [(#375)](https://github.com/mviereck/x11docker/issues/375)
 ### Changed
- - `--wm=container`: drop containerized window manager support. 
  - `--backend=nerdctl`: Disallow `--home` in rootless mode.
  - `--backend`: Allow `--share` in all rootless modes.
  - Use `python` to parse json output of `inspect`.
@@ -28,8 +31,8 @@ Project website: https://github.com/mviereck/x11docker
    [(#372)](https://github.com/mviereck/x11docker/issues/372)
  - `--interactive`: Fix output redirection.
    [(#364)](https://github.com/mviereck/x11docker/issues/364)
- - `python` dependency check: check for `python3`, too.
-   [(x11docker/mate #2)](https://github.com/mviereck/dockerfile-x11docker-mate/issues/2)
+### Removed
+ - `--wm=container`: drop containerized window manager support. 
 
 ## [6.9.0](https://github.com/mviereck/x11docker/releases/tag/v6.9.0) - 2021-06-02
 ### Added

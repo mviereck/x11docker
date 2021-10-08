@@ -13,6 +13,12 @@ x11docker ToDo notes
  - replace word 'docker' in messages, variable names and documentation to generalize for podman and nerdctl, too.
  - check, maybe drop container wm using `x11docker/openbox`. Currently likely fails with different backends.
 
+## Changes in 7.0:
+ - `x11docker-gui`: drop?
+ - `--pull`: drop
+ - `--network=none`: Disable internet access by default, require `-I`.
+ - `--user=root`: Don't enable `--sudouser`.
+
 ## Old issues to fix
  - `--gpu --webcam` adds user to group `video` twice.
  - docker-for-win: DOS newline mess in `error()` #219.
