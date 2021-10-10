@@ -2,6 +2,7 @@
 x11docker ToDo notes
 
 ## Actually to fix
+ - `--showN`: Add argument `=FILE`.
  - `--update`: Check if root is needed in custom installation path. Do not install other files then.
  - `--password, --install, --update, --cleanup`, etc.: give note about dropped options.
    Maybe change to $1 mode without `--`
@@ -13,7 +14,7 @@ x11docker ToDo notes
  - replace word 'docker' in messages, variable names and documentation to generalize for podman and nerdctl, too.
  - check, maybe drop container wm using `x11docker/openbox`. Currently likely fails with different backends.
 
-## Changes in 7.0:
+## Planned changes in 7.0:
  - `x11docker-gui`: drop?
  - `--pull`: drop
  - `--network=none`: Disable internet access by default, require `-I`.
@@ -30,7 +31,6 @@ x11docker ToDo notes
 
 ## Nice to fix
  - `--init=systemd`: check systemd warnings on x11docker services
- - `--xpra-xwayland --desktop`: resizing window does not work
  - `--printer`: regard host environment variable `CUPS_SERVER`. Maybe already done by `lpadmin`.
  - `pspid()`: On some systems (busybox) `ps -p` is not supported
  - `--runtime=kata-runtime`: `x11docker/lxde` needs `--init=systemd`, why? Sort of `menud` issue.
@@ -41,9 +41,10 @@ x11docker ToDo notes
  - `--interactive --enforce-i` fails. Issue is subshell containershell & in main, would work without it.
  - `--group-add`: gid 101 for both possible: `messagebus` and `systemd-journal`, works nonetheless.
  - `--keymap` does not work on tty with `--kwin` and `--kwin-xwayland`. No idea how to set it.
- - `--wayland --user|--hostuser`: wayland socket access denied due to `XDG_RUNTIME_DIR` file access permissions
+ - `--wayland --user`: wayland socket access denied due to `XDG_RUNTIME_DIR` file access permissions
 
 ## Nice to fix (images)
+ - `x11docker/check`: Print several checks in terminal before running gui
  - `x11docker/fluxbox` on arch host: background can miss, sometimes no context menu. Where is the difference to other hosts?
  - `--sudouser`: `su` to root in void containers fails.
  - `elogind` in alpine: `su` does not take effect. missing policykit? pam corrupted by x11docker?
@@ -67,7 +68,6 @@ x11docker ToDo notes
  - debian bug report lightdm/sddm contra gdm, dm can crash on tty switch if multiple graphical sessions are running
   
 ## Improvements
- - `--update`: regard possible location in `/opt`
  - `--cleanup`: avoid hardcoded paths
  - support `--exe --user` ?
  - avoid losing `dockerstopshell` from process tree
