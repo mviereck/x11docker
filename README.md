@@ -44,7 +44,7 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
  - [Options](#options)
    - [Choice of X servers and Wayland compositors](#choice-of-x-servers-and-wayland-compositors)
    - [Desktop or seamless mode](#desktop-or-seamless-mode)
-   - [Shared folders and HOME in container](#shared-folders-docker-volumes-and-home-in-container)
+   - [Shared folders and HOME in container](#shared-folders-volumes-and-home-in-container)
    - [GPU hardware acceleration](#gpu-hardware-acceleration)
    - [Clipboard](#clipboard)
    - [Sound](#sound)
