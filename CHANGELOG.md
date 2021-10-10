@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-### Unreleased
+## Unreleased
 ### Deprecated
  - `--pull`: Use `docker pull IMAGE` or `x11docker --build IMAGE` instead.
 
