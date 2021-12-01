@@ -25,12 +25,14 @@ Project website: https://github.com/mviereck/x11docker
 ### Fixed
  - Return exit code of container command (regression fix).
    [(#383)](https://github.com/mviereck/x11docker/issues/383)
- - `--share`: If path is in `HOME`, change container path and create softlink.
+ - `--share` without `--home`: If path is in `HOME`, change container path and create softlink.
    Otherwise `HOME` might not be writeable.
  - `--fallback`: Add missing switch in option parsing.
    [(#372)](https://github.com/mviereck/x11docker/issues/372)
  - `--interactive`: Fix output redirection.
    [(#364)](https://github.com/mviereck/x11docker/issues/364)
+ - `--gpu`: Set environment variables of `prime-run`.
+   [(#394)](https://github.com/mviereck/x11docker/issues/394)
 ### Removed
  - `--wm=container`: drop containerized window manager support. 
 
