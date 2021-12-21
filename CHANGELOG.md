@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 
 ## Unreleased
+### Changed
+ - `--backend`: Fallbacks to `podman` and `nerdctl` if `docker` not found.
 ### Deprecated
  - `--pull`: Use `docker pull IMAGE` or `x11docker --build IMAGE` instead.
+### Fixed
+ - `--gpu`: Set environment variables of `prime-run`.
+   [(#394)](https://github.com/mviereck/x11docker/issues/394)
 
 ## [6.10.0](https://github.com/mviereck/x11docker/releases/tag/v6.10.0) - 2021-10-06
 ### Added
@@ -31,8 +36,6 @@ Project website: https://github.com/mviereck/x11docker
    [(#372)](https://github.com/mviereck/x11docker/issues/372)
  - `--interactive`: Fix output redirection.
    [(#364)](https://github.com/mviereck/x11docker/issues/364)
- - `--gpu`: Set environment variables of `prime-run`.
-   [(#394)](https://github.com/mviereck/x11docker/issues/394)
 ### Removed
  - `--wm=container`: drop containerized window manager support. 
 

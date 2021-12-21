@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="6.10.1-beta-4"
+Version="6.10.1-beta-5"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -262,7 +262,7 @@ Container init system, elogind and DBus daemon:
 
 Container special configuration:
      --backend=BACKEND   Container backend to use: docker, podman or nerdctl.
-                       Default: docker.
+                       Default: docker. (Fallbacks to podman and nerdctl.)
                        For rootless mode podman is recommended.
                        For rootful podman or nerdctl use sudo or option --pw.
                        For rootless docker set DOCKER_HOST accordingly.
@@ -6459,11 +6459,6 @@ start_hostexe() {               # options --exe, --xonly: Run host executable in
     done < <(store_runoption dump env | grep -v XAUTHORITY | grep -v XDG_RUNTIME_DIR)
     echo ""
     
-    echo "env >> $Containerenvironmentfile"
-    echo "verbose \"Container environment:"
-    echo "\$(env | sort)\""
-    echo ""
-    
     echo "storeinfo test tini && {"
     echo "  Tini=\"\$(storeinfo dump tini)  --\" "
     echo "  export TINI_SUBREAPER=1"
@@ -6657,7 +6652,7 @@ check_host() {                  # check host environment
       Containerbackendbin="docker.exe"
     ;;
     no)
-      Containerbackendbin="$Containerbackend"
+      Containerbackendbin="$(command -v "$Containerbackend" &2>/dev/null)"
     ;;
   esac
   
@@ -6886,7 +6881,7 @@ check_hostxenv() {              # check environment variables for host X display
   return 0
 }
 check_option_interferences() {  # check multiple option interferences, change settings if needed
-  local Message
+  local Message Fallbackinuse=
 
   [ "$Desktopmode" = "no" ] && case $Xserver in
     --xephyr|--weston-xwayland|--kwin-xwayland|--xorg) Windowmanagermode="auto" ;;
@@ -7600,6 +7595,44 @@ check_option_interferences() {  # check multiple option interferences, change se
     ;;
   esac
   
+  # --backend
+  while ! command -v "$Containerbackendbin" >/dev/null ; do
+    note "Option --backend: $Containerbackend not found."
+    Fallbackinuse="yes"
+    case $Containerbackend in
+      docker) Containerbackend="podman" ;;
+      podman) Containerbackend="nerdctl" ;;
+      nerdctl) Containerbackend="NOBACKENDFOUND" ;;
+    esac
+    Containerbackendbin="$(command -v "$Containerbackend" &2> /dev/null)"
+    note "Option --backend: Fallback: using backend $Containerbackend"
+    [ "$Containerbackend" = "NOBACKENDFOUND" ] && break
+  done
+  [ "$Fallbackinuse" ] && check_fallback
+  [ "$Containerbackend" = "NOBACKENDFOUND" ] && error "Option --backend: No container backend found.
+  To run containers you need to install a valid backend.
+  Known backends: docker podman nerdctl"
+  case "$Containerbackend" in
+    docker) ;;
+    podman)
+      # /proc/sys/kernel/unprivileged_userns_clone might exist on debian only.
+      # https://github.com/mviereck/x11docker/issues/255#issuecomment-758014962
+      [ "$(cat /proc/sys/kernel/unprivileged_userns_clone)" = "0" ] && error "Option --podman: Linux kernel disallows unprivileged 
+  user namespace setup. Please run as root:
+    sysctl -w kernel.unprivileged_userns_clone=1"
+      store_runoption cap "CHOWN"
+    ;;
+    nerdctl) 
+      note "Option --backend=nerdctl: nerdctl only supports a subset
+  of docker options. That limits support of x11docker features."
+      Switchcontaineruser="yes"
+      [ "$Capdropall" = "yes" ] && warning "Option --backend=nerdctl: x11docker
+  will allow some user switching capabilities that would be dropped with
+  other backends. (Because 'nerdctl --exec' does not support option --user.)
+  Though, these are still within nerdctl default capabilities."
+    ;;
+  esac
+  
   # --home rootless
   [ "$Rootlessbackend" ] && {
     case $Containerbackend in
@@ -7626,30 +7659,6 @@ check_option_interferences() {  # check multiple option interferences, change se
       Sudouser=""
       check_fallback
     ;;
-  esac
-
-  case "$Containerbackend" in
-    docker) ;;
-    podman)
-      # /proc/sys/kernel/unprivileged_userns_clone might exist on debian only.
-      # https://github.com/mviereck/x11docker/issues/255#issuecomment-758014962
-      [ "$(cat /proc/sys/kernel/unprivileged_userns_clone)" = "0" ] && error "Option --podman: Linux kernel disallows unprivileged 
-  user namespace setup. Please run as root:
-    sysctl -w kernel.unprivileged_userns_clone=1"
-      store_runoption cap "CHOWN"
-    ;;
-    nerdctl) 
-      note "Option --backend=nerdctl: nerdctl only supports a subset
-  of docker options. That limits support of x11docker features."
-      Switchcontaineruser="yes"
-      [ "$Capdropall" = "yes" ] && warning "Option --backend=nerdctl: x11docker
-  will allow some user switching capabilities that would be dropped with
-  other backends. (Because 'nerdctl --exec' does not support option --user.)
-  Though, these are still within nerdctl default capabilities."
-    ;;
-    *) note "Option --backend=$Containerbackend: Unknown backend. Will try anyway.
-  You might need option --no-setup. 
-  Known backends are docker, podman and nerdctl." ;;
   esac
   
   return 0
@@ -7731,10 +7740,6 @@ check_runmode() {               # check run/--exe/--xonly
     run)
       Imagebasename="$(echo $Imagename | tr / - | cut -d: -f1)"
       Codename="$Imagename $Containercommand"
-      
-      command -v $Containerbackendbin >/dev/null || error "Backend $Containerbackendbin is not installed.
-  To run containers you need to install a valid backend.
-  Known backends: docker podman nerdctl"
       verbose "Image name: $Imagename
   Container command: $Containercommand"
     ;;
@@ -8762,7 +8767,6 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,cachedir:,no-init,nothing,no-xtest,openrc,ps,runit,silent,starter,stderr,stdout"               # Removed
   Longoptions="$Longoptions,sys-admin,sysvinit,tini,trusted,untrusted,vcxsrv"                                              # Removed
 
-  Parsererrorfile="/tmp/x11docker.parserserror.$Cachenumber"
   Parsedoptions="$(getopt --options "$Shortoptions" --longoptions "$Longoptions" --name "$0" -- "$@" )" || error "Failed to parse options."
   eval set -- "$Parsedoptions"
   [ -z "$Parsedoptions_global" ] && Parsedoptions_global="$Parsedoptions"
