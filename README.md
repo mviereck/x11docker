@@ -61,6 +61,7 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
    - [Sandbox](#sandbox)
    - [Security and feature check](#security-and-feature-check)
  - [Installation](#installation)
+   - [Distribution packages](#distribution-packages)
    - [Installation options](#installation-options)
    - [Shortest way for first installation](#shortest-way-for-first-installation)
    - [Minimal installation](#minimal-installation)
@@ -350,7 +351,19 @@ To check container isolation and some feature options use image `x11docker/check
  - Add options like `--pulseaudio --alsa --webcam --clipboard --printer` to check their functionality.
   
 ## Installation
-Note that x11docker is just a **bash script** without library dependencies. Basically it is just a wrapper for X servers and container backends docker, podman and nerdctl. To allow advanced usage of x11docker abilities have a look at chapter [Dependencies](#dependencies).
+Note that x11docker is just a **bash script** without library dependencies. 
+Basically it is just a wrapper for X servers and container backends docker, podman and nerdctl. 
+To allow advanced usage of x11docker abilities have a look at chapter [Dependencies](#dependencies).
+
+### Distribution packages
+x11docker is available as a package in some distributions. If you know of more packages in other distributions, please tell me.
+ - [Alpine](https://pkgs.alpinelinux.org/package/edge/testing/x86/x11docker)
+ - [archlinux](https://aur.archlinux.org/packages/x11docker/)
+ - [fedora](https://packages.fedoraproject.org/pkgs/x11docker/x11docker/index.html)
+ - [NixOS](https://search.nixos.org/packages?channel=unstable&from=0&size=50&sort=relevance&query=x11docker)
+
+Thanks to the maintainers that decided to provide these packages! 
+
 ### Installation options
 As root you can install, update and remove x11docker in system directories to be available system-wide:
  - `x11docker --install` : install x11docker and x11docker-gui from current directory. (Useful to install from an extracted `zip` file or a cloned `git` repository.)
