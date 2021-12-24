@@ -61,12 +61,13 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
    - [Sandbox](#sandbox)
    - [Security and feature check](#security-and-feature-check)
  - [Installation](#installation)
-   - [Distribution packages](#distribution-packages)
-   - [Installation options](#installation-options)
-   - [Shortest way for first installation](#shortest-way-for-first-installation)
-   - [Minimal installation](#minimal-installation)
-   - [Installation on MS Windows](#installation-on-ms-windows)
-   - [Deinstallation](#deinstallation)
+   - [Installation from distribution repositories](#installation-from-distribution-repositories)
+   - [Manual installation](#manual-installation)
+     - [Installation options](#installation-options)
+     - [Shortest way for first installation](#shortest-way-for-first-installation)
+     - [Minimal installation](#minimal-installation)
+     - [Installation on MS Windows](#installation-on-ms-windows)
+     - [Deinstallation](#deinstallation)
  - [Dependencies](#dependencies)
  - [Troubleshooting](#troubleshooting)
    - [Core checks](#core-checks)
@@ -355,16 +356,17 @@ Note that x11docker is just a **bash script** without library dependencies.
 Basically it is just a wrapper for X servers and container backends docker, podman and nerdctl. 
 To allow advanced usage of x11docker abilities have a look at chapter [Dependencies](#dependencies).
 
-### Distribution packages
+### Installation from distribution repositories
 x11docker is available as a package in some distributions. If you know of more packages in other distributions, please tell me.
- - [Alpine](https://pkgs.alpinelinux.org/package/edge/testing/x86/x11docker)
- - [archlinux](https://aur.archlinux.org/packages/x11docker/)
- - [fedora](https://packages.fedoraproject.org/pkgs/x11docker/x11docker/index.html)
- - [NixOS](https://search.nixos.org/packages?channel=unstable&from=0&size=50&sort=relevance&query=x11docker)
+ - [Alpine](https://pkgs.alpinelinux.org/package/edge/testing/x86/x11docker): `apk add x11docker`
+ - [archlinux (AUR)](https://aur.archlinux.org/packages/x11docker/)
+ - [fedora](https://packages.fedoraproject.org/pkgs/x11docker/x11docker/index.html) `dnf install x11docker`
+ - [NixOS](https://search.nixos.org/packages?channel=unstable&from=0&size=50&sort=relevance&query=x11docker): `nix-env -i x11docker`
 
 Thanks to the maintainers that decided to provide these packages! 
 
-### Installation options
+### Manual installation
+#### Installation options
 As root you can install, update and remove x11docker in system directories to be available system-wide:
  - `x11docker --install` : install x11docker and x11docker-gui from current directory. (Useful to install from an extracted `zip` file or a cloned `git` repository.)
  - `x11docker --update` : download and install latest [release](https://github.com/mviereck/x11docker/releases) from github.
@@ -378,7 +380,7 @@ What the installation does (just for information):
  - Creates menu entry `x11docker.desktop` in `/usr/share/applications`. 
  - Copies documentation `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
  
-### Shortest way for first installation:
+#### Shortest way for first installation:
  - For systems using `sudo`:
    ```sh
    curl -fsSL https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker | sudo bash -s -- --update
@@ -388,12 +390,12 @@ What the installation does (just for information):
    curl -fsSL https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker | bash -s -- --update
    ```
    
-### Minimal installation
+#### Minimal installation
 You can run x11docker from an arbitrary location with `bash x11docker`.
-For minimal system-wide installation make `x11docker` executable with `chmod +x x11docker` and move it to `/usr/bin` (or another location in `PATH`).
+For minimal system-wide installation make `x11docker` executable with `chmod +x x11docker` and move it to `/usr/local/bin` (or another location in `PATH`).
 Other files than script `x11docker` itself are not essential.
 
-### Installation on MS Windows
+#### Installation on MS Windows
 x11docker can run natively on MS Windows electively in one of:
  - [WSL (Windows subsystem for Linux)](https://docs.microsoft.com/en-us/windows/wsl/about)
  - [Cygwin](https://www.cygwin.com/) 
@@ -401,7 +403,7 @@ x11docker can run natively on MS Windows electively in one of:
 
 Further information at [wiki: x11docker on MS Windows](https://github.com/mviereck/x11docker/wiki/x11docker-on-MS-Windows).
 
-### Deinstallation
+#### Deinstallation
 You can remove x11docker with `x11docker --remove`. That will remove the [files listed above](#installation-options).
 It will also remove `~/.cache/x11docker` and stop all running x11docker containers.
 x11docker will **not** remove:
