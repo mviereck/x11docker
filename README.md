@@ -64,6 +64,7 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
    - [Installation from distribution repositories](#installation-from-distribution-repositories)
    - [Manual installation](#manual-installation)
      - [Installation options](#installation-options)
+     - [Installed files](#installed-files)
      - [Shortest way for first installation](#shortest-way-for-first-installation)
      - [Minimal installation](#minimal-installation)
      - [Installation on MS Windows](#installation-on-ms-windows)
@@ -374,10 +375,11 @@ As root you can install, update and remove x11docker in system directories to be
  - `x11docker --remove` : remove all files installed by x11docker.
    - Note: This does not remove `~/.local/share/x11docker` where it stores persistent files of option `--home`.
 
+#### Installed files
 What the installation does (just for information):
  - Copies scripts `x11docker` and `x11docker-gui` to `/usr/bin`. 
- - Copies icon `x11docker.png` to `/usr/share/icons`. 
- - Creates menu entry `x11docker.desktop` in `/usr/share/applications`. 
+ - Installs icon `x11docker.png` in `/usr/share/icons` using `xdg-icon-resource`. 
+ - Creates menu entry `x11docker.desktop` in `/usr/share/applications` for `x11docker-gui`. 
  - Copies documentation `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
  
 #### Shortest way for first installation:
@@ -499,6 +501,7 @@ Feel free to open a [ticket](https://github.com/mviereck/x11docker/issues) if yo
 If reporting an [issue](https://github.com/mviereck/x11docker/issues):
  - Have a look at chapter [Troubleshooting](#troubleshooting).
  - Most times it makes sense to store the `--verbose` output (or `~/.cache/x11docker/x11docker.log`) at [pastebin.com](https://pastebin.com/).
+   - Personal informations in the logfile are mainly the user name (also in pathes) and some hardware and system information.
 ### Contributing
 If you want to contribute to x11docker, please open a [ticket](https://github.com/mviereck/x11docker/issues) before creating a pull request. 
 Often it is possible to accomplish desired tasks with already available options.
@@ -552,7 +555,7 @@ x11docker --build x11docker/fvwm
 | Desktop environment <br> (most based on Debian)| x11docker command |
 | --- | --- |
 | [Cinnamon](https://github.com/mviereck/dockerfile-x11docker-cinnamon) | `x11docker --desktop --gpu --init=systemd x11docker/cinnamon` |
-| [deepin](https://github.com/mviereck/dockerfile-x11docker-deepin) ([website](https://www.deepin.org/en/dde/)) (3D desktop from China) | `x11docker --desktop --gpu --init=systemd -- --cap-add=IPC_LOCK --security-opt seccomp=unconfined -- x11docker/deepin` |
+| [deepin](https://github.com/mviereck/dockerfile-x11docker-deepin) ([website](https://www.deepin.org/en/dde/)) (3D desktop from China) | `x11docker --desktop --gpu --init=systemd -- --cap-add=IPC_LOCK -- x11docker/deepin` |
 | [Enlightenment](https://github.com/mviereck/dockerfile-x11docker-enlightenment) (based on [Void Linux](https://www.voidlinux.org/)) | `x11docker --desktop --gpu --runit x11docker/enlightenment` |
 | [Fluxbox](https://github.com/mviereck/dockerfile-x11docker-fluxbox) (based on Debian, 87 MB) | `x11docker --desktop x11docker/fluxbox` |
 | [FVWM](https://github.com/mviereck/dockerfile-x11docker-fvwm) (based on [Alpine](https://alpinelinux.org/), 22.5 MB) | `x11docker --desktop x11docker/fvwm` |
