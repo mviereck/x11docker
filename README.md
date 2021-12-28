@@ -43,6 +43,7 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
  - [Options](#options)
    - [Choice of X servers and Wayland compositors](#choice-of-x-servers-and-wayland-compositors)
    - [Desktop or seamless mode](#desktop-or-seamless-mode)
+   - [Internet access](#internet-access)
    - [Shared folders and HOME in container](#shared-folders-volumes-and-home-in-container)
    - [GPU hardware acceleration](#gpu-hardware-acceleration)
    - [Clipboard](#clipboard)
@@ -131,6 +132,10 @@ x11docker assumes that you want to run a single application in seamless mode, i.
  - Special case: Single applications with a window manager (option `--wm`).
    - If neither `nxagent` nor `xpra` are installed, but x11docker finds a desktop capable X server like `Xephyr`, it avoids insecure option `--hostdisplay` and runs Xephyr with a window manager.
    
+### Internet access
+By default x11docker disables Network access for containers with `--network=none` because it targets best possible container isolation.
+To allow internet access set option `-I` or `--network`.
+
 ### Shared folders, volumes and HOME in container
 Changes in a running container system will be lost, the created container will be discarded. For persistent data storage you can share host directories or volumes:
  - Option `-m, --home` creates a host directory in `~/.local/share/x11docker/IMAGENAME` that is shared with the container and mounted as its `HOME` directory. 
@@ -535,9 +540,9 @@ x11docker --build x11docker/fvwm
 | [Kodi media center](https://kodi.tv/) with hardware <br> acceleration, Pulseaudio sound <br> and shared `Videos` folder. <br> For setup look at [ehough/docker-kodi](https://github.com/ehough/docker-kodi). | `x11docker --gpu --pulseaudio --share ~/Videos erichough/kodi`. |
 | [XaoS](https://github.com/patrick-nw/xaos) fractal generator | `x11docker patricknw/xaos` |
 | [Telegram messenger](https://telegram.org/) with persistent <br> `HOME` for configuration storage | `x11docker --home xorilog/telegram` |
-| Firefox with shared `Download` folder. | `x11docker --share $HOME/Downloads -- --tmpfs /dev/shm -- jess/firefox` |
-| [Tor browser](https://www.torproject.org/projects/torbrowser.html) | `x11docker jess/tor-browser` |
-| Chromium browser with restricted resource usage | `x11docker --limit -- jess/chromium --no-sandbox` |
+| Firefox with shared `Download` folder. | `x11docker -I --share $HOME/Downloads -- --tmpfs /dev/shm -- jess/firefox` |
+| [Tor browser](https://www.torproject.org/projects/torbrowser.html) | `x11docker -I jess/tor-browser` |
+| Chromium browser with restricted resource usage | `x11docker -I --limit -- jess/chromium --no-sandbox` |
 | VLC media player with shared `Videos` <br> folder and Pulseaudio sound | `x11docker --pulseaudio --share=$HOME/Videos jess/vlc` |
 | [GNU Octave Scientific Programming Language](https://www.gnu.org/software/octave/) built for arm & arm64 | `x11docker aptman/dbhi:bionic-octave octave` | 
 
