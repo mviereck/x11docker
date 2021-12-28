@@ -8,12 +8,17 @@ Project website: https://github.com/mviereck/x11docker
 
 ## Unreleased
 ### Changed
+ - `--network=none` is default now. Use `-I, --network` to allow internet access.
+ - `--user=root`: Needs `--sudouser` or `--cap-default` for full privileges.
  - `--backend`: Fallbacks to `podman` and `nerdctl` if `docker` not found.
-### Deprecated
- - `--pull`: Use `docker pull IMAGE` or `x11docker --build IMAGE` instead.
+ - `--showenv`,`--showid`,`--showinfofile`,`--showpid1` accept optional
+   argument FILE to print into a file instead of stdout.
 ### Fixed
  - `--gpu`: Set environment variables of `prime-run`.
    [(#394)](https://github.com/mviereck/x11docker/issues/394)
+### Removed
+ - `x11docker-gui`: Removed due to outdated and unmaintained `kaptain`.
+ - `--pull`: Please pull missing images yourself.
 
 ## [6.10.0](https://github.com/mviereck/x11docker/releases/tag/v6.10.0) - 2021-10-06
 ### Added
