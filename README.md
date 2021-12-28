@@ -39,7 +39,6 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
 
 
 ### Table of contents
- - [GUI for x11docker](#gui-for-x11docker)
  - [Terminal usage](#terminal-usage)
  - [Options](#options)
    - [Choice of X servers and Wayland compositors](#choice-of-x-servers-and-wayland-compositors)
@@ -85,17 +84,8 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
    - [Option --preset](#option---preset)
    - [Adjust images for your needs](#adjust-images-for-your-needs)
    - [Screenshots](#screenshots)
+
    
-
-## GUI for x11docker
-`x11docker-gui` is an optional graphical frontend for `x11docker`. It runs from console, too.
- - `x11docker-gui` needs package `kaptain`. If your distribution misses it, look at [kaptain repository](https://github.com/mviereck/kaptain). 
- - If `kaptain` is not installed on your system, `x11docker-gui` uses image [`x11docker/kaptain`](https://hub.docker.com/r/x11docker/kaptain/). 
-
-![x11docker-gui screenshot](/../screenshots/x11docker-gui.png?raw=true "GUI for x11docker")
-
-
-
 ## Terminal usage
 Just type `x11docker IMAGENAME [COMMAND]`. 
  - Get an [overview of options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`. 
@@ -281,12 +271,12 @@ Core concept is:
  - Creates container user similar to host user to [avoid root in container](http://blog.dscpl.com.au/2015/12/don-run-as-root-inside-of-docker.html).
    - You can also specify another user with `--user=USERNAME` or a non-existing one with `--user=UID:GID`.
    - Disables possible root password and deletes entries in `/etc/sudoers`.
-     - If you want root permissions in container, use option `--sudouser` that allows `su` and `sudo` with password `x11docker`. Alternatively you can run with `--user=root`. 
+     - If you want root permissions in container, use option `--sudouser` that allows `su` and `sudo` with password `x11docker`.  
    - If you want to use `USER` specified in image instead, set option `--user=RETAIN`. x11docker won't change container's `/etc/passwd` or `/etc/sudoers` in that case. Option `--home` won't be available.
  - Reduces [container capabilities](https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities) to bare minimum.
    - Sets run option `--cap-drop=ALL` to drop all capabilities. Most applications don't need them.
    - Sets run option [`--security-opt=no-new-privileges`](https://www.projectatomic.io/blog/2016/03/no-new-privs-docker/).
-   - These restrictions can be disabled with x11docker option `--cap-default` or reduced with `--sudouser`, `--user=root`, `--newprivileges`.
+   - These restrictions can be disabled with x11docker option `--cap-default` or reduced with `--sudouser`, `--newprivileges`.
    
 That being said, the default docker capabilities and the seccomp/SELinux/apparmor profiles are set up well to protect the host system.
 Nonetheless, x11docker follows the [principle of least privilege](https://en.wikipedia.org/wiki/Principle_of_least_privilege). 
@@ -317,7 +307,7 @@ _Most important:_
   - `--pulseaudio` and `--alsa` allow catching audio output and microphone input from host.
   
 _Rather special options reducing security, but not needed for regular use:_
-  - `--sudouser` and `--user=root` allow `su` and `sudo` with password `x11docker`for container user.
+  - `--sudouser` allows `su` and `sudo` with password `x11docker`for container user.
     If an application somehow breaks out of container, it can harm your host system. Allows many container capabilities that x11docker would drop otherwise.
   - `--cap-default` disables x11docker's container security hardening and falls back to default container capabilities as provided by the backends docker, podman or nerdctl.
     If an application somehow breaks out of container, it can harm your host system.
@@ -482,7 +472,7 @@ One attempt is to allow several privileges until the setup works. Than reduce pr
  - The image may have a `USER` specification and be designed for this user. 
    - Check for a `USER` specification in image with `docker inspect --format '{{.Config.User}}' IMAGENAME`
    - You can enable this predefined user with `--user=RETAIN`
- - The container might need a root user. Try with `--user=root`. Note that this disables some x11docker restrictions for containers similar to `--cap-default`.
+ - The container might need a root user. Try with `--user=root`, maybe add `--cap-default`.
    
 **2.** Init and DBus
  - A few applications need a [DBus](#dbus) user daemon. Install `dbus` in image and try option `--dbus`.
@@ -561,9 +551,9 @@ x11docker --build x11docker/fvwm
 | [FVWM](https://github.com/mviereck/dockerfile-x11docker-fvwm) (based on [Alpine](https://alpinelinux.org/), 22.5 MB) | `x11docker --desktop x11docker/fvwm` |
 | [Gnome 3](https://github.com/mviereck/dockerfile-x11docker-gnome) | `x11docker --desktop --gpu --init=systemd x11docker/gnome` |
 | [KDE Plasma](https://github.com/mviereck/dockerfile-x11docker-kde-plasma) | `x11docker --desktop --gpu --init=systemd x11docker/kde-plasma` |
-| [KDE Plasma](https://github.com/mviereck/dockerfile-x11docker-kde-plasma) as nested Wayland compositor| `x11docker --gpu --init=systemd -- --cap-add SYS_RESOURCE -- x11docker/kde-plasma startplasmacompositor` |
+| [KDE Plasma](https://github.com/mviereck/dockerfile-x11docker-kde-plasma) as nested Wayland compositor| `x11docker --gpu --init=systemd -- --cap-add SYS_RESOURCE -- x11docker/kde-plasma startplasma-wayland` |
 | [Lumina](https://github.com/mviereck/dockerfile-x11docker-lumina) ([website](https://lumina-desktop.org)) (based on [Void Linux](https://www.voidlinux.org/))| `x11docker --desktop x11docker/lumina` |
-| [LiriOS](https://liri.io/) (needs at least docker 18.06 <br> or this [xcb bugfix](https://github.com/mviereck/x11docker/issues/76).) (based on Fedora) | `x11docker --desktop --gpu lirios/unstable` |
+| [LiriOS](https://liri.io/) (based on Fedora) | `x11docker --desktop --gpu lirios/unstable` |
 | [LXDE](https://github.com/mviereck/dockerfile-x11docker-lxde) | `x11docker --desktop x11docker/lxde` |
 | [LXDE with wine and PlayOnLinux](https://github.com/mviereck/dockerfile-x11docker-lxde-wine) and <br> a persistent `HOME` folder to preserve <br> installed Windows applications, <br> and with Pulseaudio sound. | `x11docker --desktop --home --pulseaudio x11docker/lxde-wine` |
 | [LXQt](https://github.com/mviereck/dockerfile-x11docker-lxqt) | `x11docker --desktop x11docker/lxqt` |
