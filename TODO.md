@@ -1,8 +1,12 @@
 # ToDo
 x11docker ToDo notes
 
+## Enhacement
+ - `--weston[-xwayland]/--kwin[-xwayland]`: check for nvidia/Xwayland versions
+ - `--runtime`: check sysbox runtime: https://github.com/nestybox/sysbox
+
 ## Actually to fix
- - `--showN`: Add argument `=FILE`.
+ - `--exe`: Give notes for invalid options.
  - `--update`: Check if root is needed in custom installation path. Do not install other files then.
  - `--password, --install, --update, --cleanup`, etc.: give note about dropped options.
    Maybe change to $1 mode without `--`
@@ -11,14 +15,6 @@ x11docker ToDo notes
  - `--user=root --home` in rootless docker and nerdctl: Set up HOME in host user ~/x11docker.
  - `--backend=podman` rootless: disallow `--home` for different `--user`.
  - `--init=systemd`: cgroupv2 support #349
- - replace word 'docker' in messages, variable names and documentation to generalize for podman and nerdctl, too.
- - check, maybe drop container wm using `x11docker/openbox`. Currently likely fails with different backends.
-
-## Planned changes in 7.0:
- - `x11docker-gui`: drop?
- - `--pull`: drop
- - `--network=none`: Disable internet access by default, require `-I`.
- - `--user=root`: Don't enable `--sudouser`.
 
 ## Old issues to fix
  - `--gpu --webcam` adds user to group `video` twice.
