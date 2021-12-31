@@ -19,6 +19,8 @@ Project website: https://github.com/mviereck/x11docker
  - `--backend`: Fallbacks to `podman` and `nerdctl` if `docker` not found.
  - `--showenv`,`--showid`,`--showinfofile`,`--showpid1` accept optional
    argument FILE to print into a file instead of stdout.
+ - `--vt [=N]`: Argument N is optional now.
+   [(#404)](https://github.com/mviereck/x11docker/issues/404)
 ### Fixed
  - `--gpu`: Set environment variables of `prime-run`.
    [(#394)](https://github.com/mviereck/x11docker/issues/394)
