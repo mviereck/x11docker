@@ -8,6 +8,7 @@ Project website: https://github.com/mviereck/x11docker
 
 ## Unreleased
 ### Added
+ - `--backend=sysbox-runc`: Experimental support of sysbox runtime.
  - `--printenv [=FILE]`: Replaces `--showenv`.
  - `--printid [=FILE]`: Replaces `--showid`.
  - `--printinfofile [=FILE]`: Replaces `--showinfofile`.
