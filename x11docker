@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.0.0-beta-3"
+Version="7.0.0-beta-4"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -29,7 +29,7 @@ To run a container on a new X server:
   x11docker IMAGE
   x11docker [OPTIONS] IMAGE [COMMAND]
   x11docker [OPTIONS] -- IMAGE [COMMAND [ARG1 ARG2 ...]]
-  x11docker [OPTIONS] -- RUN_OPTIONS -- IMAGE [COMMAND [ARG1 ARG2 ...]]
+  x11docker [OPTIONS] -- CUSTOM_RUN_OPTIONS -- IMAGE [COMMAND [ARG1 ARG2 ...]]
 To run a host application on a new X server:
   x11docker [OPTIONS] --exe COMMAND
   x11docker [OPTIONS] --exe -- COMMAND [ARG1 ARG2 ...]
@@ -49,7 +49,7 @@ Optional features:
   * Wayland support
   * Language locale creation
   * Several init systems and DBus in container
-  * Support of several container runtimes
+  * Support of several container runtimes and backends
 Focus on security:
   * Avoids X security leaks using additional X servers.
   * Container user is same as host user to avoid root in container.
@@ -194,8 +194,9 @@ X and Wayland special configuration:
                        Default is yes except for --nxagent. Can cause or
                        fix issues with some applications on nxagent.
      --display=N       Use display number N for new X server.
-     --iglx            Use indirect rendering for OpenGL. (Currently works with
-                       closed source nvidia driver only, bug in MESA libgl.)
+     --iglx            Use indirect rendering for OpenGL / GPU access.
+                       For --xorg only. Needs recent Xorg>=1.20.11
+                       Can be used instead of --gpu.
      --keymap=LAYOUT   Set keyboard layout for new X server, e.g. de, us, ru.
                        For possible LAYOUT look at /usr/share/X11/xkb/symbols.
      --no-auth         Allow access to X for everyone. Security risk!
@@ -205,8 +206,10 @@ X and Wayland special configuration:
      --xhost [=STR]    Set \"xhost STR\" on new X server (see 'man xhost').
                        Without STR will set:  +SI:localuser:\$USER
                        (Use with care. '--xhost=+' allows access for everyone).
-     --xoverip         Connect to X over TCP network. For special setups only.
+     --xoverip         Connect to X over TCP network. For special setups only,
+                       usually only enabled by x11docker itself.
                        Only supported by a subset of X server options.
+                       Needs option --network.
      --xtest [=yes|no] Enable or disable X extension XTEST. Default is yes for
                        --xpra, --xvfb and --xdummy, no for other X servers.
                        Needed to allow custom access with xpra. 
@@ -394,7 +397,7 @@ alertbox() {                    # X alert box with title $1 and message $2
 
 $Message" | xmessage  -file - -default okay ||:
   } || {
-    command -v gxmessage    >/dev/null && [ -n "${DISPLAY:-}" ] && {
+    command -v xmessage    >/dev/null && [ -n "${DISPLAY:-}" ] && {
       echo "$Title
 
 $Message" | gxmessage -file - -default okay ||:
@@ -1833,6 +1836,19 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
 
   local Gpudevice
   
+  case "$Xoverip" in
+    yes) 
+      note "Option --gpu with X over IP: Enabling indirect rendering with --iglx."
+      Iglx="yes"
+      Sharegpu="no"
+      case "$Xserver" in
+        --xorg) ;;
+        *) note "Option --iglx is known to accelerate with option --xorg only." ;;
+      esac
+      return 0
+    ;;
+  esac
+  
   Containerusergroups="$Containerusergroups video render"
 
   # check device files
@@ -1949,7 +1965,7 @@ setup_printer() {               # option --printer: connect to cups printer serv
   local Cupsserver=
   
   command -v lpstat >/dev/null || {
-    warning "Option --printer: command lpstat not found.
+    note "Option --printer: command lpstat not found.
   Is cups printer server installed on your system?
   Error: Cannot share access to printer."
     Sharecupsmode=""
@@ -1957,7 +1973,17 @@ setup_printer() {               # option --printer: connect to cups printer serv
   }
   
   case $Sharecupsmode in
-    tcp)    Cupsserver="$Hostip:631" ;;
+    tcp)    
+      Cupsserver="$Hostip:631" 
+      [ "$Network" = "none" ] && {
+        note "Option --printer=tcp does not work without network access.
+  Consider to enable option -I, --network.
+  Fallback: Disabling option --printer."
+        check_fallback
+        Sharecupsmode=""
+        return 1
+      }
+    ;;
     socket) Cupsserver="$(lpstat -H)" ;;
   esac
   
@@ -2043,12 +2069,27 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
     [ "$Runtime" = "kata-runtime" ]                  && Pulseaudiomode="tcp"
     [ "$Snapsupport" = "yes" ]                       && Pulseaudiomode="tcp"
     unpriv 'LC_ALL=C pactl info | grep -q "User Name: pulse"' && Pulseaudiomode="tcp"
+    note "Option --pulseaudio: Enabling TCP mode"
+  }
+  
+  [ "$Pulseaudiomode" = "tcp" ] && [ "$Network" = "none" ] && {
+    note "Option --pulseaudio: Without option -I, --network
+  pulseaudio sound over TCP is not possible but needed in your setup.
+  Fallback: Enabling option --alsa"
+    check_fallback
+    Pulseaudiomode=""
+    Sharealsa="yes"
+    return 1
   }
   
   case $Pulseaudiomode in
     socket)
       # create pulseaudio socket
+      echo $Pulseaudiosocket
+      ls -la $Pulseaudiosocket
       Pulseaudiomoduleid="$(unpriv "pactl load-module module-native-protocol-unix socket=$Pulseaudiosocket 2>&1")"
+      echo $Pulseaudiomoduleid
+      
       [ "$Pulseaudiomoduleid" ] && {
         storeinfo "pulseaudiomoduleid=$Pulseaudiomoduleid"
         store_runoption env "PULSE_SERVER=unix:$(convertpath share $Pulseaudiosocket)"
@@ -2084,6 +2125,9 @@ $(nl -ba <$Pulseaudioconf)"
       [ -e "$Hostuserhome/.config/pulse/cookie" ] && cp "$Hostuserhome/.config/pulse/cookie" "$Pulseaudiocookie" || note "Option --pulseaudio: Did not find cookie
   $Hostuserhome/.config/pulse/cookie"
       store_runoption env "PULSE_SERVER=tcp:$Hostip:$Pulseaudioport"
+#      Customdockeroptions="-p $Hostip:$Pulseaudioport:$Pulseaudioport"
+#      store_runoption env "PULSE_SERVER=tcp:127.0.0.1:$Pulseaudioport"
+#      Customdockeroptions="-p 127.0.0.1:$Pulseaudioport:$Pulseaudioport"
     ;;
   esac
   return 0
@@ -2123,7 +2167,15 @@ check_newxenv() {               # find free display, create $Newxenv
 
   # X over IP/TCP
   [ "$Xoverip" ] || case $Xserver in
-    --xwin|--runx) Xoverip="yes" ;;
+    --xwin|--runx) 
+      Xoverip="yes" 
+      [ "$Network" = "none" ] && {
+        note "Option $Xserver needs network access.
+  Enabling option -I, --network."
+        check_fallback
+        Network=""
+      }
+    ;;
   esac
   
   # set $Newdisplay (DISPLAY of container) and $Newxsocket
@@ -2403,6 +2455,7 @@ check_xdepends() {              # check dependencies on host for X server option
     yes) Message="debugnote" ;;
     no)  Message="note" ;;
   esac
+  # xinit
   case ${1:-} in
     --xephyr|--xpra|--nxagent|--xorg|--xvfb|--xdummy|--xwayland|--weston-xwayland|--kwin-xwayland|--xdummy-xwayland)
       command -v xinit >/dev/null || {
@@ -2411,6 +2464,7 @@ check_xdepends() {              # check dependencies on host for X server option
       }
     ;;
   esac
+  # Wayland
   case ${1:-} in
     --xpra-xwayland|--weston-xwayland|--xwayland|--weston|--kwin|--kwin-xwayland|--xdummy-xwayland|--hostwayland)
       [ "$Nvidiaversion" ] && {
@@ -2429,6 +2483,7 @@ check_xdepends() {              # check dependencies on host for X server option
       esac
     ;;
   esac
+  # X command
   case ${1:-} in
     --xpra|--xpra-xwayland)
       command -v "xpra" >/dev/null || {
@@ -2508,6 +2563,7 @@ check_xdepends() {              # check dependencies on host for X server option
       }
     ;;
   esac
+  # Wayland command
   case ${1:-} in
     --weston|--xpra-xwayland|--weston-xwayland|--xdummy-xwayland)
       command -v "weston" >/dev/null || {
@@ -2538,10 +2594,10 @@ check_xdepends() {              # check dependencies on host for X server option
         Return=1
       } ;;
   esac
+  # xpra version
   case ${1:-} in
     --xpra|--xpra-xwayland)
       [ "$Return" = "1" ] || {
-        # check xpra version
         [ "$Xpraversion" ] || {
           Xpraversion="$(xpra --version 2>/dev/null | cut -d' ' -f2)"
           Xprarelease="$(echo $Xpraversion | cut -s -d- -f2)"
@@ -2619,6 +2675,7 @@ check_xdepends() {              # check dependencies on host for X server option
       ;;
     esac
   }
+  # --xoverip
   [ "$Xoverip" = "yes" ] && {
     case ${1:-} in
       --xephyr|--xorg|--nxagent|--xpra|--xvfb|--xdummy|--xwin|--runx|--tty) ;;
@@ -2629,12 +2686,16 @@ check_xdepends() {              # check dependencies on host for X server option
           Return=1
         }
       ;;
-      --xwayland|--weston-xwayland|--kwin|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland|--hostwayland)
+      --xwayland|--weston-xwayland|--kwin|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland)
         $Message "${1:-} does not support X over TCP."
-        #Return=1
+        Return=1
+      ;;
+      --weston|--kwin|--hostwayland)
+        $Message "${1:-} does not support X over TCP."
       ;;
     esac
   }
+  # --gpu
   [ "$Sharegpu" = "yes" ] && {
     case ${1:-} in
       --hostdisplay|--xorg|--xpra-xwayland|--weston-xwayland|--kwin-xwayland|--xdummy-xwayland|--xwayland|--xwin|--runx) ;;
@@ -2747,9 +2808,16 @@ check_xserver() {               # check chosen X server, auto-choose X server
 
   # X over TCP
   [ -z "$Xoverip" ] && {
-    [ "$Runtime" = "kata-runtime" ] && Xoverip="yes"
+    [ "$Runtime" = "kata-runtime" ] && {
+      Xoverip="yes"
+      [ "$Network" = "none" ] && {
+        note "Option --runtime=kata-runtime works only with X over IP.
+  Enabling option --xoverip.
+  Please enable option -I, --network to allow network access."
+      }
+    }
     case $Mobyvm in
-      yes)                             Xoverip="yes" ;;
+      yes) Xoverip="yes" ;;
     esac
     [ "$Xoverip" = "yes" ] && [ "$Autochooseserver" = "no" ] && debugnote "Enabled X over TCP instead of sharing unix socket."
   }
@@ -6936,6 +7004,12 @@ check_option_interferences() {  # check multiple option interferences, change se
       Windowmanagermode="none"
     ;;
   esac
+  
+  # --xoverip
+  case "$Xoverip" in
+    yes) [ "$Network" = "none" ] && error "Option --xoverip needs network access.
+  Please enable option -I, --network." ;;
+  esac
 
   # check xauth
   [ "$Xauthentication" = "yes" ] && case $Xserver in
@@ -6971,27 +7045,11 @@ check_option_interferences() {  # check multiple option interferences, change se
   [ "$Runsonconsole" = "yes" ] && Fullscreen="no"
           
   # --gpu
-  [ "$Sharegpu" = "yes" ] && {
-    warning "Option --gpu degrades container isolation.
+  [ "$Sharegpu" = "yes" ] && warning "Option --gpu degrades container isolation.
   Container gains access to GPU hardware.
   This allows reading host window content (palinopsia leak)
-  and GPU rootkits (compare proof of concept: jellyfish)."
-    case $Xoverip in
-      yes)
-        case $Nvidiaversion in
-          "")
-            [ "$Network" != "host" ] && warning "Option --gpu: With X over IP the host network stack must
-  be shared to allow GPU access. Enabling option --network=host."
-            check_fallback
-            Network="host"
-          ;;
-          *)
-            Iglx="yes"
-          ;;
-        esac
-      ;;
-    esac
-  }
+  and GPU rootkits (compare proof of concept: jellyfish).
+  An alternative is --iglx that works with --xorg and --xoverip only."
 
   # --hostdisplay --gpu
   [ "$Xserver" = "--hostdisplay" ] && [ "$Sharegpu" = "yes" ]  && [ "$Trusted" = "no" ] && {
@@ -7496,7 +7554,7 @@ check_option_interferences() {  # check multiple option interferences, change se
   Otherwise container startup may fail."
       [ "$Sharealsa" = "yes" ] && {
         note "Option --alsa: ALSA sound is not possible with 
-  --runtime=kata-runtime. Fallback: Enabling option --pulseaudio."
+  --runtime=kata-runtime. Fallback: Enabling option --pulseaudio=tcp."
         check_fallback
         Sharealsa="no"
         Pulseaudiomode="tcp"
@@ -7513,13 +7571,13 @@ check_option_interferences() {  # check multiple option interferences, change se
         check_fallback
         Network="bridge"
       }
-      [ "$Sharegpu" = "yes" ] && [ -z "$Nvidiaversion" ] && {
-        note "Option --runtime=kata currently does not support option --gpu 
-  except with closed source NVIDIA driver.
-  Fallback: Disabling option --gpu"
-        check_fallback
-        Sharegpu="no"
-      }
+#      [ "$Sharegpu" = "yes" ] && [ -z "$Nvidiaversion" ] && {
+#        note "Option --runtime=kata currently does not support option --gpu 
+#  except with closed source NVIDIA driver.
+#  Fallback: Disabling option --gpu"
+#        check_fallback
+#        Iglx="yes"
+#      }
       [ "$Sharehostipc" = "yes" ] && {
         note "Option --hostipc: Only IPC of the qemu VM is shared with
   --runtime=kata-runtime."
@@ -8040,8 +8098,14 @@ option_messages() {             # some messages depending on options, but not ch
   esac
   
   # --iglx
-  [ "$Iglx" = "yes" ] && [ -z "$Nvidiaversion" ] && note "Option --iglx: iGLX is known to have a bug in libgl
-  of free MESA drivers. You might get black content only."
+  [ "$Iglx" = "yes" ] && {
+    [ -z "$Nvidiaversion" ] && note "Option --iglx: iGLX is known to work only with new
+  MESA drivers and new X servers. Otherwise you might get black content only."
+    case $Xserver in
+      --xorg) ;;
+      *) note "Option --iglx is useful with option --xorg only." ;;
+    esac
+  }
 
   # --fullscreen
   [ "$Fullscreen" = "yes" ] && {
@@ -8085,12 +8149,22 @@ option_messages() {             # some messages depending on options, but not ch
   esac
 
   # --network
-  [ "$Network" = "host" ] && warning "Option --network=host severely degrades 
+  case "$Network" in
+    none) ;;
+    ""|bridge) 
+      warning "Option --network: Container has access to
+  local network and internet." ;;
+    host) 
+      warning "Option --network=host severely degrades 
   container isolation. Network namespacing is disabled. 
   Container shares host network stack. 
   Spying on network traffic may be possible. 
   Access to host X server $Hostdisplay may be possible 
-  through abstract unix socket."
+  through abstract unix socket." ;;
+    *) 
+      warning "Option --network=$Network: Some sort of network access
+  is enabled." ;;
+  esac
   
   # --sudouser
   [ "$Sudouser" ] && [ "$Containeruseruid" != "0" ] && [ "$Network" != "host" ] && [ -z "$Xoverip" ] && note "Option --sudouser: If you want to run GUI application
@@ -9075,11 +9149,15 @@ Parsed options:    $Parsedoptions_global"
   [ "$Snapsupport" = "yes" ] && {
     note "Option --snap causes some restrictions.
   Option --newprivileges=yes is enabled.
+  Option --network is enabled because X over TCP is not possible otherwise.
   Option --hostdisplay is not available because X must be accessed over TCP. 
-  Option --gpu only works with --xorg and --network=host.
-  It is recommended to purge the Docker snap installation and to install Docker natively."
+  Option --gpu only works with --xorg and with indirect rendering (--iglx).
+  Options --printer and --pulseaudio only work in TCP mode.
+  Recommendation: Purge the Docker snap installation and install Docker natively."
     [ "$Allownewprivileges" = "auto" ] && Allownewprivileges="yes"
     Xoverip="yes"
+    [ "$Network" = "none" ] && Network=""
+    [ "$Sharecupsmode" ] && Sharecupsmode="tcp" 
   }
   
   check_xserver                  # check chosen X server or auto-choose one
