@@ -39,7 +39,7 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
 
 
 ### Table of contents
- - [Terminal usage](#terminal-usage)
+ - [Terminal syntax](#terminal-syntax)
  - [Options](#options)
    - [Choice of X servers and Wayland compositors](#choice-of-x-servers-and-wayland-compositors)
    - [Desktop or seamless mode](#desktop-or-seamless-mode)
@@ -87,10 +87,11 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
    - [Screenshots](#screenshots)
 
    
-## Terminal usage
+## Terminal syntax
 Just type `x11docker IMAGENAME [COMMAND]`. 
  - Get an [overview of options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`. 
    - For desktop environments in image add option `-d, --desktop`.
+   - For internet access use option `-I, --network`.
    - To run without X at all use option `-t, --tty`.
    - Get an interactive TTY with option `-i, --interactive`.
    - See generated container backend command (and further infos) with option `--debug`.
@@ -102,14 +103,14 @@ To run a container on a new X server:
   x11docker IMAGE
   x11docker [OPTIONS] IMAGE [COMMAND]
   x11docker [OPTIONS] -- IMAGE [COMMAND [ARG1 ARG2 ...]]
-  x11docker [OPTIONS] -- RUN_OPTIONS -- IMAGE [COMMAND [ARG1 ARG2 ...]]
+  x11docker [OPTIONS] -- CUSTOM_RUN_OPTIONS -- IMAGE [COMMAND [ARG1 ARG2 ...]]
 To run a host application on a new X server:
   x11docker [OPTIONS] --exe COMMAND
   x11docker [OPTIONS] --exe -- COMMAND [ARG1 ARG2 ...]
 To run only an empty new X server:
   x11docker [OPTIONS] --xonly
 ```
-`RUN_OPTIONS` are just added to the `docker|podman|nerdctl run` command without a serious check by x11docker.
+`CUSTOM_RUN_OPTIONS` are just added to the `docker|podman|nerdctl run` command without a serious check by x11docker.
  
  
  
@@ -156,7 +157,9 @@ Note that x11docker copies files from `/etc/skel` in container to `HOME` if `HOM
 ### GPU hardware acceleration
 Hardware acceleration for OpenGL is possible with option `-g, --gpu`. 
  - This will work out of the box in most cases with open source drivers on host. Otherwise have a look at [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options). 
- - Closed source [NVIDIA drivers](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container) need some setup and support less [x11docker X server options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options#attributes-of-x-server-and-wayland-options).
+ - Closed source [NVIDIA drivers](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container) need some setup 
+   and support less [x11docker X server options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options#attributes-of-x-server-and-wayland-options)
+   for driver version < v470.x and Xwayland < v22.1.2.
  
 ### Clipboard
 Clipboard sharing is possible with option `-c, --clipboard`. 
@@ -222,6 +225,7 @@ Container runtimes known and supported by x11docker are:
  - [`nvidia`](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container#nvidianvidia-docker-images): Specialized fork of `runc` to support `nvidia/nvidia-docker` images.
  - [`crun`](https://github.com/giuseppe/crun): Fast and lightweight alternative to `runc` with same functionality.
  - `oci`: Runtime reported in [#205](https://github.com/mviereck/x11docker/issues/205), no documentation found. Handled by x11docker like `runc`.
+ - [`sysbox-runtime`](https://github.com/nestybox/sysbox): Based on runc, aims to enhance container isolation. Support is experimental yet.
  
 Using different runtimes is well tested for rootful Docker, but not for other [backend setups](#backend-docker-podman-or-nerdctl).
  
@@ -372,9 +376,8 @@ As root you can install, update and remove x11docker in system directories to be
 
 #### Installed files
 What the installation does (just for information):
- - Copies scripts `x11docker` and `x11docker-gui` to `/usr/bin`. 
+ - Copies script `x11docker` to `/usr/bin`. 
  - Installs icon `x11docker.png` in `/usr/share/icons` using `xdg-icon-resource`. 
- - Creates menu entry `x11docker.desktop` in `/usr/share/applications` for `x11docker-gui`. 
  - Copies documentation `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
  
 #### Shortest way for first installation:
@@ -388,7 +391,7 @@ What the installation does (just for information):
    ```
    
 #### Minimal installation
-You can run x11docker from an arbitrary location with `bash x11docker`.
+You can run x11docker from an arbitrary location with `bash x11docker` or `./x11docker`.
 For minimal system-wide installation make `x11docker` executable with `chmod +x x11docker` and move it to `/usr/local/bin` (or another location in `PATH`).
 Other files than script `x11docker` itself are not essential.
 
@@ -580,17 +583,19 @@ For very long option combinations you might want to use option `--preset FILENAM
    --share ~/Music
    ```
    Use it like: `x11docker --preset=multimedia jess/vlc`
- - Example deepin desktop: Instead of very long command
+ - Example deepin desktop: Instead of long command
    ```
-   x11docker --desktop --init=systemd -- --cap-add=IPC_LOCK --security-opt seccomp=unconfined -- x11docker/deepin
+   x11docker --desktop --init=systemd --gpu --pulseaudio --home -- --cap-add=IPC_LOCK -- x11docker/deepin
    ``` 
    you can create a file `~/.config/x11docker/preset/deepin` containing the desired options:
    ```
    --desktop 
    --init=systemd
+   --gpu
+   --pulseaudio
+   --home
    -- 
    --cap-add=IPC_LOCK
-   --security-opt seccomp=unconfined
    -- 
    x11docker/deepin
    ```
@@ -607,11 +612,11 @@ RUN apt-get update && apt-get install -y vlc
 ### Screenshots
 More screenshots are stored in [screenshot branch](https://github.com/mviereck/x11docker/tree/screenshots)
 
-`x11docker --desktop x11docker/lxde-wine`
-![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxde-wine.png "LXDE desktop in docker")
-
 `x11docker --desktop x11docker/lxqt`
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxqt.png "LXQT desktop in docker")
+
+`x11docker --desktop x11docker/lxde-wine`
+![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-lxde-wine.png "LXDE desktop in docker")
 
 `x11docker --desktop --gpu --init=systemd -- --cap-add=IPC_LOCK --security-opt seccomp=unconfined -- x11docker/deepin`
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-deepin.png "deepin desktop in docker")
