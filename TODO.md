@@ -1,29 +1,27 @@
 # ToDo
 x11docker ToDo notes
 
-## Enhancement
- - `--runtime=sysbox`: check sysbox runtime: https://github.com/nestybox/sysbox
-   - check shiftfs on debian
-   - check --home etc. in userns-remap mode
-   - check systemd et.al.
-
 ## Actually to fix
  - `--pulseaudio=socket` fails if x11docker was started with `sudo`.
- - `--iglx` seems to work now with `--xorg` -> report at kata
+ - `--iglx` now works with `--xorg` -> report at kata
  - `--exe`: Give notes for invalid options.
- - `--update`: Check if root is needed in custom installation path. Do not install other files then.
+ - `--update`: Check if installs into `/usr/bin` or `/usr/local/bin`. Do not install other files then.
  - `--password, --install, --update, --cleanup`, etc.: give note about dropped options.
    Maybe change to $1 mode without `--`
  - check all `--init=` in all backends rootful and rootless.
    - checked: 
      - rootful docker: all 
      - rootless podman: systemd, openrc
+     - rootful podman: openrc
+     - rootless nerdctl: openrc
+     - rootful nerdctl: openrc
  - `--user`: Check in all rootless modes, maybe disallow except for `--user=root`.
  - `--user=root --home` in rootless docker and nerdctl: Set up HOME in host user ~/x11docker?
  - `--backend=podman` rootless: disallow `--home` for different `--user`.
  - `--init=systemd`: cgroupv2 support #349
 
 ## Old issues to fix
+ - `--kwin-xwayland`: broken? Xwayland says: "missing wl_shell protocol". Deprecated yet.
  - `--gpu --webcam` adds user to group `video` twice.
  - docker-for-win: DOS newline mess in `error()` #219.
  - docker-for-win: Double entries in log.
@@ -54,21 +52,16 @@ x11docker ToDo notes
  - `elogind` in void container: loginctl is empty. ck-list-sessions, too.
 
 ## Needs investigation and probably 3d party bug report
-  - `startplasmacompositor`: hardcoded `--libinput` causes failure if running nested
   - `kwin_wayland` needs `CAP_SYS_RESOURCE` even if running nested
   - `--xpra --desktop --xdummy`: --size modeline does not work, might not even appear in xrandr although set in xdummy.xorg.conf
   - `Xwayland` does not support X over IP (`-listen tcp`)
 
 ## 3rd party bugs
- - `--iglx --gpu` fails since X.org 1.18.4: 
-   https://gitlab.freedesktop.org/xorg/xserver/issues/211
  - Xwayland does not always sit at 0.0 on multiple outputs. 
    https://bugzilla.redhat.com/show_bug.cgi?id=1498665
  - `--kwin*`: wrong fullscreen and crashes in gnome-wayland, strange in weston, WAYLAND_DISPLAY="" does not help, probably bug in kwin
  - scale>1 Xwayland in Weston is too large (Xwayland bug), rendering issues on tty (switching scaled/unscaled Xwayland on keyboard/mouse events). 
    https://bugzilla.redhat.com/show_bug.cgi?id=1498669
- - x11docker-gui in weston freezes weston in combo boxes. Weston bug? QT3/4 bug?
- - debian bug report lightdm/sddm contra gdm, dm can crash on tty switch if multiple graphical sessions are running
   
 ## Improvements
  - `--cleanup`: avoid hardcoded paths

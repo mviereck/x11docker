@@ -26,6 +26,7 @@ Project website: https://github.com/mviereck/x11docker
  - NVIDIA: Wayland/Xwayland support since driver>=470.x and Xwayland>=21.1.2
    [(#394)](https://github.com/mviereck/x11docker/issues/394)
 ### Deprecated
+ - `--kwin-xwayland`: use `--weston-xwayland` instead.
  - `--showenv`: use `--printenv` instead.
  - `--showid`: use `--printid` instead.
  - `--showinfofile`: use `--printinfofile` instead.
