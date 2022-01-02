@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.0.0-beta-4"
+Version="7.0.0-beta-5"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -195,7 +195,7 @@ X and Wayland special configuration:
                        fix issues with some applications on nxagent.
      --display=N       Use display number N for new X server.
      --iglx            Use indirect rendering for OpenGL / GPU access.
-                       For --xorg only. Needs recent Xorg>=1.20.11
+                       For --xorg only. Needs Xorg>=1.20.8
                        Can be used instead of --gpu.
      --keymap=LAYOUT   Set keyboard layout for new X server, e.g. de, us, ru.
                        For possible LAYOUT look at /usr/share/X11/xkb/symbols.
@@ -1836,6 +1836,7 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
 
   local Gpudevice
   
+  # --xoverip
   case "$Xoverip" in
     yes) 
       note "Option --gpu with X over IP: Enabling indirect rendering with --iglx."
@@ -1848,6 +1849,12 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
       return 0
     ;;
   esac
+  
+  warning "Option --gpu degrades container isolation.
+  Container gains access to GPU hardware.
+  This allows reading host window content (palinopsia leak)
+  and GPU rootkits (compare proof of concept: jellyfish).
+  An alternative is --iglx that works with --xorg only."
   
   Containerusergroups="$Containerusergroups video render"
 
@@ -2467,8 +2474,9 @@ check_xdepends() {              # check dependencies on host for X server option
   # Wayland
   case ${1:-} in
     --xpra-xwayland|--weston-xwayland|--xwayland|--weston|--kwin|--kwin-xwayland|--xdummy-xwayland|--hostwayland)
-      [ "$Nvidiaversion" ] && {
-        $Message "${1:-}: Closed source NVIDIA driver does not support Wayland."
+      verlt "$Nvidiaversion" "470" && {
+        $Message "${1:-}: Closed source NVIDIA driver $Nvidiaversion < version 470.x does not support Wayland.
+  You would need NVIDIA driver>=v470.x and Xwayland>=21.1.2"
         Return=1
       }
       [ "$Runtime" = "kata-runtime" ] && {
@@ -2736,6 +2744,7 @@ check_xpraoption() {            # check if xpra option $1 is available
   }
 }
 check_xserver() {               # check chosen X server, auto-choose X server
+  local Xorgautochoice=
 
   ## default option '--auto': Try to automatically choose best matching and available X server
   [ "$Autochooseserver" = "yes" ] && {                              Xserver="--xpra"
@@ -2798,7 +2807,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
   It is recommended to use another desktop environment or GNOME >= 3.38.
   Only --xorg or discouraged option --hostdisplay might work as expected."
           [ "$Autochooseserver" = "yes" ] && case "$Desktopmode" in
-            "yes") Xserver="--xorg" ;;
+            "yes") Xserver="--xorg" && Xorgautochoice="yes" ;;
             "no")  Xserver="--hostdisplay" ;;
           esac
         ;;
@@ -2824,9 +2833,11 @@ check_xserver() {               # check chosen X server, auto-choose X server
 
   [ "$Nvidiaversion" ] && [ "$Sharegpu" = "yes" ] && case $Xserver in
     --xpra-xwayland|--weston-xwayland|--xwayland|--weston|--kwin|--kwin-xwayland|--xdummy-xwayland|--hostwayland)
-      note "Your system uses closed source NVIDIA driver.
+      verlt "$Nvidiaversion" "470" && note "Option $Xserver --gpu: Your system uses closed source NVIDIA
+  driver version $Nvidiaversion. 
   GPU support will work only with options --hostdisplay and --xorg.
-  Consider to use free open source nouveau driver instead."
+  Consider to use free open source driver nouveau instead.
+  Using NVIDIA driver>=v470.x  and Xwayland>=v21.1.2 might work for $Xserver --gpu."
     ;;
   esac
   
@@ -2846,7 +2857,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
   To allow other X server options, please provide environment variables with
     pkexec env DISPLAY=\$DISPLAY XAUTHORITY=\$XAUTHORITY x11docker [ARGS]."
 
-    [ "$Autochooseserver" = "yes" ] && Xserver="--xorg"
+    [ "$Autochooseserver" = "yes" ] && Xserver="--xorg" && Xorgautochoice="yes"
   }
 
   [ "$Runsoverssh" = "yes" ] && [ -z "$Hostdisplay$Hostwaylandsocket" ] && [ "$Xserver" != "--tty" ] && [ "$Autochooseserver" = "yes" ] && {
@@ -2879,9 +2890,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
     --weston|--kwin|--hostwayland) Setupwayland="yes" ;;
   esac
   [ "$Setupwayland" = "yes" ]          && { check_xdepends $Xserver || error "Failed to set up a Wayland environment.
-  Please install 'weston' or 'kwin_wayland'.
-  Wayland is not possible with proprietary NVIDIA driver
-  or with --runtime=kata-runtime." ; }
+  Please install 'weston' or 'kwin_wayland'." ; }
 
    # Xephyr as fallback for all options. Last fallback: Xorg
   check_xdepends $Xserver || Xserver="--xephyr"
@@ -2903,7 +2912,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
                                             check_xdepends --weston-xwayland && Xserver="--weston-xwayland"
                                             check_xdepends --xorg            && Xserver="--xorg"
     }
-    check_xdepends $Xserver || Xserver="--xorg"
+    check_xdepends $Xserver || { Xserver="--xorg" && Xorgautochoice="yes" ; }
   }
   
   check_xdepends $Xserver || {
@@ -2938,6 +2947,11 @@ check_xserver() {               # check chosen X server, auto-choose X server
       ;;
     esac
   }
+  
+  [ "$Xserver" = "--xorg" ] && [ "$Xorgautochoice" = "yes" ] && [ "$Runsonconsole" = "no" ] && error "Option --xorg was chosen automatically
+  as the best one fitting your specified options and installed dependencies.
+  However, x11docker does not run another Xorg without being specified.
+  Please run with option --xorg."
 
   [ "$Autochooseserver" = "yes" ] && note "Using X server option $Xserver" 
   storeinfo "xserver=$Xserver"
@@ -7043,13 +7057,6 @@ check_option_interferences() {  # check multiple option interferences, change se
 
   # --fullscreen is nonsense on tty at all. Avoids weston error on tty.
   [ "$Runsonconsole" = "yes" ] && Fullscreen="no"
-          
-  # --gpu
-  [ "$Sharegpu" = "yes" ] && warning "Option --gpu degrades container isolation.
-  Container gains access to GPU hardware.
-  This allows reading host window content (palinopsia leak)
-  and GPU rootkits (compare proof of concept: jellyfish).
-  An alternative is --iglx that works with --xorg and --xoverip only."
 
   # --hostdisplay --gpu
   [ "$Xserver" = "--hostdisplay" ] && [ "$Sharegpu" = "yes" ]  && [ "$Trusted" = "no" ] && {
@@ -7968,15 +7975,10 @@ option_messages() {             # some messages depending on options, but not ch
     --hostdisplay)
       [ "$Autochooseserver" = "yes" ] && [ -z "$Winsubsystem" ] && case "$Sharegpu" in
         yes)
-          case $Nvidiaversion in
-            "") note "To allow protection against X security leaks,
+          note "To allow protection against X security leaks,
   please install 'xinit' and one or more of:
     xpra, weston+Xwayland or kwin_wayland+Xwayland,
   or run a second Xorg server with option --xorg." ;;
-            *) note "To allow protection against X security leaks 
-  while using --gpu with NVIDIA, please use option --xorg." ;;
-          esac
-        ;;
         no) note "To allow protection against X security leaks,
   please install 'xinit' and one or more of:
     xpra, Xephyr, nxagent, weston+Xwayland, kwin_wayland+Xwayland or Xnest,

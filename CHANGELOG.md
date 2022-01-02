@@ -15,14 +15,15 @@ Project website: https://github.com/mviereck/x11docker
  - `--printpid1 [=FILE]`: Replaces `--showpid1`.
 ### Changed
  - `--network=none` is default now. Use `-I, --network` to allow internet access.
- - `--user=root`: Needs `--sudouser` or `--cap-default` for full privileges.
+ - `--user=root`: Needs `--sudouser` or `--cap-default` for usual privileges.
  - `--backend`: Fallbacks to `podman` and `nerdctl` if `docker` not found.
- - `--showenv`,`--showid`,`--showinfofile`,`--showpid1` accept optional
-   argument FILE to print into a file instead of stdout.
+ - `--xorg`: Not used as fallback if not a tty.
  - `--vt [=N]`: Argument N is optional now.
    [(#404)](https://github.com/mviereck/x11docker/issues/404)
 ### Fixed
  - `--gpu`: Set environment variables of `prime-run`.
+   [(#394)](https://github.com/mviereck/x11docker/issues/394)
+ - NVIDIA: Wayland/Xwayland support since driver>=470.x and Xwayland>=21.1.2
    [(#394)](https://github.com/mviereck/x11docker/issues/394)
 ### Deprecated
  - `--showenv`: use `--printenv` instead.

@@ -1,18 +1,25 @@
 # ToDo
 x11docker ToDo notes
 
-## Enhacement
- - `--weston[-xwayland]/--kwin[-xwayland]`: check for nvidia/Xwayland versions
- - `--runtime`: check sysbox runtime: https://github.com/nestybox/sysbox
+## Enhancement
+ - `--runtime=sysbox`: check sysbox runtime: https://github.com/nestybox/sysbox
+   - check shiftfs on debian
+   - check --home etc. in userns-remap mode
+   - check systemd et.al.
 
 ## Actually to fix
+ - `--pulseaudio=socket` fails if x11docker was started with `sudo`.
+ - `--iglx` seems to work now with `--xorg` -> report at kata
  - `--exe`: Give notes for invalid options.
  - `--update`: Check if root is needed in custom installation path. Do not install other files then.
  - `--password, --install, --update, --cleanup`, etc.: give note about dropped options.
    Maybe change to $1 mode without `--`
- - check `--init=` in all backends rootful and rootless.
+ - check all `--init=` in all backends rootful and rootless.
+   - checked: 
+     - rootful docker: all 
+     - rootless podman: systemd, openrc
  - `--user`: Check in all rootless modes, maybe disallow except for `--user=root`.
- - `--user=root --home` in rootless docker and nerdctl: Set up HOME in host user ~/x11docker.
+ - `--user=root --home` in rootless docker and nerdctl: Set up HOME in host user ~/x11docker?
  - `--backend=podman` rootless: disallow `--home` for different `--user`.
  - `--init=systemd`: cgroupv2 support #349
 
