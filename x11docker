@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.0.0-beta-6"
+Version="7.0.0-beta-7"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -605,7 +605,7 @@ finish() {                      # trap EXIT routine to clean up background proce
 
   # --pulseaudio: unload module
   Pulseaudiomoduleid="$(storeinfo dump pulseaudiomoduleid)"
-  [ "$Pulseaudiomoduleid" ] && pactl unload-module "$Pulseaudiomoduleid" 
+  [ "$Pulseaudiomoduleid" ] && unpriv "pactl unload-module '$Pulseaudiomoduleid'" 
 
   # Check if container is still running -> docker stop
   [ "$X11dockermode" = "run" ] && containerisrunning && {
@@ -1979,6 +1979,23 @@ setup_printer() {               # option --printer: connect to cups printer serv
   }
   
   case $Sharecupsmode in
+    "") ;;
+    auto)
+      Sharecupsmode="socket"
+      [ "$Snapsupport" = "yes" ]      && Sharecupsmode="tcp"
+      [ "$Runtime" = "kata-runtime" ] && Sharecupsmode="tcp"
+      [ "$Runtime" = "sysbox-runc" ]  && Sharecupsmode="tcp"
+    ;;
+    socket|tcp) ;;
+    *) 
+      note "Option --printer: Invalid argument $Sharecupsmode
+  Fallback: Setting --printer=socket"
+      check_fallback
+      Sharecupsmode="socket"
+    ;;
+  esac
+  
+  case $Sharecupsmode in
     tcp)    
       Cupsserver="$Hostip:631" 
       [ "$Network" = "none" ] && {
@@ -2021,7 +2038,20 @@ setup_sound_alsa() {            # option --alsa: share sound devices
   # libasound2 in image is recommended.
   # The desired sound card can be specified with environment variable ALSA_CARD. See card name in 'aplay -l'.
   # Further documentation at https://github.com/mviereck/x11docker/wiki/Container-sound:-ALSA-or-Pulseaudio
-
+  
+  case "$Runtime" in
+    kata-runtime|sysbox-runc)
+      [ "$Sharealsa" = "yes" ] && {
+        note "Option --alsa: ALSA sound is not possible with 
+  --runtime=$Runtime. Try option --pulseaudio instead.
+  Fallback: Disabling option --alsa"
+        check_fallback
+        Sharealsa="no"
+        return 1
+      }
+    ;;
+  esac
+  
   warning "Option --alsa: ALSA sound degrades container isolation.
   Sharing device files in /dev/snd, container gains access to sound hardware.
   Container applications can catch audio output and microphone input."
@@ -2036,20 +2066,12 @@ setup_sound_alsa() {            # option --alsa: share sound devices
   [ -d /dev/snd ] && store_runoption volume "/dev/snd" || {
     warning "Option --alsa: /dev/snd not found.
   Sound support not possible."
+    check_fallback
     Sharealsa="no"
     return 1
   }
   
-  [ -s "$Pulseaudioconf" ] || echo "# Connect to host pulseaudio server using mounted UNIX socket
-default-server = none
-# Prevent a server running in container
-autospawn = no
-daemon-binary = /bin/true
-# Prevent use of shared memory
-enable-shm = false
-" >> $Pulseaudioconf
-  
-  [ "$Sharealsa" = "yes" ] && Containerusergroups="$Containerusergroups audio"
+  Containerusergroups="$Containerusergroups audio"
 
   return 0
 }
@@ -2065,8 +2087,26 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
   local Lowerport= Upperport=
   local Pulseaudiopath
 
-  warning "Option --pulseaudio allows container applications
-  to catch your audio output and microphone input."
+  case $Pulseaudiomode in
+    auto|tcp|socket) 
+      command -v pactl >/dev/null || {
+        note "Option --pulseaudio: pactl not found.
+  Is pulseaudio installed and running on your host system?
+  Fallback: Disabling --pulseaudio, enabling option --alsa"
+        check_fallback
+        Pulseaudiomode=""
+        Sharealsa="yes"
+        return 1
+      }
+    ;;
+    *) 
+      note "Option --pulseaudio: Unknown pulseaudio mode: $Pulseaudiomode
+  Allowed are --pulseaudio=socket, --pulseaudio=tcp or --pulseaudio=auto.
+  Fallback: Enabling --pulseaudio=auto"
+      check_fallback
+      Pulseaudiomode="auto"
+    ;;
+  esac
   
   [ -z "$Pulseaudiomode" ] && Pulseaudiomode="socket" 
   [ "$Pulseaudiomode" = "auto" ] && {
@@ -2076,7 +2116,7 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
     [ "$Snapsupport" = "yes" ]                       && Pulseaudiomode="tcp"
     [ "$Runtime" = "sysbox-runc" ]                   && Pulseaudiomode="tcp"
     unpriv 'LC_ALL=C pactl info | grep -q "User Name: pulse"' && Pulseaudiomode="tcp"
-    note "Option --pulseaudio: Enabling TCP mode"
+    [ "$Pulseaudiomode" = "tcp" ] && note "Option --pulseaudio: Enabling TCP mode"
   }
   
   [ "$Pulseaudiomode" = "tcp" ] && [ "$Network" = "none" ] && {
@@ -2088,6 +2128,9 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
     Sharealsa="yes"
     return 1
   }
+  
+  warning "Option --pulseaudio allows container applications
+  to catch your audio output and microphone input."
   
   case $Pulseaudiomode in
     socket)
@@ -2105,6 +2148,7 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
         check_fallback
         Pulseaudiomode=""
         Sharealsa="yes"
+        return 1
       }
 
       echo "# Connect to host pulseaudio server using mounted UNIX socket
@@ -2139,6 +2183,19 @@ setup_webcam() {                # option --webcam: share webcam devices
   # (This works only if webcam is plugged in before container starts.
   # Hotplug support would have to be different.)
   local Webcamdevice
+
+  case "$Runtime" in
+    sysbox-runc|kata-runtime)
+      note "Option --webcam does not work with --runtime=$Runtime.
+  Fallback: Disabling option --webcam"
+      check_fallback
+      Sharewebcam="no"
+      return 1
+    ;;
+  esac
+     
+  [ "$Sharewebcam" = "yes" ] && warning "Option --webcam: Container applications might look 
+  at you and also might take screenshots of your Desktop."
   
   while read -r Webcamdevice ; do
     store_runoption volume "$Webcamdevice"
@@ -2148,6 +2205,7 @@ setup_webcam() {                # option --webcam: share webcam devices
   
   # at least cheese and gnome-ring need some device information from udev.
   store_runoption volume "/run/udev/data:ro"
+  return 0
 }
 
 #### X server setup
@@ -2811,14 +2869,16 @@ check_xserver() {               # check chosen X server, auto-choose X server
 
   # X over TCP
   [ -z "$Xoverip" ] && {
-    [ "$Runtime" = "kata-runtime" ] && {
-      Xoverip="yes"
-      [ "$Network" = "none" ] && {
-        note "Option --runtime=kata-runtime works only with X over IP.
-  Enabling option --xoverip.
-  Please enable option -I, --network to allow network access."
-      }
-    }
+    case "$Runtime" in
+      kata-runtime|sysbox-runc)
+        Xoverip="yes"
+        [ "$Network" = "none" ] && {
+          note "Option --runtime=$Runtime works only with X over IP.
+    Enabling option --xoverip.
+    Please enable option -I, --network to allow network access."
+        }
+      ;;
+    esac
     case $Mobyvm in
       yes) Xoverip="yes" ;;
     esac
@@ -2906,7 +2966,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
                                             check_xdepends --weston-xwayland && Xserver="--weston-xwayland"
                                             check_xdepends --xorg            && Xserver="--xorg"
     }
-    check_xdepends $Xserver || { Xserver="--xorg" && Xorgautochoice="yes" ; }
+    check_xdepends $Xserver || { Xserver="--xorg" && [ "$Autochooseserver" = "yes" ] && Xorgautochoice="yes" ; }
   }
   
   check_xdepends $Xserver || {
@@ -4148,6 +4208,33 @@ check_containerhome() {         # options --home, --homedir, --homebasedir: chec
     yes) Hosthomebasefolder="$(convertpath subsystem "$(wincmd 'echo %userprofile%') ")/x11docker/home" ;;
   esac
   
+  # rootless with userns-remap
+  [ "$Rootlessbackend" ] && {
+    case $Containerbackend in
+      docker|nerdctl)
+        [ "$Sharehome" != "no" ] && {
+          note "Option --home is not supported in $Containerbackend rootless mode.
+  In rootless mode only option --backend=podman supports option --home.
+  Alternatively run one of docker, podman or nerdctl in rootful mode.
+  Fallback: Disabling option --home"
+          check_fallback
+          Sharehome="no"
+        }
+      ;;
+    esac
+  }
+  
+  case "$Runtime" in
+    sysbox-runc) 
+      [ "$Sharehome" != "no" ] && {
+        note "Option --runtime=sysbox-runc does not allow option --home.
+  Fallback: Disabling option --home."
+        check_fallback
+        Sharehome="no"
+      }
+    ;;
+  esac
+  
   case $Sharehome in
     yes|host)
       [ -z "$Persistanthomevolume" ] && Persistanthomevolume="$Hosthomebasefolder/$Imagebasename"
@@ -4936,7 +5023,7 @@ create_containerrootrc() {      ### create containerrootrc: This script runs as 
   echo "# - Install NVIDIA driver if requested"
   echo "# - Set up init system services and DBus for --init=systemd|openrc|runit|sysvinit"
   echo ""
-#  echo "set -x"
+  echo "set -x"
     
   echo "# redirect output to have it available before 'docker logs' starts. --init=runit (void) would eat up the output at all for unknown reasons."
   echo "exec 1>>$(convertpath share $Containerlogfile) 2>&1"
@@ -7127,27 +7214,32 @@ check_option_interferences() {  # check multiple option interferences, change se
       [ "$Dbusrunsession" ] && {
         note "Option --no-setup does not support option --dbus
   Fallback: Disabling option --dbus"
+        check_fallback
         Dbusrunsession="no"
       }
       [ "$Langwunsch" ] && {
         note "Option --no-setup does not support option --lang.
   Fallback: Disabling option --lang, setting '--env LANG=$Langwunsch' only."
         store_runoption env "LANG=$Langwunsch"
+        check_fallback
         Langwunsch=""
       }
       [ "$Noentrypoint" = "yes" ] && {
         note "Option --no-setup does not support option --no-entrypoint.
   Fallback: Disabling option --no-entrypoint."
+        check_fallback
         Noentrypoint="no"
       }
       [ "$Runasroot" ] && {
         note "Option --no-setup does not support option --runasroot.
   Fallback: Disabling option --runasroot."
+        check_fallback
         Runasroot=""
       }
       [ "$Runasuser" ] && {
         note "Option --no-setup does not support option --runasuser.
   Fallback: Disabling option --runasuser."
+        check_fallback
         Runasuser=""
       }
       [ "$Sudouser" ] && note "Option --no-setup does not support option --sudouser.
@@ -7213,13 +7305,23 @@ check_option_interferences() {  # check multiple option interferences, change se
   [ -n "$Xkblayout" ] && {
     case $Xserver in
       --kwin|--kwin-xwayland)
-        [ "$Runsonconsole" = "yes" ] && note "Option --keymap does not work with option $Xserver
-  if running from console."
+        [ "$Runsonconsole" = "yes" ] && {
+          note "Option --keymap does not work with option $Xserver
+  if running from console.
+  Fallback. Disabling option --keymap."
+          check_fallback
+          Xkblayout=""
+        }
       ;;
     esac
     [ "$Xkblayout" = "clone" ] && case $Xserver in
       --nxagent) ;;
-      *) Xkblayout="" ;;
+      *)
+        note "--keymap=clone is supported with --nxagent only.
+  Fallback: Disabling option --keymap."
+        check_fallback
+        Xkblayout=""
+      ;;
     esac
   }
 
@@ -7319,6 +7421,7 @@ check_option_interferences() {  # check multiple option interferences, change se
   options --size, --scale and --rotate.
   Please install 'xrandr'.
   $Wikipackages"
+      check_fallback
     ;;
   esac
 
@@ -7326,6 +7429,7 @@ check_option_interferences() {  # check multiple option interferences, change se
   [ -n "$Dpi" ] && case $Xserver in
     --weston|--kwin|--hostwayland|--hostdisplay)
       note "Option --dpi has no effect with option $Xserver"
+      check_fallback
       Dpi=
     ;;
   esac
@@ -7337,6 +7441,7 @@ check_option_interferences() {  # check multiple option interferences, change se
         [[ "$Outputcount" =~ ^[1-9]$ ]] || {
           note "Option --output-count: Value must be one of 1 2 3 4 5 6 7 8 9
   Disabling invalid value $Outputcount"
+          check_fallback
           Outputcount="1"
         }
         [ "$Runsonconsole" = "yes" ] && {
@@ -7349,6 +7454,7 @@ check_option_interferences() {  # check multiple option interferences, change se
       *) note "$Xserver does not support option --output-count.
   Only available for Weston, KWin and Xephyr, thus for options
   --weston, --weston-xwayland, --kwin, --kwin-xwayland, --xephyr."
+        check_fallback
         Outputcount="1"
       ;;
     esac
@@ -7360,6 +7466,7 @@ check_option_interferences() {  # check multiple option interferences, change se
       note "xfishtank not found. Can not show a fish tank.
   Please install 'xfishtank' for option --xfishtank to show a fish tank.
   $Wikipackages"
+      check_fallback
       Xfishtank="no"
     }
     case $Xserver in
@@ -7367,6 +7474,7 @@ check_option_interferences() {  # check multiple option interferences, change se
         [ "$Desktopmode" = "no" ] && [ -z "$Windowmanagermode" ] && Windowmanagermode="auto" && Desktopmode="yes" ;;
       --weston|--kwin|--hostwayland|--hostdisplay|--tty)
         note "Option --xfishtank is not supported for $Xserver."
+        check_fallback
         Xfishtank="no"
       ;;
     esac
@@ -7401,6 +7509,7 @@ check_option_interferences() {  # check multiple option interferences, change se
       [ "$Sharecgroup" = "yes" ] && { 
         note "Option --sharecgroup is not supported with MobyVM.
   Fallback: Disabling option --sharecgroup."
+        check_fallback
         Sharecgroup="no"
       }
     ;;
@@ -7421,10 +7530,10 @@ check_option_interferences() {  # check multiple option interferences, change se
     ;;
   esac
     
-  # check XDG_RUNTIME_DIR
+  # XDG_RUNTIME_DIR
+  [ -z "$XDG_RUNTIME_DIR" ] && [ -e "/run/user/${Hostuseruid:-unknownuid}" ] && export XDG_RUNTIME_DIR="/run/user/$Hostuseruid"
   case $Xserver in
     --weston|--kwin|--weston-xwayland|--kwin-xwayland) 
-      [ -z "$XDG_RUNTIME_DIR" ] && [ -e "/run/user/${Hostuseruid:-unknownuid}" ] && export XDG_RUNTIME_DIR="/run/user/$Hostuseruid"
       [ -z "$XDG_RUNTIME_DIR" ] && {
         export XDG_RUNTIME_DIR="$Cachefolder/XDG_RUNTIME_DIR"
         unpriv "mkdir -p  $XDG_RUNTIME_DIR"
@@ -7456,6 +7565,7 @@ check_option_interferences() {  # check multiple option interferences, change se
   [ -n "$Customwestonini" ] && [ ! -e "$Customwestonini" ] && {
     warning "Custom weston.ini (option --westonini) not found.
   $Customwestonini"
+    check_fallback
     Customwestonini=""
   }
   
@@ -7508,78 +7618,19 @@ check_option_interferences() {  # check multiple option interferences, change se
   It only restricts memory and CPU usage."
   }
   
-  # --pulseaudio
-  case $Pulseaudiomode in
-    "") ;;
-    auto|tcp|socket) 
-      command -v pactl >/dev/null || {
-        note "Option --pulseaudio: pactl not found.
-  Is pulseaudio installed and running on your host system?
-  Fallback: Disabling --pulseaudio, enabling option --alsa"
-        check_fallback
-        Pulseaudiomode=""
-        Sharealsa="yes"
-      }
-    ;;
-    *) 
-      note "Option --pulseaudio: Unknown pulseaudio mode: $Pulseaudiomode
-  Allowed are --pulseaudio=socket, --pulseaudio=tcp or --pulseaudio=auto.
-  Fallback: Enabling --pulseaudio=auto"
-      check_fallback
-      Pulseaudiomode="auto"
-    ;;
-  esac
-  
-  # --printer
-  case $Sharecupsmode in
-    auto)
-      Sharecupsmode="socket"
-      [ "$Snapsupport" = "yes" ]      && Sharecupsmode="tcp"
-      [ "$Runtime" = "kata-runtime" ] && Sharecupsmode="tcp"
-    ;;
-    ""|socket|tcp) ;;
-    *) 
-      note "Option --printer: Invalid argument $Sharecupsmode
-  Fallback: Setting --printer=socket"
-      check_fallback
-      Sharecupsmode="socket"
-    ;;
-  esac
-  
   case "$Runtime" in
-    ""|runc|crun|oci) ;;
-    sysbox-runc) 
-      [ "$Sharehome" != "no" ] && {
-        note "Option --runtime=sysbox-runc does not allow option --home.
-  Fallback: Disabling option --home."
+    ""|runc|crun|oci|sysbox-runc) ;;
+    nvidia) 
+      [ "$Sharegpu" = "no" ] && {
+        note "Option --runtime=nvidia: Enabling option --gpu"
+        Sharegpu="yes"
         check_fallback
-        Sharehome="no"
-      }
-      [ "$Sharewebcam" = "yes" ] && {
-        note "Option --webcam does not work with --runtime=sysbox-runtime.
-  Fallback: Disabling option --webcam"
-        check_fallback
-        Sharewebcam="no"
       }
     ;;
-    nvidia) Sharegpu="yes" ;;
     kata-runtime)
       note "Option --runtime=kata-runtime: Be aware not to share
   the same files with runc and kata-runtime containers at the same time.
   Otherwise container startup may fail."
-      [ "$Sharealsa" = "yes" ] && {
-        note "Option --alsa: ALSA sound is not possible with 
-  --runtime=kata-runtime. Fallback: Enabling option --pulseaudio=tcp."
-        check_fallback
-        Sharealsa="no"
-        Pulseaudiomode="tcp"
-      }
-      [ "$Sharewebcam" = "yes" ] && {
-        note "Option --webcam: Webcam support does not work with
-  --runtime=kata-runtime. Fallback: Disabling option --webcam."
-        check_fallback
-        Sharewebcam="no"
-      }
       [ "$Network" = "host" ] && {
         note "Option --network=host: Sharing host network stack does not work
   with --runtime=kata-runtime. Fallback: Setting --network=bridge."
@@ -7593,7 +7644,8 @@ check_option_interferences() {  # check multiple option interferences, change se
     ;;
     *)
       note "Option --runtime: x11docker does not know runtime: $Runtime
-  Will try to use it anyway."
+  Will try to use it anyway. 
+  If that fails, you can try options --snap or --no-setup."
     ;;
   esac
   
@@ -7607,13 +7659,15 @@ check_option_interferences() {  # check multiple option interferences, change se
       nerdctl) Containerbackend="NOBACKENDFOUND" ;;
     esac
     Containerbackendbin="$(command -v "$Containerbackend" &2> /dev/null)"
-    note "Option --backend: Fallback: using backend $Containerbackend"
     [ "$Containerbackend" = "NOBACKENDFOUND" ] && break
   done
-  [ "$Fallbackinuse" ] && check_fallback
   [ "$Containerbackend" = "NOBACKENDFOUND" ] && error "Option --backend: No container backend found.
   To run containers you need to install a valid backend.
   Known backends: docker podman nerdctl"
+  [ "$Fallbackinuse" ] && {
+    note "Option --backend: Fallback: using backend $Containerbackend"
+    check_fallback
+  }
   case "$Containerbackend" in
     docker) ;;
     podman)
@@ -7634,22 +7688,6 @@ check_option_interferences() {  # check multiple option interferences, change se
   Though, these are still within nerdctl default capabilities."
     ;;
   esac
-  
-  # --home rootless
-  [ "$Rootlessbackend" ] && {
-    case $Containerbackend in
-      docker|nerdctl)
-        [ "$Sharehome" ] && {
-          note "Option --home is not supported in $Containerbackend rootless mode.
-  In rootless mode only option --backend=podman supports option --home.
-  Alternatively run one of docker, podman or nerdctl in rootful mode.
-  Fallback: Disabling option --home"
-          check_fallback
-          Sharehome="no"
-        }
-      ;;
-    esac
-  }
 
   Sudouser="${Sudouser,,}"
   case $Sudouser in
@@ -8108,8 +8146,8 @@ option_messages() {             # some messages depending on options, but not ch
   # NVIDIA without --gpu
   [ "$Nvidiaversion" ] && [ "$Sharegpu" = "no" ] && case $Xserver in
     --hostdisplay|--xorg) note "Option $Xserver may fail with proprietary NVIDIA driver
-  on host. In that case try other X server options like 
-  --nxagent, --xpra or --xephyr." ;;
+  on host without enabling option --gpu. 
+  In that case try other X server options like --nxagent, --xpra or --xephyr." ;;
   esac
   
   # --iglx
@@ -8143,10 +8181,6 @@ option_messages() {             # some messages depending on options, but not ch
   Different window managers handle this different. Just try out." ;;
     esac
   }
-  
-  # --webcam
-  [ "$Sharewebcam" = "yes" ] && warning "Option --webcam: Container applications might look 
-  at you and also might take screenshots of your Desktop."
   
   # --hostipc
   [ "$Sharehostipc" = "yes" ] && warning "Option --hostipc severely degrades 
@@ -8249,6 +8283,7 @@ setup_fifo() {                  # set up fifo channels (also option --stdin)
     no)  Usemkfifo="yes" ;;
   esac
   [ "$Runtime" = "kata-runtime" ] && Usemkfifo="no"
+  [ "$Runtime" = "sysbox-runc" ]  && Usemkfifo="no"
   
   # redirect stdin to named pipe. Named pipe is shared with container and used as stdin of container command in containerrc
   [ "$Forwardstdin" = "yes" ] && {
@@ -8382,6 +8417,7 @@ declare_variables() {           # declare global variables
   grep -q ':/sbin:'            <<< ":$PATH:" || PATH="$PATH:/sbin"
   grep -q ':/usr/sbin:'        <<< ":$PATH:" || PATH="$PATH:/usr/sbin"
   grep -q ':/usr/local/bin:'   <<< ":$PATH:" || PATH="$PATH:/usr/local/bin"
+  grep -q ':/usr/bin:'         <<< ":$PATH:" || PATH="$PATH:/bin"
   grep -q ':/usr/bin:'         <<< ":$PATH:" || PATH="$PATH:/usr/bin"
   grep -q ':/usr/local/games:' <<< ":$PATH:" || PATH="$PATH:/usr/local/games"
   grep -q ':/usr/games:'       <<< ":$PATH:" || PATH="$PATH:/usr/games"
@@ -9179,7 +9215,6 @@ Parsed options:    $Parsedoptions_global"
     [ "$Allownewprivileges" = "auto" ] && Allownewprivileges="yes"
     Xoverip="yes"
     [ "$Network" = "none" ] && Network=""
-    [ "$Sharecupsmode" ] && Sharecupsmode="tcp" 
   }
   
   check_xserver                  # check chosen X server or auto-choose one
