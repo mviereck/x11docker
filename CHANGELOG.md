@@ -8,6 +8,9 @@ Project website: https://github.com/mviereck/x11docker
 
 ## Unreleased
 ### Added
+ - Configuration of x11docker with `default` preset file. Compare `--preset`.
+   Allows to specify options that will be applied in all x11docker sessions.
+   Useful to declare a default `--backend` and/or `--runtime`.
  - `--backend=sysbox-runc`: Experimental support of sysbox runtime.
  - `--printenv [=FILE]`: Replaces `--showenv`.
  - `--printid [=FILE]`: Replaces `--showid`.
@@ -15,9 +18,9 @@ Project website: https://github.com/mviereck/x11docker
  - `--printpid1 [=FILE]`: Replaces `--showpid1`.
 ### Changed
  - `--network=none` is default now. Use `-I, --network` to allow internet access.
- - `--user=root`: Needs `--sudouser` or `--cap-default` for usual privileges.
+ - `--user=root`: Needs `--sudouser` or `--cap-default` for usual root privileges.
  - `--backend`: Fallbacks to `podman` and `nerdctl` if `docker` not found.
- - `--xorg`: Not used as fallback if not a tty.
+ - `--xorg`: Not used as fallback if not on tty.
  - `--vt [=N]`: Argument N is optional now.
    [(#404)](https://github.com/mviereck/x11docker/issues/404)
 ### Fixed

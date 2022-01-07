@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.0.0-beta-8"
+Version="7.0.0-beta-9"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -279,6 +279,7 @@ Container special configuration:
                          crun:         Fast replacement for runc written in C.
                          nvidia:       Runtime for nvidia/nvidia-docker images.
                          kata-runtime: Runtime using a QEMU VM.
+                         sysbox-runc:  Runtime for powerful root in container.
      --shell=SHELL     Set preferred user shell. Example: --shell=/bin/zsh
      --snap            Enable support for Docker in snap.
      --stdin           Forward stdin of x11docker to container command.
@@ -2024,7 +2025,9 @@ Port 631
   Allow 172.17.0.*
   Allow 172.20.0.*
   Allow 127.0.0.1
-</Location>"
+</Location>
+
+Also you need to allow network access for each printer in a CUPS GUI."
   }
     
   [ "$Cupsserver" ]    && store_runoption env "CUPS_SERVER=$Cupsserver"
@@ -2493,13 +2496,15 @@ check_xdepends() {              # check dependencies on host for X server option
   You would need NVIDIA driver>=v470.x and Xwayland>=21.1.2"
         Return=1
       }
-      [ "$Runtime" = "kata-runtime" ] && {
-        $Message "${1:-} not supported with --runtime=kata-runtime"
-        Return=1
-      }
+      case "$Runtime" in
+        kata-runtime|sysbox-runc)
+          $Message "${1:-} is not supported with --runtime=$Runtime"
+          Return=1
+        ;;
+      esac
       case $Mobyvm in
         yes)
-          $Message "${1:-} not supported with MobyVM / docker-for-win"
+          $Message "${1:-} is not supported with MobyVM / docker-for-win"
           Return=1
         ;;
       esac
@@ -2831,14 +2836,19 @@ check_xserver() {               # check chosen X server, auto-choose X server
 
   # X over TCP
   [ -z "$Xoverip" ] && {
-    case "$Runtime" in
-      kata-runtime|sysbox-runc)
-        Xoverip="yes"
-        [ "$Network" = "none" ] && {
-          note "Option --runtime=$Runtime works only with X over IP.
-    Enabling option --xoverip.
-    Please enable option -I, --network to allow network access."
-        }
+    case "$Xserver" in
+      --tty|--weston|--kwin|--hostwayland) ;;
+      *)
+        case "$Runtime" in
+          kata-runtime|sysbox-runc)
+            Xoverip="yes"
+            [ "$Network" = "none" ] && {
+              note "Option --runtime=$Runtime works only with X over IP.
+  Enabling option --xoverip.
+  Please enable option -I, --network to allow network access."
+            }
+          ;;
+        esac
       ;;
     esac
     case $Mobyvm in
@@ -2905,7 +2915,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
   case $Xserver in
     --weston|--kwin|--hostwayland) Setupwayland="yes" ;;
   esac
-  [ "$Setupwayland" = "yes" ]          && { check_xdepends $Xserver || error "Failed to set up a Wayland environment.
+  [ "$Setupwayland" = "yes" ]          && { Autochooseserver="no" check_xdepends $Xserver || error "Failed to set up a Wayland environment.
   Please install 'weston' or 'kwin_wayland'." ; }
 
    # Xephyr as fallback for all options. Last fallback: Xorg
@@ -2931,7 +2941,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
     check_xdepends $Xserver || { Xserver="--xorg" && [ "$Autochooseserver" = "yes" ] && Xorgautochoice="yes" ; }
   }
   
-  check_xdepends $Xserver || {
+  Autochooseserver="no" check_xdepends $Xserver || {
     case $Winsubsystem in
       "") 
         error "Did not find a possibility to provide a display.
@@ -4631,8 +4641,8 @@ setup_capabilities() {          # check linux capabilities needed by container
     none|tini|dockerinit) ;;
     systemd)
       Switchcontaineruser="yes"
-      Sharecgroup="yes"
       store_runoption cap "FSETID FOWNER SETPCAP SYS_BOOT"
+      Sharecgroup="yes"
     ;;
     runit|openrc|sysvinit)
       Switchcontaineruser="yes"
@@ -8657,8 +8667,9 @@ declare_variables() {           # declare global variables
   Imagebasename=""                                # Image name without tags and / replaced with -. For use of --home folders.
   Parsedoptions_global=""                         # Parsed options
   Passwordterminal=""                             # Terminal emulator to use for password prompt (if no terminal emulator is needed, it will be 'bash -c')
-  Presetdirlocal="$HOME/.config/x11docker/preset"
-  Presetdirsystem="/etc/x11docker/preset"
+  Presetdefaultcount=""
+  Presetdirlocal="$HOME/.config/x11docker/preset" # --preset storage dir (local)
+  Presetdirsystem="/etc/x11docker/preset"         # --preset storage dir (system)
   Preservecachefiles="no"                         # If yes, don't delete cache files on exit. For few failure cases only.
   X11dockermode="run"                             # --exe, --xonly: Can be either "run" (default), "exe", or "xonly".
   
@@ -8783,6 +8794,22 @@ parse_options() {               # parse cli options
   [ "$*" = "-h --" ] &&       usage &&        exit 0                 # Catch single -h for usage info, otherwise it means --hostdisplay
   [ "$*" = "--" ]    &&       usage &&        exit 0                 # x11docker without options
   
+  # default preset file
+  [ -z "$Presetdefaultcount" ] && {
+    Presetdefaultcount="1"
+    Presetoptions=""
+    Presetfile=""
+    [ -f "$Presetdirsystem/default" ] && Presetfile="$Presetdirsystem/default"
+    [ -f "$Presetdirlocal/default" ]  && Presetfile="$Presetdirlocal/default"
+    [ -f "$Presetfile" ] && {
+      Presetoptions="$(sed '/^#/d' < "$Presetfile" | tr '\n' ' ')"
+      note "Applying default preset: $Presetoptions"
+      debugnote "--preset $Presetfile: 
+  $Presetoptions"
+      [ "$Presetoptions" ] && eval parse_options $Presetoptions
+    }
+  }
+  
   while [ $# -gt 0 ]; do
     case "${1:-}" in
       --hostdisplay|--hostwayland|--kwin|--kwin-xwayland|--nxagent|--tty|--weston|--weston-xwayland|--xpra-xwayland|--xephyr|--xorg|--xwayland|--xwin|-h|-H|-K|-n|-t|-T|-Y|-y|-A|-x|-X)
@@ -8826,7 +8853,7 @@ parse_options() {               # parse cli options
   $Presetdirlocal
   $Presetdirsystem"
                               Presetoptions="$(sed '/^#/d' < "$Presetfile" | tr '\n' ' ')"
-                              debugnote "--preset ${2:-}: 
+                              note "Option --preset ${2:-}: Applying 
   $Presetoptions"
                               [ "$Presetoptions" ] && eval parse_options $Presetoptions
                               shift ;; 
