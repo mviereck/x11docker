@@ -44,6 +44,7 @@ Project website: https://github.com/mviereck/x11docker
 ### Removed
  - `x11docker-gui`: Removed due to outdated and unmaintained `kaptain`.
  - `--pull`: Please pull missing images yourself.
+ - `--pw`: Run x11docker directly as root or with sudo if needed.
 
 ## [6.10.0](https://github.com/mviereck/x11docker/releases/tag/v6.10.0) - 2021-10-06
 ### Added

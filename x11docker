@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.0.0-beta-13"
+Version="7.0.0-beta-14"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -271,7 +271,7 @@ Container special configuration:
      --backend=BACKEND   Container backend to use: docker, podman or nerdctl.
                        Default: docker. (Fallbacks to podman and nerdctl.)
                        For rootless mode podman is recommended.
-                       For rootful podman or nerdctl use sudo or option --pw.
+                       For rootful podman or nerdctl run as root or with sudo.
                        For rootless docker set DOCKER_HOST accordingly.
                        Rootless docker and rootless nerdctl do not support
                        option --home and work not well with option --share.
@@ -322,12 +322,6 @@ Miscellaneous:
                         - Local presets supersede global ones in /etc
                        Special case: A preset file with file name 'default'
                        will be applied automatically for all x11docker sessions.
-     --pw [=FRONTEND]  Choose frontend for password prompt. Possible FRONTEND:
-                         su sudo gksu gksudo lxsu lxsudo kdesu kdesudo
-                         pkexec beesu none
-                       If FRONTEND is not specified, one of sudo or su is used.
-                       This allows to choose between rootful or rootless mode
-                       of nerdctl and podman.
      
 Output of parseable information on stdout:
   Get output e.g. with: read xenv < <(x11docker --printenv x11docker/check)
@@ -431,19 +425,6 @@ $Message" | gxmessage -file - -default okay ||:
   } || {
     command -v xterm        >/dev/null && [ -n "${DISPLAY:-}" ] && {
       xterm -title "$Title" -e "echo '$(echo "$Message" | sed "s/'/\"/g")' ; read -n1" ||:
-    }
-  } || {
-    [ -n "$Passwordterminal" ] && [ "$Passwordterminal" != "eval" ] && [ -e "$Cachefolder" ] && {
-      mkfile $Cachefolder/message
-      echo "#! /usr/bin/env bash
-echo '$Title
-
-$Message
-(Press any key to close window)'
-read -n1
-:
-" >> $Cachefolder/message
-      $Passwordterminal /usr/bin/env bash $Cachefolder/message
     }
   } || {
     notify-send "$Title:
@@ -566,11 +547,6 @@ finish() {                      # trap EXIT routine to clean up background proce
   trap - EXIT
   trap - ERR
   trap - SIGINT
-  
-  # --pw=sudo: no password prompt here, rather fail ### FIXME
-  [ "$Sudo" ] && {
-    sudo -n echo 2>/dev/null && Sudo="sudo -n" || Sudo=""
-  }
 
   while read -r Line ; do
     
@@ -2613,7 +2589,12 @@ check_xdepends() {              # check dependencies on host for X server option
   esac
    # X servers in container
   case ${1:-} in
-    *-c*) $Message "${1:-} needs image x11docker/xserver." ;; ### FIXME check for image
+    *-c*) 
+      $Containerbackendbin inspect x11docker/xserver >/dev/null 2>&1 || {
+        $Message "${1:-} needs image x11docker/xserver."
+        Return=1
+      }
+    ;;
   esac
   # Wayland command
   case ${1:-} in
@@ -6346,7 +6327,7 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
           echo   '  [ "$(id -u)" != "0" ] && {'
           echo   "    note 'Want to create and mount a cgroup for $Wantcgroup.
   As x11docker currently does not run as root, this will probably fail.
-  Please either run x11docker as root, or run with option --pw=su or --pw=sudo.
+  Please run x11docker as root.
     
   Alternatively, create cgroup mountpoint yourself with:
     mkdir -p /sys/fs/cgroup/$Wantcgroup
@@ -6500,43 +6481,6 @@ $(rmcr < '$Containerlogfile' | uniq )"'
   echo "exit 0"
   return 0
 }
-create_xtermrc() {              # create xtermrc: Script to prompt for password (if needed) and to run dockerrc
-  echo "#! /usr/bin/env bash"
-  echo "# Ask for password if needed."
-  echo "# Runs in terminal or in an additional terminal window"
-  echo ""
-  declare -f rocknroll
-  declare -f storeinfo
-  echo "$Messagefifofuncs"
-  echo "Timetosaygoodbyefile='$Timetosaygoodbyefile'"
-  echo ""
-  #[ "$Debugmode" = "yes" ] && echo "set -x"
-  echo "Messagefile='$Messagefifo'"
-  echo "Storeinfofile='$Storeinfofile'"
-  echo "export TERM=xterm SHELL=/bin/bash"
-  echo ""  
-  echo "debugnote 'Running xtermrc: Ask for password if needed ($Passwordneeded)'"
-  echo ""
-  [ "$Passwordneeded" = "yes" ] && case $Passwordfrontend in
-    su|sudo)
-      echo "echo 'x11docker $Imagename $Containercommand:'"
-      echo "echo 'Please type in your password to run docker on display $Newdisplay'"
-      echo "echo -n 'Password ($Passwordfrontend): '"
-    ;;
-  esac
-  echo ""
-  case $Passwordfrontend in
-    gksudo|lxsudo)  echo "$Passwordcommand bash $Dockerrc" ;;
-    pkexec)         echo "pkexec env DISPLAY=\$DISPLAY XAUTHORITY=\$XAUTHORITY bash $Dockerrc" ;;
-    gksu)           echo "$Passwordcommand \"bash $Dockerrc \"" ;;
-    lxsu)           echo "$Passwordcommand bash $Dockerrc" ;;
-    *)              echo "$Passwordcommand \"${Sudo}bash $Dockerrc \"" ;;
-  esac
-  echo ""
-  echo "storeinfo xtermrc=ready"  
-  echo "exit 0"
-  return 0
-}
 
 #### final startup routines
 start_compositor() {            # start Wayland compositor Weston or KWin
@@ -6557,19 +6501,6 @@ start_compositor() {            # start Wayland compositor Weston or KWin
       unpriv "xdotool windowunmap 0x$(printf '%x\n' $(grep 'window id' $Compositorlogfile | rev | cut -d' ' -f1 | rev))" ;;
   esac
   return 0
-}
-start_docker() {                # start xtermrc -> dockerrc
-  # run docker in xtermrc, ask for password if needed
-  case $Passwordfrontend in
-    su|sudo)
-      case $Passwordneeded in
-        no)                     /usr/bin/env bash $Xtermrc ;;
-        yes) $Passwordterminal  /usr/bin/env bash $Xtermrc ;;
-      esac
-    ;;
-    *)       $Passwordterminal              "bash $Xtermrc" ;;
-  esac
-  waitforlogentry "start_docker()" "$Storeinfofile" "dockerrc=ready" "" infinity
 }
 start_hostexe() {               # options --exe, --xonly: Run host executable instead of docker container
   local Line
@@ -6676,7 +6607,7 @@ $Xpraservercommand"
       #Xpraserverpid=$!
     ;;
     --xpra-c|--xpra-c2)
-      $Containerbackendbin exec --detach $Xcontainername sh -c "$(tr -d '\\\n' <<< "$Xpraservercommand") >> $Xpraserverlogfile 2>&1" >> $Xpraserverlogfile 2>&1 ### FIXME rootful docker without group docker
+      $Containerbackendbin exec --detach $Xcontainername sh -c "$(tr -d '\\\n' <<< "$Xpraservercommand") >> $Xpraserverlogfile 2>&1" >> $Xpraserverlogfile 2>&1 
       #Xpraserverpid="$(ps aux | grep "/usr/bin/xpra start $Newdisplay" | grep -v grep | awk '{print $2}')"
     ;;
   esac
@@ -6698,7 +6629,7 @@ $Xpraclientcommand"
       #Xpraclientpid=$!
     ;;
     --xpra-c)
-      $Containerbackendbin exec --detach $Xcontainername sh -c "$(tr -d '\\\n' <<< "$Xpraclientcommand") >> $Xpraclientlogfile 2>&1" >> $Xpraclientlogfile 2>&1 ### FIXME rootful docker without group docker
+      $Containerbackendbin exec --detach $Xcontainername sh -c "$(tr -d '\\\n' <<< "$Xpraclientcommand") >> $Xpraclientlogfile 2>&1" >> $Xpraclientlogfile 2>&1
       #Xpraclientpid="$(ps aux | grep "/usr/bin/xpra attach $Newdisplay" | grep -v grep | awk '{print $2}')"
       #warning "$(ps aux | grep "/usr/bin/xpra attach $Newdisplay")"    ;;
   esac
@@ -6724,7 +6655,7 @@ $(tail $Xpraclientlogfile)"
 start_xserver() {               # start X server
   case $Xserver in
     --xpra-c|--xpra-c2|--xfvb-c|--xephyr-c)
-      $Containerbackendbin exec $Xcontainername xinit $Xinitrc -- $(tr -d '\\' <<< "$Xcommand") >> $Xinitlogfile  2>&1 ;; ### FIXME rootful docker without group docker
+      $Containerbackendbin exec $Xcontainername xinit $Xinitrc -- $(tr -d '\\' <<< "$Xcommand") >> $Xinitlogfile  2>&1 ;;
     --xpra|--xephyr|--xdummy|--xvfb|--nxagent|--xwayland|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland|--xwin) 
       unpriv "env WAYLAND_DISPLAY=$Newwaylandsocket      xinit $Xinitrc -- $Xcommand             >> $Xinitlogfile  2>&1 " ;;
     --xorg)
@@ -7769,72 +7700,6 @@ check_option_interferences() {  # check multiple option interferences, change se
   
   return 0
 }
-check_passwordfrontend() {      # check password prompt frontend (pkexec, su, sudo, ...) (also option --pw)
-  # check if x11docker can run docker without prompting for password
-  [ "$Passwordfrontend" = "auto" ] && {
-    command -v sudo >/dev/null && Passwordfrontend="sudo" || Passwordfrontend="su"
-  }
-  [ "$Passwordfrontend" = "none" ] && Passwordneeded="no"
-  [ "$X11dockermode" = "exe" ]     && Passwordneeded="no"
-  case $Mobyvm in
-    yes) Passwordneeded="no" && Passwordfrontend="none" ;;
-  esac
-  [ -z "$Passwordfrontend" ] && $Containerbackendbin info >/dev/null 2>&1 && Passwordfrontend="none" && Passwordneeded="no"
-  [ -z "$Passwordfrontend" ] && sudo -n env >/dev/null 2>&1     && Passwordfrontend="sudo" && Passwordneeded="no"
-  [ "$Passwordfrontend" = "sudo" ] && sudo -n env >/dev/null 2>&1 && Passwordneeded="no"
-
-  # check sudo. Check is not reliable, compare https://unix.stackexchange.com/questions/383918/su-or-sudo-how-to-know-which-one-will-work
-  ### FIXME: just guessing that members of group sudo or wheel are allowed to run commands docker and env as root
-  [ -z "$Passwordfrontend" ] && { sudo -ln $Containerbackendbin >/dev/null 2>&1  ||  id | grep -q '(sudo)'  ||  id | grep -q '(wheel)' ; } && command -v sudo >/dev/null && {
-    [ -z "$Hostdisplay$Newdisplay" ] && Passwordfrontend="sudo"
-    sudo -ln env >/dev/null 2>&1  ||  id | grep -q '(sudo)'  ||  id | grep -q '(wheel)'  && {
-      [ -z "$Passwordfrontend" ] && [ "$Runsinterminal" = "yes" ] && Passwordfrontend="sudo"
-      [ -z "$Passwordfrontend" ] && command -v gksudo  >/dev/null && Passwordfrontend="gksudo"
-      [ -z "$Passwordfrontend" ] && command -v lxsudo  >/dev/null && Passwordfrontend="lxsudo"
-      [ -z "$Passwordfrontend" ] && command -v kdesudo >/dev/null && Passwordfrontend="kdesudo"
-    }
-    [ -z "$Passwordfrontend" ] && Passwordfrontend="sudo"
-  }
-
-  # check su
-  [ -n "$Hostdisplay$Newdisplay" ] && {
-    [ -z "$Passwordfrontend" ] && [ "$Runsinterminal" = "yes" ] && Passwordfrontend="su"
-    [ -z "$Passwordfrontend" ] && command -v gksu  >/dev/null   && Passwordfrontend="gksu"
-    [ -z "$Passwordfrontend" ] && command -v lxsu  >/dev/null   && Passwordfrontend="lxsu"
-    [ -z "$Passwordfrontend" ] && command -v kdesu >/dev/null   && Passwordfrontend="kdesu"
-    [ -z "$Passwordfrontend" ] && command -v beesu >/dev/null   && Passwordfrontend="beesu"
-  }
-  [ -z "$Passwordfrontend" ] && Passwordfrontend="su" # default if everything else fails
-
-  # Passwordcommand: prefix to start dockerrc. Sudo: prefix to start docker in dockerrc
-  case $Passwordfrontend in
-    pkexec|"") Passwordcommand="bash -c"                                                 ; Passwordterminal="bash -c" ;;
-    su)        Passwordcommand="su -c"                                                   ;;
-#    sudo)      Passwordcommand="bash -c"                                                 ; Sudo="sudo -E " ;;
-    sudo)      Passwordcommand="bash -c"                                                 ; Sudo="sudo " ;;
-    gksu)      Passwordcommand="gksu    --message 'x11docker $Imagename' --disable-grab" ; Passwordterminal="bash -c" ;;
-    gksudo)    Passwordcommand="gksudo  --message 'x11docker $Imagename' --disable-grab" ; Passwordterminal="bash -c" ;;
-    lxsu)      Passwordcommand="lxsu"                                                    ; Passwordterminal="bash -c" ;;
-    lxsudo)    Passwordcommand="lxsudo"                                                  ; Passwordterminal="bash -c" ;;
-    kdesu)     Passwordcommand="kdesu -c"                                                ; Passwordterminal="bash -c" ;;
-    kdesudo)   Passwordcommand="kdesudo --comment 'x11docker $Imagename'"                ; Passwordterminal="bash -c" ;;
-    beesu)     Passwordcommand="beesu -c"                                                ; Passwordterminal="bash -c" ;;
-    none)      Passwordcommand="bash -c"                                                 ; Passwordterminal="bash -c" ;;
-    *) warning "Unknown password prompt '$Passwordfrontend' (option --pw).
-  Possible: su sudo gksu gksudo lxsu lxsudo kdesu kdesudo beesu pkexec none"
-               Passwordcommand="$Passwordfrontend"                                       ; Passwordterminal="bash -c" ;;
-  esac
-  [ "$Passwordneeded" = "yes" ] && {
-    command -v $(echo $Passwordcommand|cut -d' ' -f1) >/dev/null || {
-      warning "Password prompt frontend $(echo $Passwordcommand|cut -d' ' -f1) not found.
-  Fallback: using no password prompt (--pw=none)." 
-      check_fallback
-               Passwordcommand="bash -c" ; Passwordfrontend="none" ; Passwordneeded="no" ; Passwordterminal="bash -c"
-    }
-  }
-  [ "$Passwordcommand" = "bash -c" ] && Passwordcommand="eval"
-  return 0
-}
 check_runmode() {               # check run/--exe/--xonly
   # Basically x11docker divides between
   # default: run docker image
@@ -7874,41 +7739,6 @@ check_runmode() {               # check run/--exe/--xonly
   Imagebasename="$(unspecialstring "$Imagebasename")"  # must be - for backwards compatibility of --home
   Imagebasename="${Imagebasename:-noname}"
   
-  return 0
-}
-check_terminalemulator() {      # check terminal for password prompt of su or sudo
-  # $Passwordterminal:  To prompt for su or sudo password
-
-  # Not working: pangoterm lilyterm fbterm
-  # Makes problems if X and Wayland are independently available at same time: xfce4-terminal
-  # Works, but does not appear: 'guake -te'
-  
-  local Terminallist
-
-  Terminallist="xterm mintty lxterm lxterminal stterm sakura termit pterm terminator terminology Eterm konsole qterminal gnome-terminal mate-terminal mrxvt rxvt xvt kterm mlterm xfce4-terminal bash"
-  [ -z "$Hostdisplay" ] && [ -n "$Hostwaylandsocket" ] && Terminallist="konsole qterminal gnome-terminal bash"
-  [ "$Runsinterminal" = "yes" ] && Terminallist="bash"
-
-  for Passwordterminal in $Terminallist ; do command -v $Passwordterminal >/dev/null && break ; done
-
-  [ -z "$Hostdisplay" ] && [ -n "$Hostwaylandsocket" ] && {
-    case $Passwordterminal in
-      qterminal) Passwordterminal="env QT_QPA_PLATFORM=wayland $Passwordterminal -e" ;;
-      konsole) Passwordterminal="env QT_QPA_PLATFORM=wayland dbus-run-session $Passwordterminal --nofork -e" ;;
-    esac
-  }
-  [ -z "$Hostdisplay$Hostwaylandsocket" ] && Passwordterminal="bash"
-  
-  case $Passwordterminal in
-    xfce4-terminal) Passwordterminal="$Passwordterminal --disable-server -x" ;;
-    mate-terminal)  Passwordterminal="dbus-run-session $Passwordterminal -x" ;;
-    gnome-terminal) Passwordterminal="dbus-launch $Passwordterminal --" ;;
-    terminator)     Passwordterminal="dbus-run-session $Passwordterminal --no-dbus -x" ;;
-    konsole)        Passwordterminal="dbus-run-session $Passwordterminal --nofork -e" ;;
-    bash)           Passwordterminal="eval" ;;
-    *)              Passwordterminal="$Passwordterminal -e" ;;
-  esac
-
   return 0
 }
 create_cachefiles() {           # create empty cache files owned by unprivileged user
@@ -8754,12 +8584,6 @@ declare_variables() {           # declare global variables
   Tinibinaryfile=""                               # --init=tini (default): Binary of tini; either /usr/bin/docker-exec or provided by user in [...]/share/x11docker
   Tinicontainerpath="/usr/local/bin/init"         # --init=tini: Path of tini (or catatonit) in container
   
-  # Gaining root privileges to run docker
-  Passwordcommand=""                              # --pw: Generated command for password prompt
-  Passwordfrontend=""                             # --pw: Frontend for password. One of pkexec, su, sudo, gksu, gksudo, kdesu, kdesudo, lxsu, lxsudo, beesu, auto, none
-  Passwordneeded="yes"                            # Password needed to run docker? assume yes, check later
-  Sudo=""                                         # "sudo", "sudo -n", or empty. Added as prefix to some privileged commands, especially docker.
-  
   # Custom additional commands
   Runasuser=""                                       # --runasuser: Add container command to containerrc
   Runasroot=""                                    # --runasroot: Add container command to container setup script running as root
@@ -8774,7 +8598,6 @@ declare_variables() {           # declare global variables
   Hostexe=""                                      # --exe: Host command
   Imagebasename=""                                # Image name without tags and / replaced with -. For use of --home folders.
   Parsedoptions_global=""                         # Parsed options
-  Passwordterminal=""                             # Terminal emulator to use for password prompt (if no terminal emulator is needed, it will be 'bash -c')
   Presetdirlocal="$HOME/.config/x11docker/preset" # --preset storage dir (local)
   Presetdirsystem="/etc/x11docker/preset"         # --preset storage dir (system)
   Presetlist=""                                   # List of already parsed preset files to avoid a loop
@@ -8879,7 +8702,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,xephyr-c,xpra-c,xpra-c2,xvfb-c"                                                                 # X servers in container
   Longoptions="$Longoptions,border::,dpi:,fullscreen,output-count:,rotate:,scale:,size:,xfishtank"                          # X/Wayland appearance options
   Longoptions="$Longoptions,clean-xhost,composite::,display:,iglx,keymap:,no-auth,vt::,westonini:,xhost::,xoverip,xtest::"  # X/Wayland config
-  Longoptions="$Longoptions,enforce-i,fallback::,preset:,pull::,pw::"                                                       # x11docker config
+  Longoptions="$Longoptions,enforce-i,fallback::,preset:,pull::"                                                            # x11docker config
   Longoptions="$Longoptions,cachebasedir:,home::,homebasedir:,share:"                                                       # Host folders
   Longoptions="$Longoptions,alsa::,clipboard,gpu,lang::,printer::,pulseaudio::,webcam"                                      # Host integration features
   Longoptions="$Longoptions,backend:,env:,mobyvm,name:,no-entrypoint,no-setup,runtime:,snap,workdir:"                       # Container config
@@ -8896,7 +8719,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,keepcache,xopt:,xorgconf:"                                                                      # Experimental
   Longoptions="$Longoptions,dbus-system,homedir:,hostnet,kwin-xwayland,no-internet,no-xhost,sharedir:,sharessh,systemd"     # Deprecated
   Longoptions="$Longoptions,showenv,showid,showinfofile,showpid1"                                                           # Deprecated
-  Longoptions="$Longoptions,cachedir:,no-init,nothing,no-xtest,openrc,podman,pull::,ps,runit,silent,starter"                # Removed
+  Longoptions="$Longoptions,cachedir:,no-init,nothing,no-xtest,openrc,podman,pull::,ps,pw::,runit,silent,starter"           # Removed
   Longoptions="$Longoptions,stderr,stdout,sys-admin,sysvinit,tini,trusted,untrusted,vcxsrv"                                 # Removed
 
   # default preset files
@@ -9019,7 +8842,6 @@ ${2:-${LANG:-}}" ; shift                                             # Locale/la
          --enforce-i)         ;;                                     # Run in bash interactive mode. Parsed at begin of script, nothing to do here.
          --fallback)          Fallback="${2:-yes}" ; shift ;;        # Allow/deny fallbacks for impossible options
       -i|--interactive)       Interactive="yes" ;;                   # Interactive terminal
-         --pw)                Passwordfrontend="${2:-auto}" ; shift ;;   # Password prompt frontend
          --runasroot)         Runasroot="$Runasroot
 ${2:-}"                       ; shift ;;                             # Add custom root command in container setup script
          --runasuser)         Runasuser="$Runasuser
@@ -9138,7 +8960,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
          --no-init|--openrc|--runit|--sysvinit|--tini)
                               error "Option ${1:-} has been removed.
   Please use option --init=INITSYSTEM instead." ;;
-         --cachedir|--nothing|--no-xtest|--podman|--ps|--pull|--silent|--starter|--stderr|--stdout|--sys-admin|--trusted|--untrusted)
+         --cachedir|--nothing|--no-xtest|--podman|--ps|--pull|--pw|--silent|--starter|--stderr|--stdout|--sys-admin|--trusted|--untrusted)
                               error "Option ${1:-} has been removed.
   Please have a look at 'x11docker --help' for possible replacements
   or search for '${1:-}' in /usr/share/doc/x11docker/CHANGELOG.md." ;;
@@ -9324,19 +9146,13 @@ Parsed options:    $Parsedoptions_global"
   $Xcontainercommand"
   [ "$Shareclipboard" = "yes" ]  && setup_clipboard ||:                           # --clipboard
     
-  check_terminalemulator         # find terminal emulator like xterm for error messages and 'docker pull'
-  check_passwordfrontend         # check for su/sudo/gksu/pkexec etc.             # --pw #time0,230
   setup_initsystem               # init in container. Default: tini               # --init
-  [ "$Runsinterminal" = "no" ]   && [ "$Passwordneeded" = "yes" ] && warning "You might need to run x11docker in terminal
-  for password prompt if prompting for password with a GUI fails."
   
   debugnote "Users and terminal:
   x11docker was started by:                       $Startuser
   As host user serves (running X, storing cache): $Hostuser
   Container user will be:                         $( [ "$Createcontaineruser" = "yes" ] && echo $Containeruser || echo "(retaining USER of image)")
   Container user password:                        $( [ "$Createcontaineruser" = "yes" ] && echo x11docker      || echo "(unknown)")
-  Getting permission to run backend with:         $Passwordcommand $Sudo
-  Terminal for password frontend:                 $Passwordterminal
   Running in a terminal:                          $Runsinterminal
   Running on console:                             $Runsonconsole
   Running over SSH:                               $Runsoverssh
@@ -9373,7 +9189,6 @@ $(nl -ba <$Dockerrc)"
       verbose "Generated containerrootrc:
 $(nl -ba <$Containerrootrc)"
     }
-    create_xtermrc >> "$Xtermrc"              # xtermrc to prompt for password if needed.
   }
   
   #### Create helper script xinitrc to set up X
@@ -9398,7 +9213,7 @@ $(nl -ba <$Westonini)"
     
     # start container
     case $X11dockermode in
-      run) start_docker ;;                                                        # (default)
+      run) bash $Dockerrc ;;                                                        # (default)
       exe) start_hostexe ;;                                                       # --exe, --xonly
     esac
     Pid1pid="$(storeinfo dump pid1pid)"
