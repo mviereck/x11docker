@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.0.0-beta-12"
+Version="7.0.0-beta-13"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -142,13 +142,19 @@ X server options:
                        to a black tty before switching to X to avoid crashes.
  -a, --xpra            Nested X server supporting seamless and --desktop mode.
  -A, --xpra-xwayland   Like --xpra, but supports option --gpu.
+ 
+X server running in container (Needs image x11docker/xserver):
+     --xephyr-c        Compare --xephyr.
+     --xpra-c          Compare --xpra. xpra server and client run in container.
+     --xpra-c2         Compare --xpra. xpra client runs on host.
+     --xvfb-c          Compare --xvfb.
 
 Special X server options:
  -t, --tty             Terminal only mode. Does not run an X or Wayland server.
      --xdummy          Invisible X server using dummy video driver.
      --xvfb            Invisible X server using Xvfb.
-                       --xdummy and --xvfb can be used for custom  VNC access.
-                       Output of environment variables on stdout. (--printenv)
+                       --xdummy and --xvfb can be used for custom access with
+                       xpra or VNC.
                        Along with option --gpu an invisible setup with Weston,
                        Xwayland and xdotool is used (instead of Xdummy or Xvfb).
  -X, --xwayland        Blanc Xwayland, needs a running Wayland compositor.
@@ -1650,6 +1656,18 @@ $(sed -n '/'$Key1'/,/'$Key2'/p' /usr/share/doc/x11docker/CHANGELOG.md | head -n-
 #### features
 check_windowmanager() {         # option --wm: search a host window manager
   # check --wm arguments, adjust mode
+  case $Xcontainer in
+    yes)
+      case $Windowmanagermode in
+        auto|host)
+          Windowmanagermode="host"
+          Windowmanagercommand="metacity" ;;
+        *) Windowmanagermode="none" ;;
+      esac
+      return 0
+    ;;
+  esac
+  
   case "$Windowmanagermode" in
     ""|none)
       Windowmanagermode="none"
@@ -1759,9 +1777,9 @@ setup_clipboard() {             # option --clipboard: create shareclipboard scri
       Shareclipboard="no"
       return 1
     ;;
-    --nxagent|--xpra|--xpra-xwayland|--xwin) ;; # have their own clipboard management, look at create_xcommand().
+    --nxagent|--xpra*|--xwin) ;; # have their own clipboard management, look at create_xcommand().
     
-    --xephyr|--xorg|--xdummy|--xdummy-xwayland|--xvfb|--xwayland|--weston-xwayland)
+    --xephyr*|--xorg|--xdummy|--xdummy-xwayland|--xvfb|--xwayland|--weston-xwayland)
       # check for either xclip or xsel
       command -v xsel >/dev/null && {
         Clipsend="xsel --clipboard --input"
@@ -2216,7 +2234,7 @@ setup_webcam() {                # option --webcam: share webcam devices
 }
 
 #### X server setup
-check_newxenv() {               # find free display, create $Newxenv
+check_newxenv()  {               # find free display, create $Newxenv
   local Line
   # find free display number
   [ "$Newdisplaynumber" ] || {
@@ -2302,7 +2320,7 @@ XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
   
   # X / Wayland environment variables for container
   case $Xserver in
-    --xpra|--xephyr|--xpra-xwayland|--weston-xwayland|--hostdisplay|--xorg|--xdummy|--xvfb|--xdummy-xwayland|--xwayland|--kwin-xwayland|--nxagent|--xwin|--runx)
+    --xpra*|--xephyr*|--weston-xwayland|--hostdisplay|--xorg|--xdummy|--xvfb*|--xdummy-xwayland|--xwayland|--kwin-xwayland|--nxagent|--xwin|--runx)
       store_runoption env "DISPLAY=$Newdisplay"
       store_runoption env "XAUTHORITY=$(convertpath share $Xclientcookie)"
     ;;
@@ -2347,10 +2365,10 @@ check_screensize() {            # check physical and virtual screen size (also o
   
   # size for windowed desktops, roughly maximized relative to primary monitor
   case $Xserver in
-    --xpra|--xpra-xwayland) [ "$Desktopmode" = "yes" ] && Xserver="${Xserver}-desktop" ;;
+    --xpra*) [ "$Desktopmode" = "yes" ] && Xserver="${Xserver}-desktop" ;;
   esac
   [ -z "$Screensize" ] && [ "$Runsonconsole" = "no" ] && case $Xserver in
-    --xephyr|--weston-xwayland|--weston|--kwin|--kwin-xwayland|--nxagent|--xpra-desktop|--xpra-xwayland-desktop)
+    --xephyr*|--weston-xwayland|--weston|--kwin|--kwin-xwayland|--nxagent|--xpra*-desktop)
       Xaxis="$((Maxxaxis-96))"
       Yaxis="$((Maxyaxis-96))"
       Xaxis="$(( $(( $Xaxis / 8 )) * 8 ))"  # avoid grey edge in Xwayland, needs full byte x width
@@ -2389,7 +2407,7 @@ check_screensize() {            # check physical and virtual screen size (also o
   $(xrandr 2>/dev/null | grep Screen ||:)"
   
   # create set of Modelines if needed
-  { [ "$Xserver" = "--xpra" ] && [ "$Xpravfb" = "Xvfb" ] && [ "$Desktopmode" = "yes" ] ; } || [ "$Xserver" = "--xvfb" ] && {
+  { [ "$Xpravfb" = "Xvfb" ] && [ "$Desktopmode" = "yes" ] ; } || [ "$Xserver" = "--xvfb" ] && {
     Modelinefile="$(create_modelinefile ${Maxxaxis}x${Maxyaxis})"
   }
       
@@ -2515,15 +2533,15 @@ check_xdepends() {              # check dependencies on host for X server option
   esac
   # X command
   case ${1:-} in
-    --xpra|--xpra-xwayland)
+    --xpra|--xpra-xwayland|--xpra-c2)
       command -v "xpra" >/dev/null || {
         $Message "${1:-}: xpra not found.
   $Wikipackages"
         Return=1
       } ;;
     --xephyr)
-      command -v "Xephyr" >/dev/null || command -v "Xnest" >/dev/null || {
-        $Message "${1:-}: Neither Xephyr nor Xnest found.
+      command -v "Xephyr" >/dev/null || {
+        $Message "${1:-}: Xephyr not found.
   $Wikipackages"
         Return=1
       } ;;
@@ -2593,6 +2611,10 @@ check_xdepends() {              # check dependencies on host for X server option
       }
     ;;
   esac
+   # X servers in container
+  case ${1:-} in
+    *-c*) $Message "${1:-} needs image x11docker/xserver." ;; ### FIXME check for image
+  esac
   # Wayland command
   case ${1:-} in
     --weston|--xpra-xwayland|--weston-xwayland|--xdummy-xwayland)
@@ -2650,7 +2672,7 @@ check_xdepends() {              # check dependencies on host for X server option
     ;;
   esac
   case ${1:-} in
-    --xpra)
+    --xpra|--xpra-c2)
       [ -z "$Hostdisplay" ] && [ -n "$Hostwaylandsocket" ] && {
         verlt $Xprarelease r23305 && {
           $Message "Option ${1:-}: xpra on Wayland needs at least xpra v3.0-r23305 
@@ -2669,7 +2691,7 @@ check_xdepends() {              # check dependencies on host for X server option
         }
       }
     ;;
-    --hostdisplay|--xpra-xwayland|--xdummy-xwayland|--xephyr|--nxagent)
+    --hostdisplay|--xpra-xwayland|--xdummy-xwayland|--xephyr*|--nxagent)
       [ "$Hostdisplay" ] || {
         $Message "${1:-} needs a running X server. DISPLAY is empty."
         Return=1
@@ -2709,6 +2731,7 @@ check_xdepends() {              # check dependencies on host for X server option
   [ "$Xoverip" = "yes" ] && {
     case ${1:-} in
       --xephyr|--xorg|--nxagent|--xpra|--xvfb|--xdummy|--xwin|--runx|--tty) ;;
+      --xpra-c*|--xephyr-c) ;; ### FIXME check
       --hostdisplay)
         [ -n "$(cut -d: -f1 <<< "$Hostdisplay")" ] || {
           $Message "${1:-} does not support X over TCP
@@ -2717,11 +2740,11 @@ check_xdepends() {              # check dependencies on host for X server option
         }
       ;;
       --xwayland|--weston-xwayland|--kwin|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland)
-        $Message "${1:-} does not support X over TCP."
+        $Message "${1:-} does not support X over TCP (--xoverip)."
         Return=1
       ;;
       --weston|--kwin|--hostwayland)
-        $Message "${1:-} does not support X over TCP."
+        $Message "${1:-} does not support X over TCP (--xoverip)."
       ;;
     esac
   }
@@ -2752,6 +2775,14 @@ check_xdepends() {              # check dependencies on host for X server option
 }
 check_xpraoption() {            # check if xpra option $1 is available
   local Option
+  
+  case $Xserver in
+    --xpra-c)
+      echo "$@"
+      return 0
+    ;;
+  esac
+  
   Option="$(cut -d= -f1 <<< "${1:-}")"
   grep -q "noprobe" <<< "${1:-}" && {
     grep "OpenGL" <<< "$Xprahelp" | grep -q "probe" && echo "$@" || {
@@ -3005,7 +3036,8 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   -noshpix"
       }
     ;;
-    *) Xserveroptions=" \\
+    *) 
+      Xserveroptions=" \\
   -retro \\
   +extension RANDR \\
   +extension RENDER \\
@@ -3016,14 +3048,14 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   +extension DAMAGE \\
   +extension X-Resource \\
   -extension XINERAMA -xinerama"
-      case $Sharehostipc in
-        yes) Xserveroptions="$Xserveroptions \\
-  +extension MIT-SHM" ;;
-        no)
-          Xserveroptions="$Xserveroptions \\
+      { [ "$Sharehostipc" = "yes" ] || [ "$Xcontainer" = "yes" ] ; } && {
+        Xserveroptions="$Xserveroptions \\
+  +extension MIT-SHM" 
+      } || {
+        Xserveroptions="$Xserveroptions \\
   -extension MIT-SHM"
-          Xprashm="XPRA_XSHM=0" ;;
-      esac
+        Xprashm="XPRA_XSHM=0"
+      }
     ;;
   esac
 
@@ -3048,7 +3080,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
 
   # X extension XTEST
   [ "$Xtest" ] || case $Xserver in
-    --xpra|--xpra-xwayland|--xdummy|--xdummy-xwayland|--xvfb) Xtest="yes" ;;
+    --xpra*|--xdummy|--xdummy-xwayland|--xvfb) Xtest="yes" ;;
     *) Xtest="no" ;;
   esac
   case "$Xtest" in
@@ -3104,7 +3136,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
 
   # check DPI
   case $Xserver in
-    --xpra|--xpra-xwayland)
+    --xpra*)
       { [ -n "$Dpi" ] || [ "$Scaling" ] ; } && verlt "$Xpraversion" "v2.1-r16547" && ! verlt "$Xpraversion" "v2.1" && {
         note "Option --dpi is buggy in xpra $Xpraversion
   due to xpra bug #1605. Need at least xpra v2.1-r16547 or one of 2.0 series.
@@ -3127,7 +3159,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   $Wikipackages"
         }
         case $Xserver in
-          --xpra|--xpra-xwayland)
+          --xpra*)
             [ "$Scaling" ] && [ "$Desktopmode" = "no" ] && {
               Dpi="$(awk -v a="$Scaling" -v b="$Dpi" 'BEGIN {print (b * a * a)}')"
               Dpi="${Dpi%.*}"
@@ -3143,15 +3175,17 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   
   #### xpra server and client command
   case $Xserver in
-    --xpra|--xpra-xwayland)
+    --xpra*)
+      [ "$Xprahelp" ] || Xprahelp="$(xpra --help 2>/dev/null)"
 
       Xpraoptions="\\
   $(check_xpraoption --csc-modules=none) \\
   $(check_xpraoption --encodings=rgb) \\
   $(check_xpraoption --microphone=no) \\
+  $(check_xpraoption --mmap=$Sharefolder/xpra.mmap) \\
   $(check_xpraoption --notifications=no) \\
   $(check_xpraoption --pulseaudio=no) \\
-  $(check_xpraoption --socket-dirs="'$Cachefolder'") \\
+  $(check_xpraoption --socket-dirs="$Sharefolder") \\
   $(check_xpraoption --speaker=no) \\
   $(check_xpraoption --start-via-proxy=no) \\
   $(check_xpraoption --webcam=no) \\
@@ -3170,6 +3204,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
       [ "$Desktopmode" = "yes" ] && Xpraservercommand="xpra start-desktop" || Xpraservercommand="xpra start"
       Xpraservercommand="$Xpraservercommand :$Newdisplaynumber --use-display $Xpraoptions \\
   $(check_xpraoption --clipboard=yes)\\
+  $(check_xpraoption --dbus-launch=) \\
   $(check_xpraoption --dbus-proxy=no) \\
   $(check_xpraoption --daemon=no) \\
   $(check_xpraoption --fake-xinerama=no) \\
@@ -3178,14 +3213,16 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   $(check_xpraoption --opengl=noprobe) \\
   $(check_xpraoption --mdns=no) \\
   $(check_xpraoption --printing=no) \\
-  $(check_xpraoption --session-name="'$Codename'") \\
+  $(check_xpraoption --session-name="$Codename") \\
   $(check_xpraoption --start-new-commands=no) \\
   $(check_xpraoption --systemd-run=no) \\
   $(check_xpraoption --video-encoders=none)"
       # disable --dpi for buggy versions
       [ -n "$Dpi" ] && verlt "$Xpraversion" "v2.1-r16547" && ! verlt "$Xpraversion" "v2.1" &&  Dpi=""
       [ -n "$Dpi" ] && Xpraservercommand="$Xpraservercommand \\
-  $(check_xpraoption --dpi="'$Dpi'")"
+  $(check_xpraoption --dpi="$Dpi")"
+      [ "$Xserver" = "--xpra-c2" ] && Xpraservercommand="$Xpraservercommand \\
+  --bind=$Sharefolder/$(hostname)-$Newdisplaynumber"
 
       # xpra client command
       Xpraclientcommand="xpra attach :$Newdisplaynumber $Xpraoptions \\
@@ -3194,6 +3231,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   $(check_xpraoption --modal-windows=no) \\
   $(check_xpraoption --opengl=auto) \\
   $(check_xpraoption --quality=100) \\
+  $(check_xpraoption --reconnect="no") \\
   $(check_xpraoption --video-decoders=none)"
       [ "$Fullscreen" = "yes" ]  && Xpraclientcommand="$Xpraclientcommand \\
   $(check_xpraoption --desktop-fullscreen=yes)"
@@ -3203,14 +3241,14 @@ create_xcommand() {             ### create command to start X server and/or Wayl
 #  $(check_xpraoption --dpi="'$Dpi'")"
       [ "$Xpraborder" ] && Xpraclientcommand="$Xpraclientcommand \\
   $(check_xpraoption --border="$Xpraborder")"
-      [ "$X11dockermode" = "run" ] && {
-        case "$Desktopmode" in
-          yes) Xpraclientcommand="$Xpraclientcommand \\
-  $(check_xpraoption --title="'$Codename on $Newdisplay [in container] (shift+F11 toggles fullscreen)'")" ;;
-          no)  Xpraclientcommand="$Xpraclientcommand \\
-  $(check_xpraoption --title="'@title@ [in container]'")" ;;
-        esac
-      }
+#      [ "$X11dockermode" = "run" ] && {
+#        case "$Desktopmode" in ### FIXME
+#          yes) Xpraclientcommand="$Xpraclientcommand \\
+#  $(check_xpraoption --title="'$Codename on $Newdisplay [in container] (shift+F11 toggles fullscreen)'")" ;;
+#          no)  Xpraclientcommand="$Xpraclientcommand \\
+#  $(check_xpraoption --title="'@title@ [in container]'")" ;;
+#        esac
+#      }
   
       # xpra environment variables
       for Line in $Xpracontainerenv; do
@@ -3269,7 +3307,7 @@ startup-animation=fade
       Xcommand="$(command -v Xorg) :$Newdisplaynumber vt$Newxvt $Xserveroptions"
     ;;
 
-    --xpra)
+    --xpra|--xpra-c*)
       case $Xpravfb in
         Xvfb) Xcommand="$(command -v Xvfb) :$Newdisplaynumber $Xserveroptions \\
   -screen 0 ${Xaxis}x${Yaxis}x24" ;;
@@ -3289,37 +3327,29 @@ startup-animation=fade
   -screen 0 ${Screensize}x24"   ### FIXME: hardcoded setting of depth 24. Could be better?
     ;;
 
-    --xephyr)
-      command -v Xephyr >/dev/null && {
-        Xserveroptions="$Xserveroptions \\
+    --xephyr*)
+      Xserveroptions="$Xserveroptions \\
   -resizeable \\
   -noxv"
-#        Xserveroptions="$Xserveroptions \\  
+#      Xserveroptions="$Xserveroptions \\  
 #  -glamor"  # disabled because of lagginess reported in #196
-        case $Fullscreen in
-          yes) 
-            Xserveroptions="$Xserveroptions \\
+      case $Fullscreen in
+        yes)
+          Xserveroptions="$Xserveroptions \\
   -fullscreen" 
-          ;;
-          no)  
-            grep -q -- "-output " <<< "$Xserveroptions_custom" || Xserveroptions="$Xserveroptions \\
+        ;;
+        no)  
+          grep -q -- "-output " <<< "$Xserveroptions_custom" || Xserveroptions="$Xserveroptions \\
   -screen $Screensize"
-          ;;
-        esac
-        Xcommand="$(command -v Xephyr) :$Newdisplaynumber $Xserveroptions"
-      } || {
-        # Fallback: Xnest
-        Xcommand="$(command -v Xnest) :$Newdisplaynumber $Xserveroptions \\
+        ;;
+      esac
+      Xcommand="$(command -v Xephyr) :$Newdisplaynumber $Xserveroptions"
+   ;;
+   --xnest)
+      Xcommand="$(command -v Xnest) :$Newdisplaynumber $Xserveroptions \\
   -geometry $Screensize \\
   -scrns $Outputcount \\
   -name '$Codename on $Newdisplay' "
-        note "Option --xephyr: Xephyr not found. Fallback: using Xnest.
-  Xnest is less stable and has less features than Xephyr.
-  For example, it misses RandR and Composite extensions and fullscreen mode.
-  It is recommended to install 'Xephyr'.
-  $Wikipackages"
-        check_fallback
-      }
     ;;
 
     --xwayland)
@@ -3599,6 +3629,53 @@ esac
   
   return 0
 }
+create_xcontainercommand() {    # create docker command for X in container
+  Xcontainername="x11docker_X${Newdisplaynumber}_xserver_${Cachenumber}"
+  Xcontainercommand="$Containerbackendbin run --rm --detach --pull=never  \\
+  --name=$Xcontainername"
+  case $Containerbackend in
+    podman)
+      Xcontainercommand="$Xcontainercommand \\
+  --userns=keep-id"
+    ;;
+  esac
+  Xcontainercommand="$Xcontainercommand \\
+  --user $Containeruseruid:$Containerusergid \\
+  --env HOME=/tmp \\
+  --cap-drop ALL \\
+  --security-opt=no-new-privileges \\
+  --ipc=shareable \\
+  --volume $Cachefolder/X11-unix:/tmp/.X11-unix \\
+  --volume $Sharefolder:/$Sharefolder \\
+  --volume $Modelinefilebasepath:$Modelinefilebasepath:ro \\
+  --volume $Xservercookie:$Xservercookie"
+  case $Xserver in
+    --xephyr-c)
+      Xcontainercommand="$Xcontainercommand \\
+  --volume /tmp/.X11-unix/X$Hostdisplaynumber:/X$Hostdisplaynumber \\
+  --env DISPLAY=$Hostdisplay \\
+  --volume $Hostxauthority:/Xauthority \\
+  --env XAUTHORITY=/Xauthority"
+    ;;
+    --xpra-c)
+      [ -n "$Hostdisplay" ] && [ -z "$Hostwaylandsocket" ] && {
+        Xcontainercommand="$Xcontainercommand \\
+  --volume /tmp/.X11-unix/X$Hostdisplaynumber:/X$Hostdisplaynumber \\
+  --env DISPLAY=$Hostdisplay \\
+  --volume $Hostxauthority:/Xauthority \\
+  --env XAUTHORITY=/Xauthority"
+      }
+      [ "$Hostwaylandsocket" ] && {
+        Xcontainercommand="$Xcontainercommand \\
+  --volume $XDG_RUNTIME_DIR/$Hostwaylandsocket:$XDG_RUNTIME_DIR/$Hostwaylandsocket \\
+  --env XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR \\
+  --env GDK_BACKEND=wayland"
+      }
+    ;;
+  esac
+  Xcontainercommand="$Xcontainercommand \\
+  x11docker/xserver sh -c 'ln -s /X$Hostdisplaynumber /tmp/.X11-unix/X$Hostdisplaynumber ; read goodbye < $Timetosaygoodbyefifo'"
+}
 disable_xhost() {               # remove any access to X server granted by xhost
   local Line=
   command -v xhost >/dev/null || {
@@ -3642,7 +3719,7 @@ create_modelinefile() {         # generate a set of smaller modelines for screen
   Size="${1:-}"
   X="$(echo "$Size" | cut -dx -f1)"
   Y="$(echo "$Size" | cut -dx -f2)"
-  Newmodelinefile="$Modelinefilebasepath.$Size"
+  Newmodelinefile="$Modelinefilebasepath/$Size"
   
   [ -e "$Newmodelinefile" ] || {
     debugnote "$Xserver: Generating modelines for $Size"
@@ -3904,7 +3981,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   Maybe your X server misses extension SECURITY.'"
         [ "$Xserver" = "--hostdisplay" ] && {
           [ "$Sharehostipc" = "no" ] && [ "$Runsoverssh" = "no" ] && [ "$Hostmitshm" = "yes" ] && {
-            echo     "  warning 'Memory access failures and rendering glitches
+            echo     "  warning 'Option --hostdisplay: Memory access failures and rendering glitches
   may occur due to unrestricted cookie.
   Avoid them with isolation breaking option --hostipc,
   or use another X server option like --nxagent or --xpra.'"
@@ -3929,7 +4006,9 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
         echo         ""
         echo         "debugnote \"xinitrc: Created cookie: \$(xauth -f $Xclientcookie list 2>&1)\""
         echo         "ls -l $Xclientcookie"
-        echo         "cp $Xclientcookie $Xservercookie"
+        echo         "truncate -s0 $Xservercookie"
+        echo         "cat $Xclientcookie >> $Xservercookie"
+#        echo         "cp $Xclientcookie $Xservercookie"
         echo         "chmod 644 $Xclientcookie"
         echo         ""
         echo         "[ -s '$Xclientcookie' ] || warning 'Cookie creation failed!'"
@@ -3988,7 +4067,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   esac
 
   case $Xserver in
-    --xpra|--xpra-xwayland)
+    --xpra|--xpra-xwayland|--xpra-c2)
       ! verlt "$Xpraversion" "v2.3" && verlt "$Xprarelease" "r19606" && {
         warning "Your xpra version has a cookie authentication issue.
   Installed version is: xpra $Xpraversion
@@ -4002,7 +4081,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   esac
   
   case $Xserver in
-    --xpra|--xvfb) 
+    --xpra*|--xvfb) 
       { [ "$Xserver" = "--xpra" ] && [ "$Xpravfb" = "Xvfb" ] && [ "$Desktopmode" = "yes" ] ; } || [ "$Xserver" = "--xvfb" ] && {
         echo         "# create set of different screen resolutions"
         echo         "xrandr --newmode $Modeline"
@@ -4138,10 +4217,9 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   echo             "storeinfo xinitrc=ready"
   echo             ""
   
-  
   [ "$Shareclipboard" = "yes" ] && [ -n "$Hostdisplay" ] && {
     case $Xserver in
-      --xpra|--xpra-xwayland|--nxagent|--xwin) ;;           # have their own clipboard management
+      --xpra*|--nxagent|--xwin) ;;           # have their own clipboard management
       --hostdisplay) ;;                                     # already same clipboard
       *)                                                    # synchronizing between different X servers
         echo     "# option '-c, --clipboard': Run clipboard script "
@@ -4356,7 +4434,7 @@ check_containeruser() {         # check container user and shared home folder (a
 create_dockercommand() {        ### create command to run docker
   local Line= Memory Tini=
   
-  Dockercommand="$Containerbackendbin run"
+  Dockercommand="$Containerbackendbin run --pull never"
   #[ "$Preservecachefiles" = "no" ] && Dockercommand="$Dockercommand --rm"
   case $Interactive in
     yes) 
@@ -4536,19 +4614,21 @@ create_dockercommand() {        ### create command to run docker
   [ -e "$Nvidiainstallerfile" ] && Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$Nvidiainstallerfile:ro" "$Nvidiacontainerfile")"
   
-  # X socket will be softlinked to /tmp/.X11-unix in containerrc
-  [ "$Newxsocket" ] && {
-    case $Containersetup in
-      yes)
-        Dockercommand="$Dockercommand \\
-  --volume $(convertpath volume "$Newxsocket" "/X$Newdisplaynumber")"
-      ;;
-      no)
+  # --tools
+  case "$Xcontainer" in
+    yes)
+      Dockercommand="$Dockercommand \\
+  --volume $Cachefolder/X11-unix:/tmp/.X11-unix \\
+  --ipc=container:$Xcontainername"
+#  --volume x11docker_tmp_$Newdisplaynumber:/tmp \
+    ;;
+    no)
+      [ "$Newxsocket" ] && {
         Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$Newxsocket")"
-      ;;
-    esac
-  }
+      }
+    ;;
+  esac
   
   # Wayland socket will be softlinked to XDG_RUNTIME_DIR in containerrc
   [ "$Setupwayland" = "yes" ] && {
@@ -5028,7 +5108,7 @@ create_containerrootrc() {      ### create containerrootrc: This script runs as 
   echo "chmod -c 1777 /tmp/.ICE-unix /tmp/.X11-unix /tmp/.font-unix"
   echo "export DISPLAY=$Newdisplay XAUTHORITY=$(convertpath share $Xclientcookie)"
   [ "$Xoverip" = "no" ] && {
-    echo "[ -e /X$Newdisplaynumber ] && ln -s /X$Newdisplaynumber $Newxsocket" # done again in containerrc. At least x11docker/deepin needs it here already.
+    #echo "[ -e /X$Newdisplaynumber ] && ln -s /X$Newdisplaynumber $Newxsocket" # done again in containerrc. At least x11docker/deepin needs it here already.
     echo "ls -l /X$Newdisplaynumber"
     echo "ls -l $Newxsocket"
   }
@@ -6135,7 +6215,7 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
 
       [ -n "$Newdisplay" ] && {
         echo   "  echo '# Create softlink to X unix socket'"
-        echo   "  echo '[ -e /tmp/.X11-unix/X$Newdisplaynumber ] || ln -s /X$Newdisplaynumber /tmp/.X11-unix'"
+        #echo   "  echo '[ -e /tmp/.X11-unix/X$Newdisplaynumber ] || ln -s /X$Newdisplaynumber /tmp/.X11-unix'"
         echo   "  echo ''"
       }
   
@@ -6297,14 +6377,18 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
   
   echo "# Send signal to run X and wait for X to be ready"
   echo 'storeinfo readyforX=ready'
+  case "$Xcontainer" in
+    yes)
+      echo "read Xcontainerid< <($Xcontainercommand 2>>$Xinitlogfile)"
+      echo 'storeinfo Xcontainerid="$Xcontainerid"'
+    ;;
+  esac
   echo "waitforlogentry 'dockerrc' $Xinitlogfile 'xinitrc is ready' '$Xiniterrorcodes'"
-  echo ""
   
   echo "rocknroll || exit 64"
   echo ""
   
   echo "#### run docker image ####"
-#      echo "$Dockercommand "
   case $Interactive in
     no)  
       echo "read Containerid < <($Dockercommand 2>>$Containerlogfile | rmcr)"
@@ -6567,7 +6651,7 @@ start_pulseaudiotcp() {         # option --pulseaudio=tcp: load Pulseaudio TCP m
   return 0
 }
 start_xpra() {                  # options --xpra / --xpra-xwayland: start and watch xpra server and xpra client
-  local Xpraserverpid Xpraclientpid Xpraenv
+  local Xpraserverpid Xpraclientpid Xpraenv Inspect Xcontainerpid1
   
   Xpraenv="  NO_AT_BRIDGE=1 \\
   XPRA_EXPORT_ICON_DATA=0 \\
@@ -6586,9 +6670,18 @@ $Xpraenv $Xpraservercommand"
   debugnote "Running xpra server:
 $Xpraservercommand"
   echo "x11docker [$(timestamp)]: Starting Xpra server" >> $Xpraserverlogfile
-  unpriv "$Xpraservercommand ||:" >> $Xpraserverlogfile 2>&1 &
-  Xpraserverpid=$!
-  storepid $Xpraserverpid xpraserver
+  case $Xserver in
+    --xpra|--xpra-xwayland)
+      unpriv "$Xpraservercommand ||:" >> $Xpraserverlogfile 2>&1 &
+      #Xpraserverpid=$!
+    ;;
+    --xpra-c|--xpra-c2)
+      $Containerbackendbin exec --detach $Xcontainername sh -c "$(tr -d '\\\n' <<< "$Xpraservercommand") >> $Xpraserverlogfile 2>&1" >> $Xpraserverlogfile 2>&1 ### FIXME rootful docker without group docker
+      #Xpraserverpid="$(ps aux | grep "/usr/bin/xpra start $Newdisplay" | grep -v grep | awk '{print $2}')"
+    ;;
+  esac
+  Xpraserverpid="$(ps aux | grep "/usr/bin/xpra start $Newdisplay" | grep -v grep | awk '{print $2}')"
+  storepid "$Xpraserverpid" xpraserver
   
   verlt "$Xprarelease" "r23060" && waitforlogentry "xpra server" $Xpraserverlogfile 'xpra is ready' 
   rocknroll || return 64
@@ -6599,9 +6692,18 @@ $Xpraenv $Xpraclientcommand"
   debugnote "Running xpra client:
 $Xpraclientcommand"
   echo "x11docker [$(timestamp)]: Starting Xpra client" >> $Xpraclientlogfile
-  unpriv "$Xpraclientcommand ||:" >> $Xpraclientlogfile 2>&1 & 
-  Xpraclientpid=$!
-  storepid $Xpraclientpid xpraclient
+  case $Xserver in
+    --xpra|--xpra-xwayland|--xpra-c2)
+      unpriv "$Xpraclientcommand ||:" >> $Xpraclientlogfile 2>&1 & 
+      #Xpraclientpid=$!
+    ;;
+    --xpra-c)
+      $Containerbackendbin exec --detach $Xcontainername sh -c "$(tr -d '\\\n' <<< "$Xpraclientcommand") >> $Xpraclientlogfile 2>&1" >> $Xpraclientlogfile 2>&1 ### FIXME rootful docker without group docker
+      #Xpraclientpid="$(ps aux | grep "/usr/bin/xpra attach $Newdisplay" | grep -v grep | awk '{print $2}')"
+      #warning "$(ps aux | grep "/usr/bin/xpra attach $Newdisplay")"    ;;
+  esac
+  Xpraclientpid="$(ps aux | grep "/usr/bin/xpra attach $Newdisplay" | grep -v grep | awk '{print $2}')"
+  storepid "$Xpraclientpid" xpraclient
 
   # catch possible xpra crashes
   while rocknroll; do
@@ -6621,7 +6723,9 @@ $(tail $Xpraclientlogfile)"
 }
 start_xserver() {               # start X server
   case $Xserver in
-    --xpra|--xephyr|--xdummy|--xvfb|--xwayland|--nxagent|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland|--xwin)
+    --xpra-c|--xpra-c2|--xfvb-c|--xephyr-c)
+      $Containerbackendbin exec $Xcontainername xinit $Xinitrc -- $(tr -d '\\' <<< "$Xcommand") >> $Xinitlogfile  2>&1 ;; ### FIXME rootful docker without group docker
+    --xpra|--xephyr|--xdummy|--xvfb|--nxagent|--xwayland|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xdummy-xwayland|--xwin) 
       unpriv "env WAYLAND_DISPLAY=$Newwaylandsocket      xinit $Xinitrc -- $Xcommand             >> $Xinitlogfile  2>&1 " ;;
     --xorg)
       case $Xlegacywrapper in
@@ -6955,7 +7059,7 @@ check_option_interferences() {  # check multiple option interferences, change se
   local Message Fallbackinuse=
 
   [ "$Desktopmode" = "no" ] && case $Xserver in
-    --xephyr|--weston-xwayland|--kwin-xwayland|--xorg) Windowmanagermode="auto" ;;
+    --xephyr|--xephyr-c|--weston-xwayland|--kwin-xwayland|--xorg) Windowmanagermode="auto" ;;
   esac
   
   case $Xserver in
@@ -6996,6 +7100,7 @@ check_option_interferences() {  # check multiple option interferences, change se
   $Wikipackages" && Xpravfb="Xdummy"
       [ "$Xpravfb" ] || { command -v Xvfb >/dev/null && Xpravfb="Xvfb" || Xpravfb="Xdummy" ; }
     ;;
+    --xpra-c*) Xpravfb="Xvfb" ;;
     --tty)
       [ "$Interactive" = "no" ] && {
         tput lines >/dev/null 2>&1 && store_runoption env "LINES=$(tput lines)"
@@ -7021,12 +7126,9 @@ check_option_interferences() {  # check multiple option interferences, change se
         ;;
       esac
     ;;
-    --xdummy|--xvfb)
-      Showdisplayenvironment="${Showdisplayenvironment:-yes}"
-    ;;
   esac
   case $Xserver in
-    -xpra|--xpra-xwayland)
+    -xpra|--xpra-c2|--xpra-xwayland)
       # check for version with cookie bug
       ! verlt "$Xpraversion" "v2.3" && verlt "$Xprarelease" "r19606" && {
         command -v xhost >/dev/null || {
@@ -7041,7 +7143,7 @@ check_option_interferences() {  # check multiple option interferences, change se
 
   # check if a host window manager is needed
   [ "$Desktopmode" = "no" ] && [ -z "$Windowmanagermode" ] && case $Xserver in
-    --xephyr|--weston-xwayland|--kwin-xwayland|--xorg|--xwayland)
+    --xephyr*|--weston-xwayland|--kwin-xwayland|--xorg|--xwayland)
       note "Option $Xserver: x11docker assumes that you need
   a window manager. If you don't want this, run with option --desktop. 
   Enabling option --wm to provide a window manager."
@@ -7154,7 +7256,7 @@ check_option_interferences() {  # check multiple option interferences, change se
         ;;
       esac
       case $Xserver in
-        --xpra|--xpra-xwayland|--hostdisplay|--kwin|--weston|--tty|--xwin) ;;
+        --xpra*|--hostdisplay|--kwin|--weston|--tty|--xwin) ;;
         *) note "Sharing picture clips with option --clipboard
   is only possible with options --xpra, --xpra-xwayland and --hostdisplay." ;;
       esac
@@ -7301,7 +7403,7 @@ check_option_interferences() {  # check multiple option interferences, change se
           Scaling=""
         }
       ;;
-      --xpra|--xpra-xwayland|--xorg)
+      --xpra*|--xorg)
         isnum $Scaling || {
           note "Option --scale needs a number. '$Scaling' is not allowed.
   Fallback: disabling option --scale"
@@ -7319,7 +7421,7 @@ check_option_interferences() {  # check multiple option interferences, change se
       ;;
     esac
     case $Xserver in
-      --xpra|--xpra-xwayland)
+      --xpra|--xpra-c2|--xpra-xwayland)
         verlt "$Xpraversion" "v0.16" && {
           note "Your xpra version is quite old and does not support --scale.
   You need at least xpra version 0.16
@@ -7401,7 +7503,7 @@ check_option_interferences() {  # check multiple option interferences, change se
   # --output-count
   [ "$Outputcount" != "1" ] && {
     case $Xserver in
-      --xephyr|--weston|--kwin|--weston-xwayland|--kwin-xwayland|--xwin)
+      --xephyr*|--weston|--kwin|--weston-xwayland|--kwin-xwayland|--xwin)
         [[ "$Outputcount" =~ ^[1-9]$ ]] || {
           note "Option --output-count: Value must be one of 1 2 3 4 5 6 7 8 9
   Disabling invalid value $Outputcount"
@@ -7434,8 +7536,8 @@ check_option_interferences() {  # check multiple option interferences, change se
       Xfishtank="no"
     }
     case $Xserver in
-      --xpra|--xpra-xwayland|--nxagent)
-        [ "$Desktopmode" = "no" ] && [ -z "$Windowmanagermode" ] && Windowmanagermode="auto" && Desktopmode="yes" ;;
+      --xpra*|--nxagent)
+        [ "$Desktopmode" = "no" ] && [ "$Windowmanagermode" = "none" ] && Windowmanagermode="auto" && Desktopmode="yes" ;;
       --weston|--kwin|--hostwayland|--hostdisplay|--tty)
         note "Option --xfishtank is not supported for $Xserver."
         check_fallback
@@ -7872,11 +7974,7 @@ $Hostuserhome/.cache/x11docker/symlink
   Dockerstopsignalfifo="$Cachefolder/$Dockerstopsignalfifo"
   Hostxauthority="$Cachefolder/$Hostxauthority"                     && mkfile $Hostxauthority
   Messagelogfile="$Cachefolder/$Messagelogfile"                     && mkfile $Messagelogfile
-  Nxagentclientrc="$Cachefolder/$Nxagentclientrc"                   && mkfile $Nxagentclientrc
-  Nxagentkeysfile="$Cachefolder/$Nxagentkeysfile"                   && mkfile $Nxagentkeysfile
-  Nxagentoptionsfile="$Cachefolder/$Nxagentoptionsfile"             && mkfile $Nxagentoptionsfile
   Pulseaudioconf="$Cachefolder/$Pulseaudioconf"                     && mkfile $Pulseaudioconf
-  Clipboardrc="$Cachefolder/$Clipboardrc"                           && mkfile $Clipboardrc
   Storepidfile="$Cachefolder/$Storepidfile"                         && mkfile $Storepidfile
   Systemdconsoleservice=$Cachefolder/$Systemdconsoleservice         && mkfile $Systemdconsoleservice
   Systemdenvironment=$Cachefolder/$Systemdenvironment               && mkfile $Systemdenvironment
@@ -7888,15 +7986,14 @@ $Hostuserhome/.cache/x11docker/symlink
   Westonini="$Cachefolder/$Westonini"                               && mkfile $Westonini
   Xdummyconf="$Cachefolder/$Xdummyconf"                             && mkfile $Xdummyconf
   Xinitlogfile="$Cachefolder/$Xinitlogfile"                         && mkfile $Xinitlogfile
-  Xinitrc="$Cachefolder/$Xinitrc"                                   && mkfile $Xinitrc
-  Xkbkeymapfile="$Cachefolder/$Xkbkeymapfile"                       && mkfile $Xkbkeymapfile
-  Xorgwrapper="$Cachefolder/$Xorgwrapper"                           && mkfile $Xorgwrapper
-  Xpraclientlogfile="$Cachefolder/$Xpraclientlogfile"               && mkfile $Xpraclientlogfile
-  Xpraserverlogfile="$Cachefolder/$Xpraserverlogfile"               && mkfile $Xpraserverlogfile
   Xservercookie="$Cachefolder/$Xservercookie"                       && mkfile $Xservercookie
   Xtermrc="$Cachefolder/$Xtermrc"                                   && mkfile $Xtermrc
+  case "$Xcontainer" in
+    yes)                                                       unpriv "mkdir $Cachefolder/X11-unix" ;;
+  esac
   
   # Files in $Sharefolder: shared to /x11docker in container
+  Clipboardrc="$Sharefolder/$Clipboardrc"                           && mkfile $Clipboardrc
   Cmdrc="$Sharefolder/$Cmdrc"                                       && mkfile $Cmdrc
   Cmdstderrlogfile="$Sharefolder/$Cmdstderrlogfile"                 && mkfile $Cmdstderrlogfile 666
   Cmdstdinfifo="$Sharefolder/$Cmdstdinfifo"
@@ -7908,16 +8005,24 @@ $Hostuserhome/.cache/x11docker/symlink
   Containerrootrc="$Sharefolder/$Containerrootrc"                   && mkfile $Containerrootrc
   Logfile="$Sharefolder/x11docker.log"                              && mkfile $Logfile 666
   Messagefifo="$Sharefolder/$Messagefifo"
+  Nxagentclientrc="$Sharefolder/$Nxagentclientrc"                   && mkfile $Nxagentclientrc
+  Nxagentkeysfile="$Sharefolder/$Nxagentkeysfile"                   && mkfile $Nxagentkeysfile
+  Nxagentoptionsfile="$Sharefolder/$Nxagentoptionsfile"             && mkfile $Nxagentoptionsfile
   Pulseaudiocookie="$Sharefolder/$Pulseaudiocookie"
   Pulseaudiosocket="$Sharefolder/$Pulseaudiosocket"
   Storeinfofile="$Sharefolder/$Storeinfofile"                       && mkfile $Storeinfofile 666
   Timetosaygoodbyefile="$Sharefolder/$Timetosaygoodbyefile"         && mkfile $Timetosaygoodbyefile
   Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo"
   Xclientcookie="$Sharefolder/$Xclientcookie"                       && mkfile $Xclientcookie
+  Xkbkeymapfile="$Sharefolder/$Xkbkeymapfile"                       && mkfile $Xkbkeymapfile
+  Xinitrc="$Sharefolder/$Xinitrc"                                   && mkfile $Xinitrc
+  Xpraclientlogfile="$Sharefolder/$Xpraclientlogfile"               && mkfile $Xpraclientlogfile
+  Xpraserverlogfile="$Sharefolder/$Xpraserverlogfile"               && mkfile $Xpraserverlogfile
+  Xorgwrapper="$Sharefolder/$Xorgwrapper"                           && mkfile $Xorgwrapper
   
   # Files in $Cachebasefolder
   Logfilebackup="$Cachebasefolder/x11docker.log"
-  Modelinefilebasepath="$Cachebasefolder/$Modelinefilebasepath"
+  Modelinefilebasepath="$Cachebasefolder/$Modelinefilebasepath"     && unpriv "mkdir -p $Modelinefilebasepath"
   
   # file to store display numbers in use today
   Numbersinusefile="$Cachebasefolder/$Numbersinusefile"
@@ -7941,7 +8046,7 @@ drop_cachefiles() {             # remove some cache files that are not needed in
     *) rm $Systemdconsoleservice $Systemdenvironment $Systemdjournallogfile $Systemdjournalservice $Systemdtarget $Systemdwatchservice ;;
   esac
   case $Xserver in
-    --xpra|--xpra-xwayland) ;;
+    --xpra*) ;;
     *) rm $Xpraclientlogfile $Xpraserverlogfile ;;
   esac
   case $Xserver in
@@ -7965,7 +8070,7 @@ drop_cachefiles() {             # remove some cache files that are not needed in
     exe) rm $Containerrootrc $Dockercommandfile $Dockerinfofile $Dockerrc ;;
   esac
   case $Xserver in
-    --xephyr|--xorg|--xdummy|--xdummy-xwayland|--xvfb|--xwayland|--weston-xwayland) 
+    --xephyr*|--xorg|--xdummy|--xdummy-xwayland|--xvfb|--xwayland|--weston-xwayland) 
       [ "$Shareclipboard" = "no" ] && rm $Clipboardrc ;;
     *)                                rm $Clipboardrc ;;
   esac
@@ -8052,7 +8157,7 @@ option_messages() {             # some messages depending on options, but not ch
   --iglx may fail and give black content."
     ;;
 
-    --xpra|--xpra-xwayland)
+    --xpra|--xpra-c2|--xpra-xwayland)
       verlt "$Xpraversion" "v1.0" && {
         note "Your xpra version $Xpraversion is out of date. It is
   recommended to install at least xpra v1.0. Look at:  www.xpra.org"
@@ -8127,20 +8232,20 @@ option_messages() {             # some messages depending on options, but not ch
   # --fullscreen
   [ "$Fullscreen" = "yes" ] && {
     case $Xserver in
-      --xephyr|--weston|--weston-xwayland|--nxagent|--xpra|--xpra-xwayland|--xwin) ;;
+      --xephyr*|--weston|--weston-xwayland|--nxagent|--xpra*|--xwin) ;;
       --xdummy|--xdummy-xwayland|--xvfb|--xorg) ;;
-      *) note "$Xserver does not support option --fullscreen" ;;
+      *) note "Option --fullscreen is not supported by $Xserver." ;;
     esac
   }
 
   # --output-count
   [ "$Outputcount" != "1" ] && {
     case $Xserver in
-      --weston-xwayland) note "Xwayland sometimes does not position itself well
+      --weston-xwayland) note "Option --output-count: Xwayland sometimes does not position itself well
   at origin 0+0 of first virtual screen, and some screens appear to be unused.
   You may need to move Xwayland manually with [META]+[LeftMouseButton].
   (Bug report at https://bugzilla.redhat.com/show_bug.cgi?id=1498665 )" ;;
-      --xephyr) note "Xinerama support would be best for multiple outputs,
+      --xephyr*) note "Option --output-count: Xinerama support would be best for multiple outputs,
   but is disabled in Xephyr because Xephyr does not handle it well.
   Different window managers handle this different. Just try out." ;;
     esac
@@ -8675,6 +8780,9 @@ declare_variables() {           # declare global variables
   Presetlist=""                                   # List of already parsed preset files to avoid a loop
   Preservecachefiles="no"                         # If yes, don't delete cache files on exit. For few failure cases only.
   X11dockermode="run"                             # --exe, --xonly: Can be either "run" (default), "exe", or "xonly".
+  Xcontainer="no"                                 # --*-c: run some X servers in x11docker/xserver container
+  Xcontainercommand=""
+  Xcontainername=""
   
   # Verbosity options
   Debugmode="no"                                  # --debug: Excerpt of --verbose, also bash error checks
@@ -8768,12 +8876,13 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,hostdisplay,nxagent,runx,xdummy,xephyr,xpra,xorg,xvfb,xwin"                                     # X servers
   Longoptions="$Longoptions,weston-xwayland,xpra-xwayland,xwayland"                                                         # X servers depending on a Wayland compositor
   Longoptions="$Longoptions,hostwayland,kwin,weston"                                                                        # Wayland compositors without X
+  Longoptions="$Longoptions,xephyr-c,xpra-c,xpra-c2,xvfb-c"                                                                 # X servers in container
   Longoptions="$Longoptions,border::,dpi:,fullscreen,output-count:,rotate:,scale:,size:,xfishtank"                          # X/Wayland appearance options
   Longoptions="$Longoptions,clean-xhost,composite::,display:,iglx,keymap:,no-auth,vt::,westonini:,xhost::,xoverip,xtest::"  # X/Wayland config
   Longoptions="$Longoptions,enforce-i,fallback::,preset:,pull::,pw::"                                                       # x11docker config
   Longoptions="$Longoptions,cachebasedir:,home::,homebasedir:,share:"                                                       # Host folders
   Longoptions="$Longoptions,alsa::,clipboard,gpu,lang::,printer::,pulseaudio::,webcam"                                      # Host integration features
-  Longoptions="$Longoptions,backend:,env:,mobyvm,name:,no-entrypoint,runtime:,snap,workdir:"                                # Container config
+  Longoptions="$Longoptions,backend:,env:,mobyvm,name:,no-entrypoint,no-setup,runtime:,snap,workdir:"                       # Container config
   Longoptions="$Longoptions,cap-default,hostipc,limit::,newprivileges::,network::"                                          # Container capabilities
   Longoptions="$Longoptions,group-add:,hostuser:,password::,sudouser::,user:,shell:"                                        # Container user
   Longoptions="$Longoptions,dbus::,init::,hostdbus,sharecgroup"                                                             # Container init and DBus
@@ -8784,10 +8893,10 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,build,cleanup,help,launcher,licence,license,version"                                            # Special options without starting X or container
   Longoptions="$Longoptions,install,remove,update,update-master"                                                            # Installation
   #
-  Longoptions="$Longoptions,keepcache,no-setup,xopt:,xorgconf:"                                                             # Experimental
+  Longoptions="$Longoptions,keepcache,xopt:,xorgconf:"                                                                      # Experimental
   Longoptions="$Longoptions,dbus-system,homedir:,hostnet,kwin-xwayland,no-internet,no-xhost,sharedir:,sharessh,systemd"     # Deprecated
   Longoptions="$Longoptions,showenv,showid,showinfofile,showpid1"                                                           # Deprecated
-  Longoptions="$Longoptions,cachedir:,no-init,nothing,no-xtest,openrc,podman,pull:,ps,runit,silent,starter"                 # Removed
+  Longoptions="$Longoptions,cachedir:,no-init,nothing,no-xtest,openrc,podman,pull::,ps,runit,silent,starter"                # Removed
   Longoptions="$Longoptions,stderr,stdout,sys-admin,sysvinit,tini,trusted,untrusted,vcxsrv"                                 # Removed
 
   # default preset files
@@ -8838,6 +8947,8 @@ parse_options() {               # parse cli options
          --xvfb)              [ "$Xserver" = "--xpra" ]   && Xpravfb="Xvfb" || Xserver="--xvfb" ;;      # Xvfb. Invisible on host.
       -X|--xwayland)          Xserver="--xwayland" ;;                # Xwayland on already running Wayland
          --xwin)              Xserver="--xwin" ;;                    # XWin, MS Windows only
+         
+         --xpra-c|--xpra-c2|--xephyr-c|--xvfb-c) Xserver="${1:-}" ; Xcontainer="yes" ;; # X servers in container x11docker/xserver
 
      #### Influencing automatic choice of X server or Wayland compositor
       -d|--desktop)           Desktopmode="yes" ;;                   # image contains a desktop environment.
@@ -9209,6 +9320,8 @@ Parsed options:    $Parsedoptions_global"
   $Xcommand"
   [ "$Compositorcommand" ]       && debugnote "Compositor command:
   $Compositorcommand"
+  [ "$Xcontainer" = "yes" ]      && create_xcontainercommand && debugnote "X container command:
+  $Xcontainercommand"
   [ "$Shareclipboard" = "yes" ]  && setup_clipboard ||:                           # --clipboard
     
   check_terminalemulator         # find terminal emulator like xterm for error messages and 'docker pull'
@@ -9327,6 +9440,14 @@ $(cat $Storeinfofile)"
     debugnote "storepid(): Stored pids:
 $(cat $Storepidfile)"
 
+
+    case $Xcontainer in
+      yes)
+        # softlink to X server in container x11docker/tools
+        ln -s $Cachefolder/X11-unix/X$Newdisplaynumber /tmp/.X11-unix/X$Newdisplaynumber
+      ;;
+    esac
+    
     # optional info on stdout
     case "$Showinfofile" in           # --printinfofile
       "") ;;
@@ -9353,13 +9474,15 @@ $(cat $Storepidfile)"
   
   #### Start X server [and/or Wayland compositor] [and xpra]
   waitforlogentry "start_xserver()" $Storeinfofile "readyforX=ready" "" infinity
-  [ "$Xpraservercommand" ] && {
-    {
-      waitforlogentry xpra $Storeinfofile "xinitrc=ready" infinity
-      rocknroll || exit 0
-      start_xpra                                                                    # --xpra, --xpra-xwayland
-    } & storepid $! xpraloop
-  }
+  case $Xserver in
+    xpra*)
+      {
+        waitforlogentry xpra $Storeinfofile "xinitrc=ready" infinity
+        rocknroll || exit 0
+        start_xpra                                                                    # --xpra, --xpra-xwayland
+      } & storepid $! xpraloop
+    ;;
+  esac
   rocknroll && [ "$Compositorcommand" ] && start_compositor
   rocknroll && start_xserver
 
