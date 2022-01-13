@@ -6,9 +6,6 @@ x11docker ToDo notes
    - nvidia GPU
    - check --xoverip, --exe, --backend, --runtime
    - try Xwayland, weston, kwin, nxagent
-   - --xpra2
- - check --kwin / dbus-launch
- - remove --xdummy and --xdummy-xwayland, also Xpravfb
  - no dockerrc needed since --pw is removed
 
 ## Issues to fix
