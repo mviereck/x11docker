@@ -1,16 +1,26 @@
 # ToDo
 x11docker ToDo notes
 
-## Actually to fix
- - `--pulseaudio=socket` fails if x11docker was started with `sudo`.
+## Work in progress
+ - X in container:
+   - nvidia GPU
+   - check --xoverip, --exe, --backend, --runtime
+   - try Xwayland, weston, kwin, nxagent
+   - --xpra2
+ - check --kwin / dbus-launch
+ - remove --xdummy and --xdummy-xwayland, also Xpravfb
+ - no dockerrc needed since --pw is removed
+
+## Issues to fix
  - `--iglx` now works with `--xorg` -> report at kata
+ - `--remove`: give note about not removed files in `~./config/x11docker` and `/etc/x11docker`
  - `--exe`: Give notes for invalid options.
  - `--update`: Check if installs into `/usr/bin` or `/usr/local/bin`. Do not install other files then.
  - `--password, --install, --update, --cleanup`, etc.: give note about dropped options.
    Maybe change to $1 mode without `--`
  - check all `--init=` in all backends rootful and rootless.
    - checked: 
-     - rootful docker: all 
+     - rootful docker: all
      - rootless podman: systemd, openrc
      - rootful podman: openrc
      - rootless nerdctl: openrc

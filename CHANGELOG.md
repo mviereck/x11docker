@@ -8,13 +8,12 @@ Project website: https://github.com/mviereck/x11docker
 
 ## Unreleased
 ### Added
- - X server running in container `x11docker/xerver`.
-   Experimental stage yet. Currently the options are called:
-   - `--xephyr-c`: New X server option for X server Xephyr in container.
-   - `--xvfb-c`: New X server option for X server Xvfb in container.
-   - `--xpra-c`: New X server option for xpra in container.
-   - `--xpra-c2`: New X server option for xpra server in container
-     and xpra client on host.
+ - `--xc`: New option to run X server in container of `x11docker/xerver`.
+   Experimental stage yet. Currently supported:
+   - `--xpra`
+   - `--xephyr`
+   - `--weston-xwayland`
+   - `--xvfb`
  - Configuration of x11docker with `default` preset file. Compare `--preset`.
    Allows to specify options that will be applied in all x11docker sessions.
    Useful to declare a default `--backend` and/or `--runtime`.
