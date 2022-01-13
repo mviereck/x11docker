@@ -28,7 +28,8 @@ Project website: https://github.com/mviereck/x11docker
  - `--backend`: Fallbacks to `podman` and `nerdctl` if `docker` not found.
  - `--xorg`: Not used as fallback if not on tty.
  - `--xvfb`: `--printenv` is not set automatically.
- - `--xdummy`: `--printenv` is not set automatically.
+ - `--xvfb`: No ugly GPU support anymore.
+ - `--xpra`: No Xdummy support. Needs `Xfvb`.
  - `--vt [=N]`: Argument N is optional now.
    [(#404)](https://github.com/mviereck/x11docker/issues/404)
 ### Fixed
@@ -46,6 +47,7 @@ Project website: https://github.com/mviereck/x11docker
  - `x11docker-gui`: Removed due to outdated and unmaintained `kaptain`.
  - `--pull`: Please pull missing images yourself.
  - `--pw`: Run x11docker directly as root or with sudo if needed.
+ - `--xdummy:` Use `--xvfb` instead.
 
 ## [6.10.0](https://github.com/mviereck/x11docker/releases/tag/v6.10.0) - 2021-10-06
 ### Added
