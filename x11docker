@@ -2725,6 +2725,7 @@ check_xdepends() {              # check dependencies on host for X server option
     yes)
       case ${1:-} in
         --xpra|--xpra2|--xephyr|--weston-xwayland|--xvfb) ;;
+#        --xpra|--xpra2|--xpra-xwayland|--xephyr|--weston-xwayland|--xvfb) ;;
         *)
           $Message "${1:-} not supported yet to run inside of container."
           Return=1
@@ -2801,11 +2802,13 @@ check_xserver() {               # check chosen X server, auto-choose X server
       [ "$Xcontainerimage" = "no" ] && Xcontainer="no"
       [ "$Runsonconsole" = "yes" ]  && Xcontainer="no"
       [ "$Winsubsystem" ]           && Xcontainer="no"
-      [ "$Xcontainer" = "no" ] && note "Option --xc not possible
+      [ "$Xcontainer" = "no" ] && { 
+        note "Option --xc not possible
   on console, on MS Windows or without image x11docker/xserver.
   Fallback: Setting --xc=no"
-      check_fallback
-      Xcontainer="no"
+        check_fallback
+        Xcontainer="no"
+      }
     ;;
     auto)
       [ "$Xcontainerimage" = "no" ] && Xcontainer="no"
@@ -2818,7 +2821,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
       Xcontainer="no"
     ;;
   esac
-      
+
   [ "$Sharegpu" = "yes" ] && {
     case $Xserver in
       --xpra|--xpra2)
@@ -3017,13 +3020,14 @@ check_xserver() {               # check chosen X server, auto-choose X server
     Xcontainer="yes"
     case $Xserver in
       --xpra|--xpra2|--xephyr|--weston-xwayland|--xvfb) ;;
+#      --xpra|--xpra2|--xpra-xwayland|--xephyr|--weston-xwayland|--xvfb) ;;
       *) Xcontainer="no" ;;
     esac
     [ "$Xcontainer" = "yes" ] && note "Option --xc enabled automatically.
   X server will run in container of image x11docker/xserver.
   You can disable this with --xc=no"
   }
-  
+
   return 0
 }
 create_xcommand() {             ### create command to start X server and/or Wayland compositor
@@ -3240,12 +3244,12 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   $(check_xpraoption --modal-windows=no) \\
   $(check_xpraoption --opengl=auto) \\
   $(check_xpraoption --quality=100) \\
-  $(check_xpraoption --reconnect="no") \\
+  $(check_xpraoption --reconnect=no) \\
   $(check_xpraoption --video-decoders=none)"
       [ "$Fullscreen" = "yes" ]  && Xpraclientcommand="$Xpraclientcommand \\
   $(check_xpraoption --desktop-fullscreen=yes)"
       [ "$Scaling" ] && Xpraclientcommand="$Xpraclientcommand \\
-  $(check_xpraoption --desktop-scaling="'$Scaling'")"
+  $(check_xpraoption --desktop-scaling="$Scaling")"
 #      [ -n "$Dpi" ] && Xpraclientcommand="$Xpraclientcommand \\
 #  $(check_xpraoption --dpi="'$Dpi'")"
       [ "$Xpraborder" ] && Xpraclientcommand="$Xpraclientcommand \\
@@ -3345,11 +3349,11 @@ startup-animation=fade
    ;;
 
     --xwayland)
-      Xcommand="$(command -v Xwayland) :$Newdisplaynumber $Xserveroptions"
+      Xcommand="$(command -v Xwayland) :$Newdisplaynumber -ac $Xserveroptions"
     ;;
 
     --xpra-xwayland)
-      Xcommand="$(command -v Xwayland) :$Newdisplaynumber $Xserveroptions"
+      Xcommand="$(command -v Xwayland) :$Newdisplaynumber -ac $Xserveroptions"
   
       echo "[output]
 name=${Westonoutput}1
@@ -3411,7 +3415,7 @@ mode=$Screensize
     ;;
 
     --kwin|--kwin-xwayland)
-      Xcommand="$(command -v Xwayland) :$Newdisplaynumber $Xserveroptions"
+      Xcommand="$(command -v Xwayland) :$Newdisplaynumber -ac $Xserveroptions"
   
       Compositorcommand="kwin_wayland \\
   --xwayland \\
@@ -3622,19 +3626,39 @@ esac
   return 0
 }
 create_xcontainercommand() {    # create docker command for X in container
+  local Xcontainerrc Xc_hostx Xc_hostwayland Xc_containerwayland Xc_gpu
+
+  # code snippets
+  Xc_hostx="\\
+  --volume /tmp/.X11-unix/X$Hostdisplaynumber:/X$Hostdisplaynumber \\
+  --env DISPLAY=$Hostdisplay \\
+  --volume $Hostxauthority:/Xauthority \\
+  --env XAUTHORITY=/Xauthority"
+  Xc_hostwayland="\\
+  --volume $XDG_RUNTIME_DIR/$Hostwaylandsocket:$XDG_RUNTIME_DIR/$Hostwaylandsocket \\
+  --env XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR \\
+  --env GDK_BACKEND=wayland"
+  Xc_containerwayland="\\
+  --env XDG_RUNTIME_DIR=/run/user/$Containeruseruid \\
+  --env WAYLAND_DISPLAY=$Newwaylandsocket \\
+  --volume $Cachefolder/XDG_RUNTIME_DIR:/run/user/$Containeruseruid"
+  Xc_gpu="\\
+  --group-add $(getent group video | cut -d: -f3) \\
+  --group-add $(getent group render | cut -d: -f3) \\
+  --device /dev/dri:/dev/dri" ### FIXME nvidia
+  
+  mkfile $Cachefolder/etcpasswd.xcontainer
+  echo "$Containeruser:x:$Containeruseruid:$Containerusergid:$Containeruser,,,:/tmp:/bin/bash" >> $Cachefolder/etcpasswd.xcontainer
+
   Xcontainername="x11docker_X${Newdisplaynumber}_xserver_${Cachenumber}"
 #  note "
 #docker exec -ti $Xcontainername bash"
+
+  # create command
   Xcontainercommand="$Containerbackendbin run --rm --detach --pull=never  \\
-  --name $Xcontainername"
-  case $Containerbackend in
-    podman)
-      Xcontainercommand="$Xcontainercommand \\
-  --userns=keep-id"
-    ;;
-  esac
-  Xcontainercommand="$Xcontainercommand \\
+  --name $Xcontainername \\
   --user $Containeruseruid:$Containerusergid \\
+  --volume $Cachefolder/etcpasswd.xcontainer:/etc/passwd:ro \\
   --env HOME=/tmp \\
   --cap-drop ALL \\
   --security-opt=no-new-privileges \\
@@ -3648,59 +3672,63 @@ create_xcontainercommand() {    # create docker command for X in container
   --ipc=shareable"
     ;;
   esac
-  
+  case $Containerbackend in
+    podman)
+      Xcontainercommand="$Xcontainercommand \\
+  --userns=keep-id"
+    ;;
+  esac
+  [ "$Runtime" ] && Xcontainercommand="$Xcontainercommand \\
+  --runtime $Runtime"
+  # add code snippets
   case $Xserver in
     --xephyr)
-      Xcontainercommand="$Xcontainercommand \\
-  --volume /tmp/.X11-unix/X$Hostdisplaynumber:/X$Hostdisplaynumber \\
-  --env DISPLAY=$Hostdisplay \\
-  --volume $Hostxauthority:/Xauthority \\
-  --env XAUTHORITY=/Xauthority"
-    ;;
-    
+      Xcontainercommand="$Xcontainercommand $Xc_hostx"
+    ;; 
     --xpra)
       [ -n "$Hostdisplay" ] && [ -z "$Hostwaylandsocket" ] && {
-        Xcontainercommand="$Xcontainercommand \\
-  --volume /tmp/.X11-unix/X$Hostdisplaynumber:/X$Hostdisplaynumber \\
-  --env DISPLAY=$Hostdisplay \\
-  --volume $Hostxauthority:/Xauthority \\
-  --env XAUTHORITY=/Xauthority"
+        Xcontainercommand="$Xcontainercommand $Xc_hostx"
       }
       [ "$Hostwaylandsocket" ] && {
-        Xcontainercommand="$Xcontainercommand \\
-  --volume $XDG_RUNTIME_DIR/$Hostwaylandsocket:$XDG_RUNTIME_DIR/$Hostwaylandsocket \\
-  --env XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR \\
-  --env GDK_BACKEND=wayland"
+        Xcontainercommand="$Xcontainercommand $Xc_hostwayland"
       }
-      Xcontainercommand="$Xcontainercommand \\
-  --group-add $(getent group video | cut -d: -f3) \\
-  --group-add $(getent group render | cut -d: -f3) \\
-  --device /dev/dri:/dev/dri" ### FIXME nvidia      
+      Xcontainercommand="$Xcontainercommand $Xc_gpu"    
     ;;
-    
+    --xpra2)
+    ;;
     --weston-xwayland)
-      Xcontainercommand="$Xcontainercommand \\
-  --volume /tmp/.X11-unix/X$Hostdisplaynumber:/X$Hostdisplaynumber \\
-  --env DISPLAY=$Hostdisplay \\
-  --volume $Hostxauthority:/Xauthority \\
-  --env XAUTHORITY=/Xauthority"
-  
-      Xcontainercommand="$Xcontainercommand \\
-  --env XDG_RUNTIME_DIR=/XDG_RUNTIME_DIR \\
-  --env WAYLAND_DISPLAY=$Newwaylandsocket \\
-  --volume $Cachefolder/XDG_RUNTIME_DIR:/XDG_RUNTIME_DIR \\
-  --volume $Westonini:$Westonini"
-      [ "$Sharegpu" = "yes" ] && {
-        Xcontainercommand="$Xcontainercommand \\
-  --group-add $(getent group video | cut -d: -f3) \\
-  --group-add $(getent group render | cut -d: -f3) \\
-  --device /dev/dri:/dev/dri" ### FIXME nvidia      
-      }  
+      Xcontainercommand="$Xcontainercommand $Xc_hostx"
+      Xcontainercommand="$Xcontainercommand $Xc_containerwayland"
+      [ "$Sharegpu" = "yes" ] && Xcontainercommand="$Xcontainercommand $Xc_gpu"
+    ;;
+    --xpra-xwayland)
+      Xcontainercommand="$Xcontainercommand $Xc_hostx"
+      Xcontainercommand="$Xcontainercommand $Xc_containerwayland"
+      Xcontainercommand="$Xcontainercommand $Xc_gpu"
     ;;
   esac
   
+  Xcontainerrc="$Cachefolder/xcontainerrc"
+  mkfile "$Xcontainerrc"
+  echo "#! /bin/bash
+# script running in X container (option --xc)
+exec >> $Xinitlogfile 2>&1
+
+$(declare -f rocknroll)
+Timetosaygoodbyefile=$Timetosaygoodbyefile
+
+[ -e /X$Hostdisplaynumber ] && ln -s /X$Hostdisplaynumber /tmp/.X11-unix/X$Hostdisplaynumber
+
+# wait for the end
+case $Usemkfifo in
+  yes) read -n1 goodbye <$Timetosaygoodbyefifo ;;
+  no)  while rocknroll; do sleep 1; done ;;
+esac
+" >> $Xcontainerrc
+  
   Xcontainercommand="$Xcontainercommand \\
-  x11docker/xserver sh -c 'ln -s /X$Hostdisplaynumber /tmp/.X11-unix/X$Hostdisplaynumber ; read goodbye < $Timetosaygoodbyefifo'"
+  --volume $Xcontainerrc:/xcontainerrc \\
+  x11docker/xserver bash /xcontainerrc"
 }
 disable_xhost() {               # remove any access to X server granted by xhost
   local Line=
@@ -6531,15 +6559,15 @@ $Xpraclientcommand"
 
   # catch possible xpra crashes
   while rocknroll; do
-    ps -p $Xpraserverpid >/dev/null || break
-    ps -p $Xpraclientpid >/dev/null || break
+    ps -p $Xpraserverpid >/dev/null || { debugnote "xpra server terminated" ; break ; }
+    ps -p $Xpraclientpid >/dev/null || { debugnote "xpra client terminated" ; break ; }
     sleep 1
   done
   sleep 1 && rocknroll && note "Option $Xserver: xpra terminated unexpectedly.
-  Last lines of xpra server log:
+  Last lines of xpra server log: $(pspid $Xpraserverpid)
 $(tail $Xpraserverlogfile)
 ---------------------------------
-  Last lines of xpra client log:
+  Last lines of xpra client log: $(pspid $Xpraclientpid)
 $(tail $Xpraclientlogfile)"
   saygoodbye xpra
   
@@ -7679,8 +7707,6 @@ $Hostuserhome/.cache/x11docker/symlink
   Systemdtarget=$Cachefolder/$Systemdtarget                         && mkfile $Systemdtarget
   Systemdwatchservice=$Cachefolder/$Systemdwatchservice             && mkfile $Systemdwatchservice
   Watchpidfifo="$Cachefolder/$Watchpidfifo"
-  Westonini="$Cachefolder/$Westonini"                               && mkfile $Westonini
-  Xinitlogfile="$Cachefolder/$Xinitlogfile"                         && mkfile $Xinitlogfile
   Xservercookie="$Cachefolder/$Xservercookie"                       && mkfile $Xservercookie
   Xtermrc="$Cachefolder/$Xtermrc"                                   && mkfile $Xtermrc
                                                                unpriv "mkdir $Cachefolder/X11-unix"
@@ -7708,8 +7734,10 @@ $Hostuserhome/.cache/x11docker/symlink
   Storeinfofile="$Sharefolder/$Storeinfofile"                       && mkfile $Storeinfofile 666
   Timetosaygoodbyefile="$Sharefolder/$Timetosaygoodbyefile"         && mkfile $Timetosaygoodbyefile
   Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo"
+  Westonini="$Sharefolder/$Westonini"                               && mkfile $Westonini
   Xclientcookie="$Sharefolder/$Xclientcookie"                       && mkfile $Xclientcookie
   Xkbkeymapfile="$Sharefolder/$Xkbkeymapfile"                       && mkfile $Xkbkeymapfile
+  Xinitlogfile="$Sharefolder/$Xinitlogfile"                         && mkfile $Xinitlogfile
   Xinitrc="$Sharefolder/$Xinitrc"                                   && mkfile $Xinitrc
   Xpraclientlogfile="$Sharefolder/$Xpraclientlogfile"               && mkfile $Xpraclientlogfile
   Xpraserverlogfile="$Sharefolder/$Xpraserverlogfile"               && mkfile $Xpraserverlogfile
@@ -7850,7 +7878,7 @@ option_messages() {             # some messages depending on options, but not ch
       [ "$Sharegpu" = "yes" ] && note "Option --$Xserver: If performance of GPU acceleration
   is not satisfying, you can try insecure '--hostdisplay --gpu'
   or, better but windowed, '--weston-xwayland --gpu'."
-      note "Option --$Xserver: If you encounter issues with xpra, 
+      note "Option $Xserver: If you encounter issues with xpra, 
   you can try --nxagent instead.
   Rather use xpra from www.xpra.org than from distribution repositories."
     ;;
