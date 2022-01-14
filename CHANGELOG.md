@@ -16,6 +16,8 @@ Project website: https://github.com/mviereck/x11docker
    - `--xvfb`
  - `--xpra2`: New X server option to run xpra server in container (`-xc`),
    but xpra client on host.
+ - `--xpra2-xwayland`: New X server option to run accelerated xpra server
+   in container (`-xc`), but xpra client on host.
  - Configuration of x11docker with `default` preset file. Compare `--preset`.
    Allows to specify options that will be applied in all x11docker sessions.
    Useful to declare a default `--backend` and/or `--runtime`.
