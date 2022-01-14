@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.0.0-beta-17"
+Version="7.0.0-beta-18"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -1810,6 +1810,9 @@ done
   esac
   return 0
 }
+setup_gpu_devicelist() {        # option --gpu: print list of GPU devices
+  find /dev/dri /dev/nvidia* /dev/vga_arbiter /dev/nvhost* /dev/nvmap -maxdepth 0 2>/dev/null ||:
+}
 setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia driver
   # Easiest case: share /dev/dri.
   # Works for open source MESA drivers on host and in image.
@@ -1852,7 +1855,7 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
   # check device files
   while read -r Gpudevice ; do
     store_runoption volume "$Gpudevice"
-  done < <(find /dev/dri /dev/nvidia* /dev/vga_arbiter /dev/nvhost* /dev/nvmap -maxdepth 0 2>/dev/null ||:)
+  done < <(setup_gpu_devicelist)
 
   #Nvidiaversion="304.137"
   [ -z "$Nvidiaversion" ] && return 0
@@ -2724,7 +2727,12 @@ check_xdepends() {              # check dependencies on host for X server option
   # --xc
   case $Xcontainer in
     yes)
-      grep -q -w -- "$Xserver" <<< "$Xcontainer_supportlist" || {
+      grep -q -w -- "$Xserver" <<< "$Xcontainer_supportlist" && {
+        [ "$Runsonconsole" = "yes" ] && {
+          $Message "${1:-} with option --xc does not run on console."
+          Return=1
+        }
+      } || {
         $Message "${1:-} not supported yet to run inside of container."
         Return=1
       }
@@ -3624,7 +3632,7 @@ esac
   return 0
 }
 create_xcontainercommand() {    # create docker command for X in container
-  local Xcontainerrc Xc_hostx Xc_hostwayland Xc_containerwayland Xc_gpu
+  local Xcontainerrc Xc_hostx Xc_hostwayland Xc_containerwayland Xc_gpu Gpudevice
 
   # code snippets
   Xc_hostx="\\
@@ -3642,8 +3650,19 @@ create_xcontainercommand() {    # create docker command for X in container
   --volume $Cachefolder/XDG_RUNTIME_DIR:/run/user/$Containeruseruid"
   Xc_gpu="\\
   --group-add $(getent group video | cut -d: -f3) \\
-  --group-add $(getent group render | cut -d: -f3) \\
-  --device /dev/dri:/dev/dri" ### FIXME nvidia
+  --group-add $(getent group render | cut -d: -f3)"
+  while read -r Gpudevice ; do
+    Xc_gpu="$Xc_gpu \\
+  --device $Gpudevice:$Gpudevice"
+  done < <(setup_gpu_devicelist) ### FIXME nvidia driver
+  [ "$Nvidiainstallerfile" ] && {
+    mkfile $Sharefolder/nvidia_installer
+    nvidia_installer >> $Sharefolder/nvidia_installer
+    Xc_gpu="$Xc_gpu \\
+  --volume $Nvidiainstallerfile:$Nvidiacontainerfile:ro"
+    mkfile $Sharefolder/nvidia_installer
+    nvidia_installer >> $Sharefolder/nvidia_installer
+  }
   
   mkfile $Cachefolder/etcpasswd.xcontainer
   echo "$Containeruser:x:$Containeruseruid:$Containerusergid:$Containeruser,,,:/tmp:/bin/bash" >> $Cachefolder/etcpasswd.xcontainer
@@ -3653,7 +3672,7 @@ create_xcontainercommand() {    # create docker command for X in container
 #docker exec -ti $Xcontainername bash"
 
   # create command
-  Xcontainercommand="$Containerbackendbin run --rm --detach --pull=never  \\
+  Xcontainercommand="$Containerbackendbin run --rm --detach --tty --pull=never  \\
   --name $Xcontainername \\
   --user $Containeruseruid:$Containerusergid \\
   --volume $Cachefolder/etcpasswd.xcontainer:/etc/passwd:ro \\
@@ -3702,12 +3721,7 @@ create_xcontainercommand() {    # create docker command for X in container
       Xcontainercommand="$Xcontainercommand $Xc_containerwayland"
       Xcontainercommand="$Xcontainercommand $Xc_gpu"
     ;;
-    --xpra2-xwayland)
-      Xcontainercommand="$Xcontainercommand $Xc_hostx"
-      Xcontainercommand="$Xcontainercommand $Xc_containerwayland"
-      [ "$Sharegpu" = "yes" ] && Xcontainercommand="$Xcontainercommand $Xc_gpu"
-    ;;
-    --weston-xwayland)
+    --weston|--weston-xwayland|--xpra2-xwayland)
       Xcontainercommand="$Xcontainercommand $Xc_hostx"
       Xcontainercommand="$Xcontainercommand $Xc_containerwayland"
       [ "$Sharegpu" = "yes" ] && Xcontainercommand="$Xcontainercommand $Xc_gpu"
@@ -3735,6 +3749,9 @@ esac
   Xcontainercommand="$Xcontainercommand \\
   --volume $Xcontainerrc:/xcontainerrc \\
   x11docker/xserver bash /xcontainerrc"
+  
+  debugnote "Created xcontainerrc:
+$(nl -ba $Xcontainerrc)"
 }
 disable_xhost() {               # remove any access to X server granted by xhost
   local Line=
@@ -4515,19 +4532,17 @@ create_dockercommand() {        ### create command to run docker
   [ -e "$Nvidiainstallerfile" ] && Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$Nvidiainstallerfile:ro" "$Nvidiacontainerfile")"
   
-  # --tools
+  # --xc
   case "$Xcontainer" in
     yes)
-      Dockercommand="$Dockercommand \\
+      [ "$Newxsocket" ] && Dockercommand="$Dockercommand \\
   --volume $Cachefolder/X11-unix:/tmp/.X11-unix \\
   --ipc=container:$Xcontainername"
 #  --volume x11docker_tmp_$Newdisplaynumber:/tmp \
     ;;
     no)
-      [ "$Newxsocket" ] && {
-        Dockercommand="$Dockercommand \\
+      [ "$Newxsocket" ] && Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$Newxsocket")"
-      }
     ;;
   esac
   
@@ -4535,12 +4550,21 @@ create_dockercommand() {        ### create command to run docker
   [ "$Setupwayland" = "yes" ] && {
     case $Containersetup in
       yes)
-        Dockercommand="$Dockercommand \\
+        case $Xcontainer in
+          yes) Dockercommand="$Dockercommand \\
+  --volume $(convertpath volume "$Cachefolder/XDG_RUNTIME_DIR/$Newwaylandsocket" "/$Newwaylandsocket")"
+          ;;
+          no) Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$XDG_RUNTIME_DIR/$Newwaylandsocket" "/$Newwaylandsocket")"
+        esac
       ;;
       no)
-        Dockercommand="$Dockercommand \\
-  --volume $(convertpath volume "$XDG_RUNTIME_DIR/$Newwaylandsocket")"
+        case $Xcontainer in
+          yes) Dockercommand="$Dockercommand \\
+  --volume $(convertpath volume "$Cachefolder/XDG_RUNTIME_DIR/$Newwaylandsocket")" ;;
+          no)  Dockercommand="$Dockercommand \\
+  --volume $(convertpath volume "$XDG_RUNTIME_DIR/$Newwaylandsocket")" ;;
+        esac
       ;;
     esac
   }
@@ -4956,6 +4980,47 @@ $Line"
 }
 
 #### docker helper scripts
+nvidia_installer() {
+  # print code to install NVIDIA driver in container
+  # $Nvidiainstallerfile must be shared with container as $Nvidiacontainerfile
+  ### FIXME $Containerlibc
+  echo "
+# Install NVIDIA driver
+Nvidiaversion=\"\$(nvidia-settings -v 2>/dev/null | grep version | rev | cut -d' ' -f1 | rev)\"
+[ \"\$Nvidiaversion\" ] && note \"Found NVIDIA driver \$Nvidiaversion in image.\"
+case \"\$Nvidiaversion\" in
+  $Nvidiaversion) note 'NVIDIA driver version in image matches version on host. Skipping installation.' ;;
+  *)
+    Installationwillsucceed=maybe
+    case \"\$Containerlibc\" in
+      musl) note 'Installing NVIDIA driver in container systems
+  based on musl libc like Alpine is not possible due to
+  proprietary closed source policy of NVIDIA corporation.'
+        Installationwillsucceed=no
+      ;;
+    esac
+    [ \"\$Installationwillsucceed\" = \"maybe\" ] && {
+      note 'Installing NVIDIA driver $Nvidiaversion in container.'
+      mkdir -m 1777 /tmp2
+      # provide fake tools to fool installer dependency check
+      ln -s /bin/true /tmp2/modprobe
+      ln -s /bin/true /tmp2/depmod
+      ln -s /bin/true /tmp2/lsmod
+      ln -s /bin/true /tmp2/rmmod
+      ln -s /bin/true /tmp2/ld
+      ln -s /bin/true /tmp2/objcopy
+      ln -s /bin/true /tmp2/insmod
+      Nvidiaoptions='--accept-license --no-runlevel-check --no-questions --no-backup --ui=none --no-kernel-module --no-nouveau-check'
+      env TMPDIR=/tmp2 PATH=\"/tmp2:\$PATH\" sh $Nvidiacontainerfile -A | grep -q -- '--install-libglvnd'        && Nvidiaoptions=\"\$Nvidiaoptions --install-libglvnd\"
+      env TMPDIR=/tmp2 PATH=\"/tmp2:\$PATH\" sh $Nvidiacontainerfile -A | grep -q -- '--no-nvidia-modprobe'      && Nvidiaoptions=\"\$Nvidiaoptions --no-nvidia-modprobe\"
+      env TMPDIR=/tmp2 PATH=\"/tmp2:\$PATH\" sh $Nvidiacontainerfile -A | grep -q -- '--no-kernel-module-source' && Nvidiaoptions=\"\$Nvidiaoptions --no-kernel-module-source\"
+      env TMPDIR=/tmp2 PATH=\"/tmp2:\$PATH\" sh $Nvidiacontainerfile --tmpdir /tmp2 \$Nvidiaoptions || note 'ERROR: Installation of NVIDIA driver failed.
+  Run with option --verbose to see installer output.'
+      rm -R /tmp2 && unset TMPDIR
+    } || note 'Skipping installation of $Nvidiacontainerfile'
+  ;;
+esac"
+}
 create_containerrootrc() {      ### create containerrootrc: This script runs as root in container
   local Line=
 
@@ -5179,50 +5244,7 @@ Exec=/usr/local/bin/x11docker-xrandr
   echo ""
 
   # --gpu with closed source nvidia driver
-  [ "$Nvidiainstallerfile" ] && {
-    echo "# Install NVIDIA driver"
-    echo "Nvidiaversion=\"\$(nvidia-settings -v 2>/dev/null | grep version | rev | cut -d' ' -f1 | rev)\""
-    echo '[ "$Nvidiaversion" ] && note "Found NVIDIA driver $Nvidiaversion in image."'
-    echo 'case "$Nvidiaversion" in'
-    echo "  $Nvidiaversion) note 'NVIDIA driver version in image matches version on host. Skipping installation.' ;;"
-    echo "  *)"
-    echo "    Installationwillsucceed=maybe"
-    echo '    case "$Containerlibc" in'
-    echo "      musl) note 'Installing NVIDIA driver in container systems
-  based on musl libc like Alpine is not possible due to
-  proprietary closed source policy of NVIDIA corporation.'"
-    echo "        Installationwillsucceed=no"
-    echo "      ;;"
-    echo "    esac"
-    echo "    case \$Containersystem in"
-    echo "      opensuse)"
-    echo "        note \"Nvidia driver installation probably fails in \$Containersystem.
-  You can try to install nvidia driver $Nvidiaversion in image yourself.\""
-    echo "      ;;"
-    echo "    esac"
-    echo "    [ \"\$Installationwillsucceed\" = \"maybe\" ] && {"
-    echo "      note 'Installing NVIDIA driver $Nvidiaversion in container.'"
-    echo "      mkdir -m 1777 /tmp2"
-    echo "      # provide fake tools to fool installer dependency check"
-    echo "      ln -s /bin/true /tmp2/modprobe"
-    echo "      ln -s /bin/true /tmp2/depmod"
-    echo "      ln -s /bin/true /tmp2/lsmod"
-    echo "      ln -s /bin/true /tmp2/rmmod"
-    echo "      ln -s /bin/true /tmp2/ld"
-    echo "      ln -s /bin/true /tmp2/objcopy"
-    echo "      ln -s /bin/true /tmp2/insmod"
-    echo "      Nvidiaoptions='--accept-license --no-runlevel-check --no-questions --no-backup --ui=none --no-kernel-module --no-nouveau-check'"
-    echo "      env TMPDIR=/tmp2 PATH=\"/tmp2:\$PATH\" sh $Nvidiacontainerfile -A | grep -q -- '--install-libglvnd'        && Nvidiaoptions=\"\$Nvidiaoptions --install-libglvnd\""
-    echo "      env TMPDIR=/tmp2 PATH=\"/tmp2:\$PATH\" sh $Nvidiacontainerfile -A | grep -q -- '--no-nvidia-modprobe'      && Nvidiaoptions=\"\$Nvidiaoptions --no-nvidia-modprobe\""
-    echo "      env TMPDIR=/tmp2 PATH=\"/tmp2:\$PATH\" sh $Nvidiacontainerfile -A | grep -q -- '--no-kernel-module-source' && Nvidiaoptions=\"\$Nvidiaoptions --no-kernel-module-source\""
-    echo "      env TMPDIR=/tmp2 PATH=\"/tmp2:\$PATH\" sh $Nvidiacontainerfile --tmpdir /tmp2 \$Nvidiaoptions || note 'ERROR: Installation of NVIDIA driver failed.
-  Run with option --verbose to see installer output.'"
-    echo "      rm -R /tmp2 && unset TMPDIR"
-    echo "    } || note 'Skipping installation of $Nvidiacontainerfile'"
-    echo "  ;;"
-    echo "esac"
-    echo ""
-  }
+  [ "$Nvidiainstallerfile" ] && nvidia_installer
   
   echo "rocknroll || exit 64"
   echo ""
@@ -6282,6 +6304,10 @@ create_dockerrc() {             ### create dockerrc: This script runs as root (o
     yes)
       echo "read Xcontainerid< <($Xcontainercommand 2>>$Xinitlogfile)"
       echo 'storeinfo Xcontainerid="$Xcontainerid"'
+      [ "$Nvidiainstallerfile" ] && {
+        note "Installing NVIDIA driver in X container."
+        echo "docker exec --tty --privileged --user=root $Xcontainername bash $Sharefolder/nvidia_installer >> $Xinitlogfile 2>&1 || note 'ERROR: NVIDIA driver installation in X container failed.'" 
+      }
 #      echo "watchpid CONTAINER$Xcontainername"
     ;;
   esac
@@ -6780,7 +6806,7 @@ check_host() {                  # check host environment
   
   # Check if host uses proprietary NVIDIA driver
   Nvidiaversion=$(head -n1 2>/dev/null </proc/driver/nvidia/version | awk '{ print $8 }')
-  #Nvidiaversion="470.14"
+  Nvidiaversion="470.74"
     
   # check python version
   Pythonbin="$(command -v python)"
@@ -8395,7 +8421,7 @@ declare_variables() {           # declare global variables
   Xcontainercommand=""
   Xcontainerimage=""
   Xcontainername=""
-  Xcontainer_supportlist="--xpra --xpra2 --xpra2-xwayland --xephyr --weston-xwayland --xvfb"
+  Xcontainer_supportlist="--xpra --xpra2 --xpra2-xwayland --xephyr --weston-xwayland --xvfb --weston"
   
   # Window manager
   Windowmanagermode="none"                        # --wm: Window manager to use: container/host/auto

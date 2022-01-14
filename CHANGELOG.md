@@ -14,6 +14,7 @@ Project website: https://github.com/mviereck/x11docker
    - `--xephyr`
    - `--weston-xwayland`
    - `--xvfb`
+   - `--weston`
  - `--xpra2`: New X server option to run xpra server in container (`-xc`),
    but xpra client on host.
  - `--xpra2-xwayland`: New X server option to run accelerated xpra server
