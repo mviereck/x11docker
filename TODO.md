@@ -3,9 +3,13 @@ x11docker ToDo notes
 
 ## Work in progress
  - X in container:
-   - nvidia GPU
+   - check --ipc/--hostipc interferences (X only)
+   - --exe, --xonly
+   - provide Wayland socket to host if needed
+   - nvidia GPU - image with driver
    - check --xoverip, --exe, --backend, --runtime
-   - try Xwayland, weston, kwin, nxagent
+   - missing: Xorg, Weston/Kwin on console, nxagent, xpra-xwayland
+   - nxagent needs root owned .X11-unix https://github.com/ArcticaProject/nx-libs/issues/1034
  - no dockerrc needed since --pw is removed
 
 ## Issues to fix
