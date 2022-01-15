@@ -94,6 +94,8 @@ Basic settings:
                        Useful with commands like bash.
      --xc [=yes|no]    Run X server in container of x11docker/xserver.
                        Experimental stage yet. Defaults to yes.
+                       No fallback to other options is done if --xc is not
+                       possible with other chosen options.
 
 Host integration:
      --alsa [=ALSA_CARD]  Sound with ALSA. You can define a desired sound card
@@ -1090,10 +1092,12 @@ convertpath() {                 # convert unix and windows paths
   }
 
   Containerpath="$Path"
-  [ "$Sharehome" = "host" ] || {
-    grep -q "^$Containeruserhome" <<< "$Path" && Containerpath="$(sed "s%^$Containeruserhome%/home.host%" <<< "$Containerpath")"
+  [ "$Containeruser" = "RETAIN" ] || {
+    [ "$Sharehome" = "host" ] || {
+      grep -q "^$Containeruserhome" <<< "$Path" && Containerpath="$(sed "s%^$Containeruserhome%/home.host%" <<< "$Containerpath")"
+    }
+    [ "$Containerpath" = "$Containeruserhosthome" ] && [ "$Persistanthomevolume" != "$Containeruserhosthome" ] && Containerpath="/home.host/$Containeruser"
   }
-  [ "$Containerpath" = "$Containeruserhosthome" ] && [ "$Persistanthomevolume" != "$Containeruserhosthome" ] && Containerpath="/home.host/$Containeruser"
   
   # not on Windows
   [ -z "$Winsubsystem" ] && {
@@ -1857,7 +1861,6 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
     store_runoption volume "$Gpudevice"
   done < <(setup_gpu_devicelist)
 
-  #Nvidiaversion="304.137"
   [ -z "$Nvidiaversion" ] && return 0
   
   # support for prime-run / discrete NVIDIA card #394
@@ -2510,6 +2513,15 @@ check_xdepends() {              # check dependencies on host for X server option
           Return=1
         ;;
       esac
+    ;;
+  esac
+  case ${1:-} in
+    --weston|--kwin)
+      [ "$Containeruser" != "$Hostuser" ] && {
+        $Message "${1:-} does not run with a container user
+  different from host user $Hostuser (option --user=$Containeruser)."
+        Return=1
+      }
     ;;
   esac
   # X command
@@ -3675,7 +3687,7 @@ create_xcontainercommand() {    # create docker command for X in container
   # create command
   Xcontainercommand="$Containerbackendbin run --rm --detach --tty --pull=never  \\
   --name $Xcontainername \\
-  --user $Containeruseruid:$Containerusergid \\
+  --user ${Containeruseruid:-1000}:${Containerusergid:-1000} \\
   --volume $Cachefolder/etcpasswd.xcontainer:/etc/passwd:ro \\
   --env HOME=/tmp \\
   --cap-drop ALL \\
@@ -6445,7 +6457,6 @@ $(rmcr < '$Containerlogfile' | uniq )"'
 start_compositor() {            # start Wayland compositor Weston or KWin
   local Compositorkeyword Command
   Command="$(tr -d '\\\n' <<< "$Compositorcommand")"
-  
   case $Xserver in
     --weston|--weston-xwayland|--xpra-xwayland|--xpra2-xwayland) Compositorkeyword="weston-desktop-shell" ;;
 #    --kwin|--kwin-xwayland)                                      Compositorkeyword="CreateListener" ;;
@@ -6454,7 +6465,7 @@ start_compositor() {            # start Wayland compositor Weston or KWin
   
   case $Xcontainer in
     yes)
-      $Containerbackendbin exec --detach $Xcontainername sh -c "$Command >> $Compositorlogfile  2>&1"
+      $Containerbackendbin exec --detach $Xcontainername sh -c "$Command >> $Compositorlogfile  2>&1" 2>>"$Compositorlogfile"
       Compositorpid="$(ps aux | grep "$(cut -c1-50 <<< "$Command")" | grep -v grep | awk '{print $2}')"
     ;;
     no)

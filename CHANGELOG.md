@@ -43,6 +43,8 @@ Project website: https://github.com/mviereck/x11docker
    [(#394)](https://github.com/mviereck/x11docker/issues/394)
  - NVIDIA: Wayland/Xwayland support since driver>=470.x and Xwayland>=21.1.2
    [(#394)](https://github.com/mviereck/x11docker/issues/394)
+ - `--user=RETAIN`: Fix socket sharing bug caused by convertpath(). 
+   [(#394)](https://github.com/mviereck/x11docker/issues/394)
 ### Deprecated
  - `--kwin-xwayland`: use `--weston-xwayland` instead.
  - `--showenv`: use `--printenv` instead.
