@@ -3,16 +3,17 @@ x11docker ToDo notes
 
 ## Work in progress
  - X in container:
-   - check --ipc/--hostipc interferences (X only)
+   - do not store stdout&stderr of container?
    - --exe, --xonly
+   - check --ipc in CUSTOM_RUN_OPTIONS
    - provide Wayland socket to host if needed
-   - nvidia GPU - image with driver
-   - check --xoverip, --exe, --backend, --runtime
-   - missing: Xorg, Weston/Kwin on console, nxagent, xpra-xwayland
-   - nxagent needs root owned .X11-unix https://github.com/ArcticaProject/nx-libs/issues/1034
- - no dockerrc needed since --pw is removed
-
+   - check --exe, --backend, --runtime
+   - missing: Xorg, Weston/Kwin on console, xpra-xwayland
+ - check --stdin
+ 
 ## Issues to fix
+ - use --mount instead of --volume -> does not create root host directories
+ - x11docker/fvwm: openrc package broken? no `rc-update`, no dbus
  - `--iglx` now works with `--xorg` -> report at kata
  - `--remove`: give note about not removed files in `~./config/x11docker` and `/etc/x11docker`
  - `--exe`: Give notes for invalid options.

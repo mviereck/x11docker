@@ -8,14 +8,9 @@ Project website: https://github.com/mviereck/x11docker
 
 ## Unreleased
 ### Added
- - `--xc`: New option to run X server in container of `x11docker/xerver`.
-   Experimental stage yet. Currently supported:
-   - `--xpra`
-   - `--xephyr`
-   - `--weston-xwayland`
-   - `--xvfb`
-   - `--weston`
-   - `--xwayland`
+ - `--xc`: New option to run X server in container of `x11docker/xserver`.
+   Most X server and Wayland options are supported except those
+   running on console (notable `--xorg`).
  - `--xpra2`: New X server option to run xpra server in container (`--xc`),
    but xpra client on host.
  - `--xpra2-xwayland`: New X server option to run accelerated xpra server
@@ -38,6 +33,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--xpra`: No Xdummy support. Needs `Xfvb`.
  - `--vt [=N]`: Argument N is optional now.
    [(#404)](https://github.com/mviereck/x11docker/issues/404)
+ - `create_dockerrc()`: removed, components integrated in main script.
 ### Fixed
  - `--gpu`: Set environment variables of `prime-run`.
    [(#394)](https://github.com/mviereck/x11docker/issues/394)
