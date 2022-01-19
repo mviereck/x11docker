@@ -2,15 +2,14 @@
 x11docker ToDo notes
 
 ## Work in progress
- - --build: download files for COPY/ADD
  - X in container:
-   - --xc=no if not on amd64
    - check --ipc in CUSTOM_RUN_OPTIONS
    - missing: Xorg, Weston/Kwin on console, xpra-xwayland
    - reduce xpra dependencies?
  - provide XlibNoSHM.so on host for --hostdisplay
  
 ## Issues to fix
+ - --build: download files for COPY/ADD (x11docker/check, x11docker/xserver)
  - x11docker/fvwm: openrc package broken? no `rc-update`, no dbus
  - `--iglx` now works with `--xorg` -> report at kata
  - `--remove`: give note about not removed files in `~./config/x11docker` and `/etc/x11docker`

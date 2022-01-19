@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## Unreleased
+## [7.0.0](https://github.com/mviereck/x11docker/releases/tag/v7.0.0) - 2022-01-20
 ### Added
  - `--xc`: New option to run X server in container of `x11docker/xserver`.
    Most X server and Wayland options are supported except those
@@ -30,7 +30,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--xorg`: Not used as fallback if not on tty.
  - `--xvfb`: `--printenv` is not set automatically.
  - `--xvfb`: No ugly GPU support anymore.
- - `--xpra`: No Xdummy support. Needs `Xfvb`.
+ - `--xpra`: No Xdummy support anymore. Needs `Xfvb`.
  - `--vt [=N]`: Argument N is optional now.
    [(#404)](https://github.com/mviereck/x11docker/issues/404)
  - `create_dockerrc()`: removed, components integrated in main script.

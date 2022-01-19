@@ -1,12 +1,13 @@
 # x11docker: ![x11docker logo](x11docker.png) Run GUI applications in Docker
 ## Avoid X security leaks and enhance container security
 [![DOI](http://joss.theoj.org/papers/10.21105/joss.01349/status.svg)](https://doi.org/10.21105/joss.01349)
-### Introduction
+## Introduction
 x11docker allows to run graphical desktop applications (and entire desktops) in Linux containers.
  - [Container tools](#backend-docker-podman-or-nerdctl) like [Docker](https://en.wikipedia.org/wiki/Docker_(software)), [podman](http://docs.podman.io/en/latest/) and [nerdctl](https://github.com/containerd/nerdctl) allow to run applications in an isolated [container](https://en.wikipedia.org/wiki/Operating-system-level_virtualization) environment. 
    Containers need much less resources than [virtual machines](https://en.wikipedia.org/wiki/Virtual_machine) for similar tasks.
  - Docker, podman and nerdctl do not provide a [display server](https://en.wikipedia.org/wiki/Display_server) that would allow to run applications with a [graphical user interface](https://en.wikipedia.org/wiki/Graphical_user_interface).
- - x11docker fills the gap. It runs an [X display server](https://en.wikipedia.org/wiki/X_Window_System) on the host system and provides it to containers.
+ - x11docker fills the gap. It runs an [X display server](https://en.wikipedia.org/wiki/X_Window_System) and provides it to containers. 
+   Most supported X servers run in a container, too.
  - Additionally x11docker does some [security setup](https://github.com/mviereck/x11docker#security) to enhance container isolation and to avoid X security leaks. 
    This allows a [sandbox](#sandbox) environment that fairly well protects the host system from possibly malicious or buggy software.
 
@@ -15,9 +16,6 @@ This can help to run or deploy software that is difficult to install on several 
 Files to work on can be shared between host and container.
 
 [x11docker wiki](https://github.com/mviereck/x11docker/wiki) provides some how-to's for basic setups without x11docker.
-
-### Supported systems
-x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#installation-on-ms-windows). x11docker does not run on macOS except in a Linux VM.
 
 ### Features
  - Focus on [security](#security):
@@ -33,12 +31,16 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
  - Easy to use. [Examples](#examples): 
    - `x11docker x11docker/fvwm xterm`
    - `x11docker --desktop --size 320x240 x11docker/lxde` (needs nested X server `Xephyr`)
-   
+ 
+### Supported systems
+x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#installation-on-ms-windows). x11docker does not run on macOS except in a Linux VM.
 
 ![retro terminal cathode](/../screenshots/screenshot-retroterm.png?raw=true "Cathode retro term in docker") ![LXDE in xpra](/../screenshots/screenshot-lxde-small.png?raw=true "LXDE desktop in docker")
-
-
-### Table of contents
+  
+## Table of contents
+ - [Introduction](#introduction)
+   - [Features](#features)
+   - [Supported systems](#supported-systems)
  - [Terminal syntax](#terminal-syntax)
  - [Options](#options)
    - [Choice of X servers and Wayland compositors](#choice-of-x-servers-and-wayland-compositors)
@@ -56,6 +58,8 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
    - [DBus](#dbus)
    - [Container runtime](#container-runtime)
    - [Backend docker, podman or nerdctl](#backend-docker-podman-or-nerdctl)
+   - [Preconfiguration with --preset](#preconfiguration-with---preset)
+     - [Default preset for all x11docker sessions](#default-preset-for-all-x11docker-sessions)
  - [Security](#security)
    - [Options degrading container isolation](#options-degrading-container-isolation)
    - [Sandbox](#sandbox)
@@ -82,11 +86,9 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
  - [Examples](#examples)
    - [Single applications](#single-applications)
    - [Desktop environments](#desktop-environments)
-   - [Option --preset](#option---preset)
    - [Adjust images for your needs](#adjust-images-for-your-needs)
    - [Screenshots](#screenshots)
 
-   
 ## Terminal syntax
 Just type `x11docker IMAGENAME [COMMAND]`. 
  - Get an [overview of options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview) with `x11docker --help`. 
@@ -111,9 +113,7 @@ To run only an empty new X server:
   x11docker [OPTIONS] --xonly
 ```
 `CUSTOM_RUN_OPTIONS` are just added to the `docker|podman|nerdctl run` command without a serious check by x11docker.
- 
- 
- 
+
 ## Options
 Description of some commonly used feature [options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview).
  - Some of these options have dependencies on host and/or in image.
@@ -247,6 +247,9 @@ Possible runtime configuration in `/etc/docker/daemon.json`:
     "nvidia": {
       "path": "nvidia-container-runtime",
       "runtimeArgs": []
+    },
+    "sysbox-runc": {
+      "path": "/usr/bin/sysbox-runc"
     }
   }
 }
@@ -262,7 +265,6 @@ and [nerdctl](https://github.com/containerd/nerdctl) with option `--backend=BACK
    - Barely tested:
      - rootless `docker`
      - `nerdctl` in rootless and rootful mode.
-   - Some fixes and adjustments for the less tested setups can be expected.
  - For rootless mode `podman` is recommended. 
    - Only `podman` allows option `--home` in rootless mode yet.
    - Only `podman` provides useful file ownerships with option `--share` in rootless mode yet.
@@ -270,6 +272,49 @@ and [nerdctl](https://github.com/containerd/nerdctl) with option `--backend=BACK
  - To switch between rootless or rootful mode of `podman` and `nerdctl` just use (or leave) `sudo` or set (or leave) option `--pw`.
  - For [rootless docker](https://docs.docker.com/engine/security/rootless/) set environment variable `DOCKER_HOST` accordingly.
  
+### Preconfiguration with --preset
+For often used option combinations you might want to use option `--preset FILENAME` to have a command shortcut. 
+`FILENAME` is a file in `~/.config/x11docker/preset` or in `/etc/x11docker/preset` containing some x11docker options.
+ - Example `multimedia`: Create a file `~/.config/x11docker/preset/multimedia`:
+   ```
+   --gpu
+   --webcam
+   --printer
+   --pulseaudio
+   --clipboard
+   --share ~/Videos
+   --share ~/Music
+   ```
+   Use it like: `x11docker --preset=multimedia jess/vlc`
+ - Example deepin desktop: Instead of long command
+   ```
+   x11docker --desktop --init=systemd --gpu --pulseaudio --home -- --cap-add=IPC_LOCK -- x11docker/deepin
+   ``` 
+   you can create a file `~/.config/x11docker/preset/deepin` containing the desired options and even the image name:
+   ```
+   --desktop 
+   --init=systemd
+   --gpu
+   --pulseaudio
+   --home
+   -- 
+   --cap-add=IPC_LOCK
+   -- 
+   x11docker/deepin
+   ```
+   Run with: `x11docker --preset=deepin`
+   
+#### Default preset for all x11docker sessions
+You can create a `default` preset file that is applied on all x11docker sessions. You can think of it as a configuration file for x11docker.
+ - Example: To always use `podman` instead of docker, create a file with name `default` in `~/.config/x11docker/preset` or in `/etc/x11docker/preset` with content:
+   ```
+   --backend=podman
+   ```
+   This will cause x11docker to always use `podman` instead of `docker` unless specified otherwise in the x11docker command.
+   
+The same way you can specify other and more options as a default, e.g. `--runtime=kata-runtime`.
+Note that a local user `default` will supersede a system wide `default`. 
+   
 ## Security 
 Scope of x11docker is to run containerized GUI applications while preserving and improving container isolation.
 Core concept is:
@@ -420,9 +465,10 @@ x11docker can run with standard system utilities without additional dependencies
  - As a core it only needs `bash`, an `X` server and one of [`docker`](https://www.docker.com/), [`podman`](http://docs.podman.io/en/latest/) or [`nerdctl`](https://github.com/containerd/nerdctl) to run containers on X.
  - x11docker checks dependencies for chosen options on startup and shows terminal messages if some are missing. 
 
-For advanced usage of x11docker it is recommended to install some additional packages.
+For advanced usage of x11docker it is recommended to provide some additional packages.
 The recommended base commands are: `nxagent` `Xephyr` `weston` `Xwayland` `xdotool` `xauth` `xinit` `xclip` `xhost` `xrandr` `xdpyinfo`. Some of them are probably already installed.
- - To provide these base commands see [wiki: Dependencies - Recommended base](https://github.com/mviereck/x11docker/wiki/Dependencies#recommended-base) for a package list matching your distribution.
+ - You can provide image [`x11docker/xserver`](https://github.com/mviereck/dockerfile-x11docker-xserver) that contains all the tools. (Recommended)
+ - Or install the packages on host. See [wiki: Dependencies - Recommended base](https://github.com/mviereck/x11docker/wiki/Dependencies#recommended-base) for a package list matching your distribution.
 
 Some feature options have additional dependencies on host and/or in image. This affects especially options `--gpu`, `--printer` and `--pulseaudio`.
 Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
@@ -558,7 +604,8 @@ x11docker --build x11docker/fvwm
 | [Fluxbox](https://github.com/mviereck/dockerfile-x11docker-fluxbox) (based on Debian, 87 MB) | `x11docker --desktop x11docker/fluxbox` |
 | [FVWM](https://github.com/mviereck/dockerfile-x11docker-fvwm) (based on [Alpine](https://alpinelinux.org/), 22.5 MB) | `x11docker --desktop x11docker/fvwm` |
 | [Gnome 3](https://github.com/mviereck/dockerfile-x11docker-gnome) | `x11docker --desktop --gpu --init=systemd x11docker/gnome` |
-| [KDE Plasma](https://github.com/mviereck/dockerfile-x11docker-kde-plasma) | `x11docker --desktop --gpu --init=systemd x11docker/kde-plasma` |
+| [KDE Plasma](https://github.com/mviereck/dockerfile-x11docker-kde-plasma) on X| `x11docker --desktop --gpu --init=systemd x11docker/kde-plasma` |
+| [KDE Plasma](https://github.com/mviereck/dockerfile-x11docker-kde-plasma) on Wayland| `x11docker --kwin --wayland x11docker/kde-plasma plasmashell` |
 | [KDE Plasma](https://github.com/mviereck/dockerfile-x11docker-kde-plasma) as nested Wayland compositor| `x11docker --gpu --init=systemd -- --cap-add SYS_RESOURCE -- x11docker/kde-plasma startplasma-wayland` |
 | [Lumina](https://github.com/mviereck/dockerfile-x11docker-lumina) ([website](https://lumina-desktop.org)) (based on [Void Linux](https://www.voidlinux.org/))| `x11docker --desktop x11docker/lumina` |
 | [LiriOS](https://liri.io/) (based on Fedora) | `x11docker --desktop --gpu lirios/unstable` |
@@ -568,38 +615,6 @@ x11docker --build x11docker/fvwm
 | [Mate](https://github.com/mviereck/dockerfile-x11docker-mate) | `x11docker --desktop x11docker/mate` |
 | [Trinity](https://github.com/mviereck/dockerfile-x11docker-trinity) ([website](https://www.trinitydesktop.org/)) (successor of KDE 3) | `x11docker --desktop x11docker/trinity` |
 | [Xfce](https://github.com/mviereck/dockerfile-x11docker-xfce) | `x11docker --desktop x11docker/xfce` |
-
-### Option --preset
-For very long option combinations you might want to use option `--preset FILENAME` to have a command shortcut. 
-`FILENAME` is a file in `~/.config/x11docker/preset` containing some x11docker options.
- - Example multimedia: Create a file `~/.config/x11docker/preset/multimedia`:
-   ```
-   --gpu
-   --webcam
-   --printer
-   --pulseaudio
-   --clipboard
-   --share ~/Videos
-   --share ~/Music
-   ```
-   Use it like: `x11docker --preset=multimedia jess/vlc`
- - Example deepin desktop: Instead of long command
-   ```
-   x11docker --desktop --init=systemd --gpu --pulseaudio --home -- --cap-add=IPC_LOCK -- x11docker/deepin
-   ``` 
-   you can create a file `~/.config/x11docker/preset/deepin` containing the desired options:
-   ```
-   --desktop 
-   --init=systemd
-   --gpu
-   --pulseaudio
-   --home
-   -- 
-   --cap-add=IPC_LOCK
-   -- 
-   x11docker/deepin
-   ```
-   Run with: `x11docker --preset=deepin`
    
 ### Adjust images for your needs
 For persistent changes of image system adjust Dockerfile and rebuild. To add custom applications to x11docker example images you can create a new Dockerfile based on them. Example:
