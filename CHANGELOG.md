@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## Unreleased
+### Fixed
+ - Fixed some tool dependency checks not needed with `--xc`.
+
 ## [7.0.0](https://github.com/mviereck/x11docker/releases/tag/v7.0.0) - 2022-01-20
 ### Added
  - `--xc`: New option to run X server in container of `x11docker/xserver`.
