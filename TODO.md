@@ -3,13 +3,13 @@ x11docker ToDo notes
 
 ## Work in progress
  - X in container:
-   - do not store stdout&stderr of container?
-   - --exe, --xonly
+   - --xc=no if not on amd64
    - check --ipc in CUSTOM_RUN_OPTIONS
-   - provide Wayland socket to host if needed
-   - check --exe, --backend, --runtime
    - missing: Xorg, Weston/Kwin on console, xpra-xwayland
+   - Xcontainerid: watch und remove
  - check --stdin
+ - --build: download files for COPY/ADD
+ - provide XlibNoSHM.so on host
  
 ## Issues to fix
  - use --mount instead of --volume -> does not create root host directories
