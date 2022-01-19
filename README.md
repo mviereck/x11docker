@@ -7,7 +7,7 @@ x11docker allows to run graphical desktop applications (and entire desktops) in 
    Containers need much less resources than [virtual machines](https://en.wikipedia.org/wiki/Virtual_machine) for similar tasks.
  - Docker, podman and nerdctl do not provide a [display server](https://en.wikipedia.org/wiki/Display_server) that would allow to run applications with a [graphical user interface](https://en.wikipedia.org/wiki/Graphical_user_interface).
  - x11docker fills the gap. It runs an [X display server](https://en.wikipedia.org/wiki/X_Window_System) and provides it to containers. 
-   Most supported X servers run in a container, too.
+   Most supported X servers run on host or in a container of image [x11docker/xserver](https://github.com/mviereck/dockerfile-x11docker-xserver).
  - Additionally x11docker does some [security setup](https://github.com/mviereck/x11docker#security) to enhance container isolation and to avoid X security leaks. 
    This allows a [sandbox](#sandbox) environment that fairly well protects the host system from possibly malicious or buggy software.
 
@@ -467,7 +467,8 @@ x11docker can run with standard system utilities without additional dependencies
 
 For advanced usage of x11docker it is recommended to provide some additional packages.
 The recommended base commands are: `nxagent` `Xephyr` `weston` `Xwayland` `xdotool` `xauth` `xinit` `xclip` `xhost` `xrandr` `xdpyinfo`. Some of them are probably already installed.
- - You can provide image [`x11docker/xserver`](https://github.com/mviereck/dockerfile-x11docker-xserver) that contains all the tools. (Recommended)
+ - You can provide image [`x11docker/xserver`](https://github.com/mviereck/dockerfile-x11docker-xserver) that contains all noted packages. 
+   This allows x11docker to run nested X servers in a container. (Recommended)
  - Or install the packages on host. See [wiki: Dependencies - Recommended base](https://github.com/mviereck/x11docker/wiki/Dependencies#recommended-base) for a package list matching your distribution.
 
 Some feature options have additional dependencies on host and/or in image. This affects especially options `--gpu`, `--printer` and `--pulseaudio`.
