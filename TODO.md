@@ -7,12 +7,13 @@ x11docker ToDo notes
    - check --ipc in CUSTOM_RUN_OPTIONS
    - missing: Xorg, Weston/Kwin on console, xpra-xwayland
    - Xcontainerid: watch und remove
- - check --stdin
+   - reduce xpra dependencies
+   - drop untrusted cookies if XlibNoSHM is available?
+ - --runtime: compare option with docker info default
  - --build: download files for COPY/ADD
  - provide XlibNoSHM.so on host
  
 ## Issues to fix
- - use --mount instead of --volume -> does not create root host directories
  - x11docker/fvwm: openrc package broken? no `rc-update`, no dbus
  - `--iglx` now works with `--xorg` -> report at kata
  - `--remove`: give note about not removed files in `~./config/x11docker` and `/etc/x11docker`

@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.0.0-beta-20"
+Version="7.0.0-beta-21"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -67,6 +67,8 @@ Dependencies on host:
   Depending on chosen options x11docker might need some additional tools.
   It checks for them on startup and shows messages if some are missing.
   Core list of recommended tools:
+   * Most recommended: Provide image x11docker/xserver to run X in container.
+  Otherwise provide on host:
    * Recommended to allow security and convenience:
        X servers: xpra Xephyr nxagent 
        X tools:   xauth xclip xrandr xhost xinit
@@ -873,6 +875,11 @@ download() {                    # download file at URL $1 and store it in file $
 }
 escapestring() {                # escape special chars of $1
   # escape all characters except those described in [^a-zA-Z0-9,._+@=:/-]
+  grep -q "'" <<< "${1:-}" && {
+    error "escapestring(): x11docker cannot escape char ' in :
+  ${1:-}"
+    return 1
+  }
   echo "${1:-}" | LC_ALL=C sed -e 's/[^a-zA-Z0-9,._+@=:/-]/\\&/g; '
 }
 getrandomnumber() {             # get random number
@@ -1064,12 +1071,12 @@ convertpath() {                 # convert unix and windows paths
   # change C to c
   Drive="${Drive,}"
 
-  # docker volume
+  # docker volume (same for Windows and Unix)
   [ "${Path:0:1}" = "/" ] || {
     case $Mode in
       unix|subsystem|windows) echo "$Path" ; debugnote "convertpath() $Mode: Docker volumes do not have a specified path on host: $Path" ;;
-      volume)         echo "'$Path':'${3:-/$Path}'$Readwritemode" ;;
-      mount)          echo "type=volume,source='$Path',target='${3:-/$Path}'$Readwritemode_mount" ;;
+      volume)         echo "'$Path':'${3:-/$Path}'${Readwritemode}" ;;
+      mount)          echo "type=volume,source='$Path',target='${3:-/$Path}'${Readwritemode_mount}" ;;
       container)      echo "${3:-/$Path}" ;;
     esac
     return 0
@@ -1090,8 +1097,8 @@ convertpath() {                 # convert unix and windows paths
       windows)        warning "convertpath(): Nonsense path conversion $Mode: $Path" ; return 1 ;;
       #volume)         echo "'$Path':'${3:-$Path}'$Readwritemode" ;;
       #container)      echo "${3:-$Path}" ;;
-      volume)         echo "'$Path':'${3:-$Containerpath}'$Readwritemode" ;;
-      mount)          echo "type=bind,source='$Path',target='${3:-/$Path}'$Readwritemode_mount" ;;
+      volume)         echo "'$Path':'${3:-$Containerpath}'${Readwritemode}" ;;
+      mount)          echo "type=bind,source='$Path',target='${3:-/$Path}'${Readwritemode_mount}" ;;
       container)      echo "${3:-$Containerpath}" ;;
     esac
     return 0
@@ -4846,7 +4853,7 @@ create_dockercommand() {        ### create command to run docker
   # add environment variables. Only needed here for possible 'docker exec'. Otherwise set in containerrc
   while read Line; do
     Dockercommand="$Dockercommand \\
-  --env '$Line'"
+  --env '$(escapestring "$Line")'"
   done < <(store_runoption dump env)
       
   # add custom docker arguments, imagename and imagecommand
@@ -5324,11 +5331,11 @@ Exec=/usr/local/bin/x11docker-xrandr
   echo "verbose \"Container system ID: \$Containersystem\""
   echo ""
 
-  echo "# Environment variables"
-  while read -r Line; do
-    echo "export '$Line'"
-  done < <(store_runoption dump env)
-  echo ""
+#  echo "# Environment variables"
+#  while read -r Line; do
+#    echo "export '$Line'"
+#  done < <(store_runoption dump env)
+#  echo ""
 
   echo "# Check container user"
   echo "Containeruser=\"\$(storeinfo dump containeruser)\""
@@ -6152,14 +6159,8 @@ storeinfo test locale && export LANG=\"\$(storeinfo dump locale)\"
 
 # container environment (--env)
 "
-
-    while read -r Line ; do  ### FIXME '\\\' not transmitted
-      echo "export '$Line'"
-#        echo "$Line" >&2
-#        echo   "  echo \"export $(escapestring "$Line")\""
-#        echo   "  echo \"export $(escapestring "$Line")\"" >&2
-#        echo   "  echo \"export \\\"$(escapestring "$Line")\\\"\"" >&2
-#        echo   "  echo \"export \\\"$(escapestring "$Line")\\\"\""
+    while read -r Line ; do
+      echo "export $(escapestring "$Line")"
     done < <(store_runoption dump env)
     
     [ "$Xauthentication" = 'yes' ] || echo "unset XAUTHORITY && export XAUTHORITY"
@@ -6221,7 +6222,6 @@ debugnote \"cmdrc: Running container command:
       yes) echo "$Containerentrypoint $Containercommand <$(convertpath share $Cmdstdinfifo)" ;;
       no)  echo "$Containerentrypoint $Containercommand" ;;
     esac
-    
     echo "
 storeinfo cmdexitcode=\$?
 
@@ -6295,7 +6295,7 @@ start_container() {             # docker run
   
   debugnote "start_container(): Running image"
   case $Interactive in
-    no)  
+    no)
       read Containerid < <(eval $Dockercommand 2>>$Containerlogfile | rmcr)
     ;;
     yes)
@@ -8062,25 +8062,24 @@ setup_fifo() {                  # set up fifo channels (also option --stdin)
   esac
   [ "$Runtime" = "kata-runtime" ] && Usemkfifo="no"
   [ "$Runtime" = "sysbox-runc" ]  && Usemkfifo="no"
-  
   # redirect stdin to named pipe. Named pipe is shared with container and used as stdin of container command in containerrc
   [ "$Forwardstdin" = "yes" ] && {
     case $Usemkfifo in
       yes) unpriv "mkfifo $Cmdstdinfifo" ;;
       no)  mkfile $Cmdstdinfifo ;;
     esac
-    exec {FDcmdstdin}<>$Cmdstdinfifo 
-    cat <&0 >${FDcmdstdin} & storepid $! catstdin
+    #exec {FDcmdstdin}<>$Cmdstdinfifo 
+    #cat <&0 >>${FDcmdstdin} & storepid $! catstdin
+    cat <&0 >>$Cmdstdinfifo & storepid $! catstdin
     storeinfo "stdin=$Cmdstdinfifo"
   }
-
   case $Usemkfifo in
     yes)
       unpriv "mkfifo $Watchpidfifo"
       unpriv "mkfifo $Messagefifo && chmod 666 $Messagefifo"
       unpriv "mkfifo $Timetosaygoodbyefifo"
     ;;
-    no) # Windows, kata
+    no) # Windows, kata, sysbox
       mkfile $Watchpidfifo
       mkfile $Messagefifo 666
       mkfile $Timetosaygoodbyefifo 666
