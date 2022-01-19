@@ -18,7 +18,7 @@ Project website: https://github.com/mviereck/x11docker
  - Configuration of x11docker with `default` preset file. Compare `--preset`.
    Allows to specify options that will be applied in all x11docker sessions.
    Useful to declare a default `--backend` and/or `--runtime`.
- - `--backend=sysbox-runc`: Experimental support of sysbox runtime.
+ - `--runtime=sysbox-runc`: Experimental support of sysbox runtime.
  - `--printenv [=FILE]`: Replaces `--showenv`.
  - `--printid [=FILE]`: Replaces `--showid`.
  - `--printinfofile [=FILE]`: Replaces `--showinfofile`.
@@ -39,7 +39,7 @@ Project website: https://github.com/mviereck/x11docker
    [(#394)](https://github.com/mviereck/x11docker/issues/394)
  - NVIDIA: Wayland/Xwayland support since driver>=470.x and Xwayland>=21.1.2
    [(#394)](https://github.com/mviereck/x11docker/issues/394)
- - `--user=RETAIN`: Fix socket sharing bug caused by convertpath(). 
+ - `--user=RETAIN`: Fix socket sharing bug caused by `convertpath()`. 
    [(#394)](https://github.com/mviereck/x11docker/issues/394)
 ### Deprecated
  - `--kwin-xwayland`: use `--weston-xwayland` instead.
