@@ -2,16 +2,13 @@
 x11docker ToDo notes
 
 ## Work in progress
+ - --build: download files for COPY/ADD
  - X in container:
    - --xc=no if not on amd64
    - check --ipc in CUSTOM_RUN_OPTIONS
    - missing: Xorg, Weston/Kwin on console, xpra-xwayland
-   - Xcontainerid: watch und remove
-   - reduce xpra dependencies
-   - drop untrusted cookies if XlibNoSHM is available?
- - --runtime: compare option with docker info default
- - --build: download files for COPY/ADD
- - provide XlibNoSHM.so on host
+   - reduce xpra dependencies?
+ - provide XlibNoSHM.so on host for --hostdisplay
  
 ## Issues to fix
  - x11docker/fvwm: openrc package broken? no `rc-update`, no dbus

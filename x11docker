@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.0.0-beta-21"
+Version="7.0.0-beta-22"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -532,7 +532,7 @@ $Line"
 
 #### exit
 finish() {                      # trap EXIT routine to clean up background processes and cache
-  local Pid Name Zeit Exitcode Pid1pid= Watchmessagefifopid= i 
+  local Pid Name Zeit Exitcode Pid1pid= Watchmessagefifopid= i Xpid1pid
 
   # do not finish() in subshell, just give signal to all other processes and terminate subshell
   [ "$$" = "$BASHPID" ] || {
@@ -566,6 +566,18 @@ finish() {                      # trap EXIT routine to clean up background proce
             checkpid $Pid1pid || break
             mysleep $(awk "BEGIN { print $Count * 0.1 }")
             debugnote "finish(): Waiting for container PID 1: $Pid1pid to terminate."
+          done
+          checkpid $Pid1pid && $Containerbackendbin stop $Xcontainername
+        ;;
+        Xcontainerpid1)
+          Xpid1pid="$Pid"
+          #[ "$Winsubsystem" ] && Pid1pid=""
+          termpid "$Xpid1pid" "$Name" || Debugmode="yes"
+          # Give container time for graceful shutdown
+          for Count in 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0; do
+            checkpid $Xpid1pid || break
+            mysleep $(awk "BEGIN { print $Count * 0.1 }")
+            debugnote "finish(): Waiting for X container PID 1: $Xpid1pid to terminate."
           done
         ;;
         *) 
@@ -3681,7 +3693,7 @@ esac
   
   return 0
 }
-create_xcontainercommand() {    # create docker command for X in container
+create_xcontainercommand() {    # option --xc: create docker command for X in container
   local Xcontainerrc Xc_hostx Xc_hostwayland Xc_nomitshm Xc_containerwayland Xc_gpu Gpudevice
 
   # code snippets
@@ -3725,7 +3737,10 @@ create_xcontainercommand() {    # create docker command for X in container
   Xcontainername="x11docker_X${Newdisplaynumber}_xserver_${Cachenumber}"
 
   # create command
-  Xcontainercommand="$Containerbackendbin run --rm --detach --tty --pull=never  \\
+  Xcontainercommand="$Containerbackendbin run --rm --detach \\
+  --tty \\
+  --pull=never \\
+  --init \\
   --name $Xcontainername \\
   --user ${Containeruseruid:-$Hostuseruid}:${Containerusergid:-$Hostusergid
   } \\
@@ -4349,23 +4364,17 @@ check_image() {                 # get some image information
   
   return 0
 }
-check_runtime() {
+check_runtime() {               # option --runtime
+  local Defaultruntime
+  
   Defaultruntime="$( { grep 'Default Runtime' <<< "$Backendinfo" ||: ;} | awk '{print $3}' )"
+  [ -z "$Defaultruntime" ] && Defaultruntime="runc"
+  [ -z "$Runtime" ]        && Runtime="$Defaultruntime"
+  
   debugnote "Default runtime: $Defaultruntime"
   debugnote "All Runtimes:
   $(grep 'Runtimes' <<< "$Backendinfo" ||: )"
-  [ "$Defaultruntime" != "$Runtime" ] && {
-    case $Defaultruntime in
-      "") ;;
-      kata-runtime)  warning 'Found default container runtime kata-runtime.
-  Please run x11docker with --runtime=kata-runtime to avoid issues.' ;;
-      nvidia) [ '$Sharegpu' = 'yes' ] &&  warning 'Option --gpu: Found default container runtime nvidia.
-  Please run x11docker with --runtime=nvidia to avoid issues.' ;;
-      runc|crun|oci|sysbox-runc) ;;
-      *) note "Found unknown container runtime: $Defaultruntime
-  Please report at:  https://github.com/mviereck/x11docker" ;;
-    esac
-  }
+  
   return 0
 }
 check_cgroup() {                # check [and create] cgroup mountpoint for systemd or elogind
@@ -6485,16 +6494,25 @@ start_compositor() {            # start Wayland compositor Weston or KWin
   return 0
 }
 start_xcontainer() {            # --xc
-  local Containerinspect
+  local Containerinspect Xpid1pid
   
   Xcontainercommand="$(tr -d '\\\n' <<< "$Xcontainercommand")"
   read Xcontainerid< <($Xcontainercommand 2>>$Xinitlogfile)
   storeinfo "Xcontainerid=$Xcontainerid"
   
-  Containerinspect="$($Containerbackendbin inspect $Xcontainername)"
-  Xcontainerip="$(parse_inspect "$Containerinspect" "NetworkSettings" "IPAddress")"
-  storeinfo "Xcontainerip=$Xcontainerip"
-  
+  Containerinspect="$($Containerbackendbin inspect $Xcontainername 2>>$Xinitlogfile | rmcr)"
+  [ "$Containerinspect" != "[]" ] && {
+    Xcontainerip="$(parse_inspect "$Containerinspect" "NetworkSettings" "IPAddress")"
+    storeinfo "Xcontainerip=$Xcontainerip"
+    Xpid1pid="$(parse_inspect "$Containerinspect" "State" "Pid")"
+    setonwatchpidlist "$Xpid1pid" "Xcontainerpid1"
+  } || {
+    error "--xc: Startup of x11docker/xserver failed.
+  Last lines of xinit log:
+$(tail $Xinitlogfile)"
+    return 1
+  }
+    
   [ "$Nvidiainstallerfile" ] && {
     note "Installing NVIDIA driver in X container."
     docker exec --tty --privileged --user=root $Xcontainername bash $Sharefolder/nvidia_installer >> $Xinitlogfile 2>&1 || note 'ERROR: NVIDIA driver installation in X container failed.'
@@ -8932,13 +8950,24 @@ main() {
   check_runmode                 # modes: run image, or host command, or X only    # --exe, --xonly
   check_hostuser                # find unprivileged host user                     # --hostuser
   create_cachefiles             # create cache files owned by unprivileged user   # --cachebasedir
-  setup_verbosity                # create [and show] summary logfile              # --verbose
+  setup_verbosity               # create [and show] summary logfile               # --verbose
   check_hostxenv                # check X environment from host
   storeinfo "x11dockerpid=$$"   # store pid of x11docker
+  
+  [ "$X11dockermode" = "run" ] && {
+    # Check whether docker daemon is running, get docker info
+    Backendinfo="$($Containerbackendbin info 2>>$Containerlogfile)" || error "'$Containerbackend info' failed.
+  If using docker: Is docker daemon running at all?
+  Try to start docker daemon with 'systemctl start docker'.
+  Last lines of log:
+$(rmcr < "$Containerlogfile" | tail)"
+    check_runtime
+  }
 
   debugnote "
 x11docker version: $Version
 Backend version:   $($Containerbackendbin --version 2>&1)
+OCI Runtime:       $Runtime
 Host system:       $(grep '^PRETTY_NAME' /etc/os-release 2>/dev/null | cut -d= -f2 || echo "$Hostsystem")
 Host architecture: $Hostarchitecture
 Command:           '$0' $(for Line in "$@"; do echo -n "'$Line' " ; done)
@@ -9037,14 +9066,6 @@ Parsed options:    $Parsedoptions_global"
 
   ### Create docker command
   [ "$X11dockermode" = "run" ] && {
-  
-    # Check whether docker daemon is running, get docker info
-    Backendinfo="$($Containerbackendbin info 2>>$Containerlogfile)" || error "'$Containerbackend info' failed.
-  If using docker: Is docker daemon running at all?
-  Try to start docker daemon with 'systemctl start docker'.
-  Last lines of log:
-$(rmcr < "$Containerlogfile" | tail)"
-    check_runtime
     check_image
     check_cgroup
     setup_capabilities          # add linux capabilities if needed for some options. Default: --cap-drop=ALL
