@@ -23,7 +23,7 @@ Files to work on can be shared between host and container.
    - Restricts container capabilities to bare minimum.
    - Container user is same as host user to avoid root in container.
  - Low [dependencies](#dependencies):
-   - No obliging dependencies on host beside X and one of `docker`, `podman` or `nerdctl`. Recommended: `nxagent` and `Xephyr`.
+   - No obliging dependencies on host beside X and one of `docker`, `podman` or `nerdctl`. Recommended: `nxagent` and `Xephyr`, alternatively image `x11docker/xserver`.
    - No dependencies inside of images except for some optional features.
  - Several [optional features](#options) like [GPU](#gpu-hardware-acceleration), [sound](#sound), [webcam](#webcam) and [printer](#printer) support.
  - Remote access with [SSH](https://github.com/mviereck/x11docker/wiki/Remote-access-with-SSH), [VNC](https://github.com/mviereck/x11docker/wiki/VNC) 
@@ -31,11 +31,10 @@ Files to work on can be shared between host and container.
  - Easy to use. [Examples](#examples): 
    - `x11docker x11docker/fvwm xterm`
    - `x11docker --desktop --size 320x240 x11docker/lxde` (needs nested X server `Xephyr`)
- 
+![retro terminal cathode](/../screenshots/screenshot-retroterm.png?raw=true "Cathode retro term in docker") ![LXDE in xpra](/../screenshots/screenshot-lxde-small.png?raw=true "LXDE desktop in docker")
+
 ### Supported systems
 x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#installation-on-ms-windows). x11docker does not run on macOS except in a Linux VM.
-
-![retro terminal cathode](/../screenshots/screenshot-retroterm.png?raw=true "Cathode retro term in docker") ![LXDE in xpra](/../screenshots/screenshot-lxde-small.png?raw=true "LXDE desktop in docker")
   
 ## Table of contents
  - [Introduction](#introduction)

@@ -3,12 +3,15 @@ x11docker ToDo notes
 
 ## Work in progress
  - X in container:
+   - use xauth and others from image if not available on host
+   - check --exe --xc MIT-SHM?
    - check --ipc in CUSTOM_RUN_OPTIONS
    - missing: Xorg, Weston/Kwin on console, xpra-xwayland
    - reduce xpra dependencies?
  - provide XlibNoSHM.so on host for --hostdisplay
  
 ## Issues to fix
+ - sysbox: warning on capabilities
  - --build: download files for COPY/ADD (x11docker/check, x11docker/xserver)
  - x11docker/fvwm: openrc package broken? no `rc-update`, no dbus
  - `--iglx` now works with `--xorg` -> report at kata

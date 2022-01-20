@@ -6,10 +6,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## Unreleased
+## [7.0.1](https://github.com/mviereck/x11docker/releases/tag/v7.0.1) - 2022-01-20
 ### Fixed
  - `--share=$HOME`: Fix container path.
- - Fixed some tool dependency checks not needed with `--xc`.
+ - Fix some X tool dependency checks.
 
 ## [7.0.0](https://github.com/mviereck/x11docker/releases/tag/v7.0.0) - 2022-01-20
 ### Added
