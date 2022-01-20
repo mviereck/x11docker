@@ -8,6 +8,7 @@ Project website: https://github.com/mviereck/x11docker
 
 ## Unreleased
 ### Fixed
+ - `--share=$HOME`: Fix container path.
  - Fixed some tool dependency checks not needed with `--xc`.
 
 ## [7.0.0](https://github.com/mviereck/x11docker/releases/tag/v7.0.0) - 2022-01-20
