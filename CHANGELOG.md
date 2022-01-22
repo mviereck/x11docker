@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Changed
+ - `--hostdisplay`: Use `XlibNoSHM.so` from `x11docker/xserver` if available.
+### Fixed
+ - `--xonly/--exe --xc --xoverip`: Allow access.
+ - `--xc`: Check IPC settings in `CUSTOM_RUN_OPTIONS`.
+ - `--xonly/--exe --xoverip`: No error without `--network`.
+
 ## [7.0.1](https://github.com/mviereck/x11docker/releases/tag/v7.0.1) - 2022-01-20
 ### Fixed
  - `--share=$HOME`: Fix container path.
