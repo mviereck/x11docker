@@ -4,7 +4,9 @@ x11docker ToDo notes
 ## Work in progress
  - --backend=proot
    - --alsa fails
-   - xfce4-terminal has a long delay before prompt
+   - xfce4-terminal redirection fails, needs something in /dev
+while read Line; do
+done < <(LC_ALL=C aplay -l | grep card)
    - depends on Switchcontaineruser=yes
    - check_containeruserhome(): move checks to check_options
    - fix messages

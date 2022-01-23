@@ -4473,11 +4473,9 @@ check_cgroup() {                # check [and create] cgroup mountpoint for syste
   }
   return 0
 }
-check_containerhome() {         # options --home, --homedir, --homebasedir: check HOME of container user.
-  ## option '--home':        Share folder ~/.local/share/x11docker/imagename with created container as its home directory
-  ## option '--home=DIR':    Share custom host folder as home
+check_containerhomebasedir() {
   ## option '--homebasedir': Specify base folder here to store container home folders for --home
-  
+
   # base home folder
   [ "$Hosthomebasefolder" ] && {                # --homebasedir
     Hosthomebasefolder="$(convertpath subsystem "$Hosthomebasefolder")"
@@ -4500,6 +4498,10 @@ check_containerhome() {         # options --home, --homedir, --homebasedir: chec
       esac
     ;;
   esac
+}
+check_containerhome() {         # options --home, --homedir, --homebasedir: check HOME of container user.
+  ## option '--home':        Share folder ~/.local/share/x11docker/imagename with created container as its home directory
+  ## option '--home=DIR':    Share custom host folder as home
   
   # rootless with userns-remap
   [ "$Rootlessbackend" ] && {
@@ -4611,7 +4613,6 @@ check_containerhome() {         # options --home, --homedir, --homebasedir: chec
 }
 check_containeruser() {         # check container user and shared home folder (also option --user)
   ## check container user
-  store_runoption env "SHELL=${Containerusershell:-/bin/sh}"
   [ "$Containeruser" = "RETAIN" ] && return 0
   [ -z "$Containeruser" ] && Containeruser="$Hostuser"               # default: containeruser = hostuser. can be changed with --user
   [ -n "$Containeruser" ] && echo "$Containeruser" | grep -q ':' && {  # option --user can specify a group/gid after :
@@ -4679,14 +4680,18 @@ create_backendcommand() {        ### create command to run docker
   Dockercommand="$Backendbin run --pull never"
   [ "$Preservecachefiles" = "no" ] && Dockercommand="$Dockercommand --rm"
   
-  Prootcommand="proot -S '$Rootfs' \\
+  Prootcommand="proot --rootfs='$Rootfs' \\
   --bind=/etc/host.conf \\
   --bind=/etc/hosts \\
   --bind=/etc/nsswitch.conf \\
   --bind=/etc/resolv.conf \\
   --bind=/dev/ptmx \\
   --bind=/dev/pts \\
-  --bind=/dev/tty"
+  --bind=/dev/tty \\
+  --bind=/proc \\
+  --bind=/run/shm \\
+  --bind=/dev/shm \\
+  --bind=/dev"
   
   [ "$Sudouser" = "yes" ] && Prootcommand="$Prootcommand \\
   --root-id"
@@ -6329,6 +6334,10 @@ storeinfo test locale && export LANG=\"\$(storeinfo dump locale)\"
 
 # container environment (--env)
 "
+    case $Containerusershell in
+      auto) echo "command -v /bin/bash >/dev/null && export SHELL=/bin/bash || export SHELL=/bin/sh" ;;
+      *)    echo "export $(escapestring "SHELL=$Containerusershell")" ;;
+    esac
     while read -r Line ; do
       echo "export $(escapestring "$Line")"
     done < <(store_runoption dump env)
@@ -7813,7 +7822,7 @@ check_option_interferences() {  # check multiple option interferences, change se
       [ -z "$Rootfs" ] && error "--backend=proot: Did not find a rootfs for $Imagename
   in $Hosthomebasefolder/ROOTFS/$Imagebasename"
       [ -z "$Containercommand" ] && {
-        Containercommand="${Containerusershell:-/bin/sh}"
+        [ "$Containerusershell" != "auto" ] && Containercommand="$Containerusershell" || Containercommand="/bin/sh"
         note "--backend=proot: No command specified.
 Fallback: using command '$Containercommand' and enabling option --interactive."
         check_fallback
@@ -9195,8 +9204,9 @@ Parsed options:    $Parsedoptions_global"
   
   check_containeruser            # unprivileged user in container                 # --user
   check_xserver                  # check chosen X server or auto-choose one
-  check_containerhome            # create persistent container home               # --home, --homebasedir
+  check_containerhomebasedir        # check base dir for --home and possible rootfs  # --homebasedir
   check_option_interferences     # check options, change settings if needed
+  check_containerhome            # create persistent container home               # --home
   option_messages                # some messages depending on options, but not changing anything
   
   # some checks and setup
