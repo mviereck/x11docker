@@ -12,6 +12,7 @@ Project website: https://github.com/mviereck/x11docker
    [(#224)](https://github.com/mviereck/x11docker/issues/224)
 ### Changed
  - `--hostdisplay`: Use `XlibNoSHM.so` from `x11docker/xserver` if available.
+ - `--backend`: Do not use fallbacks if backend is not found.
 ### Fixed
  - `--xonly/--exe --xc --xoverip`: Allow access.
  - `--xc`: Check IPC settings in `CUSTOM_RUN_OPTIONS`.
@@ -42,7 +43,6 @@ Project website: https://github.com/mviereck/x11docker
 ### Changed
  - `--network=none` is default now. Use `-I, --network` to allow internet access.
  - `--user=root`: Needs `--sudouser` or `--cap-default` for usual root privileges.
- - `--backend`: Fallbacks to `podman` and `nerdctl` if `docker` not found.
  - `--xorg`: Not used as fallback if not on tty.
  - `--xvfb`: `--printenv` is not set automatically.
  - `--xvfb`: No ugly GPU support anymore.
