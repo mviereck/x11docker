@@ -2,11 +2,18 @@
 x11docker ToDo notes
 
 ## Work in progress
+ - --backend=proot
+   - --alsa fails
+   - xfce4-terminal has a long delay before prompt
+   - depends on Switchcontaineruser=yes
+   - check_containeruserhome(): move checks to check_options
+   - fix messages
+   - note about unregarded options
+   - --init except systemd possible?
  - X in container:
    - use xauth and others from image if not available on host
-   - check --exe --xc MIT-SHM?
-   - check --ipc in CUSTOM_RUN_OPTIONS
    - missing: Xorg, Weston/Kwin on console, xpra-xwayland
+   - --xpra-xwayland --xc: xpra client fails with keyboard error
    - reduce xpra dependencies?
  - provide XlibNoSHM.so on host for --hostdisplay
  

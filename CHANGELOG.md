@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
+### Added
+ - `--backend=proot`: Experimental support.
+   [(#224)](https://github.com/mviereck/x11docker/issues/224)
 ### Changed
  - `--hostdisplay`: Use `XlibNoSHM.so` from `x11docker/xserver` if available.
 ### Fixed
