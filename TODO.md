@@ -3,12 +3,12 @@ x11docker ToDo notes
 
 ## Work in progress
  - --backend=proot
-   - --alsa fails
+   - --alsa fails without entire /dev yet
+   - unset environment variables
    - xfce4-terminal redirection fails, needs something in /dev
 while read Line; do
 done < <(LC_ALL=C aplay -l | grep card)
    - depends on Switchcontaineruser=yes
-   - default to bash if exists
    - create HOME in containerrootrc
    - check_containeruserhome(): move checks to check_options
    - fix messages
