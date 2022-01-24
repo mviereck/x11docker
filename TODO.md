@@ -8,6 +8,8 @@ x11docker ToDo notes
 while read Line; do
 done < <(LC_ALL=C aplay -l | grep card)
    - depends on Switchcontaineruser=yes
+   - default to bash if exists
+   - create HOME in containerrootrc
    - check_containeruserhome(): move checks to check_options
    - fix messages
    - note about unregarded options
