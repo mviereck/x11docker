@@ -1,0 +1,240 @@
+#! /bin/bash
+#
+# script to create a rootfs for 'x11docker --backend=proot' from an image
+# pulls an image from local docker storage and creates a tarball at /tmp/mkrootfs/rootfs-<image-name>.tar
+#
+# beta stage
+# Dependencies:
+#   skopeo
+#   python
+#   tar
+#
+# syntax: mkrootfs IMAGENAME
+#
+
+parse_inspect() {               # parse json of inspect output using python
+  # parse for keys in output of docker|podman|nerdctl inspect.
+  # Uses python json parser.
+  # $1 String containing inspect output
+  # $2...$n Key. For second level keys provide e.g. "jsonstring" "Config" "Cmd"
+  
+  local Parserscript
+  
+  Parserscript="#! $Pythonbin
+$(cat << EOF
+import json,sys
+
+def parse_inspect(*args):
+    """ 
+    parse output of docker|podman|nerdctl inspect
+    args:
+     0: ignored
+     1: string containing inspect output
+     2..n: json keys. For second level keys provide e.g. "Config","Cmd"
+    Prints key value as a string.
+    Prints empty string if key not found.
+    A list is printed as a string with '' around each element.
+    """
+    
+    output=""
+    inspect=args[1]
+    inspect=inspect.strip()
+    if inspect[0] == "[" :
+        inspect=inspect[1:-2] # remove enclosing [ ]
+
+    obj=json.loads(inspect)
+    
+    for arg in args[2:]: # recursively find the desired object. Command.Cmd is found with args "Command" , "Cmd"
+        try:
+            obj=obj[arg]
+        except:
+            obj=""
+            
+    objtype=str(type(obj))
+    if "'list'" in objtype:
+        for i in obj:
+            output=output+"'"+str(i)+"' "
+    else:
+        output=str(obj)
+    
+    if output == "None":
+        output=""
+        
+    print(output)
+
+parse_inspect(*sys.argv)
+EOF
+  )"
+  echo "$Parserscript" | $Pythonbin - "$@"
+}
+declare_variables() {
+
+  Extractdir="/tmp/mkrootfs"  
+  Layerdir="$Extractdir/layers"
+  Rmlist="$Extractdir/rmlist"
+  Imagesettings="$Extractdir/imagesettings"
+  Startscript="$Extractdir/start"
+  Rootfsbasedir="$HOME/.local/share/x11docker/ROOTFS"
+  
+  Imagename=""
+  Rootfstar=""
+  Targetfile=""
+  Pythonbin=""
+}
+parse_options() {
+  Imagename="${1:-}"
+}
+check_dependencies() {
+  command -v python  >/dev/null && Pythonbin="python"
+  command -v python2 >/dev/null && Pythonbin="python2"
+  command -v python3 >/dev/null && Pythonbin="python3"
+  [ -z "$Pythonbin" ] && {
+    echo "No python binary found. Please install python. Exit." >&2
+    exit 1
+  }
+  command -v skopeo >/dev/null || {
+    echo "skopeo not found. Please install skopeo. Exit." >&2
+    exit 1
+  }
+  command -v tar >/dev/null || {
+    echo "tar not found. Please install tar. Exit." >&2
+    exit 1
+  }
+}
+setup_cache() {  
+  Imagebasename="$(rev <<< "$Imagename" | cut -d/ -s -f2 | rev)-$(rev <<< "$Imagename" | cut -d/ -f1 | rev)"
+  Imagebasename="${Imagebasename#-}"
+  Rootfstar="rootfs-$Imagebasename.tar"
+  Targetfile="$Rootfsbasedir/$Rootfstar"
+  Rootfstar="$Extractdir/$Rootfstar"
+  
+  mkdir -p "$Extractdir"
+  rm -r "$Extractdir"/* 2>/dev/null ||:
+  mkdir -p "$Layerdir"
+}
+flatten_layers() {
+  Inspect="$(skopeo inspect --config dir:"$Layerdir")"
+  
+  # find layer names of image. Each layer is a tarball.
+  Layercount=0
+  for Line in $(parse_inspect "$Inspect" rootfs diff_ids); do
+    Layercount="$((Layercount+1))"
+    Layers[$Layercount]="$Layerdir/$(echo $Line | cut -d: -f2 | cut -d"'" -f1)"
+  done
+
+  # use base layer as start for rootfs
+  mv "${Layers[1]}" "$Rootfstar"
+  ls -l $Rootfstar
+
+  for Layer in $(seq 2 $Layercount); do
+    echo "
+###### Layer $Layer"
+
+    # get a list of files in current layer
+    Tarlistcurrent="$(tar -t -f "${Layers[$Layer]}")"
+    # get a list of files in current base
+    Tarlistbase="$(tar -t -f "$Rootfstar")"
+    
+    ## Delete white folder content in base layer
+    Deletefolders="$(grep '\.wh\.\.wh\.\.opq' <<< "$Tarlistcurrent")" ||:
+    truncate -s0 $Rmlist
+    while read Line; do
+      Line="$(sed 's/\.wh\.\.wh\.\opq//g' <<<"$Line")"
+      [ -n "$Line" ] && grep -E "^${Line}*" <<< "$Tarlistcurrent" | grep -v -x "${Line}" >> $Rmlist ||:
+    done <<< "$Deletefolders"
+    # Delete white folders in base layer
+    echo "## Folder content to remove in base:
+$(cat $Rmlist)"
+    tar --delete -T $Rmlist -f $Rootfstar
+    
+    # Delete white files in base layer
+    Deletefiles="$(grep -v '\.wh\.\.wh\.\.opq' <<< "$Tarlistcurrent" | grep '\.wh\.')" ||:
+    truncate -s0 $Rmlist
+    echo "
+## Single files to remove in base:"
+    while read Line; do
+      Line="$(sed 's/\.wh\.//g' <<< "$Line")"
+      [ -n "$Line" ] && grep -q -x "$Line" <<< "$Tarlistbase" && {
+        echo "$Line"
+        echo "$Line" >> "$Rmlist"
+      } || {
+        [ -n "$Line" ] && echo "# NOTE: File not found in base layer: $Line" >&2
+      }
+    done <<< "$Deletefiles"
+    tar --delete -T "$Rmlist" -f "$Rootfstar"
+    
+    ## Delete white file markers in current layer
+    grep '\.wh\.' <<< "$Tarlistcurrent" > "$Rmlist" ||:
+    echo "
+## Markers to remove in current layer:
+$(cat $Rmlist)"
+    tar --delete -T "$Rmlist" -f "${Layers[$Layer]}"
+    
+    # copy files from current layer to base layer
+    tar --concatenate -f "$Rootfstar" "${Layers[$Layer]}"
+    rm "${Layers[$Layer]}"
+  done
+}
+create_startscript() {  # Create start script and settings store file
+  Cmd="$(       parse_inspect "$Inspect" config Cmd)"
+  Entrypoint="$(parse_inspect "$Inspect" config Entrypoint)"
+  Env="$(       parse_inspect "$Inspect" config Env)"
+  Workdir="$(   parse_inspect "$Inspect" config Workdir)"
+  User="$(      parse_inspect "$Inspect" config User)"
+  
+  echo "
+CMD=$Cmd
+ENTRYPOINT=$Entrypoint
+ENV=$Env
+WORKDIR=$Workdir
+USER=$User
+" > "$Imagesettings"
+
+  echo "#! /bin/sh"                                            > "$Startscript"
+  [ -n "$Env" ]            && echo "export $Env"               >> "$Startscript"
+  [ -n "$Workdir" ]        && echo "cd '$Workdir'"             >> "$Startscript"
+  [ -n "$Entrypoint$Cmd" ] && echo "$Entrypoint $Cmd \"\$@\""  >> "$Startscript"
+  [ -z "$Entrypoint$Cmd" ] && echo "[ -z \"\$@\" ] && $@"      >> "$Startscript"
+  [ -z "$Entrypoint$Cmd" ] && echo "[ -n \"\$@\" ] && $@"      >> "$Startscript"
+  chmod +x "$Startscript" ||:
+  
+  echo "
+## Image settings:
+$(cat "$Imagesettings")
+"
+  echo "
+## generated start script:
+$(cat "$Startscript")
+"  
+  tar -r -f "$Rootfstar" -C "$Extractdir" "$(basename "$Imagesettings")" "$(basename "$Startscript")"
+}
+main() {
+  set -eu
+  
+  declare_variables
+  parse_options "$@"
+  check_dependencies
+  setup_cache
+  
+  # Pull from local docker daemon
+  echo "###### Pulling image $Imagename"
+  skopeo copy docker-daemon:${Imagename}:latest dir:"$Layerdir"
+
+  flatten_layers
+  create_startscript
+  
+  rm -r "$Layerdir"
+  rm "$Rmlist" "$Startscript" "$Imagesettings"
+echo "
+###### Ready:
+$(ls -l "$Rootfstar")
+$Rootfstar
+
+To provide a rootfs for 'x11docker --backend=proot $Imagebasename',
+please run:
+
+mkdir -p $Rootfsbasedir/$Imagebasename
+tar -x -f $Rootfstar -C $Rootfsbasedir/$Imagebasename"
+}
+
+main "$@"
