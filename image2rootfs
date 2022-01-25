@@ -1,16 +1,19 @@
 #! /bin/bash
 #
-# script to create a rootfs for 'x11docker --backend=proot' from an image
-# pulls an image from local docker storage and creates a tarball at /tmp/mkrootfs/rootfs-<image-name>.tar
+# image2rootfs
+# Creates a rootfs tarball from a Docker image
 #
-# beta stage
+# Pulls an image from Docker hub (or elsewhere specified with skopeo image name syntax) 
+# and creates a tarball at /tmp/mkrootfs/rootfs-<image-name>.tar
+#
+# syntax: 
+#  image2rootfs IMAGENAME
+#
 # Dependencies:
 #   skopeo
-#   python
+#   python|python3
 #   tar
-#
-# syntax: mkrootfs IMAGENAME
-#
+#   file
 
 parse_inspect() {               # parse json of inspect output using python
   # parse for keys in output of docker|podman|nerdctl inspect.
@@ -77,54 +80,78 @@ declare_variables() {
   Rootfsbasedir="$HOME/.local/share/x11docker/ROOTFS"
   
   Imagename=""
+  Imagesource=""
   Rootfstar=""
   Targetfile=""
   Pythonbin=""
 }
 parse_options() {
-  Imagename="${1:-}"
+  Imagesource="${1:-}"
+}
+parse_imagesource() {
+
+  grep -E '^containers-storage:|^dir:|^docker://|^docker-archive|^docker-daemon:|^oci:|^oci-archive:' <<< "$Imagesource" || {
+    echo "Provided image source does not fit the skopeo image source syntax:
+  $Imagesource
+Compare 'man skopeo': section IMAGE NAMES.
+Will try to pull image from docker hub with:"
+    Imagesource="docker://$Imagesource"
+echo "  $Imagesource"
+  }
+  
+  Imagename="$(cut -d: -f2- <<< "$Imagesource")"
+  Imagename="${Imagename%:latest}"
+  Imagename="${Imagename#//}"
+  Imagebasename="$(rev <<< "$Imagename" | cut -d/ -s -f2 | rev)-$(rev <<< "$Imagename" | cut -d/ -f1 | rev)"
+  Imagebasename="$(tr : - <<< "$Imagebasename")"
+  Imagebasename="${Imagebasename#-}"
 }
 check_dependencies() {
   command -v python  >/dev/null && Pythonbin="python"
   command -v python2 >/dev/null && Pythonbin="python2"
   command -v python3 >/dev/null && Pythonbin="python3"
   [ -z "$Pythonbin" ] && {
-    echo "No python binary found. Please install python. Exit." >&2
+    echo "Error: No python binary found. Please install python. Exit." >&2
     exit 1
   }
   command -v skopeo >/dev/null || {
-    echo "skopeo not found. Please install skopeo. Exit." >&2
+    echo "Error: skopeo not found. Please install skopeo. Exit." >&2
     exit 1
   }
   command -v tar >/dev/null || {
-    echo "tar not found. Please install tar. Exit." >&2
+    echo "Error: tar not found. Please install tar. Exit." >&2
     exit 1
   }
 }
-setup_cache() {  
-  Imagebasename="$(rev <<< "$Imagename" | cut -d/ -s -f2 | rev)-$(rev <<< "$Imagename" | cut -d/ -f1 | rev)"
-  Imagebasename="${Imagebasename#-}"
+setup_cache() {
   Rootfstar="rootfs-$Imagebasename.tar"
   Targetfile="$Rootfsbasedir/$Rootfstar"
   Rootfstar="$Extractdir/$Rootfstar"
   
   mkdir -p "$Extractdir"
-  rm -r "$Extractdir"/* 2>/dev/null ||:
+  rm -rf "$Extractdir"/* 2>/dev/null ||:
   mkdir -p "$Layerdir"
 }
 flatten_layers() {
   Inspect="$(skopeo inspect --config dir:"$Layerdir")"
+  echo "$Inspect"
   
-  # find layer names of image. Each layer is a tarball.
+  # find layer names of image. Each layer is a tarball, sometimes .tar, sometimes .tar.gz
   Layercount=0
-  for Line in $(parse_inspect "$Inspect" rootfs diff_ids); do
+#  for Line in $(parse_inspect "$Inspect" rootfs diff_ids); do
+  for Line in $(parse_inspect "$(cat $Layerdir/manifest.json | jq)" layers | grep -o -P "(?<=sha256:).*?(?='}')"); do
     Layercount="$((Layercount+1))"
     Layers[$Layercount]="$Layerdir/$(echo $Line | cut -d: -f2 | cut -d"'" -f1)"
+    
+    grep -q "gzip" <<< "$(file "${Layers[$Layercount]}")" && {
+      mv ""${Layers[$Layercount]}"" ""${Layers[$Layercount]}".gz"
+      gzip -d ""${Layers[$Layercount]}".gz"
+    }
   done
 
   # use base layer as start for rootfs
   mv "${Layers[1]}" "$Rootfstar"
-  ls -l $Rootfstar
+  ls -l "$Rootfstar"
 
   for Layer in $(seq 2 $Layercount); do
     echo "
@@ -206,24 +233,27 @@ $(cat "$Imagesettings")
 ## generated start script:
 $(cat "$Startscript")
 "  
-  tar -r -f "$Rootfstar" -C "$Extractdir" "$(basename "$Imagesettings")" "$(basename "$Startscript")"
+  tar -r -f "$Rootfstar" -C "$Extractdir" "$(basename "$Imagesettings")" "$(basename "$Startscript")" ||: 
+#  tar -c -C "$Extractdir" -f "script.tar" "$(basename "$Imagesettings")" "$(basename "$Startscript")"
+#  tar --concatenate --ignore-zeros -C "$Extractdir" -f "$Rootfstar" "script.tar"
 }
 main() {
   set -eu
-  
+
   declare_variables
   parse_options "$@"
+  parse_imagesource
   check_dependencies
   setup_cache
   
   # Pull from local docker daemon
   echo "###### Pulling image $Imagename"
-  skopeo copy docker-daemon:${Imagename}:latest dir:"$Layerdir"
+  skopeo copy "$Imagesource" dir:"$Layerdir"
 
   flatten_layers
   create_startscript
   
-  rm -r "$Layerdir"
+  rm -rf "$Layerdir"
   rm "$Rmlist" "$Startscript" "$Imagesettings"
 echo "
 ###### Ready:
