@@ -14,6 +14,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--hostdisplay`: Use `XlibNoSHM.so` from `x11docker/xserver` if available.
  - `--backend`: Do not use fallbacks if backend is not found.
 ### Fixed
+ - `--backend=nerdctl`: Some fixes.
  - `--xonly/--exe --xc --xoverip`: Allow access.
  - `--xc`: Check IPC settings in `CUSTOM_RUN_OPTIONS`.
  - `--xonly/--exe --xoverip`: No error without `--network`.

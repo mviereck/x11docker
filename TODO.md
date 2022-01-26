@@ -3,17 +3,17 @@ x11docker ToDo notes
 
 ## Work in progress
  - --backend=proot
+   - change /etc/hostname and hostname in /etc/hosts
    - --alsa fails without entire /dev yet
-   - unset environment variables
    - xfce4-terminal redirection fails, needs something in /dev
 while read Line; do
 done < <(LC_ALL=C aplay -l | grep card)
    - depends on Switchcontaineruser=yes
    - create HOME in containerrootrc
-   - check_containeruserhome(): move checks to check_options
    - fix messages
    - note about unregarded options
    - --init except systemd possible?
+   
  - X in container:
    - use xauth and others from image if not available on host
    - missing: Xorg, Weston/Kwin on console, xpra-xwayland
@@ -25,7 +25,6 @@ done < <(LC_ALL=C aplay -l | grep card)
  - sysbox: warning on capabilities
  - --build: download files for COPY/ADD (x11docker/check, x11docker/xserver)
  - x11docker/fvwm: openrc package broken? no `rc-update`, no dbus
- - `--iglx` now works with `--xorg` -> report at kata
  - `--remove`: give note about not removed files in `~./config/x11docker` and `/etc/x11docker`
  - `--exe`: Give notes for invalid options.
  - `--update`: Check if installs into `/usr/bin` or `/usr/local/bin`. Do not install other files then.
@@ -89,9 +88,7 @@ done < <(LC_ALL=C aplay -l | grep card)
 ## Improvements
  - `--cleanup`: avoid hardcoded paths
  - support `--exe --user` ?
- - avoid losing `dockerstopshell` from process tree
  - avoid losing hostexe from process tree
- - `dockerstopshell` does not react if fifofile is deleted.
  - dependency wiki: Cygwin packages
  - `capsh`: replace `su` with `capsh`? (missing in alpine) But how to trigger login?
  - `x11docker/check`: palinopsia: check video RAM size with `glxinfo`, adjust requested RAM size.
