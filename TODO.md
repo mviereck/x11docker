@@ -9,7 +9,6 @@ x11docker ToDo notes
 while read Line; do
 done < <(LC_ALL=C aplay -l | grep card)
    - depends on Switchcontaineruser=yes
-   - create HOME in containerrootrc
    - fix messages
    - note about unregarded options
    - --init except systemd possible?
