@@ -16,6 +16,9 @@ This can help to run or deploy software that is difficult to install on several 
 Files to work on can be shared between host and container.
 
 [x11docker wiki](https://github.com/mviereck/x11docker/wiki) provides some how-to's for basic setups without x11docker.
+(Additionally a technical link for search engine crawlers to [x11docker wiki](https://github-wiki-see.page/m/mviereck/x11docker/wiki_index) 
+because github does not allow search engines to access github wiki pages directly. 
+Compare workaround helper [github-wiki-see](https://github.com/nelsonjchen/github-wiki-see-rs).)
 
 ### Features
  - Focus on [security](#security):
@@ -219,11 +222,14 @@ Some desktop environments and applications need a running DBus system daemon and
 It is possible to run containers with different backends following the [OCI runtime specification](https://github.com/opencontainers/runtime-spec). Docker's default runtime is `runc`. You can specify another one with option `--runtime=RUNTIME`.
 Container runtimes known and supported by x11docker are:
  - `runc`: Docker default.
- - [`kata-runtime`](https://katacontainers.io/): Sets up a virtual machine with its own Linux kernel to run the container. `kata` aims to combine the security advantages of containers and virtual machines.
-   - Some x11docker options are not possible with `--runtime=kata-runtime`. Most important: `--hostdisplay`, `--gpu`, `--printer`, `--webcam` and all Wayland related options.
- - [`nvidia`](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container#nvidianvidia-docker-images): Specialized fork of `runc` to support `nvidia/nvidia-docker` images.
+ - [`nvidia`](https://github.com/mviereck/x11docker/wiki/NVIDIA-driver-support-for-docker-container#nvidianvidia-docker-images): 
+   Specialized fork of `runc` to support `nvidia/nvidia-docker` images.
  - [`crun`](https://github.com/giuseppe/crun): Fast and lightweight alternative to `runc` with same functionality.
  - `oci`: Runtime reported in [#205](https://github.com/mviereck/x11docker/issues/205), no documentation found. Handled by x11docker like `runc`.
+ - [`kata-runtime`](https://katacontainers.io/) (provided by kata 1.x versions): Sets up a virtual machine with its own Linux kernel to run the container. 
+   `kata` aims to combine the security advantages of containers and virtual machines.
+   - Some x11docker options are not possible with `--runtime=kata-runtime`. Most important: `--hostdisplay`, `--webcam` and all Wayland related options. 
+     For `--gpu` only `--xorg` with indirect rendering is supported. 
  - [`sysbox-runtime`](https://github.com/nestybox/sysbox): Based on runc, aims to enhance container isolation. Support is experimental yet.
  
 Using different runtimes is well tested for rootful Docker, but not for other [backend setups](#backend-docker-podman-or-nerdctl).
