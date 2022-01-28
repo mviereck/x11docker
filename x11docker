@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.0.2-beta-3"
+Version="7.0.2-beta-4"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -2860,12 +2860,16 @@ check_xserver() {               # check chosen X server, auto-choose X server
       case "$Runtime" in
         kata-runtime|sysbox-runc)      Xcontainer="no" ;;
       esac
+      case $Backend in
+        proot)                         Xcontainer="no" ;;
+      esac
       [ "$Xcontainer" = "no" ] && { 
         note "Option --xc not possible:
   - on console
   - on MS Windows
   - without image x11docker/xserver.
   - with runtimes kata-runtime and sysbox-runc 
+  - with backend proot (yet)
   Fallback: Setting --xc=no"
         check_fallback
         Xcontainer="no"
@@ -2876,6 +2880,9 @@ check_xserver() {               # check chosen X server, auto-choose X server
         kata-runtime|sysbox-runc)      Xcontainer="no" ;;
       esac
       [ -z "$Xcontainerimage" ]     && Xcontainer="no"
+      case $Backend in
+        proot)                         Xcontainer="no" ;;
+      esac
     ;;
     no) ;;
     *)
@@ -4820,6 +4827,8 @@ create_backendcommand() {        ### create command to run docker
       Tini="$Tinicontainerpath --"
       Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$Tinibinaryfile:ro" "$Tinicontainerpath")" 
+      Prootcommand="$Prootcommand \\
+  --bind=$Tinibinaryfile:$Tinicontainerpath"
 #  --mount $(convertpath mount "$Tinibinaryfile:ro" "$Tinicontainerpath")" 
     ;;
     systemd)
@@ -5172,6 +5181,19 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
     ;;
     run)
       store_runoption env "container=docker"   # At least OpenRC and systemd regard this hint
+    ;;
+  esac
+  case $Backend in
+    proot)
+      case $Initsystem in
+        tini|none) ;;
+        *) 
+          note "Option --init: Only --init[=tini] or --init=none are 
+  supported with option --backend=proot. Fallback: Setting option --init=tini"
+          check_fallback
+          Initsystem="tini"
+        ;;
+      esac
     ;;
   esac
   
@@ -6146,22 +6168,26 @@ reload() {
 
   echo "storeinfo containerrootrc=ready"   # signal for containerrc
   echo ""
-  
+  echo "exec 1>&5 2>&6"
+
   [ "$Switchcontaineruser" = "yes" ] && {   # if "no", containerrc is executed in command line $Backendcommand
     echo "# --init=$Initsystem"
     case $Initsystem in
-      proot) 
-        echo "exec 1>&5 2>&6"
-        #echo "exec /usr/local/bin/x11docker-login"
-        echo "exec /bin/sh $(convertpath share $Containerrc)"
-      ;;
       none|dockerinit)
 #        echo "exec /usr/local/bin/x11docker-login"
-        echo "exec /usr/local/bin/x11docker-agetty"
+        case $Backend in
+          proot) echo "exec /bin/sh $(convertpath share $Containerrc)" ;;
+          *)     echo "exec /usr/local/bin/x11docker-agetty" ;;
+        esac
       ;;
       tini)
-#        echo "exec $Tinicontainerpath -- /usr/local/bin/x11docker-agetty"
-        echo "exec /usr/local/bin/x11docker-agetty"
+        case $Backend in
+          proot) echo "exec env TINI_SUBREAPER=1 $Tinicontainerpath /bin/sh $(convertpath share $Containerrc)" ;;
+          *)
+            echo "exec $Tinicontainerpath -- /usr/local/bin/x11docker-agetty"
+#            echo "exec /usr/local/bin/x11docker-agetty"
+          ;;
+        esac
       ;;
       sysvinit)
         echo "/usr/local/bin/x11docker-watch &"
@@ -6227,7 +6253,7 @@ verbose \"containerrc: Container system:
       proot)
         # set another hostname ### FIXME fails
         sed "s/$(hostname)/proot-$Imagebasename/g" "/etc/hosts" > "$Rootfs/etc/hosts"
-        echo "proot-$Imagebasename"                             > "$Rootfs/hostname"
+        echo "proot-$Imagebasename"                             > "$Rootfs/etc/hostname"
         # clean environment variables
         while read -r Line; do
           Line="$(cut -d= -f1 <<< "$Line")"
@@ -6968,7 +6994,7 @@ check_host() {                  # check host environment
       case $Network in
         host) Hostip="127.0.0.1" ;;
         *)
-          #Hostip="$(hostname -I | cut -d' ' -f1)"
+          Hostip="$(hostname -I | cut -d' ' -f1)"
           [ "$Hostip" ] || Hostip="$(ip -4 -o a | grep 'docker0' | awk '{print $4}' | cut -d/ -f1 | grep    "172.17.0.1" ||: )"
           [ "$Hostip" ] || Hostip="$(ip -4 -o a | grep 'docker0' | awk '{print $4}' | cut -d/ -f1 | head -n1)"
           [ "$Hostip" ] || Hostip="$(ip -4 -o a |                  awk '{print $4}' | cut -d/ -f1 | grep    "^192\.168\.*" | head -n1)" 
@@ -7373,6 +7399,58 @@ check_option_interferences() {  # check multiple option interferences, change se
   esac
   [ "$Trusted" = "no" ] && warning "Option --hostdisplay: Clipboard isolation might fail."
 
+  
+  # --backend
+  case "$Backend" in
+    docker) ;;
+    podman)
+      # /proc/sys/kernel/unprivileged_userns_clone might exist on debian only.
+      # https://github.com/mviereck/x11docker/issues/255#issuecomment-758014962
+      [ "$(cat /proc/sys/kernel/unprivileged_userns_clone)" = "0" ] && error "Option --backend=podman: Linux kernel disallows
+  unprivileged user namespace setup. Please run as root:
+    sysctl -w kernel.unprivileged_userns_clone=1"
+      store_runoption cap "CHOWN"
+    ;;
+    nerdctl) 
+      note "Option --backend=nerdctl: nerdctl only supports a subset
+  of docker options. That limits support of x11docker features."
+      Switchcontaineruser="yes"
+      [ "$Capdropall" = "yes" ] && warning "Option --backend=nerdctl: x11docker
+  will allow some user switching capabilities that would be dropped with
+  other backends. (Because 'nerdctl --exec' does not support option --user.)
+  Though, these are still within nerdctl default capabilities."
+    ;;
+    proot)
+      warning "Option --backend=proot: Your hosts system is NOT PROTECTED at all.
+  There is close to no isolation like a container could provide.
+  Setting security related options like --cap-default might lead to
+  (wrong) x11docker messages but won't change the proot setup."
+      Switchcontaineruser="yes"
+      [ "$Shareipc" != "no" ] && Shareipc="host" && note "Option --backend=proot: IPC settings are not possible."
+      case "$Network" in
+        ""|none) ;;
+        *) note "Option --network: No network settings possible with --backend=proot." ;;
+      esac
+      Network=""
+      [ -z "$Rootfs" ] && [ -d "$Hosthomebasefolder/ROOTFS/$Imagebasename" ] && Rootfs="$Hosthomebasefolder/ROOTFS/$Imagebasename"
+      [ -z "$Rootfs" ] && error "--backend=proot: Did not find a rootfs for $Imagename
+  in $Hosthomebasefolder/ROOTFS/$Imagebasename"
+      [ -z "$Containercommand" ] && [ -e "$Rootfs/start" ] && Containercommand="/bin/sh /start"
+      [ -z "$Containercommand" ] && {
+        [ -e "$Rootfs/bin/bash" ]                          && Containercommand="/bin/bash" || Containercommand="/bin/sh"  
+        [ "$Containerusershell" != "auto" ]                && Containercommand="$Containerusershell"
+        note "--backend=proot: No command specified.
+Fallback: using command '$Containercommand' and enabling option --interactive."
+        check_fallback
+        Interactive="yes"
+      }
+      [ "$Sudouser" ] && note "--backend=proot --sudouser: sudo fails in proot.
+  Workaround: starting with user root. 
+  You can switch to user $Containeruser with 'su $Containeruser'.
+  Note that root in proot is a fake and does not have real root privileges."
+    ;;      
+  esac
+  
   case $Containersetup in
     no)
       [ -z "$Workdir" ] && [ "$Sharehome" = "no" ] && note "Option --no-setup: You might need to specify
@@ -7418,7 +7496,7 @@ check_option_interferences() {  # check multiple option interferences, change se
         check_fallback
         Runasuser=""
       }
-      [ "$Sudouser" ] && [ "$Containeruser" != "root" ] && note "Option --no-setup does not support option --sudouser.
+      [ "$Sudouser" != "no" ] && [ "$Containeruser" != "root" ] && note "Option --no-setup does not support option --sudouser.
   Fallback: Enables needed container capabilities to allow sudo
   just in case the container user is set up for su and/or sudo.
   Consider to use --user=root."
@@ -7823,53 +7901,6 @@ check_option_interferences() {  # check multiple option interferences, change se
   If that fails, you can try options --snap or --no-setup."
     ;;
   esac
-  
-  # --backend
-  case "$Backend" in
-    docker) ;;
-    podman)
-      # /proc/sys/kernel/unprivileged_userns_clone might exist on debian only.
-      # https://github.com/mviereck/x11docker/issues/255#issuecomment-758014962
-      [ "$(cat /proc/sys/kernel/unprivileged_userns_clone)" = "0" ] && error "Option --backend=podman: Linux kernel disallows
-  unprivileged user namespace setup. Please run as root:
-    sysctl -w kernel.unprivileged_userns_clone=1"
-      store_runoption cap "CHOWN"
-    ;;
-    nerdctl) 
-      note "Option --backend=nerdctl: nerdctl only supports a subset
-  of docker options. That limits support of x11docker features."
-      Switchcontaineruser="yes"
-      [ "$Capdropall" = "yes" ] && warning "Option --backend=nerdctl: x11docker
-  will allow some user switching capabilities that would be dropped with
-  other backends. (Because 'nerdctl --exec' does not support option --user.)
-  Though, these are still within nerdctl default capabilities."
-    ;;
-    proot)
-      note "Option --backend=proot: Experimental
-  Some messages will be wrong.
-  Isolation is quite low, do not run applications that might harm the host."
-      Switchcontaineruser="yes"
-      Shareipc="host"
-      Network=""
-      Xcontainer="no"
-      Initsystem="proot"
-      [ -z "$Rootfs" ] && [ -d "$Hosthomebasefolder/ROOTFS/$Imagebasename" ] && Rootfs="$Hosthomebasefolder/ROOTFS/$Imagebasename"
-      [ -z "$Rootfs" ] && error "--backend=proot: Did not find a rootfs for $Imagename
-  in $Hosthomebasefolder/ROOTFS/$Imagebasename"
-      [ -z "$Containercommand" ] && [ -e "$Rootfs/start" ] && Containercommand="/bin/sh /start"
-      [ -z "$Containercommand" ] && {
-        [ -e "$Rootfs/bin/bash" ]                          && Containercommand="/bin/bash" || Containercommand="/bin/sh"  
-        [ "$Containerusershell" != "auto" ]                && Containercommand="$Containerusershell"
-        note "--backend=proot: No command specified.
-Fallback: using command '$Containercommand' and enabling option --interactive."
-        check_fallback
-        Interactive="yes"
-      }
-      [ "$Sudouser" = "yes" ] && [ "$Containeruser" != "root" ] && note "--backend=proot --sudouser: sudo fails in proot.
-  Workaround: starting with user root. 
-  You can switch to user $Containeruser with 'su $Containeruser'."
-    ;;      
-  esac
 
   # --sudouser
   Sudouser="${Sudouser,,}"
@@ -8216,21 +8247,26 @@ option_messages() {             # some messages depending on options, but not ch
   container isolation. IPC namespace remapping is disabled."
 
   # --network
-  case "$Network" in
-    none) ;;
-    ""|bridge) 
-      warning "Option --network: Container has access to
+  case $Backend in
+    proot) ;;
+    *)
+      case "$Network" in
+        none) ;;
+        ""|bridge) 
+          warning "Option --network: Container has access to
   local network and internet." ;;
-    host) 
-      warning "Option --network=host severely degrades 
+        host) 
+          warning "Option --network=host severely degrades 
   container isolation. Network namespacing is disabled. 
   Container shares host network stack. 
   Spying on network traffic may be possible. 
   Access to host X server $Hostdisplay may be possible 
   through abstract unix socket." ;;
-    *) 
-      warning "Option --network=$Network: Some sort of network access
-  is enabled." ;;
+        *) 
+          warning "Option --network=$Network: Some sort of network access
+     is enabled." ;;
+      esac
+    ;;
   esac
   
   # --sudouser

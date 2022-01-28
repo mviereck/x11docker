@@ -3,7 +3,7 @@ x11docker ToDo notes
 
 ## Work in progress
  - --backend=proot
-   - change /etc/hostname and hostname in /etc/hosts
+   - --xc=backend?
    - --alsa fails without entire /dev yet
    - xfce4-terminal redirection fails, needs something in /dev
 while read Line; do
@@ -13,6 +13,9 @@ done < <(LC_ALL=C aplay -l | grep card)
    - fix messages
    - note about unregarded options
    - --init except systemd possible?
+   
+ - kata: add new runtime for nerdctl io.containerd.kata.v2
+ - --overip: use real host ip
    
  - X in container:
    - use xauth and others from image if not available on host
