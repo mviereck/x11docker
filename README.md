@@ -16,9 +16,6 @@ This can help to run or deploy software that is difficult to install on several 
 Files to work on can be shared between host and container.
 
 [x11docker wiki](https://github.com/mviereck/x11docker/wiki) provides some how-to's for basic setups without x11docker.
-(Additionally a technical link for search engine crawlers to [x11docker wiki](https://github-wiki-see.page/m/mviereck/x11docker/wiki_index) 
-because github does not allow search engines to access github wiki pages directly. 
-Compare workaround helper [github-wiki-see](https://github.com/nelsonjchen/github-wiki-see-rs).)
 
 ### Features
  - Focus on [security](#security):
@@ -641,3 +638,7 @@ More screenshots are stored in [screenshot branch](https://github.com/mviereck/x
 
 `x11docker --desktop --gpu --init=systemd -- --cap-add=IPC_LOCK --security-opt seccomp=unconfined -- x11docker/deepin`
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-deepin.png "deepin desktop in docker")
+
+Additionally a technical link for search engine crawlers to [x11docker wiki](https://github-wiki-see.page/m/mviereck/x11docker/wiki_index) 
+because github does not allow search engines to access github wiki pages directly. 
+Compare workaround helper [github-wiki-see](https://github.com/nelsonjchen/github-wiki-see-rs).
