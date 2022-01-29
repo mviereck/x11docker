@@ -10,6 +10,7 @@ Project website: https://github.com/mviereck/x11docker
 ### Added
  - `--backend=proot`: Experimental support.
    [(#224)](https://github.com/mviereck/x11docker/issues/224)
+ - `--backend=host`: Run application from host. Replaces `-e, --exe`.
 ### Changed
  - `--hostdisplay`: Use `XlibNoSHM.so` from `x11docker/xserver` if available.
  - `--backend`: Do not use fallbacks if backend is not found.
@@ -18,6 +19,8 @@ Project website: https://github.com/mviereck/x11docker
  - `--xonly/--exe --xc --xoverip`: Allow access.
  - `--xc`: Check IPC settings in `CUSTOM_RUN_OPTIONS`.
  - `--xonly/--exe --xoverip`: No error without `--network`.
+### Deprecated
+ - `-e, --exe`: Use `--backend=host` instead.
 
 ## [7.0.1](https://github.com/mviereck/x11docker/releases/tag/v7.0.1) - 2022-01-20
 ### Fixed

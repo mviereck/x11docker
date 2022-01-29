@@ -589,23 +589,25 @@ finish() {                      # trap EXIT routine to clean up background proce
   [ "$Pulseaudiomoduleid" ] && unpriv "pactl unload-module '$Pulseaudiomoduleid'" 
 
   # Check if container is still running -> docker stop
-  [ "$X11dockermode" = "run" ] && containerisrunning && {
-    Debugmode="yes"
-    debugnote "finish(): Container still running. Executing 'docker stop'.
+  case $Backend in
+    docker|podman|nerdctl)
+      containerisrunning && {
+        Debugmode="yes"
+        debugnote "finish(): Container still running. Executing 'docker stop'.
   Will wait up to 15 seconds for docker to finish."
-    $Backendbin stop $Containername >>$Containerlogfile 2>&1
-    
-    Zeit="$(date +%s)"
-    while :; do
-      containerisrunning || break
-      debugnote "finish(): Waiting for container to terminate ..."
-      sleep 1
-      [ 15 -lt $(($(date +%s) - $Zeit)) ] && break
-    done
-      
-    containerisrunning && {
-      Exitcode="64"
-      debugnote "finish(): Container did not terminate as it should.
+        $Backendbin stop $Containername >>$Containerlogfile 2>&1
+        
+        Zeit="$(date +%s)"
+        while :; do
+          containerisrunning || break
+          debugnote "finish(): Waiting for container to terminate ..."
+          sleep 1
+          [ 15 -lt $(($(date +%s) - $Zeit)) ] && break
+        done
+          
+        containerisrunning && {
+          Exitcode="64"
+          debugnote "finish(): Container did not terminate as it should.
   Will not clean cache to avoid file permission issues.
   You can remove the new container with command:
     docker rm -f $Containername
@@ -613,15 +615,17 @@ finish() {                      # trap EXIT routine to clean up background proce
     rm -R $Cachefolder
   or let x11docker do the cleanup work for you:
     x11docker --cleanup"
-      Preservecachefiles="yes"
-    } || debugnote "finish(): Container terminated successfully"
-  }
-  
-  # remove container
-  [ "$Preservecachefiles" = "no" ] && [ "$Containername" ] && {
-    debugnote "Removing container $Containername
-    $($Backendbin rm -f "$Containername" 2>&1)"
-  }
+          Preservecachefiles="yes"
+        } || debugnote "finish(): Container terminated successfully"
+      }
+      
+      # remove container
+      [ "$Preservecachefiles" = "no" ] && [ "$Containername" ] && {
+        debugnote "Removing container $Containername
+        $($Backendbin rm -f "$Containername" 2>&1)"
+      }
+    ;;
+  esac
   
   # Stop watching for messages, check others again
   while read -r Line ; do
@@ -809,7 +813,7 @@ $(for Line in $Watchpidlist; do pspid "$Line" || echo "(pid $Line not found)" ; 
         saygoodbye "watchpidlist $Pid"
       }
     done
-    # Container PID not watchable in MSYS2/Cygwin/WSL11.
+    # Container PID not watchable in MSYS2/Cygwin/WSL1.
     [ "$Containername" ] && {
       $Backendbin inspect $Containername >/dev/null || {
         debugnote "watchpidlist(): Container $Containername has terminated"
@@ -1949,16 +1953,30 @@ setup_hostdbus() {              # option --hostdbus: connect to host DBus sessio
       export $(dbus-launch)
       note "Option --hostdbus: DBUS_SESSION_BUS_ADDRESS is empty.
   Creating abstract DBus socket with dbus-launch."
-    } || note "Option --hostdbus: Is DBus running on host?
+    } || {
+      note "Option --hostdbus: Is DBus running on host?
   Did not find an active session and did not find dbus-launch.
   DBUS_SESSION_BUS_ADDRESS is empty.
   $Wikipackages"
+      check_fallback
+      return 1
+    }
   }
     
   grep -q "unix:path" <<< "$DBUS_SESSION_BUS_ADDRESS" && {
     # DBus socket file
-    store_runoption env "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS"
-    store_runoption volume "/$(cut -d/ -f2- <<<"$DBUS_SESSION_BUS_ADDRESS"):ro"
+    case $Runtime in
+      kata-runtime|sysbox-runc)
+        note "Option --hostdbus with a unix socket is not possible
+  with --runtime=$Runtime."
+        check_fallback
+        return 1
+      ;;
+      *)
+        store_runoption env "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS"
+        store_runoption volume "/$(cut -d/ -f2- <<<"$DBUS_SESSION_BUS_ADDRESS"):ro"
+      ;;
+    esac
   }
     
   grep -q "unix:abstract" <<< "$DBUS_SESSION_BUS_ADDRESS" && {
@@ -1966,11 +1984,14 @@ setup_hostdbus() {              # option --hostdbus: connect to host DBus sessio
     store_runoption env "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS"
     [ "${DBUS_SESSION_BUS_PID:-}" ]      && store_runoption env  "${DBUS_SESSION_BUS_PID:-}"
     [ "${DBUS_SESSION_BUS_WINDOWID:-}" ] && store_runoption env  "${DBUS_SESSION_BUS_WINDOWID:-}"
-    Network="host"
-    warning "Option --hostdbus: Did not find a DBus session socket file
+    [ "$Network" != "host" ] && {
+      note "Option --hostdbus: Did not find a DBus session socket file
   but an abstract unix socket. To allow access for container,
-  x11docker sets option '--network=host'.
-  This degrades container isolation. Container shares host network stack."
+  x11docker needs insecure option '--network=host'.
+  Sharing host dbus will fail."
+      check_fallback
+      return 1
+    }
   }
   return 0
 }
@@ -2010,10 +2031,8 @@ setup_printer() {               # option --printer: connect to cups printer serv
       Cupsserver="$Hostip:631" 
       [ "$Network" = "none" ] && {
         note "Option --printer=tcp does not work without network access.
-  Consider to enable option -I, --network.
-  Fallback: Disabling option --printer."
+  Consider to enable option -I, --network."
         check_fallback
-        Sharecupsmode=""
         return 1
       }
     ;;
@@ -2051,19 +2070,6 @@ setup_sound_alsa() {            # option --alsa: share sound devices
   # libasound2 in image is recommended.
   # The desired sound card can be specified with environment variable ALSA_CARD. See card name in 'aplay -l'.
   # Further documentation at https://github.com/mviereck/x11docker/wiki/Container-sound:-ALSA-or-Pulseaudio
-  
-  case "$Runtime" in
-    kata-runtime|sysbox-runc)
-      [ "$Sharealsa" = "yes" ] && {
-        note "Option --alsa: ALSA sound is not possible with 
-  --runtime=$Runtime. Try option --pulseaudio instead.
-  Fallback: Disabling option --alsa"
-        check_fallback
-        Sharealsa="no"
-        return 1
-      }
-    ;;
-  esac
   
   warning "Option --alsa: ALSA sound degrades container isolation.
   Sharing device files in /dev/snd, container gains access to sound hardware.
@@ -2105,10 +2111,10 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
       command -v pactl >/dev/null || {
         note "Option --pulseaudio: pactl not found.
   Is pulseaudio installed and running on your host system?
-  Fallback: Disabling --pulseaudio, enabling option --alsa"
+  Fallback: Disabling option --pulseaudio.
+  You can try option --alsa instead."
         check_fallback
         Pulseaudiomode=""
-        Sharealsa="yes"
         return 1
       }
     ;;
@@ -2134,11 +2140,8 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
   
   [ "$Pulseaudiomode" = "tcp" ] && [ "$Network" = "none" ] && {
     note "Option --pulseaudio: Without option -I, --network
-  pulseaudio sound over TCP is not possible but needed in your setup.
-  Fallback: Enabling option --alsa"
+  pulseaudio sound over TCP is not possible but needed in your setup."
     check_fallback
-    Pulseaudiomode=""
-    Sharealsa="yes"
     return 1
   }
   
@@ -2157,10 +2160,10 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
       } || {
         note "Option --pulseaudio: command pactl failed.
   Is pulseaudio running at all on your host?
-  Fallback: Enabling option --alsa"
+  Fallback: Disabling option --pulseaudio.
+  You can try option --alsa instead."
         check_fallback
         Pulseaudiomode=""
-        Sharealsa="yes"
         return 1
       }
 
@@ -2196,16 +2199,6 @@ setup_webcam() {                # option --webcam: share webcam devices
   # (This works only if webcam is plugged in before container starts.
   # Hotplug support would have to be different.)
   local Webcamdevice
-
-  case "$Runtime" in
-    sysbox-runc|kata-runtime)
-      note "Option --webcam does not work with --runtime=$Runtime.
-  Fallback: Disabling option --webcam"
-      check_fallback
-      Sharewebcam="no"
-      return 1
-    ;;
-  esac
      
   [ "$Sharewebcam" = "yes" ] && warning "Option --webcam: Container applications might look 
   at you and also might take screenshots of your Desktop."
@@ -2861,7 +2854,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
         kata-runtime|sysbox-runc)      Xcontainer="no" ;;
       esac
       case $Backend in
-        proot)                         Xcontainer="no" ;;
+        proot|chroot)                  Xcontainer="no" ;;
       esac
       [ "$Xcontainer" = "no" ] && { 
         note "Option --xc not possible:
@@ -2869,7 +2862,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
   - on MS Windows
   - without image x11docker/xserver.
   - with runtimes kata-runtime and sysbox-runc 
-  - with backend proot (yet)
+  - with backends proot and chroot (yet)
   Fallback: Setting --xc=no"
         check_fallback
         Xcontainer="no"
@@ -2881,7 +2874,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
       esac
       [ -z "$Xcontainerimage" ]     && Xcontainer="no"
       case $Backend in
-        proot)                         Xcontainer="no" ;;
+        proot|chroot)                  Xcontainer="no" ;;
       esac
     ;;
     no) ;;
@@ -4495,10 +4488,10 @@ check_containerhomebasedir() {
     }
   }
   case $Backend in
-    proot)
+    proot|chroot)
       Hosthomebasefolder="$Hostuserhome/.local/share/x11docker"
     ;;
-    *)
+    docker|podman|nerdctl)
       [ "$Hosthomebasefolder" ] || case $Mobyvm in
         no)  Hosthomebasefolder="$Containeruserhosthome/.local/share/x11docker" ;;
         yes) Hosthomebasefolder="$(convertpath subsystem "$(wincmd 'echo %userprofile%') ")/x11docker/home" ;;
@@ -4682,12 +4675,12 @@ check_containeruser() {         # check container user and shared home folder (a
 }
 create_backendcommand() {        ### create command to run docker
   local Line= Memory Tini=
-  local Dockercommand Prootcommand
+  local Dockercommand Prootcommand Chrootcommand Grouplist=
   
   Dockercommand="$Backendbin run --pull never"
   case $Backend in
     nerdctl) ;;
-    *) [ "$Preservecachefiles" = "no" ] && Dockercommand="$Dockercommand --rm" ;;
+    docker|podman) [ "$Preservecachefiles" = "no" ] && Dockercommand="$Dockercommand --rm" ;;
   esac
   
   Prootcommand="proot --rootfs='$Rootfs' \\
@@ -4702,6 +4695,8 @@ create_backendcommand() {        ### create command to run docker
   --bind=/dev/shm \\
   --bind=/dev \\
   --bind=/sys"
+  
+  Chrootcommand="chroot"
   
   [ "$Sudouser" = "yes" ] && Prootcommand="$Prootcommand \\
   --root-id"
@@ -4737,16 +4732,27 @@ create_backendcommand() {        ### create command to run docker
     none|tini|dockerinit)
       case $Switchcontaineruser in
         no) 
-          [ "$Createcontaineruser" = "yes" ] && Dockercommand="$Dockercommand \\
-  --user $Containeruseruid:$Containerusergid" ;;
+          [ "$Createcontaineruser" = "yes" ] && {
+            Dockercommand="$Dockercommand \\
+  --user $Containeruseruid:$Containerusergid"
+            Chrootcommand="$Chrootcommand \\
+  --userspec=$Containeruseruid:$Containerusergid"
+          }
+        ;;
         yes) 
           Dockercommand="$Dockercommand \\
-  --user root" ;;
+  --user root" 
+          Chrootcommand="$Chrootcommand \\
+  --userspec=0:0"
+        ;;
       esac
     ;;
     systemd|runit|openrc|sysvinit|s6-overlay)
       Dockercommand="$Dockercommand \\
-  --user root" ;;
+  --user root" 
+      Chrootcommand="$Chrootcommand \\
+  --userspec=0:0"
+    ;;
   esac
   
   [ "$Createcontaineruser" = "yes" ] && {
@@ -4763,24 +4769,22 @@ create_backendcommand() {        ### create command to run docker
           ;;
         esac
       ;;
-      *) $Backendbin run --help | grep -q -- '--userns' && Dockercommand="$Dockercommand \\
-  --userns=host" ;;
+      proot|chroot) ;;
     esac
   }
   
   # add container user groups, mainly video and audio and --group-add
   [ "$Switchcontaineruser" = "no" ] && {
-    $Backendbin run --help | grep -q -- '--group-add' && {
-      for Line in $Containerusergroups; do          ### FIXME: should compare GIDs from host and container
-        getent group ${Line:-nonsense} >/dev/null && Dockercommand="$Dockercommand \\
+    for Line in $Containerusergroups; do          ### FIXME: should compare GIDs from host and container
+      getent group ${Line:-nonsense} >/dev/null && {
+        Dockercommand="$Dockercommand \\
   --group-add $(getent group $Line | cut -d: -f3)"
-      done
-      :
-    } || {
-      [ "$Containerusergroups" ] && note "Your backend $Backend does not support option --group-add.
-  Could not add container user to groups: $Containerusergroups
-  Possible sound or GPU setup may fail."
-    }
+        Grouplist="$Grouplist,$(getent group $Line | cut -d: -f3)"
+      }
+    done
+    Grouplist="${Grouplist#,}"
+    Chrootcommand="$Chrootcommand \\
+  --groups=$Grouplist"
   }
   
   # Runtime runc|nvidia|kata|sysbox
@@ -4825,11 +4829,20 @@ create_backendcommand() {        ### create command to run docker
     ;;
     tini) 
       Tini="$Tinicontainerpath --"
-      Dockercommand="$Dockercommand \\
+      case $Backend in
+        docker|podman|nerdctl)
+          Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$Tinibinaryfile:ro" "$Tinicontainerpath")" 
-      Prootcommand="$Prootcommand \\
-  --bind=$Tinibinaryfile:$Tinicontainerpath"
 #  --mount $(convertpath mount "$Tinibinaryfile:ro" "$Tinicontainerpath")" 
+        ;;
+        proot)
+          Prootcommand="$Prootcommand \\
+  --bind=$Tinibinaryfile:$Tinicontainerpath"
+        ;;
+        chroot)
+          cp "$Tinibinaryfile" "$Rootfs/$Tinicontainerpath"
+        ;;
+      esac
     ;;
     systemd)
       Dockercommand="$Dockercommand \\
@@ -4855,25 +4868,49 @@ create_backendcommand() {        ### create command to run docker
   # Needed especially for --init=systemd and --dbus-daemon
   case $Backend in
     nerdctl) ;;
-    *) Dockercommand="$Dockercommand \\
+    docker|podman) Dockercommand="$Dockercommand \\
   --tmpfs /run:exec --tmpfs /run/lock" ;;
   esac
 
   # shared cache folder
-  Dockercommand="$Dockercommand \\
+  case $Backend in
+    docker|podman|nerdctl)
+      Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$Sharefolder:rw" $Sharefoldercontainer)"
 #  --mount $(convertpath mount "$Sharefolder:rw" $Sharefoldercontainer)"
-  Prootcommand="$Prootcommand \\
+    ;;
+    proot)
+      Prootcommand="$Prootcommand \\
   --bind=$Sharefolder:$Sharefoldercontainer"
+    ;;
+    chroot)
+    set -x
+      mkdir -p "$Rootfs/$Sharefoldercontainer"
+      ls -la  "$Sharefolder" "$Rootfs/$Sharefoldercontainer"
+#      mount --bind "$Sharefolder" "$Rootfs/$Sharefoldercontainer"
+      mount --bind "$Sharefolder" "$Rootfs/x11docker"
+    set +x
+    ;;
+  esac
   
   # --home
   case $Sharehome in
     host)
-      Dockercommand="$Dockercommand \\
+      case $Backend in
+        docker|podman|nerdctl)
+          Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$Persistanthomevolume:rw" "$Containeruserhome")"
 #  --mount $(convertpath mount "$Persistanthomevolume:rw" "$Containeruserhome")"
-      Prootcommand="$Prootcommand \\
+        ;;
+        proot)
+          Prootcommand="$Prootcommand \\
   --bind=$Persistanthomevolume:$Containeruserhome"
+        ;;
+        chroot)
+          mkdir "$Rootfs/$Containeruserhome"
+          mount --bind "$Persistanthomevolume" "$Rootfs/$Containeruserhome"
+        ;;
+      esac
     ;;
     volume)
       Dockercommand="$Dockercommand \\
@@ -4883,29 +4920,48 @@ create_backendcommand() {        ### create command to run docker
   
   # --share
   while read -r Line; do
-    case "$(cut -c1-5 <<< "$Line")" in
-      "/dev/")
-         Dockercommand="$Dockercommand \\
+    case $Backend in
+      docker|podman|nerdctl)
+        case "$(cut -c1-5 <<< "$Line")" in
+          "/dev/")
+             Dockercommand="$Dockercommand \\
   --device $(convertpath volume "$Line")"
-        warning "Sharing device file: $Line"
-      ;;
-      *)
-        Dockercommand="$Dockercommand \\
+            warning "Sharing device file: $Line"
+          ;;
+          *)
+            Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$Line")" 
 #  --mount $(convertpath mount "$Line")" 
+          ;;
+        esac
+      ;;
+      proot)
+        Prootcommand="$Prootcommand \\
+  --bind=$Line:$Line"
+      ;;
+      chroot)
+        mkdir -p "$Rootfs/$Line"
+        mount --bind "$Line" "$Rootfs/$Line"
       ;;
     esac
-    Prootcommand="$Prootcommand \\
-  --bind=$Line:$Line" 
   done < <(store_runoption dump volume)
   
   # --gpu: share NVIDIA driver installer
   [ -e "$Nvidiainstallerfile" ] && {
-    Dockercommand="$Dockercommand \\
+    case $Backend in
+      docker|podman|nerdctl)
+        Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$Nvidiainstallerfile:ro" "$Nvidiacontainerfile")"
 #  --mount $(convertpath mount "$Nvidiainstallerfile:ro" "$Nvidiacontainerfile")"
-    Prootcommand="$Prootcommand \\
+      ;;
+      proot)
+        Prootcommand="$Prootcommand \\
   --bind=$Nvidiainstallerfile:$Nvidiacontainerfile"
+      ;;
+      chroot)
+        cp "$Nvidiainstallerfile" "$Rootfs/$Nvidiacontainerfile"
+      ;;
+    esac
   }
   
   # --xc
@@ -4923,11 +4979,20 @@ create_backendcommand() {        ### create command to run docker
     ;;
     no)
       [ "$Newxsocket" ] && {
-        Dockercommand="$Dockercommand \\
+        case $Backend in
+          docker|podman|nerdctl)
+            Dockercommand="$Dockercommand \\
   --volume $(convertpath volume "$Newxsocket:ro")"
 #  --mount $(convertpath mount "$Newxsocket:ro")"
-        Prootcommand="$Prootcommand \\
+          ;;
+          proot)
+            Prootcommand="$Prootcommand \\
   --bind=$Newxsocket:$Newxsocket"
+          ;;
+          chroot)
+            mount --bind "$Newxsocket" "$Rootfs/$Newxsocket" ### FIXME does not exist yet
+          ;;
+        esac
       }
     ;;
   esac
@@ -5026,6 +5091,8 @@ create_backendcommand() {        ### create command to run docker
   --"
     Prootcommand="$Prootcommand \\
   "
+    Chrootcommand="$Chrootcommand \\
+  "
   
   case $Containersetup in
     yes)
@@ -5033,22 +5100,26 @@ create_backendcommand() {        ### create command to run docker
         no)  
           Dockercommand="$Dockercommand $Imagename $Tini /bin/sh - $(convertpath share $Containerrc)"      # start_container runs containerrootrc with 'docker exec'
           Prootcommand="$Prootcommand /bin/sh - $(convertpath share $Containerrc)"
+          Chrootcommand="$Chrootcommand /bin/sh - $(convertpath share $Containerrc)"
         ;;
         yes) 
           Dockercommand="$Dockercommand $Imagename $Tini /bin/sh - $(convertpath share $Containerrootrc)"  # containerrootrc runs containerrc
           Prootcommand="$Prootcommand /bin/sh - $(convertpath share $Containerrootrc)"
+          Chrootcommand="$Chrootcommand $Rootfs /bin/sh - $(convertpath share $Containerrootrc)"
         ;;
       esac
     ;;
     no)
       Dockercommand="$Dockercommand $Imagename $Containercommand"
       Prootcommand="$Prootcommand $Containercommand"
+      Chrootcommand="$Chrootcommand $Containercommand"
     ;;
   esac
   
   case $Backend in
-    proot) Backendcommand="$Prootcommand" ;;
-    *)     Backendcommand="$Dockercommand" ;;
+    docker|podman|nerdctl) Backendcommand="$Dockercommand" ;;
+    proot)                 Backendcommand="$Prootcommand" ;;
+    chroot)                Backendcommand="$Chrootcommand" ;;
   esac
 
   return 0
@@ -5151,7 +5222,6 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
 
   case $Initsystem in
     tini|systemd|sysvinit|openrc|runit|dockerinit|s6-overlay|none) ;;
-    proot) return 0 ;;
     *) 
       note "Option --init: Unknown init system $Initsystem
   Possible: tini systemd sysvinit openrc runit s6-overlay none
@@ -5184,12 +5254,12 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
     ;;
   esac
   case $Backend in
-    proot)
+    proot|chroot|host)
       case $Initsystem in
         tini|none) ;;
         *) 
           note "Option --init: Only --init[=tini] or --init=none are 
-  supported with option --backend=proot. Fallback: Setting option --init=tini"
+  supported with option --backend=$Backend. Fallback: Setting option --init=tini"
           check_fallback
           Initsystem="tini"
         ;;
@@ -5357,6 +5427,15 @@ DefaultEnvironment=$(while read -r Line; do echo -n "$Line " ; done < <(store_ru
         note "Option --dbus=system with init system '$Initsystem'
   can have a quite long timeout delay until startup.
   Use one of --init=systemd|openrc|runit|sysvinit in that case."
+      }
+    ;;
+  esac
+  
+  case $Backend in
+    host)
+      [ "$Initsystem" = "tini" ] && {
+        Containerentrypoint="$Tinibinaryfile"
+        store_runoption env "TINI_SUBREAPER=1"
       }
     ;;
   esac
@@ -5670,8 +5749,8 @@ debugnote 'Running x11docker-login'
 chmod +x $(convertpath share $Containerrc)
 \" >/usr/local/bin/x11docker-login"
     case $Backend in
-      proot) echo "echo 'exec /bin/sh - $(convertpath share $Containerrc)' >>/usr/local/bin/x11docker-login" ;;
-      *)     echo "echo \"exec su - -s /bin/sh  \$Containeruser $(convertpath share $Containerrc)\" >>/usr/local/bin/x11docker-login" ;;
+      proot)                 echo "echo 'exec /bin/sh - $(convertpath share $Containerrc)' >>/usr/local/bin/x11docker-login" ;;
+      docker|podman|nerdctl) echo "echo \"exec su - -s /bin/sh  \$Containeruser $(convertpath share $Containerrc)\" >>/usr/local/bin/x11docker-login" ;;
     esac
     echo "chmod +x /usr/local/bin/x11docker-login"
     echo ""
@@ -6168,14 +6247,14 @@ reload() {
       none|dockerinit)
 #        echo "exec /usr/local/bin/x11docker-login"
         case $Backend in
-          proot) echo "exec /bin/sh $(convertpath share $Containerrc)" ;;
-          *)     echo "exec /usr/local/bin/x11docker-agetty" ;;
+          proot)                 echo "exec /bin/sh $(convertpath share $Containerrc)" ;;
+          docker|podman|nerdctl) echo "exec /usr/local/bin/x11docker-agetty" ;;
         esac
       ;;
       tini)
         case $Backend in
           proot) echo "exec env TINI_SUBREAPER=1 $Tinicontainerpath /bin/sh $(convertpath share $Containerrc)" ;;
-          *)
+          docker|podman|nerdctl)
             echo "exec $Tinicontainerpath -- /usr/local/bin/x11docker-agetty"
 #            echo "exec /usr/local/bin/x11docker-agetty"
           ;;
@@ -6242,10 +6321,10 @@ verbose \"containerrc: Container system:
 
 "
     case $Backend in
-      proot)
+      proot|chroot)
         # set another hostname ### FIXME fails
-        sed "s/$(hostname)/proot-$Imagebasename/g" "/etc/hosts" > "$Rootfs/etc/hosts"
-        echo "proot-$Imagebasename"                             > "$Rootfs/etc/hostname"
+        sed "s/$(hostname)/$Backend-$Imagebasename/g" "/etc/hosts" > "$Rootfs/etc/hosts"
+        echo "$Backend-$Imagebasename"                             > "$Rootfs/etc/hostname"
         # clean environment variables
         while read -r Line; do
           Line="$(cut -d= -f1 <<< "$Line")"
@@ -6255,9 +6334,9 @@ verbose \"containerrc: Container system:
           }
         done < <(unset -f rmcr ; env)
         echo "export PATH='/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games:/sbin:/usr/sbin'"
-        echo 'export PS1="\u@proot-'$Imagebasename':\w\$ "' ### FIXME fails
+        echo 'export PS1="\u@'$Backend'-'$Imagebasename':\w\$ "' ### FIXME fails
       ;;
-      *)
+      docker|podman|nerdctl)
         [ "$Switchcontaineruser" = "yes" ] && {
           echo '# Environment variables found in image:'
           IFS=$'\n'
@@ -6514,37 +6593,45 @@ start_container() {             # docker run
   Backendcommand="$(tr -d '\\\n' <<< "$Backendcommand")"
   
   debugnote "start_container(): Running image"
-      case $Interactive in
-        no)
-          case $Backend in
-            proot)
-              eval $Backendcommand & Pid1pid=$!
-              Containerid=$Pid1pid
-            ;;
-            *)
-              read Containerid < <(eval $Backendcommand 2>>$Containerlogfile | rmcr)
-            ;;
-          esac
+  case $Interactive in
+    no)
+      case $Backend in
+        host)
+          bash $Containerrc & Pid1pid=$!
+          Containerid=$Pid1pid
         ;;
-        yes)
-          case $Backend in
-            proot)
-              eval $Backendcommand <&0 & Pid1pid=$!
-              Containerid=$Pid1pid
-            ;;
-            *)
-              [ "$Winpty" ] && {
-                $Winpty bash $Backendcommandfile <&0 &
-              } || {
-                eval $Backendcommand <&0 &
-              }
-              Containerid=$Containername
-            ;;
-          esac
+        proot|chroot)
+          eval $Backendcommand & Pid1pid=$!
+          Containerid=$Pid1pid
+        ;;
+        docker|podman|nerdctl)
+          read Containerid < <(eval $Backendcommand 2>>$Containerlogfile | rmcr)
         ;;
       esac
+    ;;
+    yes)
+      case $Backend in
+        host)
+          bash $Containerrc <&0 & Pid1pid=$!
+          Containerid=$Pid1pid
+        ;;
+        proot|chroot)
+          eval $Backendcommand <&0 & Pid1pid=$!
+          Containerid=$Pid1pid
+        ;;
+        docker|podman|nerdctl)
+          [ "$Winpty" ] && {
+            $Winpty bash $Backendcommandfile <&0 &
+          } || {
+            eval $Backendcommand <&0 &
+          }
+          Containerid=$Containername
+        ;;
+      esac
+    ;;
+  esac
   
-  [ -z "$Containerid" ] && error "Startup of $Backend failed. Did not receive a container ID.
+  [ -z "$Containerid" ] && error "Startup of backend $Backend failed. Did not receive a container ID.
     
   Last lines of container log:
 $(rmcr < $Containerlogfile | tail)"
@@ -6552,8 +6639,8 @@ $(rmcr < $Containerlogfile | tail)"
   storeinfo containerid="$Containerid"
   
   case $Backend in
-    proot) ;;
-    *)
+    proot|chroot|host) ;;
+    docker|podman|nerdctl)
       # Wait for container to be ready
       for ((Count=1 ; Count<=40 ; Count++)); do
         $Backendbin exec $Containername sh -c ":" 2>&1 | rmcr >>$Containerlogfile && { debugnote 'start_container(): Container is up and running.' ; break ; } || debugnote "start_container(): Container not ready on $Count. attempt, trying again."
@@ -6591,7 +6678,7 @@ $(rmcr < $Containerlogfile | tail)"
       $Backendbin ps | grep x11docker)
       
       Content of container log:
-      rmcr < "$Containerlogfile" | uniq )"
+      $(rmcr < "$Containerlogfile" | uniq )"
       
       # Get IP of container
       Containerip="$(parse_inspect "$Containerinspect" "NetworkSettings" "IPAddress")"
@@ -6604,7 +6691,7 @@ $(rmcr < $Containerlogfile | tail)"
   Failure="$(rmcr < $Containerlogfile | grep -v grep | grep -E 'Error response from daemon|OCI runtime exec' ||:)"
   [ "$Failure" ] && {
     echo "$Failure" >>$Containerlogfile
-    error "start_container(): Got error message from $Backend:
+    error "start_container(): Got error message from backend $Backend:
 $Failure
 
   Last lines of logfile:
@@ -6616,9 +6703,10 @@ $(tail $Containerlogfile)"
     debugnote "start_container(): Starting containerrootrc with $Backend exec"
     # copy containerrootrc inside of container to avoid possible noexec of host home.
     case $Backend in
-      proot) ### FIXME
+      proot|chroot) ### FIXME currently with Switchcontaineruser=yes only
       ;;
-      *)
+      host) ;; # no containerrootrc
+      docker|podman|nerdctl)
         $Backendbin exec $Containername sh -c "cp $(convertpath share $Containerrootrc) /tmp/containerrootrc ; chmod 644 /tmp/containerrootrc" 2>&1 | rmcr >>$Containerlogfile
         # run container root setup. containerrc will wait until setup script is ready.
         $Backendbin exec -u root $Containername /bin/sh /tmp/containerrootrc 2>&1 | rmcr >>$Containerlogfile
@@ -6957,18 +7045,29 @@ check_host() {                  # check host environment
     ;;
   esac
   
+  case $Backend in
+    docker|podman|nerdctl|proot)
+      [ -z "$Backendbin" ] && error "Option --backend=$Backend: No binary found for $Backend."
+    ;;
+    host) Backendbin="" ;;
+  esac
+  
   # rootful or rootless
   case $Backend in
     docker)
       grep -q "/run/user/" <<< "${DOCKER_HOST:-}" && Rootlessbackend="yes"
     ;;
-    podman|nerdctl|*)
+    podman|nerdctl|proot)
       [ "$(id -u)" = "0" ] && Rootlessbackend="yes"
     ;;
   esac
   
   # Image x11docker/xserver
-  $Backendbin inspect "$Xcontainerimage" >/dev/null 2>&1 || Xcontainerimage=""
+  case $Backend in
+    docker|podman|nerdctl) $Backendbin inspect "$Xcontainerimage" >/dev/null 2>&1 || Xcontainerimage="" ;;
+    proot) Xcontainerimage="" ;;
+    host)  Xcontainerimage="" ;;
+  esac
   [ "$Xcontainerimage" ] && Xtoolscontainer="yes"
   
   # Check host IP. Needed for --pulseaudio=tcp, --printer=tcp, --xoverip and --xwin
@@ -7241,14 +7340,12 @@ check_option_interferences() {  # check multiple option interferences, change se
         check_fallback
         Xauthentication="no"
       }
-      case $Xtest in
-        yes|no) 
-          note "Option --xtest: Cannot enable or disable X extension XTEST
+      check_setoption "--xtest" unsupported && {
+        note "Option --xtest: Cannot enable or disable X extension XTEST
   with option --hostdisplay."
-          check_fallback
-          Xtest=""
-        ;;
-      esac
+        check_fallback
+        Xtest=""
+      }
     ;;
   esac
 
@@ -7279,14 +7376,19 @@ check_option_interferences() {  # check multiple option interferences, change se
   
   # --xoverip
   case "$Xoverip" in
-    yes) [ "$Network" = "none" ] && [ "$X11dockermode" = "run" ] && error "Option --xoverip needs network access.
-  Please enable option -I, --network." ;;
+    yes)
+      case $Backend in
+        docker|podman|nerdctl)
+          [ "$Network" = "none" ] && error "Option --xoverip needs network access.
+  Please enable option -I, --network." 
+        ;;
+      esac
+    ;;
   esac
 
   # check xauth
   [ "$Xauthentication" = "yes" ] && case $Xserver in
-    --tty) ;;
-    --weston|--kwin|--hostwayland) Xauthentication="no" ;;
+    --tty|--weston|--kwin|--hostwayland) Xauthentication="no" ;;
     *)
       [ "$Xtoolscontainer" = "no" ] && {
         command -v xauth >/dev/null || {
@@ -7385,6 +7487,38 @@ check_option_interferences() {  # check multiple option interferences, change se
   
   # --backend
   case "$Backend" in
+    host)
+      note "Option --backend=host provides no isolation at all.
+  It only provides an X server for a host application."
+      Containercommand="$Imagename $Containercommand"
+      storeinfo "containerrootrc=ready"
+      Sharefoldercontainer="$Sharefolder"
+      # --dbus, --hostdbus, --init
+      check_setoption "--alsa --cap-default --gpu --group-add --hostipc --limit --home --name --network --newprivileges --no-entrypoint --no-setup \
+                       --printer --pulseaudio --runasroot --runtime --share --sharecgroup --sudouser --user --webcam --xc" note unsupported && \
+                       check_setoption_note --backend=$Backend    
+      Sharealsa="no"
+      Capdropall="yes"
+      Sharegpu="no"
+      Shareipc="host"
+      [ "$Langwunsch" ] && store_runoption env "LANG=$Langwunsch"
+      Limitresources=""
+      Network=""
+      Allownewprivileges="no"
+      Noentrypoint=""
+      Containersetup="yes"
+      Sharecupsmode=""
+      Pulseaudiomode=""
+      Runasroot=""
+      Runtime=""
+      Sharevolumes=""
+      Sharecgroup="no"
+      Sudouser="no"
+      Containeruser=""
+      Sharewebcam=""
+      
+      # FIXME set variables accordingly
+    ;;
     docker) ;;
     podman)
       # /proc/sys/kernel/unprivileged_userns_clone might exist on debian only.
@@ -7404,90 +7538,79 @@ check_option_interferences() {  # check multiple option interferences, change se
   Though, these are still within nerdctl default capabilities."
     ;;
     proot)
-      warning "Option --backend=proot: Your host system is NOT PROTECTED.
+      warning "Option --backend=$Backend: Your host system is NOT PROTECTED.
   There is close to no isolation like a container could provide.
   Setting security related options like --cap-default might lead to
   (wrong) x11docker messages but won't change the proot setup.
   Effectively applications in proot have the same privileges
   as if they would have been installed and run on the host system."
-      Switchcontaineruser="yes"
-      [ "$Shareipc" != "no" ] && Shareipc="host" && note "Option --backend=proot: IPC settings are not possible."
-      case "$Network" in
-        ""|none) ;;
-        *) note "Option --network: No network settings possible with --backend=proot." ;;
-      esac
+      check_setoption "--cap-default --hostipc --limit --network --newprivileges --runtime --sharecgroup --user" note unsupported && check_setoption_note --backend=$Backend
+      # set defaults to avoid messages
       Network=""
+      Shareipc=""
+      Createcontaineruser="yes"
+      Containeruser=""
+      Capdropall="yes"
+      Allownewprivileges="no"
+      Runtime=""
+      Sharecgroup="no"
+      Containeruser=""
+      Limitresources=""
+      
+      # needed
+      Switchcontaineruser="yes"
+      
       [ -z "$Rootfs" ] && [ -d "$Hosthomebasefolder/ROOTFS/$Imagebasename" ] && Rootfs="$Hosthomebasefolder/ROOTFS/$Imagebasename"
-      [ -z "$Rootfs" ] && error "--backend=proot: Did not find a rootfs for $Imagename
+      [ -z "$Rootfs" ] && error "--backend=$Backend: Did not find a rootfs for $Imagename
   in $Hosthomebasefolder/ROOTFS/$Imagebasename"
       [ -z "$Containercommand" ] && [ -e "$Rootfs/start" ] && Containercommand="/bin/sh /start"
       [ -z "$Containercommand" ] && {
         [ -e "$Rootfs/bin/bash" ]                          && Containercommand="/bin/bash" || Containercommand="/bin/sh"  
         [ "$Containerusershell" != "auto" ]                && Containercommand="$Containerusershell"
-        note "--backend=proot: No command specified.
+        note "--backend=$Backend: No command specified.
 Fallback: using command '$Containercommand' and enabling option --interactive."
         check_fallback
         Interactive="yes"
       }
-      [ "$Sudouser" ] && note "--backend=proot --sudouser: sudo fails in proot.
+      [ "$Sudouser" ] && note "--backend=$Backend --sudouser: sudo fails in $Backend.
   Workaround: starting with user root. 
   You can switch to user $Containeruser with 'su $Containeruser'.
-  Note that root in proot is a fake and does not have real root privileges."
-    ;;      
+  Note that root in $Backend is a fake and does not have real root privileges." ### FIXME chroot
+    ;;
+    *) error "Option --backend=$Backend: Backend $Backend is not supported."
   esac
   
   case $Containersetup in
     no)
-      [ -z "$Workdir" ] && [ "$Sharehome" = "no" ] && note "Option --no-setup: You might need to specify
-  e.g. '--workdir=/tmp' or '--env HOME=/tmp' to allow proper functionality."
+      check_setoption "--dbus --no-entrypoint --runasroot --runasuser" note unsupported && check_setoption_note --no-setup
+      
+      [ "$Langwunsch" ] && store_runoption env "LANG=$Langwunsch"
+      
       case $Initsystem in
         none) ;;
         tini|dockerinit) Initsystem="dockerinit" ;;
-        proot) ;;
         *) note "Option --no-setup: Option --init=$Initsystem is not supported.
   Fallback: Setting --init=tini"
           Initsystem="dockerinit"
         ;;
       esac
       
-      [ "$Dbusrunsession" = "yes" ] && {
-        note "Option --no-setup does not support option --dbus
-  Fallback: Disabling option --dbus"
-        check_fallback
-        Dbusrunsession="no"
-      }
-      [ "$Langwunsch" ] && {
-        note "Option --no-setup does not support option --lang.
-  Fallback: Disabling option --lang, setting '--env LANG=$Langwunsch' only."
-        store_runoption env "LANG=$Langwunsch"
-        check_fallback
-        Langwunsch=""
-      }
-      [ "$Noentrypoint" = "yes" ] && {
-        note "Option --no-setup does not support option --no-entrypoint.
-  Fallback: Disabling option --no-entrypoint."
-        check_fallback
-        Noentrypoint="no"
-      }
-      [ "$Runasroot" ] && {
-        note "Option --no-setup does not support option --runasroot.
-  Fallback: Disabling option --runasroot."
-        check_fallback
-        Runasroot=""
-      }
-      [ "$Runasuser" ] && {
-        note "Option --no-setup does not support option --runasuser.
-  Fallback: Disabling option --runasuser."
-        check_fallback
-        Runasuser=""
-      }
+      [ -z "$Workdir" ] && [ "$Sharehome" != "no" ] && note "Option --no-setup: You might need to specify
+  e.g. '--workdir=/tmp' or '--env HOME=/tmp' to allow proper functionality."
+  
       [ "$Sudouser" != "no" ] && [ "$Containeruser" != "root" ] && note "Option --no-setup does not support option --sudouser.
   Fallback: Enables needed container capabilities to allow sudo
   just in case the container user is set up for su and/or sudo.
   Consider to use --user=root."
   
+      ### FIXME check support of further options
       # --stdin?
       # --hostdbus
+      
+      Dbusrunsession="no"
+      Noentrypoint="no"
+      Runasroot=""
+      Runasuser=""
     ;;
   esac
   
@@ -7536,15 +7659,19 @@ Fallback: using command '$Containercommand' and enabling option --interactive."
   # --hostipc: Check auto-enabling
   [ "$Xserver" = "--hostdisplay" ] && [ "$Trusted" = "yes" ] && [ "$Hostmitshm" = "yes" ] && [ "$Shareipc" != "host" ] && [ "$Runsoverssh" = "no" ] && {
     [ "$Xtoolscontainer" = "yes" ] && {
-#      $Backendbin run --rm --mount type=bind,source="$Sharefolder",target="$Sharefolder" "$Xcontainerimage" cp "/XlibNoSHM.so" "$Sharefolder/"
+      ### FIXME check for possible existing LD_PRELOAD
       store_runoption env "LD_PRELOAD=/lib/x86_64-linux-gnu/libdl.so.2:/x11docker/XlibNoSHM.so"
     } || {
-      note "Option --hostdisplay: To allow --hostdisplay with trusted cookies,
+      case $Backend in
+        docker|podman|nerdctl)
+          note "Option --hostdisplay: To allow --hostdisplay with trusted cookies,
   x11docker must share host IPC namespace with container (option --hostipc)
   to allow shared memory for X extension MIT-SHM.
   You can avoid this if you provide image x11docker/xserver
   that contains an X library XlibNoSHM.so to avoid MIT-SHM issues."
-      [ "$Shareipc" = "no" ] && Shareipc="host"
+          [ "$Shareipc" = "no" ] && Shareipc="host"
+        ;;
+      esac
     }
   }
   
@@ -7553,11 +7680,13 @@ Fallback: using command '$Containercommand' and enabling option --interactive."
     case $Xserver in
       --kwin|--kwin-xwayland)
         [ "$Runsonconsole" = "yes" ] && {
-          note "Option --keymap does not work with option $Xserver
+          check_setoption --keymap && {
+            note "Option --keymap does not work with option $Xserver
   if running from console.
   Fallback. Disabling option --keymap."
-          check_fallback
-          Xkblayout=""
+            check_fallback
+            Xkblayout=""
+          }
         }
       ;;
     esac
@@ -7664,7 +7793,7 @@ Fallback: using command '$Containercommand' and enabling option --interactive."
   esac
 
   # --dpi
-  [ -n "$Dpi" ] && case $Xserver in
+  check_setoption --dpi && case $Xserver in
     --weston|--kwin|--hostwayland|--hostdisplay)
       note "Option --dpi has no effect with option $Xserver"
       check_fallback
@@ -7734,7 +7863,8 @@ Fallback: using command '$Containercommand' and enabling option --interactive."
   please either allow access to drive C: or specify a custom folder for
   cache storage with option '--cachebasedir D:/some/cache/folder'.
   Same issue can occur with option '--home'. 
-  Use option '--homebasedir D:/some/home/folder' in that case."
+  Use option '--homebasedir D:/some/home/folder' in that case.
+  Option --preset might help you to reduce typing on each command."
         ;;
       esac
       [ "$Initsystem" = "systemd" ] && {
@@ -7754,14 +7884,12 @@ Fallback: using command '$Containercommand' and enabling option --interactive."
   esac
   case $Winsubsystem in
     MSYS2|CYGWIN|WSL1|WSL2)
-      [ "$Pulseaudiomode" ] && {
-        note "Option --pulseaudio is not supported on MS Windows.
-  Fallback: Disabling option --pulseaudio"
-        check_fallback
-        Pulseaudiomode=""
-      }
+      check_setoption "--pulseaudio --printer --webcam" note unsupported && check_setoption_note "Windows"
+      Sharecupsmode=""
+      Pulseaudiomode=""
+      Sharewebcam="no"
       case $Xserver in
-        --xwin) note "Windows firewall settings can forbid application access
+        --xwin|--runx) note "Windows firewall settings can forbid application access
   to the X server. If no application window appears, but no obvious error
   is shown, please check your firewall settings. Compare issue #108 on github." ;;
       esac
@@ -7857,7 +7985,12 @@ Fallback: using command '$Containercommand' and enabling option --interactive."
   }
   
   case "$Runtime" in
-    ""|runc|crun|oci|sysbox-runc) ;;
+    ""|runc|crun|oci) ;;
+    sysbox-runc)
+      check_setoption "--alsa --webcam" note unsupported && check_setoption_note --runtime=sysbox-runc
+      Sharewebcam="no"
+      Sharealsa="no"
+    ;;
     nvidia) 
       [ "$Sharegpu" = "no" ] && {
         note "Option --runtime=nvidia: Enabling option --gpu"
@@ -7879,6 +8012,9 @@ Fallback: using command '$Containercommand' and enabling option --interactive."
         note "Option --hostipc: Only IPC of the qemu VM is shared with
   --runtime=kata-runtime."
       }
+      check_setoption "--alsa --webcam" note unsupported && check_setoption_note --runtime=kata-runtime
+      Sharewebcam="no"
+      Sharealsa="no"
     ;;
     *)
       note "Option --runtime: x11docker does not know runtime: $Runtime
@@ -7947,6 +8083,22 @@ check_runmode() {               # check run/--exe/--xonly
   
   return 0
 }
+check_setoption() {             # check if options in $1 are set by user
+  local Line Return= Message
+  Message="${2:-verbose}"
+  for Line in ${1:-}; do
+    grep -q -x -- "$Line" <<< "$Optionset" && {
+      Return=0
+      $Message "Found ${3:-} option $Line"
+    }
+  done
+  return "${Return:-1}"
+}
+check_setoption_note() {
+  note "${1:-} does not support all options
+  you have specified on cli. See message(s) above."
+  check_fallback
+}
 create_cachefiles() {           # create empty cache files owned by unprivileged user
   local Line
   # create base cache folder
@@ -8003,7 +8155,7 @@ $Hostuserhome/.cache/x11docker/symlink
   unpriv "mkdir -p $Sharefolder"
   
   # Files in $Cachefolder: host only access
-  Backendcommandfile="$Cachefolder/$Backendcommandfile"               && mkfile $Backendcommandfile
+  Backendcommandfile="$Cachefolder/$Backendcommandfile"             && mkfile $Backendcommandfile
   Hostxauthority="$Cachefolder/$Hostxauthority"                     && mkfile $Hostxauthority
   Messagelogfile="$Cachefolder/$Messagelogfile"                     && mkfile $Messagelogfile
   Pulseaudioconf="$Cachefolder/$Pulseaudioconf"                     && mkfile $Pulseaudioconf
@@ -8228,13 +8380,20 @@ option_messages() {             # some messages depending on options, but not ch
   }
   
   # --hostipc
-  [ "$Shareipc" = "host" ] && warning "Option --hostipc severely degrades 
+  [ "$Shareipc" = "host" ] && {
+    case $Backend in
+      docker|podman|nerdctl)
+        warning "Option --hostipc severely degrades 
   container isolation. IPC namespace remapping is disabled."
+      ;;
+    esac
+  }
 
   # --network
   case $Backend in
-    proot) ;;
-    *)
+    host) ;;
+    proot|chroot) ;;
+    docker|podman|nerdctl)
       case "$Network" in
         none) ;;
         ""|bridge) 
@@ -8704,6 +8863,7 @@ declare_variables() {           # declare global variables
   Limitresources=""                               # --limit: Limit access to CPU and RAM, 0.1 ... 1.0
   Network="none"                                  # --network
   Noentrypoint="no"                               # --no-entrypoint: Disable entrypoint in image yes/no
+  Optionset=""                                    # list of set options for later support check
   Rootfs=""
   Runtime=""                                      # Runtime to use. runc|nvidia|kata-runtime|crun
   Snapsupport=""                                  # --snap: Fallback mode to support docker in snap
@@ -8837,8 +8997,9 @@ stdout() {
 }
 parse_options() {               # parse cli options
   local Shortoptions Longoptions Parsedoptions Presetoptions Presetfile
-  Shortoptions="aAcdDefFghHiIKlmnpPqtTvVwWxXyY"
-  Longoptions="exe,xonly"                                                                                                   # Alternate setups of x11docker
+  Shortoptions="aAcdDfFghHiIKlmnpPqtTvVwWxXyY"
+  Shortoptions="${Shortoptions}e"                                                                                           # deprecated
+  Longoptions="xonly"                                                                                                       # Alternate setups of x11docker
   Longoptions="$Longoptions,auto,desktop,tty,wayland,wm::,xc::"                                                             # Influencing auto-setup of X/Wayland/x11docker
   Longoptions="$Longoptions,hostdisplay,nxagent,runx,xephyr,xpra,xpra2,xorg,xvfb,xwin"                                      # X servers
   Longoptions="$Longoptions,weston-xwayland,xpra-xwayland,xpra2-xwayland,xwayland"                                          # X servers depending on a Wayland compositor
@@ -8878,12 +9039,13 @@ parse_options() {               # parse cli options
   [ "$*" = "--" ]    &&       usage &&        exit 0                 # x11docker without options
   
   while [ $# -gt 0 ]; do
+    Optionset="$Optionset
+${1:-}"
     case "${1:-}" in
          --help)              usage ;         exit 0 ;;              # Show help/usage and exit
          --license|--licence) license ;       exit 0 ;;              # Show MIT license and exit
          --version)           echo $Version ; exit 0 ;;              # Output version number and exit
 
-      -e|--exe)               X11dockermode="exe" ;;                 # Execute application from host instead of running docker image
          --xonly)             X11dockermode="xonly" ;;               # Only create X server
          
          --preset)                                                   # Predefined option sets
@@ -9069,6 +9231,9 @@ ${2:-}"                       ; shift ;;                             # Add custo
                               check_fallback
                               Dbusrunsession="system"
                               Capdropall="no" ;;
+      -e|--exe)               Backend="host"
+                              note "Option -e, --exe is deprecated.
+  Please use --backend=host instead." ;;
          --hostnet)           Network="host" 
                               note "Option --hostnet is deprecated.
   Please use --network=host instead." ;;
@@ -9145,6 +9310,13 @@ ${2:-}"                       ; shift ;;                             # Add custo
   grep -q -- "--ipc=none"               <<< "$Customdockeroptions" && Shareipc="no"
   
   [ -n "$Xserver" ] && Autochooseserver="no"
+  
+  for Line in -a,--xpra -A,--xpra-xwayland -c,--clipboard -d,--desktop -D,--debug, -f,--fullscreen -g,--gpu -e,--exe -F,--xfishtank -h,--hostdisplay -H,--hostwayland -i,--interactive -I,--network -K,--kwin -l,--lang -m,--home -n,--nxagent -p,--pulseaudio -P,--printer -q,--quiet -t,--tty -T,--weston -v,--verbose -w,--wm -W,--wayland -x,--xorg -X,--xwayland -y,--xephyr -Y,--weston-xwayland; do
+    grep -q -x -- "$(cut -d, -f1 <<< "$Line")" <<< "$Optionset" && Optionset="$Optionset
+$(cut -d, -f2 <<< "$Line")"
+  done
+  Optionset="$(grep -- '--' <<< "$Optionset" | sort | uniq)"
+
   return 0
 }
 parse_preset() {                # nested parsing for --preset
@@ -9203,8 +9375,11 @@ main() {
   
   [ "$X11dockermode" = "run" ] && {
     case $Backend in
-      proot) ;;
-      *)
+      host) ;;
+      proot|chroot)
+        command -v "$Backend" >/dev/null || error "--backend=$Backend: command $Backend not found."
+      ;;
+      docker|podman|nerdctl)
         # Check whether docker daemon is running, get docker info
         Backendinfo="$($Backendbin info 2>>$Containerlogfile)" || error "'$Backend info' failed.
   If using docker: Is docker daemon running at all?
@@ -9218,7 +9393,7 @@ $(rmcr < "$Containerlogfile" | tail)"
 
   debugnote "
 x11docker version: $Version
-Backend version:   $($Backendbin --version 2>&1)
+Backend version:   $(${Backendbin:-:} --version 2>&1)
 OCI Runtime:       $Runtime
 Host system:       $(grep '^PRETTY_NAME' /etc/os-release 2>/dev/null | cut -d= -f2 || echo "$Hostsystem")
 Host architecture: $Hostarchitecture
@@ -9322,8 +9497,8 @@ Parsed options:    $Parsedoptions_global"
   ### Create docker command
   [ "$X11dockermode" = "run" ] && {
     case $Backend in
-      proot) ;;
-      *)
+      proot|chroot) ;;
+      docker|podman|nerdctl)
         check_image
         check_cgroup
         setup_capabilities          # add linux capabilities if needed for some options. Default: --cap-drop=ALL
@@ -9406,7 +9581,7 @@ $(nl -ba <$Westonini)"
       *)
         Xinitpid="$(pgrep -a xinit 2>/dev/null | grep "xinit $Xinitrc" | awk '{print $1}')"
         checkpid "$Xinitpid"   && setonwatchpidlist $Xinitpid xinit
-        Xserverpid=$(ps aux | rmcr | grep "$(echo "${Line:-nothingtolookfor}" | cut -d' ' -f1-2)" | grep -v grep | grep -v xinit | awk '{print $2}')
+        Xserverpid=$(ps aux | rmcr | grep "$(echo "${Xcommand:-nothingtolookfor}" | cut -d' ' -f1-2)" | grep -v grep | grep -v xinit | awk '{print $2}')
         checkpid "$Xserverpid" && setonwatchpidlist "$Xserverpid" Xserver
       ;;
     esac

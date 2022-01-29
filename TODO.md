@@ -4,13 +4,13 @@ x11docker ToDo notes
 ## Work in progress
  - --backend=proot
    - --xc=backend?
+   - --name
+   - --hostdbus
    - --alsa fails without entire /dev yet
    - xfce4-terminal redirection fails, needs something in /dev
 while read Line; do
 done < <(LC_ALL=C aplay -l | grep card)
    - depends on Switchcontaineruser=yes
-   - fix messages
-   - note about unregarded options
    - --init except systemd possible?
    
  - kata: add new runtime for nerdctl io.containerd.kata.v2
@@ -28,7 +28,6 @@ done < <(LC_ALL=C aplay -l | grep card)
  - --build: download files for COPY/ADD (x11docker/check, x11docker/xserver)
  - x11docker/fvwm: openrc package broken? no `rc-update`, no dbus
  - `--remove`: give note about not removed files in `~./config/x11docker` and `/etc/x11docker`
- - `--exe`: Give notes for invalid options.
  - `--update`: Check if installs into `/usr/bin` or `/usr/local/bin`. Do not install other files then.
  - `--password, --install, --update, --cleanup`, etc.: give note about dropped options.
    Maybe change to $1 mode without `--`
