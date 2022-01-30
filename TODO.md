@@ -4,7 +4,6 @@ x11docker ToDo notes
 ## Work in progress
  - check empty XDG_RUNTIME_DIR e.g. with --user, --hostuser
  - --xc=backend? for proot and host backends
- - `--password, --install, --update, --cleanup`, etc.: give note about dropped options.
  
  - --backend=proot
    - --name
