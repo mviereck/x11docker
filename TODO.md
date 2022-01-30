@@ -3,11 +3,10 @@ x11docker ToDo notes
 
 ## Work in progress
  - check empty XDG_RUNTIME_DIR e.g. with --user, --hostuser
- - --hostuser with non-existing username
+ - --xc=backend? for proot and host backends
+ - `--password, --install, --update, --cleanup`, etc.: give note about dropped options.
  
  - --backend=proot
-   - fix /etc/passwd
-   - --xc=backend?
    - --name
    - --hostdbus
    - --init except systemd possible?
@@ -27,8 +26,9 @@ x11docker ToDo notes
  - x11docker/fvwm: openrc package broken? no `rc-update`, no dbus
  - `--remove`: give note about not removed files in `~./config/x11docker` and `/etc/x11docker`
  - `--update`: Check if installs into `/usr/bin` or `/usr/local/bin`. Do not install other files then.
- - `--password, --install, --update, --cleanup`, etc.: give note about dropped options.
    Maybe change to $1 mode without `--`
+   
+## Checks
  - check all `--init=` in all backends rootful and rootless.
    - checked: 
      - rootful docker: all
@@ -72,12 +72,9 @@ x11docker ToDo notes
  - `elogind` in alpine: `su` does not take effect. missing policykit? pam corrupted by x11docker?
  - `elogind` in void container: loginctl is empty. ck-list-sessions, too.
 
-## Needs investigation and probably 3d party bug report
-  - `kwin_wayland` needs `CAP_SYS_RESOURCE` even if running nested
-  - `--xpra --desktop --xdummy`: --size modeline does not work, might not even appear in xrandr although set in xdummy.xorg.conf
-  - `Xwayland` does not support X over IP (`-listen tcp`)
-
 ## 3rd party bugs
+  - `kwin_wayland` needs `CAP_SYS_RESOURCE` even if running nested
+  - `Xwayland` does not support X over IP (`-listen tcp`) or iglx.
  - Xwayland does not always sit at 0.0 on multiple outputs. 
    https://bugzilla.redhat.com/show_bug.cgi?id=1498665
  - `--kwin*`: wrong fullscreen and crashes in gnome-wayland, strange in weston, WAYLAND_DISPLAY="" does not help, probably bug in kwin
