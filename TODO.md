@@ -2,19 +2,17 @@
 x11docker ToDo notes
 
 ## Work in progress
+ - check empty XDG_RUNTIME_DIR e.g. with --user, --hostuser
+ - --hostuser with non-existing username
+ 
  - --backend=proot
+   - fix /etc/passwd
    - --xc=backend?
    - --name
    - --hostdbus
-   - --alsa fails without entire /dev yet
-   - xfce4-terminal redirection fails, needs something in /dev
-while read Line; do
-done < <(LC_ALL=C aplay -l | grep card)
-   - depends on Switchcontaineruser=yes
    - --init except systemd possible?
    
  - kata: add new runtime for nerdctl io.containerd.kata.v2
- - --overip: use real host ip
    
  - X in container:
    - use xauth and others from image if not available on host
@@ -88,7 +86,6 @@ done < <(LC_ALL=C aplay -l | grep card)
   
 ## Improvements
  - `--cleanup`: avoid hardcoded paths
- - support `--exe --user` ?
  - avoid losing hostexe from process tree
  - dependency wiki: Cygwin packages
  - `capsh`: replace `su` with `capsh`? (missing in alpine) But how to trigger login?
