@@ -3,10 +3,9 @@ x11docker ToDo notes
 
 ## Work in progress
  - check empty XDG_RUNTIME_DIR e.g. with --user, --hostuser
- - --xc=backend? for proot and host backends
+ - --xc=backend for proot and host backends
  - --backend=proot
    - --name
-   - --hostdbus
    - --init except systemd possible?
    
  - kata: add new runtime for nerdctl io.containerd.kata.v2

@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.1.0-beta-1"
+Version="7.1.0-beta-2"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -1212,6 +1212,12 @@ getwslpath() {                  # get path to currently running WSL system
   rm "${RUN_ID}"
   return 0
 }
+get_xpath() {                   # --xc: path to X server
+  case $Xcontainer in
+    yes) echo "/usr/bin/${1:-}" ;;
+    no)  command -v "${1:-}" ;;
+  esac
+}
 mkfile() {                      # create file $1 owned by $Hostuser
   :> "${1:-}"                 || return 1
   chown $Hostuser    "${1:-}" || return 1
@@ -1955,9 +1961,9 @@ setup_hostdbus() {              # option --hostdbus: connect to host DBus sessio
   [ "$DBUS_SESSION_BUS_ADDRESS" ] || {
     # no running DBus session?
     command -v dbus-launch >/dev/null && {
-      export $(dbus-launch)
       note "Option --hostdbus: DBUS_SESSION_BUS_ADDRESS is empty.
   Creating abstract DBus socket with dbus-launch."
+      export $(dbus-launch)
     } || {
       note "Option --hostdbus: Is DBus running on host?
   Did not find an active session and did not find dbus-launch.
@@ -1979,7 +1985,7 @@ setup_hostdbus() {              # option --hostdbus: connect to host DBus sessio
       ;;
       *)
         store_runoption env "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS"
-        store_runoption volume "/$(cut -d/ -f2- <<<"$DBUS_SESSION_BUS_ADDRESS"):ro"
+        store_runoption volume "/$(cut -d/ -f2- <<<"$DBUS_SESSION_BUS_ADDRESS")"
       ;;
     esac
   }
@@ -2312,7 +2318,7 @@ check_newxenv()  {              # find free display
 
   return 0
 }
-store_newxenv() {              # store display variables
+store_newxenv() {               # store display variables
   Newdisplay="$(sed "s/XCONTAINERIP/$Xcontainerip/" <<< "$Newdisplay")"
   # create $Newxenv: collection of environment variables to access new X from host (e.g. in xinitrc)
   [ "$Newdisplay" ]              && storeinfo "DISPLAY=$Newdisplay"                && Newxenv="$Newxenv
@@ -3873,7 +3879,7 @@ exit 0
   
   return 0
 }
-create_xtoolscontainercommand() {
+create_xtoolscontainercommand() { #(not implemented yet)
   local Xtoolscontainerrc 
  
   Xtoolscontainername="x11docker_X${Newdisplaynumber}_xtools_${Cachenumber}"
@@ -3941,12 +3947,6 @@ $(xhost 2>&1 )"
     return 1
   }
   return 0
-}
-get_xpath() {
-  case $Xcontainer in
-    yes) echo "/usr/bin/${1:-}" ;;
-    no)  command -v "${1:-}" ;;
-  esac
 }
 weston_getoutputname() {        # short startup of weston on tty to grep output name
   unpriv "$Weston --no-config --backend=drm-backend.so >> $Compositorlogfile 2>&1 & echo compositorpid=\$! >>$Storeinfofile"
@@ -4473,7 +4473,7 @@ check_cgroup() {                # check [and create] cgroup mountpoint for syste
   }
   return 0
 }
-check_containerhomebasedir() {
+check_containerhomebasedir() {  # options --homebasedir, --home
   ## option '--homebasedir': Specify base folder here to store container home folders for --home
 
   # base home folder
@@ -4499,7 +4499,7 @@ check_containerhomebasedir() {
     ;;
   esac
 }
-check_containerhome() {         # options --home, --homedir, --homebasedir: check HOME of container user.
+check_containerhome() {         # option --home: check HOME of container user.
   ## option '--home':        Share folder ~/.local/share/x11docker/imagename with created container as its home directory
   ## option '--home=DIR':    Share custom host folder as home
   
@@ -4936,6 +4936,7 @@ create_backendcommand() {        ### create command to run docker
         esac
       ;;
       proot)
+        Line="$(sed 's/:ro//' <<< "$Line")"
         Prootcommand="$Prootcommand \\
   --bind=$Line:$Line"
       ;;
@@ -7081,9 +7082,9 @@ check_host() {                  # check host environment
   #Nvidiaversion="470.74"
     
   # check python version
-  Pythonbin="$(command -v python)"
-  [ -z "$Pythonbin" ] && Pythonbin="$(command -v python3)"
-  [ -z "$Pythonbin" ] && Pythonbin="$(command -v python2)"
+  Pythonbin="$(command -v python ||:)"
+  [ -z "$Pythonbin" ] && Pythonbin="$(command -v python3 ||:)"
+  [ -z "$Pythonbin" ] && Pythonbin="$(command -v python2 ||:)"
   "$Pythonbin" --version >/dev/null 2>&1 || Pythonbin=""
   [ -z "$Pythonbin" ] && error "x11docker needs 'python' to parse output of '$Backend inspect'.
   This is needed to check ENTRYPOINT and CMD that in turn is needed to set up
@@ -7468,11 +7469,11 @@ check_option_interferences() {  # check multiple option interferences, change se
   There is close to no isolation like a real container could provide.
   Effectively applications in proot have the same privileges as if
   they would have been installed and started directly on the host system."
-      check_optionset "--backend=$Backend" "--cap-default --hostipc --limit --network --newprivileges --no-setup --runtime --sharecgroup --user"
+      check_optionset "--backend=$Backend" "--cap-default --hostipc --limit --network --newprivileges --no-setup --runtime --sharecgroup --user" ||:
       check_optionset "--backend=$Backend" "--user" && error "--backend=$Backend: Option --user is not allowed.
   Option --hostuser might serve you."
       # set defaults. Some might look misleading just to avoid later messages, but not affecting the setup.
-      Network=""
+      Network="host"
       Shareipc="host"
       Createcontaineruser="yes"
       Containersetup="yes"
@@ -7508,7 +7509,7 @@ Fallback: using command '$Containercommand' and enabling option --interactive."
       Sharefoldercontainer="$Sharefolder"
       # --dbus, --hostdbus, --init
       check_optionset "--backend=$Backend" "--alsa --cap-default --gpu --group-add --hostipc --limit --home --name --network --newprivileges --no-entrypoint --no-setup \
-                       --printer --pulseaudio --runasroot --runtime --share --sharecgroup --sudouser --webcam --xc"
+                       --printer --pulseaudio --runasroot --runtime --share --sharecgroup --sudouser --webcam --xc" ||:
       check_optionset "--backend=$Backend" "--user" && error "--backend=$Backend: Option --user is not allowed.
   Option --hostuser might serve you."
       # set defaults. Some might look misleading just to avoid later messages, but not affecting the setup.
@@ -7518,7 +7519,7 @@ Fallback: using command '$Containercommand' and enabling option --interactive."
       Shareipc="host"
       [ "$Langwunsch" ] && store_runoption env "LANG=$Langwunsch"
       Limitresources=""
-      Network=""
+      Network="host"
       Allownewprivileges="no"
       Noentrypoint=""
       Containersetup="yes"
@@ -7539,7 +7540,7 @@ Fallback: using command '$Containercommand' and enabling option --interactive."
   # --no-setup
   case $Containersetup in
     no)
-      check_optionset "--no-setup" "--dbus --no-entrypoint --runasroot --runasuser"
+      check_optionset "--no-setup" "--dbus --no-entrypoint --runasroot --runasuser" ||:
       
       [ "$Langwunsch" ] && store_runoption env "LANG=$Langwunsch"
       
@@ -7841,7 +7842,7 @@ Fallback: using command '$Containercommand' and enabling option --interactive."
   esac
   case $Winsubsystem in
     MSYS2|CYGWIN|WSL1|WSL2)
-      check_optionset "Windows" "--pulseaudio --printer --webcam"
+      check_optionset "Windows" "--pulseaudio --printer --webcam" ||:
       Sharecupsmode=""
       Pulseaudiomode=""
       Sharewebcam="no"
@@ -7944,7 +7945,7 @@ Fallback: using command '$Containercommand' and enabling option --interactive."
   case "$Runtime" in
     ""|runc|crun|oci) ;;
     sysbox-runc)
-      check_optionset "--runtime=sysbox-runc" "--alsa --webcam"
+      check_optionset "--runtime=sysbox-runc" "--alsa --webcam" ||:
       Sharewebcam="no"
       Sharealsa="no"
     ;;
@@ -7969,7 +7970,7 @@ Fallback: using command '$Containercommand' and enabling option --interactive."
         note "Option --hostipc: Only IPC of the qemu VM is shared with
   --runtime=kata-runtime."
       }
-      check_optionset "--runtime=kata-runtime" "--alsa --webcam"
+      check_optionset "--runtime=kata-runtime" "--alsa --webcam" ||:
       Sharewebcam="no"
       Sharealsa="no"
     ;;
@@ -9274,7 +9275,7 @@ main() {
   parse_options "$@"
   
   [ -n "$Containeruserpassword" ] && {     # --password
-    check_optionset "--password" "$(grep -v -- '--password' <<< "$Optionsetall")"
+    check_optionset "--password" "$(grep -v -- '--password' <<< "$Optionsetall")" ||:
     set_password "$Containeruserpassword"
     finish
   }
@@ -9324,17 +9325,17 @@ Parsed options:    $Parsedoptions_global"
     exit
   }                   
   [ "$Cleanup" = "yes" ] && {                                                     # --cleanup: Clean up cache and orphaned x11docker containers
-    check_optionset "--cleanup" "$(grep -v -E -- '--cleanup|--backend' <<< "$Optionsetall")"
+    check_optionset "--cleanup" "$(grep -v -E -- '--cleanup|--backend' <<< "$Optionsetall")" ||:
     cleanup
     exit
   }
   [ "$Installermode" ] && {                                                       # --install, --update, --update-master, --remove
-    check_optionset "$Installermode" "$(grep -v -E -- '--install|--update|--update-master|--remove' <<< "$Optionsetall")"
+    check_optionset "$Installermode" "$(grep -v -E -- '--install|--update|--update-master|--remove' <<< "$Optionsetall")" ||:
     installer "$Installermode"
     exit
   }
   [ "$Buildimage" ] && {                                                          # --build: Build image from x11docker repository
-    check_optionset "--build" "$(grep -v -E -- '--build|--backend' <<< "$Optionsetall")"
+    check_optionset "--build" "$(grep -v -E -- '--build|--backend' <<< "$Optionsetall")" ||:
     buildimage "$Imagename"
     exit
   }
@@ -9408,6 +9409,7 @@ Parsed options:    $Parsedoptions_global"
   [ "$Compositorcommand" ]       && debugnote "Compositor command:
   $Compositorcommand"
   [ "$Shareclipboard" = "yes" ]  && setup_clipboard ||:                           # --clipboard
+  [ "$Sharehostdbus" = "yes" ]   && setup_hostdbus                                # --hostdbus
     
   setup_initsystem               # init in container. Default: tini               # --init
   
@@ -9434,7 +9436,6 @@ Parsed options:    $Parsedoptions_global"
       check_image
       check_cgroup
       setup_capabilities          # add linux capabilities if needed for some options. Default: --cap-drop=ALL
-      [ "$Sharehostdbus" = "yes" ] && setup_hostdbus                                # --hostdbus
     ;;
   esac
   case $Backend in
