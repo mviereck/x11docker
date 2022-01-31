@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.1.0-beta-2"
+Version="7.1.0-beta-3"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -1490,11 +1490,14 @@ installer() {                   # --install, --update, --update-master, --remove
         Binpath="$(myrealpath "$Binpath")"
         Binowner="$(stat -c '%U' "$0")"
         Bingroup="$(stat -c '%G' "$0")"
-        [ -d "$Binpath/.git" ] && error "Option ${1:-}: It seems you are within a git directory.
+        [ -d "$Binpath/.git" ] && {
+          error "Option ${1:-}: It seems you are within a git directory.
   Use 'git pull' to update your local git repository.
   Otherwise, run 'x11docker --install' first
   before running 'x11docker ${1:-}'
   so to use a system installation of x11docker."
+          return 1
+        }
       }
     ;;
   esac
@@ -1509,7 +1512,7 @@ installer() {                   # --install, --update, --update-master, --remove
       CYGWIN|MSYS2) ;;
       *) 
         case "$Binowner" in
-          root) error "Must run as root to install, update or remove x11docker system wide." ;;
+          root) error "Must run as root to install, update or remove x11docker system wide." ; return 1 ;;
           *) warning "Option ${1:-}: Not running as root.
   Installing or updating non-essential files in system wide folders might fail." ;;
         esac
@@ -1521,7 +1524,7 @@ installer() {                   # --install, --update, --update-master, --remove
   case ${1:-} in
     --install)
       [ -f "./x11docker" ]             || { error "File x11docker not found in current folder.
-  Try 'x11docker --update' instead." ; }
+  Try 'x11docker --update' instead." ; return 1 ; }
       command -v x11docker > /dev/null && { warning "x11docker seems to be installed already.
   Will overwrite existing installation.
   Consider to use option '--update' or '--update-master' instead." ; }
@@ -1535,12 +1538,12 @@ installer() {                   # --install, --update, --update-master, --remove
       }
 
       [ -d /tmp/x11docker-install ] && rm -R /tmp/x11docker-install
-      mkdir -p /tmp/x11docker-install && cd /tmp/x11docker-install || error "Could not create or cd to /tmp/x11docker-install."
+      mkdir -p /tmp/x11docker-install && cd /tmp/x11docker-install || { error "Could not create or cd to /tmp/x11docker-install." ; return 1 ; }
       download || error "Neither wget nor curl found. Need 'wget' or 'curl' for download.
   Please install wget or curl."
       command -v unzip >/dev/null && Format="zip"
       command -v tar >/dev/null   && Format="tar.gz"
-      [ "$Format" ] || error "Cannot extract archive. Please install 'unzip' or 'tar'."
+      [ "$Format" ] || { error "Cannot extract archive. Please install 'unzip' or 'tar'." ; return 1 }
 
       case ${1:-} in
         --update-master)
@@ -3201,7 +3204,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   That can be abused to take control over your system." ;;
         no|"") 
           case "$Xserver" in
-            --hostdisplay|--hostwayland|--weston|--kwin) ;;
+            --hostdisplay|--hostwayland|--weston|--kwin|--tty) ;;
             *) warning "Option --no-auth: SECURITY RISK!
   Allowing access to new X server for everyone." ;;
           esac
@@ -4998,10 +5001,8 @@ create_backendcommand() {       ### create command to run docker
   --bind=$Sharefolder:$Sharefoldercontainer"
     ;;
     chroot)
-      mkdir -p "$Rootfs/$Sharefoldercontainer"
-      ls -la  "$Sharefolder" "$Rootfs/$Sharefoldercontainer"
-#      mount --bind "$Sharefolder" "$Rootfs/$Sharefoldercontainer"
-      mount --bind "$Sharefolder" "$Rootfs/x11docker"
+      Chrootmountlist="$Chrootmountlist
+'$Sharefolder' '$Rootfs/$Sharefoldercontainer'"
     ;;
   esac
   
@@ -5019,8 +5020,8 @@ create_backendcommand() {       ### create command to run docker
   --bind=$Persistanthomevolume:$Containeruserhome"
         ;;
         chroot)
-          mkdir "$Rootfs/$Containeruserhome"
-          mount --bind "$Persistanthomevolume" "$Rootfs/$Containeruserhome"
+          Chrootmountlist="$Chrootmountlist
+'$Persistanthomevolume' '$Rootfs/$Containeruserhome'"
         ;;
       esac
     ;;
@@ -5061,8 +5062,8 @@ create_backendcommand() {       ### create command to run docker
   --bind=$Line:$Line"
       ;;
       chroot)
-        mkdir -p "$Rootfs/$Line"
-        mount --bind "$Line" "$Rootfs/$Line"
+        Chrootmountlist="$Chrootmountlist
+'$Line' '$Rootfs/$Line'"
       ;;
     esac
   done < <(store_runoption dump volume)
@@ -5080,7 +5081,8 @@ create_backendcommand() {       ### create command to run docker
   --bind=$Nvidiainstallerfile:$Nvidiacontainerfile"
       ;;
       chroot)
-        cp "$Nvidiainstallerfile" "$Rootfs/$Nvidiacontainerfile"
+        Chrootmountlist="$Chrootmountlist
+'$Nvidiainstallerfile' '$Rootfs/$Nvidiacontainerfile'"
       ;;
     esac
   }
@@ -5117,7 +5119,8 @@ create_backendcommand() {       ### create command to run docker
   --bind=$Newxsocket:$Newxsocket"
           ;;
           chroot)
-            mount --bind "$Newxsocket" "$Rootfs/$Newxsocket" ### FIXME does not exist yet
+            Chrootmountlist="$Chrootmountlist
+'$Newxsocket' '$Rootfs/$Newxsocket'"
           ;;
         esac
       }
@@ -5273,9 +5276,14 @@ create_backendcommand() {       ### create command to run docker
       Backendcommand="$Backendcommand \\
   --"
     ;;
-    proot|chroot)
+    proot)
       Backendcommand="$Backendcommand \\
-"
+  "
+    ;;
+    chroot)
+      Backendcommand="$Backendcommand \\
+  $Rootfs \\
+  "
     ;;
   esac
   
@@ -6789,11 +6797,6 @@ start_container() {             # docker run
 #    export MSYS2_ARG_CONV_EXCL='*'
 #  }
   
-  # Send signal to run X and wait for X to be ready
-  storeinfo readyforX=ready
-  waitforlogentry 'start_container()' $Xinitlogfile 'xinitrc is ready' "$Xiniterrorcodes"
-  rocknroll || exit 64
-  
   Backendcommand="$(tr -d '\\\n' <<< "$Backendcommand")"
   debugnote "start_container(): Running image"
 
@@ -7200,7 +7203,7 @@ check_host() {                  # check host environment
   # Image x11docker/xserver
   case $Backend in
     docker|podman|nerdctl) $Backendbin inspect "$Xcontainerimage" >/dev/null 2>&1 || Xcontainerimage="" ;;
-    proot) Xcontainerimage="" ;;
+    proot|chroot) Xcontainerimage="" ;;
     host)  Xcontainerimage="" ;;
   esac
   [ "$Xcontainerimage" ] && Xtoolscontainer="yes"
@@ -7211,10 +7214,10 @@ check_host() {                  # check host environment
       case $Network in
         host) Hostip="127.0.0.1" ;;
         *)
-          Hostip="$(hostname -I | cut -d' ' -f1)"
+          #Hostip="$(hostname -I | cut -d' ' -f1)"
+          [ "$Hostip" ] || Hostip="$(ip -4 -o a |                  awk '{print $4}' | cut -d/ -f1 | grep    "^192\.168\.*" | head -n1)" 
           [ "$Hostip" ] || Hostip="$(ip -4 -o a | grep 'docker0' | awk '{print $4}' | cut -d/ -f1 | grep    "172.17.0.1" ||: )"
           [ "$Hostip" ] || Hostip="$(ip -4 -o a | grep 'docker0' | awk '{print $4}' | cut -d/ -f1 | head -n1)"
-          [ "$Hostip" ] || Hostip="$(ip -4 -o a |                  awk '{print $4}' | cut -d/ -f1 | grep    "^192\.168\.*" | head -n1)" 
           [ "$Hostip" ] || Hostip="$(ip -4 -o a |                  awk '{print $4}' | cut -d/ -f1 | grep -v "127.0.0.1" | head -n1)" 
         ;;
       esac
@@ -7284,14 +7287,18 @@ check_host() {                  # check host environment
   #Nvidiaversion="470.74"
     
   # check python version
-  Pythonbin="$(command -v python ||:)"
-  [ -z "$Pythonbin" ] && Pythonbin="$(command -v python3 ||:)"
-  [ -z "$Pythonbin" ] && Pythonbin="$(command -v python2 ||:)"
-  "$Pythonbin" --version >/dev/null 2>&1 || Pythonbin=""
-  [ -z "$Pythonbin" ] && error "x11docker needs 'python' to parse output of '$Backend inspect'.
+  case $Backend in
+    docker|podman|nerdctl)
+      Pythonbin="$(command -v python ||:)"
+      [ -z "$Pythonbin" ] && Pythonbin="$(command -v python3 ||:)"
+      [ -z "$Pythonbin" ] && Pythonbin="$(command -v python2 ||:)"
+      "$Pythonbin" --version >/dev/null 2>&1 || Pythonbin=""
+      [ -z "$Pythonbin" ] && error "x11docker needs 'python' to parse output of '$Backend inspect'.
   This is needed to check ENTRYPOINT and CMD that in turn is needed to set up
   some x11docker features. To allow more features, please install 'python'
   version 2.x or 3.x"
+    ;;
+  esac
   
   return 0
 }
@@ -7622,7 +7629,7 @@ check_option_interferences() {  # check multiple option interferences, change se
   
   # --backend
   case $Backend in
-    docker|podman|nerdctl|proot)
+    docker|podman|nerdctl|proot|chroot)
       [ "${Imagename:0:1}" = "/" ] && {
         Rootfs="$Imagename"
         Imagename="$(basename "$Rootfs")"
@@ -7733,6 +7740,20 @@ Fallback: using command '$Containercommand' and enabling option --interactive."
       Sharecgroup="no"
       Sudouser="no"
       Sharewebcam=""
+    ;;
+    chroot) ### FIXME
+      [ -z "$Rootfs" ] && [ -d "$Hosthomebasefolder/ROOTFS/$Imagebasename" ] && Rootfs="$Hosthomebasefolder/ROOTFS/$Imagebasename"
+      [ -z "$Rootfs" ] && error "--backend=$Backend: Did not find a rootfs for $Imagename
+  in $Hosthomebasefolder/ROOTFS/$Imagebasename"
+      [ -z "$Containercommand" ] && [ -e "$Rootfs/start" ] && Containercommand="/bin/sh /start"
+      [ -z "$Containercommand" ] && {
+        [ -e "$Rootfs/bin/bash" ]                          && Containercommand="/bin/bash" || Containercommand="/bin/sh"  
+        [ "$Containerusershell" != "auto" ]                && Containercommand="$Containerusershell"
+        note "--backend=$Backend: No command specified.
+Fallback: using command '$Containercommand' and enabling option --interactive."
+        check_fallback
+        Interactive="yes"
+      }
     ;;
     *) 
       error "Option --backend=$Backend: Backend $Backend is not supported."
@@ -8951,11 +8972,12 @@ declare_variables() {           # declare global variables
   # Container setup
   Adminusercaps="no"                              # --cap-default, --sudouser, --init=systemd: add capabilities for general container system administration
   Allownewprivileges="auto"                       # --newprivileges: Docker run option --security-opt=no-new-privileges. Default: no. Enabled by options --newprivileges, --cap-default, --sudouser.
-  Backend="docker"                                # --backend: Backend to use, like docker, podman, nerdctl, udocker
+  Backend=""                                      # --backend: Backend to use, like docker, podman, nerdctl, proot, host
   Backendbin=""                                   # path to binary of backend
   Backendinfo=""                                  # output of 'docker info'
   Capabilities=""                                 # Capabilities to add. Default: none, exceptions for --init, --sudouser
   Capdropall="yes"                                # --cap-default: Drop all container capabilities and set --securty-opt=no-new-privileges yes/no
+  Chrootmountlist=""
   Cmdexec=""
   Containercommand=""                             # Container command [+args]
   Containerentrypoint=""
@@ -9420,13 +9442,11 @@ ${2:-}"                       ; shift ;;                             # Add custo
   [ -n "$Xserver" ] && Autochooseserver="no"
   [ -z "$Imagename" ] && {
     # Only create X server / --xonly
-    note "No image name specified.
-  Fallback: enabling option --xonly."
-    check_fallback
-    Backend="host"
+    Backend="${Backend:-host}"
     Containercommand="sleep infinity"
     Showdisplayenvironment="${Showdisplayenvironment:-yes}"
   }
+  Backend="${Backend:-docker}"
   
   for Line in -a,--xpra -A,--xpra-xwayland -c,--clipboard -d,--desktop -D,--debug, -f,--fullscreen -g,--gpu -e,--exe -F,--xfishtank -h,--hostdisplay -H,--hostwayland -i,--interactive -I,--network -K,--kwin -l,--lang -m,--home -n,--nxagent -p,--pulseaudio -P,--printer -q,--quiet -t,--tty -T,--weston -v,--verbose -w,--wm -W,--wayland -x,--xorg -X,--xwayland -y,--xephyr -Y,--weston-xwayland; do
     grep -q -x -- "$(cut -d, -f1 <<< "$Line")" <<< "$Optionset" && Optionset="$Optionset
@@ -9495,7 +9515,7 @@ main() {
   setup_verbosity               # create [and show] summary logfile               # --verbose
   check_hostxenv                # check X environment from host
   storeinfo "x11dockerpid=$$"   # store pid of x11docker
-  
+
   case $Backend in
     host) ;;
     proot|chroot)
@@ -9596,7 +9616,7 @@ Parsed options:    $Parsedoptions_global"
   
   #### Create command to run X server [and/or Wayland compositor]
   check_newxenv                  # find free display
-  [ "$Xcontainer" = "yes" ] || [ "$Xtoolscontainer" = "yes" ] && {                # --xc
+  [ "$Xcontainer" = "yes" ] && {                                                  # --xc
     create_xcontainercommand
     debugnote "X container command:
   $Xcontainercommand"
@@ -9631,9 +9651,7 @@ Parsed options:    $Parsedoptions_global"
   Mount path in subsystem:                        $Winsubmount/
   Using MobyVM:                                   $Mobyvm"
 
-  ### Create docker command
   case $Backend in
-    proot|chroot) ;;
     docker|podman|nerdctl)
       check_image
       check_cgroup
@@ -9684,7 +9702,7 @@ $(nl -ba <$Westonini)"
     # Thus docker runs in this subshell after X server is ready to accept connections.
     # Waiting for X is done in dockerrc.
     
-    trap '' SIGINT
+    #trap '' SIGINT
     
     # softlink to X or Wayland unix socket in container
     case $Xcontainer in
@@ -9693,6 +9711,23 @@ $(nl -ba <$Westonini)"
           [ "$Newdisplay" ]       && ln -s "$Cachefolder/X11-unix/X$Newdisplaynumber"       "/tmp/.X11-unix/X$Newdisplaynumber"
           [ "$Newwaylandsocket" ] && ln -s "$Cachefolder/XDG_RUNTIME_DIR/$Newwaylandsocket" "$XDG_RUNTIME_DIR/$Newwaylandsocket"
         }
+      ;;
+    esac
+    
+    # Send signal to run X and wait for X to be ready
+    storeinfo readyforX=ready
+    waitforlogentry 'start_container()' $Xinitlogfile 'xinitrc is ready' "$Xiniterrorcodes"
+    rocknroll || timetosaygoodbye main
+  
+    case $Backend in
+      chroot)
+        Chrootmountlist="$(grep . <<< "$Chrootmountlist")"
+        while read -r Line; do
+          debugnote "mount --bind $Line"
+          eval mount --bind $Line 2>>$Containerlogfile || error "--backend=$Backend: mount failed.
+  Last lines of log:
+$(tail "$Containerlogfile")"
+        done <<< "$Chrootmountlist"
       ;;
     esac
     
