@@ -4675,170 +4675,260 @@ check_containeruser() {         # check container user and shared home folder (a
   esac
   return 0
 }
-create_backendcommand() {        ### create command to run docker
-  local Line= Memory Tini=
-  local Dockercommand Prootcommand Chrootcommand Grouplist=
+create_backendcommand() {       ### create command to run docker
+  local Line= Memory Tini= Grouplist=
   
-  Dockercommand="$Backendbin run --pull never"
   case $Backend in
-    nerdctl) ;;
-    docker|podman) [ "$Preservecachefiles" = "no" ] && Dockercommand="$Dockercommand --rm" ;;
-  esac
-  
-  Prootcommand="proot --rootfs='$Rootfs' \\
+    docker|podman|nerdctl)
+      Backendcommand="$Backendbin run \\
+  --pull never"
+    ;;
+    proot)
+      Backendcommand="proot \\
+  --rootfs='$Rootfs' \\
   --bind=/etc/host.conf \\
   --bind=/etc/nsswitch.conf \\
   --bind=/etc/resolv.conf \\
   --bind=/proc \\
-  --bind=/run/shm \\
+  --bind=/sys \\
   --bind=/dev \\
-  --bind=/sys" 
-#  --bind=/dev/ptmx \\
-#  --bind=/dev/pts \\
-#  --bind=/dev/tty \\
-#  --bind=/dev/shm \\
-  
-  Chrootcommand="chroot"
-  
-  [ "$Sudouser" = "yes" ] && Prootcommand="$Prootcommand \\
-  --root-id"
-  
-  case $Interactive in
-    yes) 
-      Dockercommand="$Dockercommand --interactive --tty" 
+  --bind=/run/shm"
     ;;
-    no)  
-      Dockercommand="$Dockercommand --detach" 
+    chroot)
+      Backendcommand="chroot"
+    ;;
+  esac
+  
+  # --keepcache
+  case $Backend in
+    docker|podman) 
+      [ "$Preservecachefiles" = "no" ] && Backendcommand="$Backendcommand \\
+  --rm"
+    ;;
+  esac
+  
+  # --sudouser
+  [ "$Sudouser" = "yes" ] && {
+    case $Backend in
+      proot) 
+        Backendcommand="$Backendcommand \\
+  --root-id"
+      ;;
+    esac
+  }
+  
+  # --interactive
+  case $Interactive in
+    yes)
+      case $Backend in
+        docker|podman|nerdctl)
+          Backendcommand="$Backendcommand \\
+  --interactive \\
+  --tty" 
+        ;;
+      esac
+    ;;
+    no)
+      case $Backend in
+        docker|podman|nerdctl)
+          Backendcommand="$Backendcommand \\
+  --detach"
+        ;;
+      esac
       case "$Backend" in
-        nerdctl) ;;
-        *) Dockercommand="$Dockercommand --tty" ;;
+        docker|podman) Backendcommand="$Backendcommand \
+  --tty" ;;
       esac
     ;;
   esac
 
+  # --name
   [ -z "$Containername" ] && Containername="x11docker_X${Newdisplaynumber}_${Codename}_${Cachenumber}"
-  Dockercommand="$Dockercommand \\
+  case $Backend in
+    docker|podman|nerdctl)
+      Backendcommand="$Backendcommand \\
   --name $Containername"
-  storeinfo "containername=$Containername"
+      storeinfo "containername=$Containername"
+    ;;
+  esac
   
+  # --limit
   [ "$Limitresources" ] && {
-    Memory="$(awk "BEGIN {print int($(LC_ALL=C free -b | grep "Mem:" | awk ' {print $4 + $6}') * $Limitresources)}")"
-    Dockercommand="$Dockercommand \\
+    case $Backend in
+      docker|podman|nerdctl)
+        Memory="$(awk "BEGIN {print int($(LC_ALL=C free -b | grep "Mem:" | awk ' {print $4 + $6}') * $Limitresources)}")"
+        Backendcommand="$Backendcommand \\
   --cpus=$(awk "BEGIN {print $(nproc) * $Limitresources}") \\
   --memory=$Memory \\
   --kernel-memory=$Memory"
+      ;;
+    esac
   }
 
-  # container user. init systems switch later.
+  # --user
   case $Initsystem in
     none|tini|dockerinit)
       case $Switchcontaineruser in
         no) 
-          [ "$Createcontaineruser" = "yes" ] && {
-            Dockercommand="$Dockercommand \\
+          case $Backend in
+            docker|podman|nerdctl)
+              [ "$Createcontaineruser" = "yes" ] && Backendcommand="$Backendcommand \\
   --user $Containeruseruid:$Containerusergid"
-            Chrootcommand="$Chrootcommand \\
+            ;;
+            chroot)
+              [ "$Createcontaineruser" = "yes" ] && Backendcommand="$Backendcommand \\
   --userspec=$Containeruseruid:$Containerusergid"
-          }
+            ;;
+          esac
         ;;
         yes) 
-          Dockercommand="$Dockercommand \\
-  --user root" 
-          Chrootcommand="$Chrootcommand \\
+          case $Backend in
+            docker|podman|nerdctl)
+              Backendcommand="$Backendcommand \\
+  --user 0:0" 
+            ;;
+            chroot)
+              Backendcommand="$Backendcommand \\
   --userspec=0:0"
+            ;;
+          esac
         ;;
       esac
     ;;
     systemd|runit|openrc|sysvinit|s6-overlay)
-      Dockercommand="$Dockercommand \\
-  --user root" 
-      Chrootcommand="$Chrootcommand \\
+      # init systems switch later from root to user.
+      case $Backend in
+        docker|podman|nerdctl)
+          Backendcommand="$Backendcommand \\
+  --user root"
+        ;;
+        chroot)
+          Backendcommand="$Backendcommand \\
   --userspec=0:0"
+        ;;
+      esac
     ;;
   esac
   
+  # userns
   [ "$Createcontaineruser" = "yes" ] && {
     # Disable user namespacing to avoid file permission issues with --home or --share. Files need same UID/GID.
     case $Backend in
-      podman) Dockercommand="$Dockercommand \\
-  --userns=keep-id" ;;
+      podman) 
+        Backendcommand="$Backendcommand \\
+  --userns=keep-id"
+      ;;
       docker)
         case $Runtime in
-          sysbox-runc) ;;
+          sysbox-runc) 
+          ;;
           *)
-            [ "$Rootlessbackend" ] || Dockercommand="$Dockercommand \\
-  --userns=host"
+            [ "$Rootlessbackend" = "yes" ] || Backendcommand="$Backendcommand \\
+  --userns=host"  ### FIXME option deprecated?
           ;;
         esac
       ;;
-      proot|chroot) ;;
     esac
   }
   
-  # add container user groups, mainly video and audio and --group-add
+  # --group-add
   [ "$Switchcontaineruser" = "no" ] && {
-    for Line in $Containerusergroups; do          ### FIXME: should compare GIDs from host and container
-      getent group ${Line:-nonsense} >/dev/null && {
-        Dockercommand="$Dockercommand \\
+    case $Backend in
+      docker|podman|nerdctl)
+        for Line in $Containerusergroups; do
+          getent group ${Line:-nonsense} >/dev/null && Backendcommand="$Backendcommand \\
   --group-add $(getent group $Line | cut -d: -f3)"
-        Grouplist="$Grouplist,$(getent group $Line | cut -d: -f3)"
-      }
-    done
-    Grouplist="${Grouplist#,}"
-    Chrootcommand="$Chrootcommand \\
+        done
+      ;;
+      chroot)
+        for Line in $Containerusergroups; do
+          getent group ${Line:-nonsense} >/dev/null && Grouplist="$Grouplist,$(getent group $Line | cut -d: -f3)"
+        done
+        Grouplist="${Grouplist#,}"
+        Backendcommand="$Backendcommand \\
   --groups=$Grouplist"
+      ;;
+    esac
   }
   
-  # Runtime runc|nvidia|kata|sysbox
+  # --runtime
   [ "$Runtime" ] && {
-    Dockercommand="$Dockercommand \\
+    case $Backend in
+      docker|podman|nerdctl)
+        Backendcommand="$Backendcommand \\
   --runtime='$Runtime'"
+      ;;
+    esac
   }
 
-  # option --hostipc
-  [ "$Shareipc" = "host" ]      && Dockercommand="$Dockercommand \\
+  # --hostipc
+  [ "$Shareipc" = "host" ] && {
+    case $Backend in
+      docker|podman|nerdctl)
+        Backendcommand="$Backendcommand \\
   --ipc host"
+      ;;
+    esac
+  }
   
-  # option --network
-  [ "$Network" ] && Dockercommand="$Dockercommand \\
+  # --network
+  [ -n "$Network" ] && {
+    case $Backend in
+      docker|podman|nerdctl)
+        Backendcommand="$Backendcommand \\
   --network $Network"
+      ;;
+    esac
+  }
       
   # capabilities
-  [ "$Capdropall" = "yes" ] && Dockercommand="$Dockercommand \\
+  case $Backend in
+    docker|podman|nerdctl)
+      [ "$Capdropall" = "yes" ] && Backendcommand="$Backendcommand \\
   --cap-drop ALL"
-  while read Line ; do
-     Dockercommand="$Dockercommand \\
+      while read Line ; do
+        Backendcommand="$Backendcommand \\
   --cap-add $Line"
-  done < <(store_runoption dump cap)
+      done < <(store_runoption dump cap)
+    ;;
+  esac
   
-  # default no, do not gain privileges
-  [ "$Allownewprivileges" = "no" ] && Dockercommand="$Dockercommand \\
+  # --newprivileges
+  case $Backend in
+    docker|podman|nerdctl)
+      [ "$Allownewprivileges" = "no" ] && Backendcommand="$Backendcommand \\
   --security-opt no-new-privileges"
+    ;;
+  esac
 
-  # SELinux restrictions for containers must be disabled to allow access to X socket. Flags z or Z do not help.
-  Dockercommand="$Dockercommand \\
+  # SELinux restrictions for containers must be disabled to allow access to X socket. Flags z or Z do not help. ### FIXME check for possible change meanwhile
+  case $Backend in
+    docker|podman|nerdctl)
+      Backendcommand="$Backendcommand \\
   --security-opt label=type:container_runtime_t"
+    ;;
+  esac
 
-  # stop signal for some init systems
-  [ "$Stopsignal" ] &&  Dockercommand="$Dockercommand \\
-  --stop-signal $Stopsignal"
-  
-  # setup and shared files for some init systems
+  # --init: setup and shared files for some init systems
   case $Initsystem in
     dockerinit)
-      Dockercommand="$Dockercommand \\
+      case $Backend in
+        docker|podman|nerdctl)
+          Backendcommand="$Backendcommand \\
   --init"
+        ;;
+      esac
     ;;
     tini) 
       Tini="$Tinicontainerpath --"
       case $Backend in
         docker|podman|nerdctl)
-          Dockercommand="$Dockercommand \\
+          Backendcommand="$Backendcommand \\
   --volume $(convertpath volume "$Tinibinaryfile:ro" "$Tinicontainerpath")" 
 #  --mount $(convertpath mount "$Tinibinaryfile:ro" "$Tinicontainerpath")" 
         ;;
         proot)
-          Prootcommand="$Prootcommand \\
+          Backendcommand="$Backendcommand \\
   --bind=$Tinibinaryfile:$Tinicontainerpath"
         ;;
         chroot)
@@ -4847,42 +4937,64 @@ create_backendcommand() {        ### create command to run docker
       esac
     ;;
     systemd)
-      Dockercommand="$Dockercommand \\
+      case $Backend in
+        docker|podman|nerdctl)
+          Backendcommand="$Backendcommand \\
   --volume $(convertpath volume "$Systemdtarget:ro"         "/etc/systemd/system/x11docker.target") \\
   --volume $(convertpath volume "$Systemdconsoleservice:ro" "/lib/systemd/system/console-getty.service") \\
   --volume $(convertpath volume "$Systemdwatchservice:ro"   "/etc/systemd/system/x11docker-watch.service") \\
   --volume $(convertpath volume "$Systemdjournalservice:ro" "/etc/systemd/system/x11docker-journal.service") \\
   --volume $(convertpath volume "$Systemdenvironment:ro"    "/etc/systemd/system.conf.d/x11docker.environment.conf")"
-#      Dockercommand="$Dockercommand \\
+#      Backendcommand="$Backendcommand \\
 #  --mount $(convertpath mount "$Systemdtarget:ro"         "/etc/systemd/system/x11docker.target") \\
 #  --mount $(convertpath mount "$Systemdconsoleservice:ro" "/lib/systemd/system/console-getty.service") \\
 #  --mount $(convertpath mount "$Systemdwatchservice:ro"   "/etc/systemd/system/x11docker-watch.service") \\
 #  --mount $(convertpath mount "$Systemdjournalservice:ro" "/etc/systemd/system/x11docker-journal.service") \\
 #  --mount $(convertpath mount "$Systemdenvironment:ro"    "/etc/systemd/system.conf.d/x11docker.environment.conf")"
+        ;;
+      esac
+    ;;
+  esac
+  
+  # stop signal for some init systems
+  [ "$Stopsignal" ] && {
+    case $Backend in
+      docker|podman|nerdctl) 
+        Backendcommand="$Backendcommand \\
+  --stop-signal $Stopsignal"
+      ;;
+    esac
+  }
+
+  # --sharecgroup
+  [ "$Sharecgroup" = "yes" ] && {
+    case $Backend in
+      docker|podman|nerdctl)
+        Backendcommand="$Backendcommand \\
+  --volume $(convertpath volume /sys/fs/cgroup:ro /sys/fs/cgroup)"
+#  --mount type=bind,source=/sys/fs/cgroup,target=/sys/fs/cgroup,readonly"
+      ;;
+    esac
+  }
+
+  # Needed especially for --init=systemd and --dbus=system
+  case $Backend in
+    docker|podman) 
+      Backendcommand="$Backendcommand \\
+  --tmpfs /run:exec \\
+  --tmpfs /run/lock"
     ;;
   esac
 
-  # option --sharecgroup
-  [ "$Sharecgroup" = "yes" ] && Dockercommand="$Dockercommand \\
-  --mount $(convertpath mount /sys/fs/cgroup:ro /sys/fs/cgroup)"
-#  --mount type=bind,source=/sys/fs/cgroup,target=/sys/fs/cgroup,readonly"
-
-  # Needed especially for --init=systemd and --dbus-daemon
-  case $Backend in
-    nerdctl) ;;
-    docker|podman) Dockercommand="$Dockercommand \\
-  --tmpfs /run:exec --tmpfs /run/lock" ;;
-  esac
-
-  # shared cache folder
+  # shared x11docker cache folder
   case $Backend in
     docker|podman|nerdctl)
-      Dockercommand="$Dockercommand \\
+      Backendcommand="$Backendcommand \\
   --volume $(convertpath volume "$Sharefolder:rw" $Sharefoldercontainer)"
 #  --mount $(convertpath mount "$Sharefolder:rw" $Sharefoldercontainer)"
     ;;
     proot)
-      Prootcommand="$Prootcommand \\
+      Backendcommand="$Backendcommand \\
   --bind=$Sharefolder:$Sharefoldercontainer"
     ;;
     chroot)
@@ -4898,12 +5010,12 @@ create_backendcommand() {        ### create command to run docker
     host)
       case $Backend in
         docker|podman|nerdctl)
-          Dockercommand="$Dockercommand \\
+          Backendcommand="$Backendcommand \\
   --volume $(convertpath volume "$Persistanthomevolume:rw" "$Containeruserhome")"
 #  --mount $(convertpath mount "$Persistanthomevolume:rw" "$Containeruserhome")"
         ;;
         proot)
-          Prootcommand="$Prootcommand \\
+          Backendcommand="$Backendcommand \\
   --bind=$Persistanthomevolume:$Containeruserhome"
         ;;
         chroot)
@@ -4913,8 +5025,16 @@ create_backendcommand() {        ### create command to run docker
       esac
     ;;
     volume)
-      Dockercommand="$Dockercommand \\
+      case $Backend in
+        docker|podman|nerdctl)
+          Backendcommand="$Backendcommand \\
   --volume $(convertpath volume "$Persistanthomevolume" "$Containeruserhomebasefolder")" ### FIXME $Containeruserhomebasefolder ?? mount/volume?
+        ;;
+        *)
+          error "--backend=$Backend: Sharing a docker volume is not supported.
+  Failing option: --home=$Persistanthomevolume"
+        ;;
+      esac
     ;;
   esac
   
@@ -4924,12 +5044,12 @@ create_backendcommand() {        ### create command to run docker
       docker|podman|nerdctl)
         case "$(cut -c1-5 <<< "$Line")" in
           "/dev/")
-             Dockercommand="$Dockercommand \\
+             Backendcommand="$Backendcommand \\
   --device $(convertpath volume "$Line")"
             warning "Sharing device file: $Line"
           ;;
           *)
-            Dockercommand="$Dockercommand \\
+            Backendcommand="$Backendcommand \\
   --volume $(convertpath volume "$Line")" 
 #  --mount $(convertpath mount "$Line")" 
           ;;
@@ -4937,7 +5057,7 @@ create_backendcommand() {        ### create command to run docker
       ;;
       proot)
         Line="$(sed 's/:ro//' <<< "$Line")"
-        Prootcommand="$Prootcommand \\
+        Backendcommand="$Backendcommand \\
   --bind=$Line:$Line"
       ;;
       chroot)
@@ -4948,15 +5068,15 @@ create_backendcommand() {        ### create command to run docker
   done < <(store_runoption dump volume)
   
   # --gpu: share NVIDIA driver installer
-  [ -e "$Nvidiainstallerfile" ] && {
+  [ -f "$Nvidiainstallerfile" ] && {
     case $Backend in
       docker|podman|nerdctl)
-        Dockercommand="$Dockercommand \\
+        Backendcommand="$Backendcommand \\
   --volume $(convertpath volume "$Nvidiainstallerfile:ro" "$Nvidiacontainerfile")"
 #  --mount $(convertpath mount "$Nvidiainstallerfile:ro" "$Nvidiacontainerfile")"
       ;;
       proot)
-        Prootcommand="$Prootcommand \\
+        Backendcommand="$Backendcommand \\
   --bind=$Nvidiainstallerfile:$Nvidiacontainerfile"
       ;;
       chroot)
@@ -4969,25 +5089,31 @@ create_backendcommand() {        ### create command to run docker
   case "$Xcontainer" in
     yes)
       [ "$Newxsocket" ] && {
-        Dockercommand="$Dockercommand \\
+        case $Backend in
+          docker|podman|nerdctl)
+            Backendcommand="$Backendcommand \\
   --volume $(convertpath volume $Cachefolder/X11-unix/X$Newdisplaynumber:ro $Newxsocket)"
 #  --mount $(convertpath mount $Cachefolder/X11-unix/X$Newdisplaynumber:ro $Newxsocket)"
-        [ "$Shareipc" != "host" ] && [ "$Containeruser" = "$Hostuser" ] && Dockercommand="$Dockercommand \\
+            [ "$Shareipc" != "host" ] && [ "$Containeruser" = "$Hostuser" ] && Backendcommand="$Backendcommand \\
   --ipc=container:$Xcontainername"
-        Prootcommand="$Prootcommand \\
+          ;;
+          proot)
+            Backendcommand="$Backendcommand \\
   --bind=$Cachefolder/X11-unix/X$Newdisplaynumber:$Newxsocket"
+          ;;
+        esac
       }
     ;;
     no)
       [ "$Newxsocket" ] && {
         case $Backend in
           docker|podman|nerdctl)
-            Dockercommand="$Dockercommand \\
+            Backendcommand="$Backendcommand \\
   --volume $(convertpath volume "$Newxsocket:ro")"
 #  --mount $(convertpath mount "$Newxsocket:ro")"
           ;;
           proot)
-            Prootcommand="$Prootcommand \\
+            Backendcommand="$Backendcommand \\
   --bind=$Newxsocket:$Newxsocket"
           ;;
           chroot)
@@ -5003,124 +5129,200 @@ create_backendcommand() {        ### create command to run docker
     case $Containersetup in
       yes)
         case $Xcontainer in
-          yes) 
-            Dockercommand="$Dockercommand \\
+          yes)
+            case $Backend in
+              docker|podman|nerdctl)
+                Backendcommand="$Backendcommand \\
   --volume $(convertpath volume "$Cachefolder/XDG_RUNTIME_DIR/$Newwaylandsocket" "/$Newwaylandsocket")" 
 #  --mount $(convertpath mount "$Cachefolder/XDG_RUNTIME_DIR/$Newwaylandsocket" "/$Newwaylandsocket")" 
-            Prootcommand="$Prootcommand \\
-  --bind=$Cachefolder/XDG_RUNTIME_DIR/$Newwaylandsocket:$Newwaylandsocket"
+              ;;
+              proot)
+                Backendcommand="$Backendcommand \\
+  --bind=$Cachefolder/XDG_RUNTIME_DIR/$Newwaylandsocket:/$Newwaylandsocket"
+              ;;
+            esac
           ;;
-          no) 
-            Dockercommand="$Dockercommand \\
+          no)
+            case $Backend in
+              docker|podman|nerdctl)
+                Backendcommand="$Backendcommand \\
   --volume $(convertpath volume "$XDG_RUNTIME_DIR/$Newwaylandsocket" "/$Newwaylandsocket")"
 #  --mount $(convertpath mount "$XDG_RUNTIME_DIR/$Newwaylandsocket" "/$Newwaylandsocket")"
-            Prootcommand="$Prootcommand \\
+              ;;
+              proot)
+                Backendcommand="$Backendcommand \\
   --bind=$XDG_RUNTIME_DIR/$Newwaylandsocket:/$Newwaylandsocket"
+              ;;
+            esac
           ;;
         esac
       ;;
       no)
         case $Xcontainer in
-          yes) 
-            Dockercommand="$Dockercommand \\
+          yes)
+            case $Backend in
+              docker|podman|nerdctl)
+                Backendcommand="$Backendcommand \\
   --volume $(convertpath volume "$Cachefolder/XDG_RUNTIME_DIR/$Newwaylandsocket")" 
-#  --mount $(convertpath mount "$Cachefolder/XDG_RUNTIME_DIR/$Newwaylandsocket")" 
-            Prootcommand="$Prootcommand \\
+#  --mount $(convertpath mount "$Cachefolder/XDG_RUNTIME_DIR/$Newwaylandsocket")"
+              ;;
+              proot)
+                Backendcommand="$Backendcommand \\
   --bind=$Cachefolder/XDG_RUNTIME_DIR/$Newwaylandsocket" ### FIXME looks wrong
+              ;;
+            esac
           ;;
-          no)  
-            Dockercommand="$Dockercommand \\
+          no)
+            case $Backend in
+              docker|podman|nerdctl)
+                Backendcommand="$Backendcommand \\
   --volume $(convertpath volume "$XDG_RUNTIME_DIR/$Newwaylandsocket")"
 #  --mount $(convertpath mount "$XDG_RUNTIME_DIR/$Newwaylandsocket")"
-            Prootcommand="$Prootcommand \\
+              ;;
+              proot)
+                Backendcommand="$Backendcommand \\
   --bind=$XDG_RUNTIME_DIR/$Newwaylandsocket"
+              ;;
+            esac
           ;;
         esac
       ;;
     esac
   }
 
-  ## options --pulseaudio, --alsa
-  { [ "$Pulseaudiomode" = "socket" ] || [ "$Sharealsa" = "yes" ] ; } && {
-    Dockercommand="$Dockercommand \\
+  # --pulseaudio
+  [ "$Pulseaudiomode" = "socket" ] && {
+    case $Backend in
+      docker|podman|nerdctl)
+        Backendcommand="$Backendcommand \\
   --volume $(convertpath volume "$Pulseaudioconf:ro" "/etc/pulse/client.conf")"
 #  --mount $(convertpath mount "$Pulseaudioconf:ro" "/etc/pulse/client.conf")"
-    Prootcommand="$Prootcommand \\
-  --bind=$Pulseaudioconf:/etc/pulse/client.conf"
-  }
-  
-  ## option --workdir or /tmp
-  case $Containersetup in
-    yes)
-      Dockercommand="$Dockercommand \\
-  --workdir '${Workdir:-/tmp}'"
-      Prootcommand="$Prootcommand \\
-  --cwd=${Workdir:-/tmp}"
-    ;;
-    no)
-      [ "$Workdir" ] && {
-        Dockercommand="$Dockercommand \\
-  --workdir '$Workdir'"
-        Prootcommand="$Prootcommand \\
-  --cwd=${Workdir}"
-      }
-    ;;
-  esac
-  
-  case $Containersetup in
-    yes)
-      # real entrypoint is checked in dockerrc
-      Dockercommand="$Dockercommand \\
-  --entrypoint env"
-    ;;
-  esac
-  
-  # add environment variables. Only needed here for possible 'docker exec'. Otherwise set in containerrc
-  while read Line; do
-    Dockercommand="$Dockercommand \\
-  --env '$(escapestring "$Line")'"
-  done < <(store_runoption dump env)
-      
-  # add custom docker arguments, imagename and imagecommand
-  [ "$Customdockeroptions" ] && {
-    Dockercommand="$Dockercommand \\
-  $Customdockeroptions"
-    Prootcommand="$Prootcommand \\
-  $Customdockeroptions"
-  }
-    Dockercommand="$Dockercommand \\
-  --"
-    Prootcommand="$Prootcommand \\
-  "
-    Chrootcommand="$Chrootcommand \\
-  "
-  
-  case $Containersetup in
-    yes)
-      case $Switchcontaineruser in
-        no)  
-          Dockercommand="$Dockercommand $Imagename $Tini /bin/sh - $(convertpath share $Containerrc)"      # start_container runs containerrootrc with 'docker exec'
-          Prootcommand="$Prootcommand /bin/sh - $(convertpath share $Containerrc)"
-          Chrootcommand="$Chrootcommand /bin/sh - $(convertpath share $Containerrc)"
         ;;
-        yes) 
-          Dockercommand="$Dockercommand $Imagename $Tini /bin/sh - $(convertpath share $Containerrootrc)"  # containerrootrc runs containerrc
-          Prootcommand="$Prootcommand /bin/sh - $(convertpath share $Containerrootrc)"
-          Chrootcommand="$Chrootcommand $Rootfs /bin/sh - $(convertpath share $Containerrootrc)"
+      proot)
+        Backendcommand="$Backendcommand \\
+  --bind=$Pulseaudioconf:/etc/pulse/client.conf"
+      ;;
+    esac
+  }
+  
+  # --workdir
+  case $Containersetup in
+    yes)
+      case $Backend in
+        docker|podman|nerdctl)
+          Backendcommand="$Backendcommand \\
+  --workdir '${Workdir:-/tmp}'"
+        ;;
+        proot)
+          Backendcommand="$Backendcommand \\
+  --cwd=${Workdir:-/tmp}"
         ;;
       esac
     ;;
     no)
-      Dockercommand="$Dockercommand $Imagename $Containercommand"
-      Prootcommand="$Prootcommand $Containercommand"
-      Chrootcommand="$Chrootcommand $Containercommand"
+      [ "$Workdir" ] && {
+        case $Backend in
+          docker|podman|nerdctl)
+            Backendcommand="$Backendcommand \\
+  --workdir '$Workdir'"
+          ;;
+          proot)
+            Backendcommand="$Backendcommand \\
+  --cwd=${Workdir}"
+          ;;
+        esac
+      }
     ;;
   esac
   
+  # --no-setup, --no-entrypoint
+  case $Containersetup in
+    yes)
+      case $Backend in
+        docker|podman|nerdctl)
+          # real entrypoint is checked in dockerrc
+          Backendcommand="$Backendcommand \\
+  --entrypoint env"
+        ;;
+      esac
+    ;;
+  esac
+  
+  # --env: add environment variables. Only needed here for possible 'docker exec'. Also set in containerrc
+  while read Line; do
+    case $Backend in
+      docker|podman|nerdctl)
+        Backendcommand="$Backendcommand \\
+  --env '$(escapestring "$Line")'"
+      ;;
+    esac
+  done < <(store_runoption dump env)
+      
+  # add custom docker arguments, imagename and imagecommand
+  [ "$Customdockeroptions" ] && {
+    case $Backend in
+      docker|podman|nerdctl|proot)
+        Backendcommand="$Backendcommand \\
+  $Customdockeroptions"
+      ;;
+    esac
+  }
+      
   case $Backend in
-    docker|podman|nerdctl) Backendcommand="$Dockercommand" ;;
-    proot)                 Backendcommand="$Prootcommand" ;;
-    chroot)                Backendcommand="$Chrootcommand" ;;
+    docker|podman|nerdctl)
+      Backendcommand="$Backendcommand \\
+  --"
+    ;;
+    proot|chroot)
+      Backendcommand="$Backendcommand \\
+"
+    ;;
+  esac
+  
+  case $Containersetup in
+    yes)
+      case $Switchcontaineruser in
+        no)
+          case $Backend in
+            docker|podman|nerdctl)
+              Backendcommand="$Backendcommand $Imagename $Tini /bin/sh - $(convertpath share $Containerrc)"      # start_container runs containerrootrc with 'docker exec'
+            ;;
+            proot)
+              Backendcommand="$Backendcommand /bin/sh - $(convertpath share $Containerrc)"
+            ;;
+            chroot)
+              Backendcommand="$Backendcommand /bin/sh - $(convertpath share $Containerrc)"
+            ;;
+          esac
+        ;;
+        yes)
+          case $Backend in
+            docker|podman|nerdctl)
+              Backendcommand="$Backendcommand $Imagename $Tini /bin/sh - $(convertpath share $Containerrootrc)"  # containerrootrc runs containerrc
+            ;;
+            proot)
+              Backendcommand="$Backendcommand /bin/sh - $(convertpath share $Containerrootrc)"
+            ;;
+            chroot)
+              Backendcommand="$Backendcommand $Rootfs /bin/sh - $(convertpath share $Containerrootrc)"
+            ;;
+          esac
+        ;;
+      esac
+    ;;
+    no)
+      case $Backend in
+        docker|podman|nerdctl)
+          Backendcommand="$Backendcommand $Imagename $Containercommand"
+        ;;
+        proot)
+          Backendcommand="$Backendcommand $Containercommand"
+        ;;
+        chroot)
+          Backendcommand="$Backendcommand $Containercommand"
+        ;;
+      esac
+    ;;
   esac
 
   return 0
