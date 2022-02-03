@@ -8,7 +8,7 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
- - `--backend=proot`: Experimental support.
+ - `--backend=proot`: Use a rootfs on host with `proot` instead of a container.
    [(#224)](https://github.com/mviereck/x11docker/issues/224)
  - `--backend=host`: Run application from host. Replaces `-e, --exe`.
 ### Changed

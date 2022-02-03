@@ -2,11 +2,15 @@
 x11docker ToDo notes
 
 ## Work in progress
+ - --backend=systemd-nspawn
  - check empty XDG_RUNTIME_DIR e.g. with --user, --hostuser
  - --xc=backend for proot and host backends
  - --backend=proot
    - --name
    - --init except systemd possible?
+   - share: ro not possible
+   - clean /tmp
+   - do old binds disappear?
    
  - kata: add new runtime for nerdctl io.containerd.kata.v2
    
