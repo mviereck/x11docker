@@ -1315,7 +1315,6 @@ writeaccess() {                 # check if useruid $1 has write access to folder
 }
 
 #### special jobs of x11docker (not running X or docker)
-
 buildimage() {                  # --build: build image from x11docker repository Dockerfile
   # Build image $1 from x11docker repository
 
@@ -4387,7 +4386,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   return 0
 }
 
-#### docker command setup
+#### backend command setup
 check_image() {                 # get some image information
 
   # Check if image $Imagename is available locally
@@ -4978,7 +4977,7 @@ create_backendcommand() {       ### create command to run docker
     ;;
   esac
 
-  # --init: setup and shared files for some init systems
+  # --init: setup for tini
   case $Initsystem in
     dockerinit)
       case $Backend in
@@ -5002,24 +5001,6 @@ create_backendcommand() {       ### create command to run docker
         ;;
         chroot)
           cp "$Tinibinaryfile" "$Rootfs/$Tinicontainerpath"
-        ;;
-      esac
-    ;;
-    systemd)
-      case $Backend in
-        docker|podman|nerdctl)
-          Backendcommand="$Backendcommand \\
-  --volume $(convertpath volume "$Systemdtarget:ro"         "/etc/systemd/system/x11docker.target") \\
-  --volume $(convertpath volume "$Systemdconsoleservice:ro" "/lib/systemd/system/console-getty.service") \\
-  --volume $(convertpath volume "$Systemdwatchservice:ro"   "/etc/systemd/system/x11docker-watch.service") \\
-  --volume $(convertpath volume "$Systemdjournalservice:ro" "/etc/systemd/system/x11docker-journal.service") \\
-  --volume $(convertpath volume "$Systemdenvironment:ro"    "/etc/systemd/system.conf.d/x11docker.environment.conf")"
-#      Backendcommand="$Backendcommand \\
-#  --mount $(convertpath mount "$Systemdtarget:ro"         "/etc/systemd/system/x11docker.target") \\
-#  --mount $(convertpath mount "$Systemdconsoleservice:ro" "/lib/systemd/system/console-getty.service") \\
-#  --mount $(convertpath mount "$Systemdwatchservice:ro"   "/etc/systemd/system/x11docker-watch.service") \\
-#  --mount $(convertpath mount "$Systemdjournalservice:ro" "/etc/systemd/system/x11docker-journal.service") \\
-#  --mount $(convertpath mount "$Systemdenvironment:ro"    "/etc/systemd/system.conf.d/x11docker.environment.conf")"
         ;;
       esac
     ;;
@@ -5576,76 +5557,10 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
       verbose "--init: Found tini binary: ${Tinibinaryfile:-(none)}"
       [ "$Tinibinaryfile" ] && storeinfo "tini=$Tinibinaryfile"
     ;;
-
     systemd)
       Stopsignal="SIGRTMIN+3"
       Containerusergroups="$Containerusergroups systemd-journal"
-
-      echo "[Unit]
-Description=x11docker target
-Wants=multi-user.target
-After=multi-user.target
-[Install]
-Also=console-getty.service
-Also=x11docker-watch.service
-Also=x11docker-journal.service
-" >> $Systemdtarget
-
-      echo "[Unit]
-Description=x11docker start service
-# start on console to support --interactive
-# runs x11docker-agetty->x11docker-login->containerrc
-Wants=multi-user.target
-Wants=x11docker-watch.service
-Wants=x11docker-journal.service
-Wants=dbus.service
-After=systemd-user-sessions.service
-After=rc-local.service getty-pre.target
-Before=getty.target
-[Service]
-ExecStart=/usr/local/bin/x11docker-agetty
-StandardInput=tty
-StandardOutput=tty
-Type=idle
-UtmpIdentifier=cons
-TTYPath=/dev/console
-TTYReset=yes
-TTYVHangup=yes
-KillMode=process
-IgnoreSIGPIPE=no
-SendSIGHUP=yes
-
-[Install]
-WantedBy=x11docker.target
-WantedBy=getty.target
-WantedBy=multi-user.target
-" >> $Systemdconsoleservice
-
-      echo "[Unit]
-Description=x11docker watch service
-# Watches for end of containerrc and initiates shutdown
-[Service]
-Type=simple
-ExecStart=/bin/sh -c 'while sleep 1; do systemctl is-active console-getty >/dev/null || { echo timetosaygoodbye >>$(convertpath share $Timetosaygoodbyefile) ; systemctl halt ; } ; [ -s $(convertpath share $Timetosaygoodbyefile) ] && systemctl halt ; done'
-[Install]
-WantedBy=x11docker.target
-" >> $Systemdwatchservice
-
-      echo "[Unit]
-Description=x11docker journal log service
-# get systemd log to transfer it into x11docker.log
-[Service]
-Type=simple
-ExecStart=/bin/sh -c '/bin/journalctl --follow --no-tail --merge >> $(convertpath share $Systemdjournallogfile) 2>&1'
-[Install]
-WantedBy=x11docker.target
-" >> $Systemdjournalservice
-
-      echo "[Manager]
-DefaultEnvironment=$(while read -r Line; do echo -n "$Line " ; done < <(store_runoption dump env))
-" >> $Systemdenvironment
     ;;
-
     runit)
       Stopsignal="HUP"
       store_runoption env "VIRTUALIZATION=docker"
@@ -5772,16 +5687,15 @@ $Line"
   return 0
 }
 
-#### docker helper scripts
+#### container setup helper scripts
 create_containerrootrc() {      # This script runs as root in container
-  local Line=
-
   echo "#! /bin/sh"
   echo ""
   echo "# containerrootrc"
   echo "# This Script is executed as root in container."
   echo "# - Create container user"
   echo "# - Set time zone"
+  echo "# - Create locale"
   echo "# - Install NVIDIA driver if requested"
   echo "# - Set up init system services and DBus for --init=systemd|openrc|runit|sysvinit"
   echo ""
@@ -5824,7 +5738,6 @@ create_containerrootrc() {      # This script runs as root in container
   echo 'debugnote "containerrootrc: Container libc: $Containerlibc"'
   echo ""
 
-  echo "# Prepare X environment"
   echo "# Create some system dirs with needed permissions"
   echo "mkdir -v -p /var/lib/dbus /var/run/dbus"
   echo "mkdir -v -p -m 1777 /tmp/.ICE-unix /tmp/.X11-unix /tmp/.font-unix"
@@ -5853,7 +5766,6 @@ create_containerrootrc() {      # This script runs as root in container
     esac
   }
 
-  # --runasroot commands added here
   [ "$Runasroot" ] && {
     echo "# Custom setup root command added with option --runasroot"
     echo "$Runasroot"
@@ -5899,13 +5811,11 @@ create_containerrootrc() {      # This script runs as root in container
       ;;
       systemd)
         echo 'Systemd=/lib/systemd/systemd'
-        echo '[ -e "$Systemd" ] || Systemd=/bin/systemd'
-        echo '[ -e "$Systemd" ] || Systemd=/sbin/systemd'
-        echo '[ -e "$Systemd" ] || {'
-        echo '  command -v systemctl && {'
-        echo '    warning "Executable for systemd not found. Will try /sbin/init"'
-        echo '    Systemd=/sbin/init'
-        echo '  } || error "systemd not found in image (option --init=systemd)."'
+        echo '[ -x "$Systemd" ] || Systemd=/bin/systemd'
+        echo '[ -x "$Systemd" ] || Systemd=/sbin/systemd'
+        echo '[ -x "$Systemd" ] || {'
+        echo '  note "Option --init=systemd: Executable for systemd not found. Will try /sbin/init"'
+        echo '  Systemd=/sbin/init'
         echo '}'
         echo 'exec $Systemd'
       ;;
@@ -5932,13 +5842,13 @@ $(declare -f storeinfo)
 $(declare -f storepid)
 $(declare -f waitforlogentry)
 $Messagefifofuncs
+
 Messagefile=$(convertpath share $Messagefifo)
 Storeinfofile=$(convertpath share $Storeinfofile)
 Storepidfile=$(convertpath share $Storepidfile)
 Timetosaygoodbyefile=$(convertpath share $Timetosaygoodbyefile)
 
 waitforlogentry containerrc \$Storeinfofile containerrootrc=ready "" infinity
-
 debugnote 'Running containerrc: Unprivileged user commands in container'
 
 verbose \"containerrc: Container system:
@@ -6235,6 +6145,7 @@ halt -f
   echo ""
 }
 rootrc_create_locale() {
+  local Line
   while read Line; do
     echo "# --lang: Language locale"
     echo "verbose \"Searching for language locale matching $Line\""
@@ -6336,11 +6247,10 @@ case \"\$Nvidiaversion\" in
 esac"
 }
 rootrc_prepare_init() {
-
   echo "# disable getty in inittab"
   echo "[ -e /etc/inittab ] && sed -i 's/.*getty/##getty disabled by x11docker## \0/' /etc/inittab"
   echo ""
-  
+
   case $Initsystem in
     tini|none|dockerinit) ;;
     systemd)
@@ -6393,8 +6303,76 @@ rootrc_prepare_init() {
       echo '    rm $Service'
       echo '  }'
       echo "done"
+      echo ""
       echo "# Fix for Gnome 3"
       echo 'sed -i "s/ProtectHostname=yes/ProtectHostname=no/" /lib/systemd/system/systemd-logind.service'
+      echo ""
+
+      echo "# create systemd units for x11docker"
+
+      echo "echo \"[Manager]
+DefaultEnvironment=$(while read -r Line; do echo -n "$Line " ; done < <(store_runoption dump env))
+\" > /etc/systemd/system.conf.d/x11docker.environment.conf"
+
+      echo "echo \"[Unit]
+Description=x11docker target
+Wants=multi-user.target
+After=multi-user.target
+[Install]
+Also=console-getty.service
+Also=x11docker-watch.service
+Also=x11docker-journal.service
+\" > /etc/systemd/system/x11docker.target"
+
+      echo "echo \"[Unit]
+Description=x11docker start service
+# start on console to support --interactive
+# runs x11docker-agetty->x11docker-login->containerrc->cmdrc
+Wants=multi-user.target
+Wants=x11docker-watch.service
+Wants=x11docker-journal.service
+Wants=dbus.service
+After=systemd-user-sessions.service
+After=rc-local.service getty-pre.target
+Before=getty.target
+[Service]
+ExecStart=/usr/local/bin/x11docker-agetty
+StandardInput=tty
+StandardOutput=tty
+Type=idle
+UtmpIdentifier=cons
+TTYPath=/dev/console
+TTYReset=yes
+TTYVHangup=yes
+KillMode=process
+IgnoreSIGPIPE=no
+SendSIGHUP=yes
+
+[Install]
+WantedBy=x11docker.target
+WantedBy=getty.target
+WantedBy=multi-user.target
+\" > /lib/systemd/system/console-getty.service"
+
+      echo "echo \"[Unit]
+Description=x11docker watch service
+# Watches for end of containerrc and initiates shutdown
+[Service]
+Type=simple
+ExecStart=/bin/sh -c 'while sleep 1; do systemctl is-active console-getty >/dev/null || { echo timetosaygoodbye >>$(convertpath share $Timetosaygoodbyefile) ; systemctl halt ; } ; [ -s $(convertpath share $Timetosaygoodbyefile) ] && systemctl halt ; done'
+[Install]
+WantedBy=x11docker.target
+\" > /etc/systemd/system/x11docker-watch.service"
+
+      echo "echo \"[Unit]
+Description=x11docker journal log service
+# get systemd log to transfer it into x11docker.log
+[Service]
+Type=simple
+ExecStart=/bin/sh -c '/bin/journalctl --follow --no-tail --merge >> $(convertpath share $Systemdjournallogfile) 2>&1'
+[Install]
+WantedBy=x11docker.target
+\" > /etc/systemd/system/x11docker-journal.service"
     ;;
     runit)
       echo "# --init=runit"
@@ -6711,6 +6689,7 @@ reload() {
   echo ""
 }
 rootrc_setup_user() {
+  local Line
   echo "# Check container user"
   echo "Containeruser=\"\$(storeinfo dump containeruser)\""
   echo ""
@@ -8374,12 +8353,6 @@ $Hostuserhome/.cache/x11docker/symlink
   Hostxauthority="$Cachefolder/$Hostxauthority"                     && mkfile $Hostxauthority
   Messagelogfile="$Cachefolder/$Messagelogfile"                     && mkfile $Messagelogfile
   Pulseaudioconf="$Cachefolder/$Pulseaudioconf"                     && mkfile $Pulseaudioconf
-  Systemdconsoleservice=$Cachefolder/$Systemdconsoleservice         && mkfile $Systemdconsoleservice
-  Systemdenvironment=$Cachefolder/$Systemdenvironment               && mkfile $Systemdenvironment
-  Systemdjournallogfile=$Sharefolder/$Systemdjournallogfile         && mkfile $Systemdjournallogfile
-  Systemdjournalservice=$Cachefolder/$Systemdjournalservice         && mkfile $Systemdjournalservice
-  Systemdtarget=$Cachefolder/$Systemdtarget                         && mkfile $Systemdtarget
-  Systemdwatchservice=$Cachefolder/$Systemdwatchservice             && mkfile $Systemdwatchservice
   Watchpidfifo="$Cachefolder/$Watchpidfifo"
   Xservercookie="$Cachefolder/$Xservercookie"                       && mkfile $Xservercookie
   Xtermrc="$Cachefolder/$Xtermrc"                                   && mkfile $Xtermrc
@@ -9056,7 +9029,7 @@ declare_variables() {           # declare global variables
   # Container setup
   Adminusercaps="no"                              # --cap-default, --sudouser, --init=systemd: add capabilities for general container system administration
   Allownewprivileges="auto"                       # --newprivileges: Docker run option --security-opt=no-new-privileges. Default: no. Enabled by options --newprivileges, --cap-default, --sudouser.
-  Backend=""                                      # --backend: Backend to use, like docker, podman, nerdctl, proot, host
+  Backend=""                                      # --backend: Backend to use, like docker, podman, nerdctl, proot, host. A default can be specified with default preset file.
   Backendbin=""                                   # path to binary of backend
   Backendinfo=""                                  # output of 'docker info'
   Capabilities=""                                 # Capabilities to add. Default: none, exceptions for --init, --sudouser
@@ -9089,12 +9062,7 @@ declare_variables() {           # declare global variables
   Sudouser=""                                     # --sudouser: Create user with sudo permissions and root user with password 'x11docker'
   Switchcontaineruser="no"                        # --init=systemd|openrc|runit|sysvinit: User switching to trigger login services yes/no
   Switchcontainerusercaps="no"                    # --init=systemd|openrc|runit|sysvinit, --sudouser: Add capabilities for su/sudo user switching
-  Systemdconsoleservice="systemd.console-getty.service" # --init=systemd
-  Systemdenvironment="systemd.environment.conf"
   Systemdjournallogfile="systemd.journal.log"
-  Systemdjournalservice="systemd.journal.service"
-  Systemdtarget="systemd.x11docker.target"
-  Systemdwatchservice="systemd.watch.service"
   Workdir=""                                      # --workdir: Set working directory in container
 
   # Init and DBus
