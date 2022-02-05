@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.1.0-beta-5"
+Version="7.1.0-beta-6"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -2834,7 +2834,7 @@ check_xdepends() {              # check dependencies on host for X server option
   [ "$Sharegpu" = "yes" ] && {
     case ${1:-} in
       --hostdisplay|--xorg|--xpra-xwayland|--xpra2-xwayland|--weston-xwayland|--kwin-xwayland|--xwayland|--xwin|--runx) ;;
-      --weston|--kwin|--hostwayland) ;;
+      --weston|--kwin|--hostwayland|--tty) ;;
       *)
         $Message "${1:-} does not support hardware acceleration (option --gpu)."
         Return=1
@@ -4799,8 +4799,8 @@ create_backendcommand() {       ### create command to run docker
     no)
       case $Backend in
         docker|podman|nerdctl)
-          Backendcommand="$Backendcommand \\
-  --detach"
+#          Backendcommand="$Backendcommand \\
+#  --detach"
         ;;
       esac
       case "$Backend" in
@@ -5746,12 +5746,27 @@ chmod -c 1777 /tmp/.ICE-unix /tmp/.X11-unix /tmp/.font-unix
   [ "$Hostlocaltimefile" ]   && rootrc_timezone
   [ "$Langwunsch" ]          && rootrc_create_locale
   [ "$Nvidiainstallerfile" ] && rootrc_nvidia_installer
-  
+
   echo "
 rocknroll || exit 64
 "
 
-  rootrc_setup_user
+  [ "$Createcontaineruser" = "yes" ] && rootrc_setup_user
+  echo "
+debugnote \"containerrootrc: Container user: \$(id \$Containeruser)
+\$(cat /etc/passwd | grep '\$Containeruser:.:')\"
+
+# Create HOME
+Containeruserhome=\"\$(cat /etc/passwd | grep '\$Containeruser:.:' | cut -d: -f6)\"
+Containeruserhome=\"\${Containeruserhome:-/tmp/\$Containeruser}\"
+[ -e \"$Containeruserhome\" ] || {
+  mkdir -v -p -m 777 \"$Containeruserhome\"
+  chown -v \"\$Containeruser\":\"\$Containerusergroup\" \"\$Containeruserhome\" && chmod -v 755 \"\$Containeruserhome\"  # can fail depending on capabilities
+}
+ls -la \"\$Containeruserhome\"
+export HOME=\"\$Containeruserhome\"
+"
+
   [ "$Switchcontaineruser" = "yes" ] && rootrc_create_helperscripts
   [ "$Dbussystem" = "yes" ]          && rootrc_prepare_dbus
   case $Initsystem in
@@ -5790,13 +5805,14 @@ $Runasroot
   echo "
 rocknroll || exit 64
 storeinfo containerrootrc=ready   # signal for containerrc
+#exec 1>&5 2>&6
 "
   [ "$Interactive" = "yes" ] || echo "
 exec 1>&5 2>&6
 "
 
   [ "$Switchcontaineruser" = "yes" ] && {   # if "no", containerrc is executed in command line $Backendcommand, and containerrootrc is started with 'docker exec'
-    echo "# --init=$Initsystem"
+    echo "debugnote 'containerrootrc(): --init=$Initsystem'"
     case $Initsystem in
       none|dockerinit)
         case $Backend in
@@ -5836,7 +5852,9 @@ exec 1>&5 2>&6
         echo '  error "Option --init=systemd: systemd not found."'
         echo '  exit 64'
         echo '}'
-        echo 'exec $Systemd'
+        echo "export SYSTEMD_LOG_LEVEL=info"
+        echo "export SYSTEMD_LOG_TARGET=console"
+        echo 'exec $Systemd --show-status=yes'
       ;;
     esac
   }
@@ -6723,48 +6741,42 @@ chmod +x /etc/init.d/dbus
 }
 rootrc_setup_user() {
   local Line
+
   echo "
 # Check container user
 Containeruser=\"\$(storeinfo dump containeruser)\"
-"
-  case $Createcontaineruser in
-    yes)
-      echo "
 Containeruserhome='$Containeruserhome'
+"
+  case $Containerusershell in
+    auto) echo "bash --version >/dev/null 2>&1 && Containerusershell=/bin/bash || Containerusershell=/bin/sh" ;;
+    *)    echo "Containerusershell='$Containerusershell'" ;;
+  esac
 
-# Create user entry in /etc/passwd (and delete possibly existing same uid)
-cat /etc/passwd | grep -v ':$Containeruseruid:' > /tmp/passwd             ### FIXME gids same as uid would be deleted, too
-cat /tmp/passwd | grep -v ':0:0:'               > /tmp/passwd
+  echo "
+# /etc/passwd
+Containeruserentry=\"\$Containeruser:x:$Containeruseruid:$Containerusergid:\$Containeruser,,,:\$Containeruserhome:\$Containerusershell\"
+debugnote \"containerrootrc: \$Containeruserentry\"
 
 # Disable possible /etc/shadow passwords for other users
-sed -i 's%:x:%:-:%' /tmp/passwd
-"
-      case $Containerusershell in
-        auto) echo "bash --version >/dev/null 2>&1 && Containerusershell=/bin/bash || Containerusershell=/bin/sh" ;;
-        *)    echo "Containerusershell='$Containerusershell'" ;;
-      esac
+# Delete root user
+# Delete possibly existing user with same uid
+sed -i 's%:x:%:-:% ; /:0:0:/d ; /:$Containeruseruid:/d' /etc/passwd
 
-      echo "
-Containeruserentry=\"\$Containeruser:x:$Containeruseruid:$Containerusergid:\$Containeruser,,,:$Containeruserhome:\$Containerusershell\"
-debugnote \"containerrootrc: \$Containeruserentry\"
-echo \"\$Containeruserentry\" >> /tmp/passwd
-echo \"root:x:0:0:root:/root:\$Containerusershell\" >> /tmp/passwd
-
-rm -v -f /etc/passwd
-mv /tmp/passwd /etc/passwd || warning 'Unable to change /etc/passwd. That may be a security risk.'
+echo \"\$Containeruserentry\" >> /etc/passwd
+echo \"root:-:0:0:root:/root:\$Containerusershell\" >> /etc/passwd
 
 # Create password entry for container user in /etc/shadow
 rm -f -v /etc/shadow || warning 'Cannot change /etc/shadow. That may be a security risk.'
 echo \"\$Containeruser:$Containeruserpassword:17293:0:99999:7:::\" > /etc/shadow
 "
-      case $Sudouser in
-        "")  echo "echo 'root:*:17219:0:99999:7:::' >> /etc/shadow" ;;
-        *)   echo "echo 'root:$Containeruserpassword:17219:0:99999:7:::' >> /etc/shadow  # with option --sudouser, set root password 'x11docker'"
-             echo "sed -i 's%root:-:%root:x:%' /etc/passwd                               # allow password in /etc/shadow"
-        ;;
-      esac
+  case $Sudouser in
+    "")  echo "echo 'root:*:17219:0:99999:7:::' >> /etc/shadow" ;;
+    *)   echo "echo 'root:$Containeruserpassword:17219:0:99999:7:::' >> /etc/shadow  # with option --sudouser, set root password 'x11docker'"
+         echo "sed -i 's%root:-:%root:x:%' /etc/passwd                               # allow password"
+    ;;
+  esac
 
-      echo "
+  echo "
 chmod 640 /etc/shadow   # can fail depending on available capabilities
 
 # sudo configuration
@@ -6775,14 +6787,14 @@ echo '# /etc/sudoers created by x11docker' > /etc/sudoers
 echo 'Defaults	env_reset'                >> /etc/sudoers
 echo 'root ALL=(ALL) ALL'                 >> /etc/sudoers
 "
-      case $Sudouser in
-        yes)      echo "echo '$Containeruser ALL=(ALL) ALL' >> /etc/sudoers" ;;
-        nopasswd) echo "echo '$Containeruser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers" ;;
-      esac
+  case $Sudouser in
+    yes)      echo "echo '$Containeruser ALL=(ALL) ALL' >> /etc/sudoers" ;;
+    nopasswd) echo "echo '$Containeruser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers" ;;
+  esac
 
-      # try to disable possible custom PAM setups that could allow switch to root in container
-      [ -z "$Sudouser" ] && {
-        echo "
+  # try to disable possible custom PAM setups that could allow a switch to root in container ### FIXME maybe not foolproof
+  [ -z "$Sudouser" ] && {
+    echo "# /etc/pam.d
 # Restrict PAM configuration of su and sudo
 mkdir -p /etc/pam.d
 [ -e /etc/pam.d/sudo ] && rm -f -v /etc/pam.d/sudo
@@ -6808,23 +6820,10 @@ case \"\$Containersystem\" in
   ;;
 esac
 "
-      }
-    ;;
-    no)
-      # check container user home. Can miss with --user=RETAIN
-      echo "
-Containeruserhome=\"\$(cat /etc/passwd | grep '\$Containeruser:.:' | cut -d: -f6)\"
-Containeruserhome=\"\${Containeruserhome:-/tmp/\$Containeruser}\"
+  }
 
-debugnote \"containerrootrc: Container user: \$(id \$Containeruser)
-\$(cat /etc/passwd | grep '\$Containeruser:.:')\"
-"
-    ;;
-  esac
-
-  # /etc/group
-  echo "# Set up container user groups
-sed -i \"s/\$Containeruser//g ; s/:,/:/g ; s/,\$//g\" /etc/group
+  echo "# /etc/group
+sed -i \"s/\$Containeruser//g ; s/:,/:/g ; s/,\$//g\" /etc/group  # remove existing entries for user
 "
   for Line in $Containerusergroups ; do
     echo "
@@ -6833,29 +6832,22 @@ Groupid=\"$(cat /etc/group   2>/dev/null | grep "^$Line" | cut -d: -f3)\"
 [ \"\$Groupname\" ] || Groupname=\"\$(cat /etc/group | grep \"$Line\" | cut -d: -f1)\"
 [ \"\$Groupid\" ]   || Groupid=\"\$(cat /etc/group | grep \"$Line\" | cut -d: -f3)\"
 [ \"\$Groupname\" ] && {
-  cat /etc/group | grep -v \"^\$Groupname\" >/tmp/group
-  echo \"\$Groupname:x:\$Groupid:\$Containeruser\" >> /tmp/group
-  # remove duplicate entry in a line
-  #sed -r ':a; s/\b([[:alnum:]]+)\b(.*)\b\1\b/\1\2/g; ta; s/(,)+/,/g; s/,*$//' -i /tmp/group
-  cp /tmp/group /etc/group
+  Entry=\"\$(grep \$Groupname /etc/group)\"
+  Entry=\"\$(echo \"\$Entry\" | cut -d: -f3-)\"
+  [ -z \"\$Entry\" ] && Entry=\"\$Groupid:\"
+  Entry=\"\$Groupname:x:\$Entry,\$Containeruser\"
+  Entry=\"\$(echo \"\$Entry\" | sed 's/:,/:/g')\"
+  sed -i \"/^\$Groupname:/d\" /etc/group
+  echo \"\$Entry\" >> /etc/group
 } || {
-  note 'Failed to add container user to group $Line.'
+  note \"Failed to add container user to group '$Line'.\"
 }
 # Create user group entry (and delete possibly existing same gid)
-cat /etc/group | grep -v ':$Containerusergid:'    > /tmp/group
-echo \"$Containerusergroup:x:$Containerusergid:\" >> /tmp/group
-mv /tmp/group /etc/group
+sed -i '/:$Containerusergid:/d' /etc/group
+echo \"$Containerusergroup:x:$Containerusergid:\" >> /etc/group
 "
   done
 
-  echo "
-# Create HOME
-[ -e \"$Containeruserhome\" ] || {
-  mkdir -v -p -m 777 \"$Containeruserhome\"
-  chown -v \"\$Containeruser\":\"\$Containerusergroup\" \"\$Containeruserhome\" && chmod -v 755 \"\$Containeruserhome\"  # can fail depending on capabilities
-}
-ls -la \$Containeruserhome
-"
   return 0
 }
 rootrc_timezone() {
@@ -6922,7 +6914,9 @@ start_container() {             # docker run
           Containerid=$Pid1pid
         ;;
         docker|podman|nerdctl)
-          read Containerid < <(eval $Backendcommand 2>>$Containerlogfile | rmcr)
+          #read Containerid < <(eval $Backendcommand 2>> $Containerlogfile | rmcr)
+          eval $Backendcommand >> $Containerlogfile 2>&1 &
+          Containerid=$Containername
         ;;
       esac
     ;;
@@ -9721,7 +9715,7 @@ Parsed options:    $Parsedoptions_global"
 
   #### Create command to run X server [and/or Wayland compositor]
   check_newxenv                  # find free display
-  [ "$Xcontainer" = "yes" ] && {                                                  # --xc
+  { [ "$Xcontainer" = "yes" ] || [ "$Xtoolscontainer" = "yes" ] ; } && {                                                  # --xc
     create_xcontainercommand
     debugnote "X container command:
   $Xcontainercommand"
