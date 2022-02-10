@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.1.0-beta-11"
+Version="7.1.0-beta-12"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -500,7 +500,7 @@ warning() {                     # show warning messages
   logentry "x11docker WARNING: $*
 "
 }
-watchmessagefifo() {            # watch for messages coming from container or dockerrc
+watchmessagefifo() {            # watch for messages coming from inside of container
   # message in fifo must end with :$Messagetype
   local Line= Message= Messagetype=
   trap '' SIGINT
@@ -5298,7 +5298,6 @@ $Newxsocket|$Rootfs/$Newxsocket"
     yes)
       case "$Backend" in
         docker|podman|nerdctl)
-          # real entrypoint is checked in dockerrc
           Backendcommand="$Backendcommand \\
   --entrypoint env"
         ;;
@@ -7001,7 +7000,7 @@ start_container() {             # docker run
       for ((Count=1 ; Count<=40 ; Count++)); do
         Containerinspect="$($Backendbin inspect "$Containername" 2>> "$Containerlogfile" | rmcr)"
         [ "$Containerinspect" != "[]" ] && Pid1pid="$(parse_inspect "$Containerinspect" "State" "Pid")"
-        debugnote "dockerrc: $Count. check for PID 1: $Pid1pid"
+        debugnote "start_container(): $Count. check for PID 1: $Pid1pid"
         case "$Mobyvm" in
           no)  checkpid "$Pid1pid" && break ;;
           yes) [ "$Pid1pid" ] && [ "$Pid1pid" != "0" ] && break
@@ -7027,12 +7026,11 @@ start_container() {             # docker run
       # Get ID of container
       Containerid="$(parse_inspect "$Containerinspect" "Id")"
       storeinfo "containerid=$Containerid"
-
       [ "$Remountcgroup" = "yes" ] && {
-        debugnote "Remounting /sys/fs/cgroup to :rw with nsenter"
+        debugnote "start_container(): Remounting /sys/fs/cgroup to :rw with nsenter"
         # Compare https://github.com/mviereck/x11docker/issues/349
         $Backendbin run --rm --cap-add "SYS_ADMIN" --cap-add="SYS_PTRACE" --security-opt "apparmor=unconfined" --pid="container:$Containerid" "$Imagename" \
-                    nsenter -t 1 -m -p -C /bin/sh -c 'mount -o remount,rw /sys/fs/cgroup/ ; touch /nsenter_is_ready' >> "$Containerlogfile" 2>&1 || {
+                    nsenter -t 1 -m -p /bin/sh -c 'mount -o remount,rw /sys/fs/cgroup/ ; touch /nsenter_is_ready' >> "$Containerlogfile" 2>&1 || {
           note "--init=systemd: Failed to remount /sys/fs/cgroup in container.
   Startup of systemd might fail.
   Last lines of log:
@@ -7069,8 +7067,6 @@ $(tail "$Containerlogfile")"
       ;;
     esac
   }
-
-  storeinfo dockerrc=ready
 
   return 0
 }
@@ -7288,7 +7284,7 @@ check_host() {                  # check host environment
   ldd --version 2>&1 | grep -q -E 'GLIBC|GNU libc'  && Hostlibc='glibc'
 
   # Check cgroup version
-  [ "$(cat /proc/self/cgroup | cut -d: -f1 | head -n1)" = "0" ] && Cgroupversion="v2" || Cgroupversion="v1"
+  grep -q '^0:' /proc/self/cgroup && Cgroupversion="v2" || Cgroupversion="v1"
   debugnote "Detected cgroup $Cgroupversion"
 
   # Check host time zone
@@ -8805,7 +8801,7 @@ setup_fifo() {                  # set up fifo channels (also option --stdin)
   exec {FDwatchpid}<>"$Watchpidfifo"
   watchpidlist & storepid $! watchpidlist
 
-  # start watching for messages out of container or dockerrc
+  # start watching for messages out of container
   exec {FDmessage}<>"$Messagefifo"
   watchmessagefifo & storepid $! watchmessagefifo
 
@@ -8940,7 +8936,7 @@ declare_variables() {           # declare global variables
 
   # Internal messages
   Logmessages=""                                  # Stores messages until logfile is available, needed by logentry()
-  Messagefifo="message.fifo"                      # Message channel for warning/verbose/debugnote/note/error within container, dockerrc, containerrootrc and others
+  Messagefifo="message.fifo"                      # Message channel for warning/verbose/debugnote/note/error within container,, containerrootrc and others
   Storeinfofile="store.info"                      # File to store some info like id, pid, name, exit code
   Storepidfile="store.pids"                       # File to store pids and names of background processes that should be terminated on exit
   Timetosaygoodbyefile="timetosaygoodbye"         # File giving term signal to all parties
@@ -9759,7 +9755,7 @@ Parsed options:    $Parsedoptions_global"
   option_messages                # some messages depending on options, but not changing anything
 
   # some checks and setup
-  setup_fifo                     # open message channels for container, dockerrc, xinitrc and watchpidlist()
+  setup_fifo                     # open message channels for container, xinitrc and watchpidlist()
   check_screensize               # size of host X and of new X server             # --size #time0,213
   [ "$Windowmanagermode" ]       && check_windowmanager                           # --wm
   [ "$Sharegpu" = "yes" ]        && setup_gpu ||:                                 # --gpu
@@ -9845,7 +9841,6 @@ $(nl -ba <$Cmdrc)"
     #   --xorg on tty only works if xinit runs in foreground to grab the tty.
     #   Otherwise, Xwrapper.config must be edited to 'allowed_users=anybody' even on console.
     # Thus docker runs in this subshell after X server is ready to accept connections.
-    # Waiting for X is done in dockerrc.
 
     #trap '' SIGINT
 
