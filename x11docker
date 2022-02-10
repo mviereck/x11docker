@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.1.0-beta-9"
+Version="7.1.0-beta-10"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -3057,10 +3057,13 @@ check_xserver() {               # check chosen X server, auto-choose X server
     [ "$Autochooseserver" = "yes" ] && Xserver="--xorg" && Xorgautochoice="yes"
   }
 
-  [ "$Runsoverssh" = "yes" ] && [ -z "$Hostdisplay$Hostwaylandsocket" ] && [ "$Xserver" != "--tty" ] && [ "$Autochooseserver" = "yes" ] && {
+  [ "$Runsoverssh" = "yes" ] && [ -z "$Hostdisplay$Hostwaylandsocket" ] && [ "$Xserver" != "--tty" ] && {
     error "You are running x11docker over SSH without providing a display.
+  DISPLAY and WAYLAND_DISPLAY are empty.
   Please run with 'ssh -X' or 'ssh -Y'.
-  (If you insist, you can run with option '--xorg', but won't see the result remotely.)"
+  If there is already an X or Wayland session running on the remote system
+  that you want to use,  please set either DISPLAY and XAUTHORITY 
+  or WAYLAND_DISPLAY and XDG_RUNTIME_DIR accordingly."
   }
 
   ## check if dependencies for chosen X server are installed, fall back to best alternatives if not
@@ -4488,24 +4491,7 @@ check_runtime() {               # option --runtime
 }
 check_cgroup() {                # check [and create] cgroup mountpoint for systemd or elogind
   local Wantedcgroup
-
-  case "$Initsystem" in
-    systemd)
-      grep -q cgroup2 /proc/filesystems && {
-        debugnote"Option --init=systemd: cgroup v2 detected."
-        [ "$Backend" = "podman" ] && [ "$Runtime" = "crun" ] || { 
-          note "Option --init=systemd: Found cgroup v2
-  on your system. systemd in container might fail without an error message.
-  Currently only '--backend=podman --runtime=crun' is known to work
-  in a pure cgroup v2 setup without hybrid support.
-  As a workaround you can set a kernel boot option to enforce cgroup v1:
-    systemd.unified_cgroup_hierarchy=0
-  Compare ticket https://github.com/mviereck/x11docker/issues/349"
-        }
-      }
-    ;;
-  esac
-
+  
   [ "$Sharecgroup" = "yes" ] && [ "$Dbussystem" = "yes" ] && {
     [ "$Initsystem" = "systemd" ] && Wantedcgroup="systemd" || Wantedcgroup="elogind"
     findmnt "/sys/fs/cgroup/$Wantedcgroup" >/dev/null || {
@@ -4812,7 +4798,7 @@ create_backendcommand() {       ### create command to run docker
         ;;
       esac
       case "$Backend" in
-        docker|podman) Backendcommand="$Backendcommand \
+        docker|podman) Backendcommand="$Backendcommand \\
   --tty" ;;
       esac
     ;;
@@ -5014,10 +5000,11 @@ create_backendcommand() {       ### create command to run docker
     ;;
     systemd)
       Backendcommand="$Backendcommand \\
-  --tmpfs /var/lib/journal \\
-  --tmpfs /sys/fs/cgroup/systemd"
+  --tmpfs /var/lib/journal"
       [ "$Backend" = "podman" ] && Backendcommand="$Backendcommand \\
   --systemd=always"
+      [ "$Remountcgroup" = "yes" ] && Backendcommand="$Backendcommand \\
+  --cgroupns private"
   esac
 
   # stop signal for some init systems
@@ -5582,7 +5569,28 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
     systemd)
       Stopsignal="SIGRTMIN+3"
       Containerusergroups="$Containerusergroups systemd-journal"
-      Sharecgroup="yes"
+      # workaround to support cgroupv2
+      [ "$Sharecgroup" = "no" ] && {
+        case "$Cgroupversion" in
+          v2)
+            [ "$Backend" = "docker" ] && {
+              Remountcgroup="yes"
+              warning "Option --init=systemd: To support systemd in docker container
+  with cgroupv2 on host, x11docker shortly runs a privileged container
+  of $Imagename with 'nsenter' to remount the container's /sys/fs/cgroup.
+  Evil images might be set up to abuse these privileges."
+              note "Option --init=systemd: If you have set up your system to use cgroupv1
+  although it could support cgroupv2, systemd startup might fail.
+  In that case please add option --sharecgroup."
+            }
+          ;;
+          v1)
+            Sharecgroup="yes"
+            warning "Option --init=systemd with cgroupv1
+  shares access to host cgroups in /sys/fs/cgroup."
+          ;;
+        esac
+      }
     ;;
     runit)
       Stopsignal="HUP"
@@ -5603,7 +5611,6 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
   It adds some user switching capabilities x11docker would drop otherwise.
   However, they are still within default docker capabilities.
   Not within default docker capabilities it adds capability SYS_BOOT.
-  It shares access to host cgroups in /sys/fs/cgroup.
   Some processes in container will run as root."
     ;;
     runit|openrc|sysvinit)
@@ -5818,6 +5825,16 @@ dbus-daemon --system --fork
       ;;
     esac
   }
+
+  [ "$Remountcgroup" = "yes" ] && echo "
+# wait for nsenter to remount /sys/fs/cgroup to :rw
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  test -e /nsenter_is_ready && break
+  sleep 1
+  debugnote 'containerrootrc: Waiting for nsenter/mount to be ready'
+done
+rm /nsenter_is_ready
+"
 
   [ "$Runasroot" ] && {
     echo "
@@ -6938,7 +6955,7 @@ start_container() {             # docker run
         ;;
         docker|podman|nerdctl)
           #read Containerid < <(eval $Backendcommand 2>> $Containerlogfile | rmcr)
-          eval $Backendcommand >> "$Containerlogfile" 2>&1 &
+          eval $Backendcommand >> "$Containerlogfile" 2>&1 ||: &
         ;;
       esac
     ;;
@@ -6952,9 +6969,9 @@ start_container() {             # docker run
         ;;
         docker|podman|nerdctl)
           [ "$Winpty" ] && {
-            $Winpty bash "$Backendcommandfile" <&0 &
+            $Winpty bash "$Backendcommandfile" <&0 ||: &
           } || {
-            eval $Backendcommand <&0 &
+            eval $Backendcommand <&0 ||: &
           }
         ;;
       esac
@@ -7013,6 +7030,18 @@ start_container() {             # docker run
       # Get ID of container
       Containerid="$(parse_inspect "$Containerinspect" "Id")"
       storeinfo "containerid=$Containerid"
+
+      [ "$Remountcgroup" = "yes" ] && {
+        debugnote "Remounting /sys/fs/cgroup to :rw with nsenter"
+        # Compare https://github.com/mviereck/x11docker/issues/349
+        $Backendbin run --rm --cap-add "SYS_ADMIN" --cap-add="SYS_PTRACE" --security-opt "apparmor=unconfined" --pid="container:$Containerid" "$Imagename" \
+                    nsenter -t 1 -m -p -C /bin/sh -c 'mount -o remount,rw /sys/fs/cgroup/ ; touch /nsenter_is_ready' >> "$Containerlogfile" 2>&1 || {
+          note "--init=systemd: Failed to remount /sys/fs/cgroup in container.
+  Startup of systemd might fail.
+  Last lines of log:
+$(tail "$Containerlogfile")"
+        }
+      }
     ;;
   esac
   storeinfo "pid1pid=$Pid1pid"
@@ -7194,7 +7223,7 @@ $Xpraclientcommand"
 
   # get pids
   sleep 1   # avoid race condition not finding the process
-  Xpraserverpid="$(ps aux | grep "/usr/bin/xpra start $Newdisplay" | grep -v grep | awk '{print $2}')"
+  Xpraserverpid="$(ps aux | grep -E "/usr/bin/xpra start $Newdisplay|/usr/bin/xpra start-desktop $Newdisplay" | grep -v grep | awk '{print $2}')"
   storepid "$Xpraserverpid" xpraserver
   Xpraclientpid="$(ps aux | grep "/usr/bin/xpra attach $Newdisplay" | grep -v grep | awk '{print $2}')"
   storepid "$Xpraclientpid" xpraclient
@@ -7205,7 +7234,7 @@ $Xpraclientcommand"
     ps -p "$Xpraclientpid" >/dev/null || { debugnote "xpra client terminated" ; break ; }
     sleep 1
   done
-  sleep 1 && rocknroll && note "Option $Xserver: xpra terminated unexpectedly.
+  sleep 3 && rocknroll && note "Option $Xserver: xpra terminated unexpectedly.
   Last lines of xpra server log: $(pspid "$Xpraserverpid")
 $(tail "$Xpraserverlogfile")
 ---------------------------------
@@ -7260,6 +7289,10 @@ check_host() {                  # check host environment
   Hostlibc="unknown"
   ldd --version 2>&1 | grep -q    'musl libc'       && Hostlibc='musl'
   ldd --version 2>&1 | grep -q -E 'GLIBC|GNU libc'  && Hostlibc='glibc'
+
+  # Check cgroup version
+  grep -q cgroup2 /proc/filesystems && Cgroupversion="v2" || Cgroupversion="v1"  ### FIXME
+  debugnote "Detected cgroup $Cgroupversion"
 
   # Check host time zone
   Hostlocaltimefile="$(myrealpath /etc/localtime)"      # Find time zone file in /usr/share/zoneinfo
@@ -8958,6 +8991,7 @@ declare_variables() {           # declare global variables
   Containerusershell="auto"                       # --shell: Preferred user shell
 
   # Hostsystem
+  Cgroupversion=""                                # Needed for --init=systemd
   Hostarchitecture=""                             # uname -m, checked
   Hostcanwatchroot=""                             # x11docker can watch root processes yes/no. Related to $Hosthidepid
   Hostdisplay=""                                  # Environment variable DISPLAY
@@ -9125,6 +9159,7 @@ declare_variables() {           # declare global variables
   Noentrypoint="no"                               # --no-entrypoint: Disable entrypoint in image yes/no
   Optionset=""                                    # list of set options for later support check
   Optionsetall=""                                 # list of all available long options
+  Remountcgroup=""                                # --init=systemd with cgroupv2 in docker workaround
   Rootfs=""
   Runtime=""                                      # Runtime to use. runc|nvidia|kata-runtime|crun
   Snapsupport=""                                  # --snap: Fallback mode to support docker in snap
