@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [7.1.0](https://github.com/mviereck/x11docker/releases/tag/v7.1.0) - 2022-02-12
 ### Added
  - `--backend=proot`: Use a rootfs on host with `proot` instead of a container.
    [(#224)](https://github.com/mviereck/x11docker/issues/224)
@@ -14,13 +14,12 @@ Project website: https://github.com/mviereck/x11docker
  - `--ipc [=ARG]`: Replaces former `--hostipc`.
 ### Changed
  - `--hostdisplay`: Use `XlibNoSHM.so` from `x11docker/xserver` if available.
-   No `--ipc=host` needed in that case.
+   This avoids the need of `--ipc=host`.
  - `--backend`: Do not use fallbacks if backend is not found.
 ### Fixed
  - `--init=systemd`: support cgroupv2 unified hierarchy.
    [(#349)](https://github.com/mviereck/x11docker/issues/349)
  - `--backend=nerdctl`: Some fixes.
- - `--xc`: Check IPC settings in `CUSTOM_RUN_OPTIONS`.
  - `--backend=host --xoverip`: No error without `--network`.
  - user/group setup fixes.
  - `xpra` pid check fix.

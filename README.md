@@ -1,6 +1,8 @@
 # x11docker: ![x11docker logo](x11docker.png) Run GUI applications in Docker
+
 ## Avoid X security leaks and enhance container security
 [![DOI](http://joss.theoj.org/papers/10.21105/joss.01349/status.svg)](https://doi.org/10.21105/joss.01349)
+
 ## Introduction
 x11docker allows to run graphical desktop applications (and entire desktops) in Linux containers.
  - [Container tools](#backend-docker-podman-or-nerdctl) like [Docker](https://en.wikipedia.org/wiki/Docker_(software)), [podman](http://docs.podman.io/en/latest/) and [nerdctl](https://github.com/containerd/nerdctl) allow to run applications in an isolated [container](https://en.wikipedia.org/wiki/Operating-system-level_virtualization) environment. 
@@ -16,6 +18,27 @@ This can help to run or deploy software that is difficult to install on several 
 Files to work on can be shared between host and container.
 
 [x11docker wiki](https://github.com/mviereck/x11docker/wiki) provides some how-to's for basic setups without x11docker.
+
+### TL;DR
+For a quick start:
+ - Install x11docker with:
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker | sudo bash -s -- --update
+   ```
+ - Install [dependencies](#dependencies):
+   - Either pull image `x11docker/xserver` or install at least `nxagent` or `xpra` and `xephyr`.
+ - Run a GUI in container with:
+   ```sh
+   x11docker IMAGENAME [COMMAND]
+   ```
+ - Add options:
+   - `--desktop` for a desktop environment in image.
+   - `--gpu` for hardware acceleration. 
+ - Examples:
+   ```sh
+   x11docker --desktop x11docker/xfce
+   x11docker --gpu x11docker/xfce glxgears
+   ```
 
 ### Features
  - Focus on [security](#security):
@@ -38,6 +61,7 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
   
 ## Table of contents
  - [Introduction](#introduction)
+   - [TL;DR](#tl-dr)
    - [Features](#features)
    - [Supported systems](#supported-systems)
  - [Terminal syntax](#terminal-syntax)
@@ -56,10 +80,11 @@ x11docker runs on Linux and (with some setup and limitations) on [MS Windows](#i
    - [Init system](#init-system)
    - [DBus](#dbus)
    - [Container runtime](#container-runtime)
-   - [Backend docker, podman or nerdctl](#backend-docker-podman-or-nerdctl)
+   - [Backends other than docker](#backends-other-than-docker)
    - [Preconfiguration with --preset](#preconfiguration-with---preset)
      - [Default preset for all x11docker sessions](#default-preset-for-all-x11docker-sessions)
  - [Security](#security)
+   - [Security weaknesses](#security-weaknesses)
    - [Options degrading container isolation](#options-degrading-container-isolation)
    - [Sandbox](#sandbox)
    - [Security and feature check](#security-and-feature-check)
@@ -100,14 +125,16 @@ Just type `x11docker IMAGENAME [COMMAND]`.
  
 General syntax:
 ```
+Usage:
 To run a container on a new X server:
   x11docker IMAGE
   x11docker [OPTIONS] IMAGE [COMMAND]
   x11docker [OPTIONS] -- IMAGE [COMMAND [ARG1 ARG2 ...]]
   x11docker [OPTIONS] -- CUSTOM_RUN_OPTIONS -- IMAGE [COMMAND [ARG1 ARG2 ...]]
 To run a host application on a new X server:
-  x11docker [OPTIONS] --exe COMMAND
-  x11docker [OPTIONS] --exe -- COMMAND [ARG1 ARG2 ...]
+  x11docker [OPTIONS] --backend=host COMMAND
+  x11docker [OPTIONS] --backend=host -- COMMAND [ARG1 ARG2 ...]
+  x11docker [OPTIONS] --backend=host -- -- COMMAND [ARG1 ARG2 ...] -- [ARG3]
 To run only an empty new X server:
   x11docker [OPTIONS] --xonly
 ```
@@ -257,23 +284,26 @@ Possible runtime configuration in `/etc/docker/daemon.json`:
 }
 ```
  
-### Backend docker, podman or nerdctl
+### Backends other than docker
 x11docker supports container tools [Docker](https://en.wikipedia.org/wiki/Docker_(software)), [podman](http://docs.podman.io/en/latest/) 
 and [nerdctl](https://github.com/containerd/nerdctl) with option `--backend=BACKEND` in rootful and rootless mode.
  - By default x11docker tries to run `docker`. Alternatively set option `--backend=podman` or `--backend=nerdctl`.
- - Test status:
-   - x11docker was developed with rootful `docker`, this is well tested.
-   - Basically tested is `podman`, rootless and rootful.
-   - Barely tested:
-     - rootless `docker`
-     - `nerdctl` in rootless and rootful mode.
- - For rootless mode `podman` is recommended. 
+ - Recommended for rootful container backend: `docker` or `podman`
+ - Recommended for rootless container backend: `podman` 
    - Only `podman` allows option `--home` in rootless mode yet.
    - Only `podman` provides useful file ownerships with option `--share` in rootless mode yet.
- - For rootful mode `docker` or `podman` are recommended.
- - To switch between rootless or rootful mode of `podman` and `nerdctl` just use (or leave) `sudo` or set (or leave) option `--pw`.
- - For [rootless docker](https://docs.docker.com/engine/security/rootless/) set environment variable `DOCKER_HOST` accordingly.
- 
+   
+Other supported backends that are in fact no containers:
+ - `--backend=host` runs a host application on a new X server. No containerization is involved.
+ - `--backend=proot` runs a command in a rootfs file system, i.e. in a folder that contains a full linux system.
+   - `proot` is similar to `chroot`, but does not need root privileges.
+   - Either specify path to a folder with a rootfs as IMAGENAME, or provide one to call with 'image-name' at `~/.local/share/x11docker/ROOTFS/image-name`.
+   - Tool [`image2rootfs`}(https://github.com/mviereck/image2rootfs) helps to create a rootfs from docker images.
+   - Changes done in the `proot` environment are persistent, in opposite to backends `docker|podman|nerdctl` that always run a fresh container.
+   - Prefer a real container backend as they provide better isolation from host.
+
+To change the default `--backend=docker` to another one like `--backend=podman`, create a [`default` file for `--preset`](#default-preset-for-all-x11docker-sessions).
+
 ### Preconfiguration with --preset
 For often used option combinations you might want to use option `--preset FILENAME` to have a command shortcut. 
 `FILENAME` is a file in `~/.config/x11docker/preset` or in `/etc/x11docker/preset` containing some x11docker options.
@@ -314,8 +344,8 @@ You can create a `default` preset file that is applied on all x11docker sessions
    ```
    This will cause x11docker to always use `podman` instead of `docker` unless specified otherwise in the x11docker command.
    
-The same way you can specify other and more options as a default, e.g. `--runtime=kata-runtime`.
-Note that a local user `default` will supersede a system wide `default`. 
+The same way you can specify other and more options as default, e.g. `--homebasedir=/my/containerhome/path`.
+Note that a local user `default` file will supersede a system wide `default` file. 
    
 ## Security 
 Scope of x11docker is to run containerized GUI applications while preserving and improving container isolation.
@@ -341,14 +371,18 @@ Containers should not have capabilities or privileges that they don't need for t
 Default runtimes like `runc` use Linux namespaces to isolate container applications, but share the kernel from host. 
 If you are concerned about container access to host kernel, consider to use [container runtime](#container-runtime) `kata-runtime` instead.
 
-_Weaknesses:_
+### Security weaknesses
  - Possible SELinux restrictions are degraded for x11docker containers with run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. 
    A more restrictive solution is desirable.
    Compare: [SELinux and Docker: allow access to X unix socket in /tmp/.X11-unix](https://unix.stackexchange.com/questions/386767/selinux-and-docker-allow-access-to-x-unix-socket-in-tmp-x11-unix)
  - A possible user namespace remapping setup is disabled to allow options `--home` and `--share` without file ownership issues. 
    - This is less an issue because x11docker already avoids root in container. 
    - Exception: User namespace remapping is not disabled for `--user=RETAIN`.
- - x11docker provides several different X server options. Each X server involved might have its individual vulnerabilities. x11docker only covers well-known X security leaks that result from X11 protocol design.
+ - x11docker provides several different X server options. 
+   Each X server involved might have its individual vulnerabilities. 
+   x11docker only covers well-known X security leaks that result from X11 protocol design.
+    - An additional security layer for most supported X servers is set up if image [x11docker/xserver](https://github.com/mviereck/dockerfile-x11docker-xserver) is available. 
+      It will be used automatically in most cases if available. Enforce its usage with option `--xc=yes`.
 
  
 ### Options degrading container isolation
@@ -357,7 +391,7 @@ x11docker shows warning messages in terminal if chosen options degrade container
 _Most important:_
   - `--hostdisplay` shares host X socket of display :0 instead of running a second X server. 
     - Danger of abuse is reduced providing so-called untrusted cookies, but do not rely on this. 
-    - If additionally using `--gpu` or `--clipboard`, option `--hostipc` and trusted cookies are enabled and no protection against X security leaks is left. 
+    - If additionally using `--gpu` or `--clipboard`, option `--ipc=host` and trusted cookies are enabled and no protection against X security leaks is left. 
     - If you don't care about container isolation, `x11docker --hostdisplay --gpu` is an insecure but quite fast setup without any overhead.
   - `--gpu` allows access to GPU hardware. This can be abused to get window content from host ([palinopsia bug](https://hsmr.cc/palinopsia/)) and makes [GPU rootkits](https://github.com/LucaBongiorni/jellyfish) like [keyloggers](http://www.cs.columbia.edu/~mikepo/papers/gpukeylogger.eurosec13.pdf) possible.
   - `--pulseaudio` and `--alsa` allow catching audio output and microphone input from host.
@@ -370,7 +404,6 @@ _Rather special options reducing security, but not needed for regular use:_
   - `--init=systemd|sysvinit|openrc|runit` allow some container capabilities that x11docker would drop otherwise. 
     `--init=systemd` also shares access to `/sys/fs/cgroup`. Some processes will run as root in container.
     If a root process somehow breaks out of container, it can harm your host system. Allows many container capabilities that x11docker would drop otherwise.
-  - `--hostipc` sets run option `--ipc=host`. Allows MIT-SHM / shared memory. Disables IPC namespacing.
   - `--hostdbus` allows communication over DBus with host applications.
 
 ### Sandbox
@@ -387,8 +420,6 @@ x11docker already restricts process capabilities. You can additionally restrict 
 As default `--limit` restricts to 50% of available CPUs and 50% of currently free RAM. Another amount can be specified with `--limit=FACTOR` with a `FACTOR` greater than zero and less than or equal one.
 
 For more custom fine tuning have a look at [Docker documentation: Limit a container's resources](https://docs.docker.com/config/containers/resource_constraints).
-
-**NOTE**: Internet access is allowed by default. You can disable internet access with `--network=none`.
 
 **WARNING**: There is no restriction that can prevent the container from flooding the hard disk storing the container or in shared folders.
 
@@ -503,11 +534,13 @@ One attempt is to allow several privileges until the setup works. Than reduce pr
 
 **1.** Adding privileges:
  - Try `x11docker --cap-default IMAGENAME`
- - Try `x11docker --cap-default --hostipc --hostnet IMAGENAME`
- - Try `x11docker --cap-default --hostipc --hostnet --share /run/udev/data:ro -- --cap-add ALL --security-opt seccomp=unconfined --privileged -- IMAGENAME`
+ - Try `x11docker --cap-default --ipc=host --network=host IMAGENAME`
+ - Try `x11docker --cap-default --ipc=host --network=host --share /run/udev/data:ro -- --cap-add ALL --security-opt seccomp=unconfined --security-opt apparmor=unconfined --privileged -- IMAGENAME`
    
 **2.** Reducing privileges:
- - Drop options one by one in this order: `--privileged --security-opt seccomp=unconfined --cap-add ALL --share /run/udev/data:ro --hostnet --hostipc --cap-default`. Only leave options that are needed to keep the setup working.
+ - Drop options one by one in this order: `--privileged` `--security-opt apparmor=unconfined` `--security-opt seccomp=unconfined` `--cap-add ALL`
+   `--share /run/udev/data:ro` `--network=host` `--ipc=host` `--cap-default`. 
+   Only leave options that are needed to keep the setup working.
  - Option `--cap-default` might already be enough. It allows default container capabilities as docker|podman|nerdctl would do on themself. 
    - You can just stop debugging and reducing here if you like to.
    - You can try to reduce `--cap-default`. Partially remove additional options to find out which one(s) are needed:
@@ -519,7 +552,7 @@ One attempt is to allow several privileges until the setup works. Than reduce pr
    - Many of these capabilities are rather dangerous and should not be allowed for a container. Especially to mention is `SYS_ADMIN`.
  - Option `--privileged` should not be considered to be a solution. Basically it allows arbitrary access to the host for container applications.
    - Likely you need to share a device file in `/dev`, e.g. something like `--share /dev/vboxdrv`.
- - `--hostipc` and `--hostnet` severely reduce container isolation. Better solutions are desirable.
+ - `--ipc=host` and `--network=host` severely reduce container isolation. Better solutions are desirable.
 
 **3.** Open a ticket to ask for possibilities how to optimize the privilege setup.
 
@@ -639,6 +672,7 @@ More screenshots are stored in [screenshot branch](https://github.com/mviereck/x
 `x11docker --desktop --gpu --init=systemd -- --cap-add=IPC_LOCK --security-opt seccomp=unconfined -- x11docker/deepin`
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-deepin.png "deepin desktop in docker")
 
-Additionally a technical link for search engine crawlers to [x11docker wiki](https://github-wiki-see.page/m/mviereck/x11docker/wiki_index) 
-because github does not allow search engines to access github wiki pages directly. 
-Compare workaround helper [github-wiki-see](https://github.com/nelsonjchen/github-wiki-see-rs).
+---------------
+Additionally a technical link for search engine crawlers to [x11docker wiki](https://github-wiki-see.page/m/mviereck/x11docker/wiki_index)
+at [github-wiki-see](https://github.com/nelsonjchen/github-wiki-see-rs) because github does not allow search engines to access github wiki pages directly. 
+Compare ticket [#412](https://github.com/mviereck/x11docker/issues/412).

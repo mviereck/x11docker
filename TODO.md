@@ -5,7 +5,6 @@ x11docker ToDo notes
  
  - --xc=backend for proot and host backends
  
- - deprecate --hostipc, use --ipc=
  - check elogind with cgroupv2
  - deprecate --sharecgroup?
 
