@@ -5,7 +5,7 @@
 
 ## Table of contents
  - [Introduction](#introduction)
-   - [TL;DR](#tl-dr)
+   - [TL;DR](#tldr)
    - [Features](#features)
    - [Supported systems](#supported-systems)
  - [Terminal syntax](#terminal-syntax)
