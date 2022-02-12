@@ -11,16 +11,24 @@ Project website: https://github.com/mviereck/x11docker
  - `--backend=proot`: Use a rootfs on host with `proot` instead of a container.
    [(#224)](https://github.com/mviereck/x11docker/issues/224)
  - `--backend=host`: Run application from host. Replaces `-e, --exe`.
+ - `--ipc [=ARG]`: Replaces former `--hostipc`.
 ### Changed
  - `--hostdisplay`: Use `XlibNoSHM.so` from `x11docker/xserver` if available.
+   No `--ipc=host` needed in that case.
  - `--backend`: Do not use fallbacks if backend is not found.
 ### Fixed
+ - `--init=systemd`: support cgroupv2 unified hierarchy.
+   [(#349)](https://github.com/mviereck/x11docker/issues/349)
  - `--backend=nerdctl`: Some fixes.
- - `--xonly/--exe --xc --xoverip`: Allow access.
  - `--xc`: Check IPC settings in `CUSTOM_RUN_OPTIONS`.
- - `--xonly/--exe --xoverip`: No error without `--network`.
+ - `--backend=host --xoverip`: No error without `--network`.
+ - user/group setup fixes.
+ - `xpra` pid check fix.
+ - Container startup check fix.
+ - Several minor fixes I forgot to note here.
 ### Deprecated
  - `-e, --exe`: Use `--backend=host` instead.
+ - `--hostipc`: Use `--ipc [=ARG]` instead.
 
 ## [7.0.1](https://github.com/mviereck/x11docker/releases/tag/v7.0.1) - 2022-01-20
 ### Fixed

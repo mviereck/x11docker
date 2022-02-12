@@ -2,31 +2,42 @@
 x11docker ToDo notes
 
 ## Work in progress
+ 
+ - --xc=backend for proot and host backends
+ 
+ - deprecate --hostipc, use --ipc=
+ - check elogind with cgroupv2
+ - deprecate --sharecgroup?
+
+ - sommelier
+ - --gpu=virgl
  - --backend=systemd-nspawn
  - check empty XDG_RUNTIME_DIR e.g. with --user, --hostuser
- - --xc=backend for proot and host backends
+ - --weston2-xwayland?
+ 
  - --backend=proot
    - --name
    - --init except systemd possible?
-   - share: ro not possible
    - clean /tmp
-   - do old binds disappear?
+   - how to disable old binds? issue e.g. with/without --home, --share
    
+ - --tty should not fall back to X (seen with --gpu)
+ 
  - kata: add new runtime for nerdctl io.containerd.kata.v2
    
  - X in container:
    - use xauth and others from image if not available on host
    - missing: Xorg, Weston/Kwin on console, xpra-xwayland
    - --xpra-xwayland --xc: xpra client fails with keyboard error
-   - reduce xpra dependencies?
  - provide XlibNoSHM.so on host for --hostdisplay
+ 
  
 ## Issues to fix
  - sysbox: warning on capabilities
  - --build: download files for COPY/ADD (x11docker/check, x11docker/xserver)
  - x11docker/fvwm: openrc package broken? no `rc-update`, no dbus
  - `--remove`: give note about not removed files in `~./config/x11docker` and `/etc/x11docker`
- - `--update`: Check if installs into `/usr/bin` or `/usr/local/bin`. Do not install other files then.
+ - `--update`: Check if installs not into `/usr/bin` or `/usr/local/bin`. Do not install other files then.
    Maybe change to $1 mode without `--`
    
 ## Checks
