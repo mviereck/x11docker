@@ -75,20 +75,20 @@ Files to work on can be shared between host and container.
 
 ### TL;DR
 For a quick start:
- - Install x11docker with:
+ - [Install](#installation) x11docker with:
    ```sh
    curl -fsSL https://raw.githubusercontent.com/mviereck/x11docker/master/x11docker | sudo bash -s -- --update
    ```
  - Install [dependencies](#dependencies):
    - Either pull image `x11docker/xserver` or install at least `nxagent` or `xpra` and `xephyr`.
- - Run a GUI in container with:
+ - [Run]((#terminal-syntax)) a GUI in container with:
    ```sh
    x11docker IMAGENAME [COMMAND]
    ```
- - Add options:
+ - Add [options](#options):
    - `--desktop` for a desktop environment in image.
    - `--gpu` for hardware acceleration. 
- - Examples:
+ - [Examples](#examples):
    ```sh
    x11docker --desktop x11docker/xfce
    x11docker --gpu x11docker/xfce glxgears
