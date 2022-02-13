@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.1.0"
+Version="7.1.1-beta"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -2571,6 +2571,86 @@ check_vt() {                    # option --xorg: find free vt / tty
   You can avoid this issue with switching to a black tty before switching to X."
   return 0
 }
+check_xcontainer() {            # option --xc: check image x11docker/xserver
+  case "$Xcontainer" in
+    no) ;;
+    yes|auto) 
+      case "$Backend" in
+        host|proot|chroot)
+          podman   inspect "$Xcontainerimage" >/dev/null 2>&1 && Xcontainerbackend="podman"
+          [ -z "$Xcontainerbackend" ] && {
+            docker inspect "$Xcontainerimage" >/dev/null 2>&1 && Xcontainerbackend="docker"
+          }
+          [ "$Xcontainer" = "yes" ] && [ -z "$Xcontainerbackend" ] && {
+            note "Option --xc: Image $Xcontainerimage not found
+  at backends podman or docker.
+  Fallback: Disabling option --xc"
+            check_fallback
+            Xcontainer="no"
+          }
+          [ -n "$Xcontainerbackend" ] && Xcontainer="yes" || Xcontainer="no"
+        ;;
+        docker|podman|nerdctl)
+          Xcontainerbackend="$Backend"
+          $Xcontainerbackend inspect "$Xcontainerimage" >/dev/null 2>&1 || Xcontainerimage="" 
+        ;;
+      esac
+    ;;
+    *)
+      Xcontainerbackend="$Xcontainer"
+      Xcontainer="yes"
+      $Xcontainerbackend inspect "$Xcontainerimage" >/dev/null 2>&1 || {
+        note "Option --xc: Image $Xcontainerimage not found
+  at backend '$Xcontainerbackend'.
+  Fallback: Disabling option --xc"
+        check_fallback
+        Xcontainer="no"
+      }
+    ;;
+  esac
+
+  case "$Xcontainer" in
+    yes)
+      [ -z "$Xcontainerimage" ]     && Xcontainer="no"
+      [ "$Runsonconsole" = "yes" ]  && Xcontainer="no"
+      [ "$Winsubsystem" ]           && Xcontainer="no"
+      case "$Runtime" in
+        kata-runtime|sysbox-runc)      Xcontainer="no" ;;
+      esac
+#      case "$Backend" in
+#        proot|chroot)                  Xcontainer="no" ;;
+#      esac
+      [ "$Xcontainer" = "no" ] && {
+        note "Option --xc not possible:
+  - on console
+  - on MS Windows
+  - without image x11docker/xserver.
+  - with runtimes kata-runtime and sysbox-runc
+  Fallback: Setting --xc=no"
+        check_fallback
+        Xcontainer="no"
+      }
+    ;;
+    auto)
+      case "$Runtime" in
+        kata-runtime|sysbox-runc)      Xcontainer="no" ;;
+      esac
+      [ -z "$Xcontainerimage" ]     && Xcontainer="no"
+#      case "$Backend" in
+#        proot|chroot)                  Xcontainer="no" ;;
+#      esac
+    ;;
+    no) ;;
+    *)
+      note "Option --xc: Unknown argument: $Xcontainer
+  Fallback: Setting --xc=no"
+      check_fallback
+      Xcontainer="no"
+    ;;
+  esac
+  [ "$Xcontainer" = "yes" ] && Xtoolscontainer="yes"
+  return 0
+}
 check_xdepends() {              # check dependencies on host for X server option $1
   # Return 1 if something is missing
   local Return= Message=
@@ -2919,47 +2999,6 @@ check_xserver() {               # check chosen X server, auto-choose X server
     [ "$Winsubsystem" = "CYGWIN" ]                               && Xserver="--xwin"
     [ "$Setupwayland" = "yes" ] && { [ -n "$Hostwaylandsocket" ] && [ "$Desktopmode" = "no" ] && Xserver="--hostwayland" || Xserver="--weston" ; }
   }
-
-  case "$Xcontainer" in
-    yes)
-      [ -z "$Xcontainerimage" ]     && Xcontainer="no"
-      [ "$Runsonconsole" = "yes" ]  && Xcontainer="no"
-      [ "$Winsubsystem" ]           && Xcontainer="no"
-      case "$Runtime" in
-        kata-runtime|sysbox-runc)      Xcontainer="no" ;;
-      esac
-      case "$Backend" in
-        proot|chroot)                  Xcontainer="no" ;;
-      esac
-      [ "$Xcontainer" = "no" ] && {
-        note "Option --xc not possible:
-  - on console
-  - on MS Windows
-  - without image x11docker/xserver.
-  - with runtimes kata-runtime and sysbox-runc
-  - with backends proot and chroot (yet)
-  Fallback: Setting --xc=no"
-        check_fallback
-        Xcontainer="no"
-      }
-    ;;
-    auto)
-      case "$Runtime" in
-        kata-runtime|sysbox-runc)      Xcontainer="no" ;;
-      esac
-      [ -z "$Xcontainerimage" ]     && Xcontainer="no"
-      case "$Backend" in
-        proot|chroot)                  Xcontainer="no" ;;
-      esac
-    ;;
-    no) ;;
-    *)
-      note "Option --xc: Unknown argument: $Xcontainer
-  Fallback: Setting --xc=no"
-      check_fallback
-      Xcontainer="no"
-    ;;
-  esac
 
   [ "$Sharegpu" = "yes" ] && {
     case "$Xserver" in
@@ -3814,7 +3853,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   }
 
   # create command
-  Xcontainercommand="$Backendbin run --rm --detach \\
+  Xcontainercommand="$Xcontainerbackend run --rm --detach \\
   --tty \\
   --pull=never \\
   --init \\
@@ -3836,7 +3875,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   --ipc=host"
     ;;
     no)
-      case "$Backend" in
+      case "$Xcontainerbackend" in
         docker)
           Xcontainercommand="$Xcontainercommand \\
   --ipc=shareable"
@@ -3844,7 +3883,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
       esac
     ;;
   esac
-  case "$Backend" in
+  case "$Xcontainerbackend" in
     podman)
       Xcontainercommand="$Xcontainercommand \\
   --userns=keep-id"
@@ -7110,7 +7149,7 @@ start_xcontainer() {            # --xc
   read Xcontainerid< <($Xcontainercommand 2>> "$Xinitlogfile")
   storeinfo "Xcontainerid=$Xcontainerid"
 
-  Containerinspect="$($Backendbin inspect "$Xcontainername" 2>> "$Xinitlogfile" | rmcr)"
+  Containerinspect="$($Xcontainerbackend inspect "$Xcontainername" 2>> "$Xinitlogfile" | rmcr)"
   [ "$Containerinspect" != "[]" ] && {
     Xcontainerip="$(parse_inspect "$Containerinspect" "NetworkSettings" "IPAddress")"
     storeinfo "Xcontainerip=$Xcontainerip"
@@ -7138,7 +7177,7 @@ start_xserver() {               # start X server
       case "$Xcontainer" in
         no)  unpriv                         "env WAYLAND_DISPLAY='$Newwaylandsocket' xinit '$Xinitrc' -- $Xcommand  >> '$Xinitlogfile'  2>&1 " ;;
         yes)
-          $Backendbin exec "$Xcontainername" env WAYLAND_DISPLAY="$Newwaylandsocket" xinit "$Xinitrc" -- $Xcommand  >> "$Xinitlogfile"  2>&1 || {
+          $Xcontainerbackend exec "$Xcontainername" env WAYLAND_DISPLAY="$Newwaylandsocket" xinit "$Xinitrc" -- $Xcommand  >> "$Xinitlogfile"  2>&1 || {
             Xcontainerexitcode=$?
             case "$Xcontainerexitcode" in
               137) Exitcode="0" ;; # docker error indicating that xinit did not shut down fast enough on SIGTERM. Ignore it.
@@ -7195,7 +7234,7 @@ $Xpraservercommand"
       #Xpraserverpid=$!
     ;;
     yes)
-      $Backendbin exec --detach "$Xcontainername" sh -c "$(tr -d '\\\n' <<< "$Xpraservercommand") >> '$Xpraserverlogfile' 2>&1" >> "$Xpraserverlogfile" 2>&1
+      $Xcontainerbackend exec --detach "$Xcontainername" sh -c "$(tr -d '\\\n' <<< "$Xpraservercommand") >> '$Xpraserverlogfile' 2>&1" >> "$Xpraserverlogfile" 2>&1
       #Xpraserverpid="$(ps aux | grep "/usr/bin/xpra start $Newdisplay" | grep -v grep | awk '{print $2}')"
     ;;
   esac
@@ -7212,7 +7251,7 @@ $Xpraenv $Xpraclientcommand"
 $Xpraclientcommand"
   echo "x11docker [$(timestamp)]: Starting Xpra client" >> "$Xpraclientlogfile"
   [ "$Xcontainer" = "yes" ] && [ "$Xserver" != "--xpra2" ] && [ "$Xserver" != "--xpra2-xwayland" ] && {
-    $Backendbin exec --detach "$Xcontainername" sh -c "$(tr -d '\\\n' <<< "$Xpraclientcommand") >> '$Xpraclientlogfile' 2>&1" >> "$Xpraclientlogfile" 2>&1
+    $Xcontainerbackend exec --detach "$Xcontainername" sh -c "$(tr -d '\\\n' <<< "$Xpraclientcommand") >> '$Xpraclientlogfile' 2>&1" >> "$Xpraclientlogfile" 2>&1
     :
   } || {
     unpriv "$Xpraclientcommand ||:" >> "$Xpraclientlogfile" 2>&1 &
@@ -7254,6 +7293,144 @@ start_pulseaudiotcp() {         # option --pulseaudio=tcp: load Pulseaudio TCP m
 }
 
 #### main init routines
+check_backend() {               # option --backend
+  case "$Backend" in
+    docker|podman|nerdctl|proot|chroot)
+      [ "${Imagename:0:1}" = "/" ] && {
+        Rootfs="$Imagename"
+        Imagename="$(basename "$Rootfs")"
+      }
+      Imagebasename="$(echo "$Imagename" | tr / - | cut -d: -f1)"
+      Codename="$Imagename $Containercommand"
+      verbose "Image name: $Imagename
+  Container command: $Containercommand"
+    ;;
+    host)
+      Containercommand="$Imagename $Containercommand"
+      [ "$Customdockeroptions" ] && error "Option --backend=$Backend does not take CUSTOM_RUN_OPTIONS.
+  If your command args contain ' -- ', run like
+  x11docker --backend=$Backend [OPTIONS] -- -- COMMAND -- ARGS"
+      Imagename=""
+      Imagebasename="$(basename "$Containercommand" | cut -d' ' -f1)"
+      Codename="$Imagebasename"
+    ;;
+  esac
+  Codename="$(unspecialstring "$Codename" | cut -c1-40)"
+  Codename="${Codename:-noname}"
+  Imagebasename="$(unspecialstring "$Imagebasename")"  # must be - for backwards compatibility of --home
+  Imagebasename="${Imagebasename:-noname}"
+
+  case "$Backend" in
+    docker) ;;
+    podman)
+      # /proc/sys/kernel/unprivileged_userns_clone might exist on debian only.
+      # https://github.com/mviereck/x11docker/issues/255#issuecomment-758014962
+      [ "$(cat /proc/sys/kernel/unprivileged_userns_clone)" = "0" ] && error "Option --backend=podman: Linux kernel disallows
+  unprivileged user namespace setup. Please run as root:
+    sysctl -w kernel.unprivileged_userns_clone=1"
+      store_runoption cap "CHOWN"
+    ;;
+    nerdctl)
+      note "Option --backend=nerdctl: nerdctl only supports a subset
+  of docker options. That limits support of x11docker features."
+      Switchcontaineruser="yes"
+      [ "$Capdropall" = "yes" ] && warning "Option --backend=nerdctl: x11docker
+  will allow some user switching capabilities that would be dropped with
+  other backends. (Because 'nerdctl --exec' does not support option --user.)
+  Though, these are still within nerdctl default capabilities."
+    ;;
+    proot)
+      warning "Option --backend=$Backend: Your host system is NOT PROTECTED.
+  There is close to no isolation like a real container could provide.
+  Effectively applications in proot have the same privileges as if
+  they would have been installed and started directly on the host system."
+      check_optionset "--backend=$Backend" "--cap-default --hostipc --ipc --limit --network --newprivileges --no-setup --runtime --sharecgroup --user" ||:
+      check_optionset "--backend=$Backend" "--user" && error "--backend=$Backend: Option --user is not allowed.
+  Option --hostuser might serve you."
+      # set defaults. Some might look misleading just to avoid later messages, but not affecting the setup.
+      Network="host"
+      Shareipc="host"
+      Createcontaineruser="yes"
+      Containersetup="yes"
+      Capdropall="yes"
+      Allownewprivileges="no"
+      Runtime=""
+      Sharecgroup="no"
+      Limitresources=""
+      # needed
+      Switchcontaineruser="yes"
+
+      [ -z "$Rootfs" ] && [ -d "$Hosthomebasefolder/ROOTFS/$Imagebasename" ] && Rootfs="$Hosthomebasefolder/ROOTFS/$Imagebasename"
+      [ -z "$Rootfs" ] && error "--backend=$Backend: Did not find a rootfs for $Imagename
+  in $Hosthomebasefolder/ROOTFS/$Imagebasename"
+      [ -z "$Containercommand" ] && [ -e "$Rootfs/start" ] && Containercommand="/bin/sh /start"
+      [ -z "$Containercommand" ] && {
+        [ -e "$Rootfs/bin/bash" ]                          && Containercommand="/bin/bash" || Containercommand="/bin/sh"
+        [ "$Containerusershell" != "auto" ]                && Containercommand="$Containerusershell"
+        note "--backend=$Backend: No command specified.
+Fallback: using command '$Containercommand' and enabling option --interactive."
+        check_fallback
+        Interactive="yes"
+      }
+      [ "$Sudouser" ] && note "--backend=$Backend --sudouser: sudo fails in $Backend.
+  Workaround: starting with user root.
+  You can switch to user $Containeruser with 'su $Containeruser'.
+  Note that root in $Backend is a fake and does not have real root privileges." ### FIXME chroot
+    ;;
+    host)
+      warning "Option --backend=host provides no isolation at all.
+  It only provides an X server for a host application."
+      storeinfo "containerrootrc=ready"
+      Sharefoldercontainer="$Sharefolder"
+      # --dbus, --hostdbus, --init
+      check_optionset "--backend=$Backend" "--alsa --cap-default --gpu --group-add --hostipc --ipc --limit --home --name --network --newprivileges --no-entrypoint --no-setup \
+                       --printer --pulseaudio --runasroot --runtime --share --sharecgroup --sudouser --webcam" ||:
+      check_optionset "--backend=$Backend" "--user" && error "--backend=$Backend: Option --user is not allowed.
+  Option --hostuser might serve you."
+      # set defaults. Some might look misleading just to avoid later messages, but not affecting the setup.
+      Sharealsa="no"
+      Capdropall="yes"
+      Sharegpu="no"
+      Shareipc="host"
+      [ "$Langwunsch" ] && store_runoption env "LANG=$Langwunsch"
+      Limitresources=""
+      Network="host"
+      Allownewprivileges="no"
+      Noentrypoint=""
+      Containersetup="yes"
+      Sharecupsmode=""
+      Pulseaudiomode=""
+      Runasroot=""
+      Runtime=""
+      Sharevolumes=""
+      Sharecgroup="no"
+      Sudouser="no"
+      Sharewebcam=""
+    ;;
+    *)
+      error "Option --backend=$Backend: Backend $Backend is not supported."
+    ;;
+    chroot) ### FIXME
+      warning "--backend=$Backend is highly experimental.
+   Prefer to use another backend. Even 'proot' is more reliable.
+   Isolation is close to not existant."
+      [ -z "$Rootfs" ] && [ -d "$Hosthomebasefolder/ROOTFS/$Imagebasename" ] && Rootfs="$Hosthomebasefolder/ROOTFS/$Imagebasename"
+      [ -z "$Rootfs" ] && error "--backend=$Backend: Did not find a rootfs for $Imagename
+  in $Hosthomebasefolder/ROOTFS/$Imagebasename"
+      [ -z "$Containercommand" ] && [ -e "$Rootfs/start" ] && Containercommand="/bin/sh /start"
+      [ -z "$Containercommand" ] && {
+        [ -e "$Rootfs/bin/bash" ]                          && Containercommand="/bin/bash" || Containercommand="/bin/sh"
+        [ "$Containerusershell" != "auto" ]                && Containercommand="$Containerusershell"
+        note "--backend=$Backend: No command specified.
+Fallback: using command '$Containercommand' and enabling option --interactive."
+        check_fallback
+        Interactive="yes"
+      }
+      Switchcontaineruser="yes"
+    ;;
+  esac
+  return 0
+}
 check_fallback() {              # --fallback
   # Option --fallback
   case "$Fallback" in
@@ -7364,15 +7541,6 @@ check_host() {                  # check host environment
     ;;
   esac
 
-  # Image x11docker/xserver
-  case "$Backend" in
-    docker|podman|nerdctl) $Backendbin inspect "$Xcontainerimage" >/dev/null 2>&1 || Xcontainerimage="" ;;
-    proot|chroot) Xcontainerimage="" ;;
-    host)  Xcontainerimage="" ;;
-  esac
-  #[ "$Xcontainerimage" ] && Xtoolscontainer="yes"
-  [ "$Xcontainer" = "yes" ] && Xtoolscontainer="yes"
-
   # Check host IP. Needed for --pulseaudio=tcp, --printer=tcp, --xoverip and --xwin
   case "$Winsubsystem" in
     "")
@@ -7452,12 +7620,12 @@ check_host() {                  # check host environment
   #Nvidiaversion="470.74"
 
   # check python version
+  Pythonbin="$(command -v python ||:)"
+  [ -z "$Pythonbin" ] && Pythonbin="$(command -v python3 ||:)"
+  [ -z "$Pythonbin" ] && Pythonbin="$(command -v python2 ||:)"
+  "$Pythonbin" --version >/dev/null 2>&1 || Pythonbin=""
   case "$Backend" in
     docker|podman|nerdctl)
-      Pythonbin="$(command -v python ||:)"
-      [ -z "$Pythonbin" ] && Pythonbin="$(command -v python3 ||:)"
-      [ -z "$Pythonbin" ] && Pythonbin="$(command -v python2 ||:)"
-      "$Pythonbin" --version >/dev/null 2>&1 || Pythonbin=""
       [ -z "$Pythonbin" ] && error "x11docker needs 'python' to parse output of '$Backend inspect'.
   This is needed to check ENTRYPOINT and CMD that in turn is needed to set up
   some x11docker features. To allow more features, please install 'python'
@@ -7796,144 +7964,6 @@ check_option_interferences() {  # check multiple option interferences, change se
     ;;
   esac
   [ "$Trusted" = "no" ] && warning "Option --hostdisplay: Clipboard isolation might fail."
-
-
-  # --backend
-  case "$Backend" in
-    docker|podman|nerdctl|proot|chroot)
-      [ "${Imagename:0:1}" = "/" ] && {
-        Rootfs="$Imagename"
-        Imagename="$(basename "$Rootfs")"
-      }
-      Imagebasename="$(echo "$Imagename" | tr / - | cut -d: -f1)"
-      Codename="$Imagename $Containercommand"
-      verbose "Image name: $Imagename
-  Container command: $Containercommand"
-    ;;
-    host)
-      Containercommand="$Imagename $Containercommand"
-      [ "$Customdockeroptions" ] && error "Option --backend=$Backend does not take CUSTOM_RUN_OPTIONS.
-  If your command args contain ' -- ', run like
-  x11docker --backend=$Backend [OPTIONS] -- -- COMMAND -- ARGS"
-      Imagename=""
-      Imagebasename="$(basename "$Containercommand" | cut -d' ' -f1)"
-      Codename="$Imagebasename"
-    ;;
-  esac
-  Codename="$(unspecialstring "$Codename" | cut -c1-40)"
-  Codename="${Codename:-noname}"
-  Imagebasename="$(unspecialstring "$Imagebasename")"  # must be - for backwards compatibility of --home
-  Imagebasename="${Imagebasename:-noname}"
-
-  case "$Backend" in
-    docker) ;;
-    podman)
-      # /proc/sys/kernel/unprivileged_userns_clone might exist on debian only.
-      # https://github.com/mviereck/x11docker/issues/255#issuecomment-758014962
-      [ "$(cat /proc/sys/kernel/unprivileged_userns_clone)" = "0" ] && error "Option --backend=podman: Linux kernel disallows
-  unprivileged user namespace setup. Please run as root:
-    sysctl -w kernel.unprivileged_userns_clone=1"
-      store_runoption cap "CHOWN"
-    ;;
-    nerdctl)
-      note "Option --backend=nerdctl: nerdctl only supports a subset
-  of docker options. That limits support of x11docker features."
-      Switchcontaineruser="yes"
-      [ "$Capdropall" = "yes" ] && warning "Option --backend=nerdctl: x11docker
-  will allow some user switching capabilities that would be dropped with
-  other backends. (Because 'nerdctl --exec' does not support option --user.)
-  Though, these are still within nerdctl default capabilities."
-    ;;
-    proot)
-      warning "Option --backend=$Backend: Your host system is NOT PROTECTED.
-  There is close to no isolation like a real container could provide.
-  Effectively applications in proot have the same privileges as if
-  they would have been installed and started directly on the host system."
-      check_optionset "--backend=$Backend" "--cap-default --hostipc --ipc --limit --network --newprivileges --no-setup --runtime --sharecgroup --user" ||:
-      check_optionset "--backend=$Backend" "--user" && error "--backend=$Backend: Option --user is not allowed.
-  Option --hostuser might serve you."
-      # set defaults. Some might look misleading just to avoid later messages, but not affecting the setup.
-      Network="host"
-      Shareipc="host"
-      Createcontaineruser="yes"
-      Containersetup="yes"
-      Capdropall="yes"
-      Allownewprivileges="no"
-      Runtime=""
-      Sharecgroup="no"
-      Limitresources=""
-      # needed
-      Switchcontaineruser="yes"
-
-      [ -z "$Rootfs" ] && [ -d "$Hosthomebasefolder/ROOTFS/$Imagebasename" ] && Rootfs="$Hosthomebasefolder/ROOTFS/$Imagebasename"
-      [ -z "$Rootfs" ] && error "--backend=$Backend: Did not find a rootfs for $Imagename
-  in $Hosthomebasefolder/ROOTFS/$Imagebasename"
-      [ -z "$Containercommand" ] && [ -e "$Rootfs/start" ] && Containercommand="/bin/sh /start"
-      [ -z "$Containercommand" ] && {
-        [ -e "$Rootfs/bin/bash" ]                          && Containercommand="/bin/bash" || Containercommand="/bin/sh"
-        [ "$Containerusershell" != "auto" ]                && Containercommand="$Containerusershell"
-        note "--backend=$Backend: No command specified.
-Fallback: using command '$Containercommand' and enabling option --interactive."
-        check_fallback
-        Interactive="yes"
-      }
-      [ "$Sudouser" ] && note "--backend=$Backend --sudouser: sudo fails in $Backend.
-  Workaround: starting with user root.
-  You can switch to user $Containeruser with 'su $Containeruser'.
-  Note that root in $Backend is a fake and does not have real root privileges." ### FIXME chroot
-    ;;
-    host)
-      warning "Option --backend=host provides no isolation at all.
-  It only provides an X server for a host application."
-      storeinfo "containerrootrc=ready"
-      Sharefoldercontainer="$Sharefolder"
-      # --dbus, --hostdbus, --init
-      check_optionset "--backend=$Backend" "--alsa --cap-default --gpu --group-add --hostipc --ipc --limit --home --name --network --newprivileges --no-entrypoint --no-setup \
-                       --printer --pulseaudio --runasroot --runtime --share --sharecgroup --sudouser --webcam --xc" ||:
-      check_optionset "--backend=$Backend" "--user" && error "--backend=$Backend: Option --user is not allowed.
-  Option --hostuser might serve you."
-      # set defaults. Some might look misleading just to avoid later messages, but not affecting the setup.
-      Sharealsa="no"
-      Capdropall="yes"
-      Sharegpu="no"
-      Shareipc="host"
-      [ "$Langwunsch" ] && store_runoption env "LANG=$Langwunsch"
-      Limitresources=""
-      Network="host"
-      Allownewprivileges="no"
-      Noentrypoint=""
-      Containersetup="yes"
-      Sharecupsmode=""
-      Pulseaudiomode=""
-      Runasroot=""
-      Runtime=""
-      Sharevolumes=""
-      Sharecgroup="no"
-      Sudouser="no"
-      Sharewebcam=""
-    ;;
-    *)
-      error "Option --backend=$Backend: Backend $Backend is not supported."
-    ;;
-    chroot) ### FIXME
-      warning "--backend=$Backend is highly experimental.
-   Prefer to use another backend. Even 'proot' is more reliable.
-   Isolation is close to not existant."
-      [ -z "$Rootfs" ] && [ -d "$Hosthomebasefolder/ROOTFS/$Imagebasename" ] && Rootfs="$Hosthomebasefolder/ROOTFS/$Imagebasename"
-      [ -z "$Rootfs" ] && error "--backend=$Backend: Did not find a rootfs for $Imagename
-  in $Hosthomebasefolder/ROOTFS/$Imagebasename"
-      [ -z "$Containercommand" ] && [ -e "$Rootfs/start" ] && Containercommand="/bin/sh /start"
-      [ -z "$Containercommand" ] && {
-        [ -e "$Rootfs/bin/bash" ]                          && Containercommand="/bin/bash" || Containercommand="/bin/sh"
-        [ "$Containerusershell" != "auto" ]                && Containercommand="$Containerusershell"
-        note "--backend=$Backend: No command specified.
-Fallback: using command '$Containercommand' and enabling option --interactive."
-        check_fallback
-        Interactive="yes"
-      }
-      Switchcontaineruser="yes"
-    ;;
-  esac
 
   # --no-setup
   case "$Containersetup" in
@@ -8735,37 +8765,31 @@ option_messages() {             # some messages depending on options, but not ch
   esac
 
   [ "$Customdockeroptions" ] && {
-    warning "Found custom DOCKER_RUN_OPTIONS.
+    warning "Found custom CUSTOM_RUN_OPTIONS.
   x11docker will add them to 'docker run' command without
   a serious check for validity or security. Found options:
   $Customdockeroptions"
     grep -q -- '--privileged'           <<< "$Customdockeroptions" && warning "Found option --privileged
-  in custom docker run options. That is A VERY BAD IDEA.
+  in CUSTOM_RUN_OPTIONS. That is A VERY BAD IDEA.
   A privileged setup allows unrestricted access from container to host.
   Malicious applications can cause arbitrary harm."
     grep -q -i -- '--cap-add.ALL'       <<< "$Customdockeroptions" && warning "Found option --cap-add=ALL
-  in custom docker run options. That is A VERY BAD IDEA.
+  in CUSTOM_RUN_OPTIONS. That is A VERY BAD IDEA.
   That is a very privileged setup.
   Malicious applications may harm to the host."
     grep -q -i -- '--cap-add.SYS_ADMIN' <<< "$Customdockeroptions" && warning "Found option --cap-add=SYS_ADMIN
-  in custom docker run options. That is A VERY BAD IDEA.
+  in CUSTOM_RUN_OPTIONS. That is A VERY BAD IDEA.
   That is a very privileged setup.
   Malicious applications may harm to the host."
     grep -q -- '--entrypoint'           <<< "$Customdockeroptions" && warning "Found option --entrypoint
-  in custom docker run options. x11docker uses this option, too.
+  in CUSTOM_RUN_OPTIONS. x11docker uses this option, too.
   This setup will probably fail. Use x11docker option --no-entrypoint instead
   and add desired command as container command after the image name."
-    grep -q -- "--user"                 <<< "$Customdockeroptions" && warning "Found option --user in custom DOCKER_RUN_OPTIONS.
-  This might lead to errors or unexpected behaviour.
-  Please use x11docker option --user instead."
-    grep -q -- "--runtime"              <<< "$Customdockeroptions" && note "Found option --runtime in custom DOCKER_RUN_OPTIONS.
-  Please use x11docker option --runtime instead."
-    grep -q -- "--network"              <<< "$Customdockeroptions" && note "Found option --network in custom DOCKER_RUN_OPTIONS.
-  Please use x11docker option --network instead."
-    grep -q -- "--name"                 <<< "$Customdockeroptions" && note "Found option --name in custom DOCKER_RUN_OPTIONS.
-  Please use x11docker option --name instead."
-    grep -q -- "--group-add"            <<< "$Customdockeroptions" && note "Found option --group-add in custom DOCKER_RUN_OPTIONS.
-  Please use x11docker option --group-add instead."
+    for Line in "--group-add" "--ipc" "--name" "--network" "--user=" "--runtime" "--workdir"; do
+      grep -q -- "$Line" <<< "$Customdockeroptions" && note "Found option $Line in CUSTOM_RUN_OPTIONS.
+  Please use x11docker option $Line instead.
+  Otherwise x11docker might behave wrong."
+    done
   }
 
   return 0
@@ -9606,13 +9630,15 @@ ${2:-}"                       ; shift ;;                             # Add custo
   Customdockeroptions="${Customdockeroptions//"--cap-add "/"--cap-add="}"
   Customdockeroptions="${Customdockeroptions//"--runtime "/"--runtime="}"
   Customdockeroptions="${Customdockeroptions//"--ipc "/"--ipc="}"
+  Customdockeroptions="${Customdockeroptions//"--network "/"--network="}"
+  Customdockeroptions="${Customdockeroptions//"--net "/"--network="}"
+  Customdockeroptions="${Customdockeroptions//"--net="/"--network="}"
+  Customdockeroptions="${Customdockeroptions//"--user "/"--user="}"
   grep -q -- "--runtime=kata-runtime"   <<< "$Customdockeroptions" && Runtime="kata-runtime"
   grep -q -- "--runtime=nvidia"         <<< "$Customdockeroptions" && Runtime="nvidia"
   grep -q -- "--runtime=runc"           <<< "$Customdockeroptions" && Runtime="runc"
   grep -q -- "--runtime=crun"           <<< "$Customdockeroptions" && Runtime="crun"
   grep -q -- "--runtime=sysbox-runc"    <<< "$Customdockeroptions" && Runtime="sysbox-runc"
-  grep -q -- "--ipc="                   <<< "$Customdockeroptions" && note "Found option --ipc in CUSTOM_RUN_OPTIONS.
-  Please use option --ipc as part of x11docker options."
 
   [ -n "$Xserver" ] && Autochooseserver="no"
   [ -z "$Imagename" ] && {
@@ -9623,6 +9649,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
   }
   Backend="${Backend:-docker}"
 
+  # Generate a list of options in use
   for Line in -a,--xpra -A,--xpra-xwayland -c,--clipboard -d,--desktop -D,--debug -f,--fullscreen -g,--gpu -e,--exe -F,--xfishtank -h,--hostdisplay -H,--hostwayland -i,--interactive -I,--network -K,--kwin -l,--lang -m,--home -n,--nxagent -p,--pulseaudio -P,--printer -q,--quiet -t,--tty -T,--weston -v,--verbose -w,--wm -W,--wayland -x,--xorg -X,--xwayland -y,--xephyr -Y,--weston-xwayland; do
     grep -q -x -- "$(cut -d, -f1 <<< "$Line")" <<< "$Optionset" && Optionset="$Optionset
 $(cut -d, -f2 <<< "$Line")"
@@ -9779,8 +9806,10 @@ Parsed options:    $Parsedoptions_global"
   }
 
   check_containeruser            # unprivileged user in container                 # --user
+  check_xcontainer               # check if x11docker/xserver can/will be used    # --xc
   check_xserver                  # check chosen X server or auto-choose one
-  check_containerhomebasedir        # check base dir for --home and possible rootfs  # --homebasedir
+  check_containerhomebasedir     # check base dir for --home and possible rootfs  # --homebasedir
+  check_backend                                                                   # --backend
   check_option_interferences     # check options, change settings if needed
   check_containerhome            # create persistent container home               # --home
   option_messages                # some messages depending on options, but not changing anything
@@ -9878,10 +9907,8 @@ $(nl -ba <$Cmdrc)"
     # softlink to X or Wayland unix socket in container
     case "$Xcontainer" in
       yes)
-        [ "$Showdisplayenvironment" = "yes" ] && {
-          [ "$Newdisplay" ]       && ln -s "$Cachefolder/X11-unix/X$Newdisplaynumber"       "/tmp/.X11-unix/X$Newdisplaynumber"
-          [ "$Newwaylandsocket" ] && ln -s "$Cachefolder/XDG_RUNTIME_DIR/$Newwaylandsocket" "$XDG_RUNTIME_DIR/$Newwaylandsocket"
-        }
+        [ "$Newdisplay" ]       && ln -s "$Cachefolder/X11-unix/X$Newdisplaynumber"       "/tmp/.X11-unix/X$Newdisplaynumber"
+        [ "$Newwaylandsocket" ] && ln -s "$Cachefolder/XDG_RUNTIME_DIR/$Newwaylandsocket" "$XDG_RUNTIME_DIR/$Newwaylandsocket"
       ;;
     esac
 
