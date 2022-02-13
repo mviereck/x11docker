@@ -3817,7 +3817,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   
   # code snippets
   Xc_containerx="\\
-  --mount type=bind,source=$Cachefolder/X11-unix,target=/tmp/.X11-unix \\
+  --mount type=bind,source=$Cachefolder/tmp,target=/tmp \\
   --mount type=bind,source=$Xservercookie,target=$Xservercookie \\
   --mount type=bind,source=$Modelinefilebasepath,target=$Modelinefilebasepath,readonly"
   [ -n "$Hostdisplay" ] && {
@@ -3851,6 +3851,8 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
     mkfile "$Sharefolder/nvidia_installer"
     rootrc_nvidia_installer >> "$Sharefolder/nvidia_installer"
   }
+  
+  mkdir "$Sharefolder/tmp"
 
   # create command
   Xcontainercommand="$Xcontainerbackend run --rm --detach \\
@@ -3903,6 +3905,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
       Xcontainercommand="$Xcontainercommand $Xc_hostx"
       Xcontainercommand="$Xcontainercommand $Xc_nomitshm"
+      Xcontainercommand="$Xcontainercommand $Xc_gpu"
     ;;
     --xpra)
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
@@ -3917,6 +3920,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
     ;;
     --xpra2)
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
+      Xcontainercommand="$Xcontainercommand $Xc_gpu"
     ;;
     --xpra-xwayland)
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
@@ -3973,8 +3977,13 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
 mkdir -p -m 1777 /tmp/.X11-unix
 [ -S /X${Hostdisplaynumber} ] && ln -s /X$Hostdisplaynumber /tmp/.X11-unix/X$Hostdisplaynumber
 [ -S /${Hostwaylandsocket} ]  && ln -s /$Hostwaylandsocket \$XDG_RUNTIME_DIR/$Hostwaylandsocket
-#cp /XlibNoSHM.so $Sharefolder/XlibNoSHM.so
+" >> "$Xcontainerrc"
 
+  [ "$Virgl" = "yes" ] && echo "
+virgl_test_server &
+" >> "$Xcontainerrc"
+
+  echo "
 # wait for the end
 case $Usemkfifo in
   yes) read -n1 goodbye <$Timetosaygoodbyefifo ;;
@@ -5193,17 +5202,19 @@ $Nvidiainstallerfile|$Rootfs/$Nvidiacontainerfile"
         case "$Backend" in
           docker|podman|nerdctl)
             Backendcommand="$Backendcommand \\
-  --volume $(convertpath volume "$Cachefolder/X11-unix/X$Newdisplaynumber:ro" "$Newxsocket")"
-#  --mount $(convertpath mount $Cachefolder/X11-unix/X$Newdisplaynumber:ro $Newxsocket)"
+  --volume $(convertpath volume "$Cachefolder/tmp/.X11-unix/X$Newdisplaynumber:ro" "$Newxsocket")"
+#  --mount $(convertpath mount $Cachefolder/tmp/.X11-unix/X$Newdisplaynumber:ro $Newxsocket)"
             [ "$Shareipc" = "no" ] && [ "$Containeruser" = "$Hostuser" ] && Backendcommand="$Backendcommand \\
   --ipc=container:$Xcontainername"
           ;;
           proot)
             Backendcommand="$Backendcommand \\
-  --bind=$Cachefolder/X11-unix/X$Newdisplaynumber:$Newxsocket"
+  --bind=$Cachefolder/tmp/.X11-unix/X$Newdisplaynumber:$Newxsocket"
           ;;
         esac
       }
+      [ "$Virgl" = "yes" ] && Backendcommand="$Backendcommand \\
+  --volume $Cachefolder/tmp/.virgl_test:/tmp/.virgl_test"
     ;;
     no)
       [ "$Newxsocket" ] && {
@@ -7965,6 +7976,36 @@ check_option_interferences() {  # check multiple option interferences, change se
   esac
   [ "$Trusted" = "no" ] && warning "Option --hostdisplay: Clipboard isolation might fail."
 
+  # --virgl
+  case "$Virgl" in
+    yes)
+      case "$Xcontainer" in
+        yes)
+          case "$Backend" in
+            docker|podman|nerdctl) 
+              store_runoption env "LIBGL_ALWAYS_SOFTWARE=1"
+              store_runoption env "GALLIUM_DRIVER=virpipe"
+              [ "$Sharegpu" = "yes" ] && note "Option --virgl will supersede effect of option --gpu."
+            ;;
+            *) 
+              note "Option --virgl is supported with
+  backends docker|podman|nerdctl only.
+  Fallback: Disabling option --virgl."
+              check_fallback
+              Virgl=""
+            ;;
+          esac
+        ;;
+        no)
+          note "Option --virgl is supported only with option --xc yet.
+  Fallback: Disabling option --virgl."
+          check_fallback
+          Virgl=""
+        ;;
+      esac
+    ;;
+  esac
+
   # --no-setup
   case "$Containersetup" in
     no)
@@ -8504,8 +8545,8 @@ $Hostuserhome/.cache/x11docker/symlink
   Watchpidfifo="$Cachefolder/$Watchpidfifo"
   Xservercookie="$Cachefolder/$Xservercookie"                       && mkfile $Xservercookie
   Xtermrc="$Cachefolder/$Xtermrc"                                   && mkfile $Xtermrc
-                                                               unpriv "mkdir $Cachefolder/X11-unix"
-                                                               unpriv "mkdir -m 700 $Cachefolder/XDG_RUNTIME_DIR"
+                                                             unpriv "mkdir -p $Cachefolder/tmp/.X11-unix"
+                                                         unpriv "mkdir -m 700 $Cachefolder/XDG_RUNTIME_DIR"
 
   # Files in $Sharefolder: shared to /x11docker in container
   Clipboardrc="$Sharefolder/$Clipboardrc"                           && mkfile $Clipboardrc
@@ -9133,6 +9174,7 @@ declare_variables() {           # declare global variables
 
   # X in container
   Xcontainer="auto"
+  Xcontainerbackend=""
   Xcontainercommand=""
   Xcontainerimage="x11docker/xserver"
   Xcontainerip=""
@@ -9162,6 +9204,7 @@ declare_variables() {           # declare global variables
   Sharevolumes=""                                 # --share: Host files or folders or devices to share, array
   Sharevolumescount="0"                           # --share: Counts shared folders in array
   Sharewebcam="no"                                # --webcam: Share webcam device /dev/video*
+  Virgl=""                                        # --virgl: GPU access through virgl gallium driver
 
   # Image information
   Imagearchitecture=""
@@ -9348,7 +9391,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,build,cleanup,help,launcher,licence,license,version"                                            # Special options without starting X or container
   Longoptions="$Longoptions,install,remove,update,update-master"                                                            # Installation
   #
-  Longoptions="$Longoptions,keepcache,xopt:,xorgconf:"                                                                      # Experimental
+  Longoptions="$Longoptions,keepcache,virgl,xopt:,xorgconf:"                                                                # Experimental
   Longoptions="$Longoptions,dbus-system,exe,homedir:,hostipc,hostnet,kwin-xwayland,no-internet,no-xhost"                    # Deprecated
   Longoptions="$Longoptions,sharedir:,sharessh,systemd,showenv,showid,showinfofile,showpid1"                                # Deprecated
   Longoptions="$Longoptions,cachedir:,no-init,nothing,no-xtest,openrc,podman,pull::,ps,pw::,runit,silent,starter"           # Removed
@@ -9549,6 +9592,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
 
      #### Experimental options
          --keepcache)         Preservecachefiles="yes" ;          note "Option --keepcache: experimental option." ;;
+         --virgl)             Virgl="yes" ;                       note "Option --virgl: experimental option." ;;
          --xopt)              Xserveroptions="${2:-}" ;   shift ; note "Option --xopt: experimental option." ;;      # Custom X server options
          --xorgconf)          Xorgconf="${2:-}" ;         shift ; note "Option --xorgconf: experimental option." ;;  # Custom xorg.conf
 
@@ -9907,7 +9951,7 @@ $(nl -ba <$Cmdrc)"
     # softlink to X or Wayland unix socket in container
     case "$Xcontainer" in
       yes)
-        [ "$Newdisplay" ]       && ln -s "$Cachefolder/X11-unix/X$Newdisplaynumber"       "/tmp/.X11-unix/X$Newdisplaynumber"
+        [ "$Newdisplay" ]       && ln -s "$Cachefolder/tmp/.X11-unix/X$Newdisplaynumber"  "/tmp/.X11-unix/X$Newdisplaynumber"
         [ "$Newwaylandsocket" ] && ln -s "$Cachefolder/XDG_RUNTIME_DIR/$Newwaylandsocket" "$XDG_RUNTIME_DIR/$Newwaylandsocket"
       ;;
     esac

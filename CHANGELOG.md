@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Added
+ - `--virgl`: Experimental option for GPU access with `virgl_test_server`.
+   Currently only along with option `--xc`.
+   Allows acceleration for Xephyr, nxagent, xpra etc.
+
 ## [7.1.0](https://github.com/mviereck/x11docker/releases/tag/v7.1.0) - 2022-02-12
 ### Added
  - `--backend=proot`: Use a rootfs on host with `proot` instead of a container.
