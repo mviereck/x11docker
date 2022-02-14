@@ -3,11 +3,6 @@ x11docker ToDo notes
 
 ## Work in progress
  
- - --xc=backend for proot and host backends
- 
- - check elogind with cgroupv2
- - deprecate --sharecgroup?
-
  - sommelier
  - --gpu=virgl
  - --backend=systemd-nspawn
@@ -27,9 +22,9 @@ x11docker ToDo notes
  - X in container:
    - use xauth and others from image if not available on host
    - missing: Xorg, Weston/Kwin on console, xpra-xwayland
-   - --xpra-xwayland --xc: xpra client fails with keyboard error
- - provide XlibNoSHM.so on host for --hostdisplay
- 
+   - --xpra-xwayland --xc: xpra client fails with keyboard error 
+
+ - deprecate --sharecgroup?
  
 ## Issues to fix
  - sysbox: warning on capabilities
@@ -40,6 +35,7 @@ x11docker ToDo notes
    Maybe change to $1 mode without `--`
    
 ## Checks
+ - check elogind with cgroupv2
  - check all `--init=` in all backends rootful and rootless.
    - checked: 
      - rootful docker: all

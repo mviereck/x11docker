@@ -111,9 +111,13 @@ Host integration:
      --alsa [=ALSA_CARD]  Sound with ALSA. You can define a desired sound card
                        with ALSA_CARD. List of available sound cards: aplay -l
  -c, --clipboard       Share clipboard. Graphical clips with --xpra only.
- -g, --gpu             GPU access for hardware accelerated OpenGL rendering.
+ -g, --gpu [=yes|no|iglx|virgl] GPU access for hardware accelerated OpenGL.
                        Works best with open source drivers on host and in image.
                        For closed source nvidia drivers regard terminal output.
+                       Direct rendering supported by few X server options only.
+                       Arg 'iglx' enables indirect rendering (--xorg only).
+                       Arg 'virgl' allows GPU access for all X servers, but
+                       with limited performance and with --xc only.
  -I, --network [=NET]  Allow internet access.
                        For optional argument NET see Docker documentation
                        of docker run option --network.
@@ -1925,7 +1929,7 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
   Container gains access to GPU hardware.
   This allows reading host window content (palinopsia leak)
   and GPU rootkits (compare proof of concept: jellyfish).
-  An alternative is --iglx that works with --xorg only."
+  An alternative is --iglx that works with --xorg only." ### FIXME warning for virgl, too
 
   Containerusergroups="$Containerusergroups video render"
 
@@ -1978,7 +1982,10 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
   version in image. That makes images less portable.
   It is recommended to use free open source nouveau driver on host instead.
   Ask NVIDIA corporation to at least publish their closed source API,
-  or even better to actively support open source driver nouveau."
+  or even better to actively support open source driver nouveau.
+  
+  To use the GPU without NVIDIA driver in container, you can use 
+  less performant options --gpu=iglx (--xorg only) or --gpu=virgl (needs --xc)."
 
   note "Option --gpu: x11docker can try to automatically install NVIDIA driver
   version $Nvidiaversion in container on every container startup.
@@ -2614,9 +2621,9 @@ check_xcontainer() {            # option --xc: check image x11docker/xserver
       [ -z "$Xcontainerimage" ]     && Xcontainer="no"
       [ "$Runsonconsole" = "yes" ]  && Xcontainer="no"
       [ "$Winsubsystem" ]           && Xcontainer="no"
-      case "$Runtime" in
-        kata-runtime|sysbox-runc)      Xcontainer="no" ;;
-      esac
+     # case "$Runtime" in
+     #   kata-runtime|sysbox-runc)      Xcontainer="no" ;;
+     # esac
 #      case "$Backend" in
 #        proot|chroot)                  Xcontainer="no" ;;
 #      esac
@@ -3851,8 +3858,6 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
     mkfile "$Sharefolder/nvidia_installer"
     rootrc_nvidia_installer >> "$Sharefolder/nvidia_installer"
   }
-  
-  mkdir "$Sharefolder/tmp"
 
   # create command
   Xcontainercommand="$Xcontainerbackend run --rm --detach \\
@@ -3867,10 +3872,12 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   --mount type=bind,source=$Sharefolder,target=$Sharefolder \\
   --mount type=bind,source=$Cachefolder/etcpasswd.xcontainer,target=/etc/passwd,readonly \\
   --mount type=bind,source=$Xcontainerrc,target=/xcontainerrc,readonly"
+
   case "$Xoverip" in
     no) Xcontainercommand="$Backendbin \\
   --network=none" ;;
   esac
+
   case "$Shareipc" in
     host)
       Xcontainercommand="$Xcontainercommand \\
@@ -3885,14 +3892,23 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
       esac
     ;;
   esac
+
   case "$Xcontainerbackend" in
     podman)
       Xcontainercommand="$Xcontainercommand \\
   --userns=keep-id"
     ;;
   esac
-  [ "$Runtime" ] && Xcontainercommand="$Xcontainercommand \\
+
+  case "$Runtime" in
+    "") ;;
+    kata-runtime|sysbox-runc) ;;
+    *)
+      Xcontainercommand="$Xcontainercommand \\
   --runtime $Runtime"
+    ;;
+  esac
+
   # add code snippets
   case "$Xserver" in
     --xephyr)
@@ -3975,8 +3991,8 @@ $(declare -f rocknroll)
 Timetosaygoodbyefile=$Timetosaygoodbyefile
 
 mkdir -p -m 1777 /tmp/.X11-unix
-[ -S /X${Hostdisplaynumber} ] && ln -s /X$Hostdisplaynumber /tmp/.X11-unix/X$Hostdisplaynumber
-[ -S /${Hostwaylandsocket} ]  && ln -s /$Hostwaylandsocket \$XDG_RUNTIME_DIR/$Hostwaylandsocket
+[ -S /X${Hostdisplaynumber} ] && ln -v -s /X$Hostdisplaynumber /tmp/.X11-unix/X$Hostdisplaynumber
+[ -S /${Hostwaylandsocket} ]  && ln -v -s /$Hostwaylandsocket \$XDG_RUNTIME_DIR/$Hostwaylandsocket
 " >> "$Xcontainerrc"
 
   [ "$Virgl" = "yes" ] && echo "
@@ -7306,6 +7322,21 @@ start_pulseaudiotcp() {         # option --pulseaudio=tcp: load Pulseaudio TCP m
 #### main init routines
 check_backend() {               # option --backend
   case "$Backend" in
+    host) ;;
+    proot|chroot)
+      command -v "$Backend" >/dev/null || error "--backend=$Backend: command $Backend not found."
+    ;;
+    docker|podman|nerdctl)
+      # Check whether docker daemon is running, get docker info
+      Backendinfo="$($Backendbin info --format='{{json .}}' 2>>$Containerlogfile)" || error "'$Backend info' failed.
+  If using docker: Is docker daemon running at all?
+  Try to start docker daemon with 'systemctl start docker'.
+  Last lines of log:
+$(rmcr < "$Containerlogfile" | tail)"
+      check_runtime
+    ;;
+  esac
+  case "$Backend" in
     docker|podman|nerdctl|proot|chroot)
       [ "${Imagename:0:1}" = "/" ] && {
         Rootfs="$Imagename"
@@ -7738,7 +7769,7 @@ check_hostxenv() {              # check environment variables for host X display
   [ -z "$XAUTHORITY" ]   && [ -e "$Hostuserhome/.Xauthority" ] && XAUTHORITY="$Hostuserhome/.Xauthority"
   [ -z "$XAUTHORITY" ]   && [ "$Runsoverssh" = "yes" ] && [ -e "$Hostuserhome/.Xauthority" ] && XAUTHORITY="$Hostuserhome/.Xauthority"
   [ "${XAUTHORITY:-}" ]  && {
-    unpriv "xauth -i -f '${XAUTHORITY:-}' nlist '$Hostdisplay' 2>/dev/null | xauth -f '$Hostxauthority' nmerge - 2>/dev/null"
+    unpriv "xauth -i -f '${XAUTHORITY:-}' nlist '$Hostdisplay' 2>/dev/null | sed -e 's/^..../ffff/' | xauth -f '$Hostxauthority' nmerge - 2>/dev/null"
     chown "$Hostuser" "$Hostxauthority"
     chmod 600 "$Hostxauthority"
     export XAUTHORITY
@@ -7776,6 +7807,66 @@ check_hostxenv() {              # check environment variables for host X display
   }
 
   return 0
+}
+check_options() {
+  # --quiet
+  [ "$Silent" = "yes" ]    && exec {FDstderr}>/dev/null
+
+  # --debug
+  [ "$Debugmode" = "yes" ] && {
+    set -Eu
+    trap 'traperror $? $LINENO $BASH_LINENO "$BASH_COMMAND" $(printf "::%s" ${FUNCNAME[@]})'  ERR
+  }
+
+  # --fallback
+  case "$Fallback" in
+    yes|no) ;;
+    *) error "Option --fallback: Unknown argument '$Fallback'" ;;
+  esac
+
+  # CUSTOM_RUN_OPTIONS
+  Customdockeroptions="${Customdockeroptions//"--cap-add "/"--cap-add="}"
+  Customdockeroptions="${Customdockeroptions//"--runtime "/"--runtime="}"
+  Customdockeroptions="${Customdockeroptions//"--ipc "/"--ipc="}"
+  Customdockeroptions="${Customdockeroptions//"--network "/"--network="}"
+  Customdockeroptions="${Customdockeroptions//"--net "/"--network="}"
+  Customdockeroptions="${Customdockeroptions//"--net="/"--network="}"
+  Customdockeroptions="${Customdockeroptions//"--user "/"--user="}"
+  grep -q -- "--runtime=kata-runtime"   <<< "$Customdockeroptions" && Runtime="kata-runtime"
+  grep -q -- "--runtime=nvidia"         <<< "$Customdockeroptions" && Runtime="nvidia"
+  grep -q -- "--runtime=runc"           <<< "$Customdockeroptions" && Runtime="runc"
+  grep -q -- "--runtime=crun"           <<< "$Customdockeroptions" && Runtime="crun"
+  grep -q -- "--runtime=sysbox-runc"    <<< "$Customdockeroptions" && Runtime="sysbox-runc"
+
+  # --gpu
+  case "$Sharegpu" in
+    yes|no) ;;
+    iglx)
+      Iglx="yes"
+      Sharegpu="no"
+    ;;
+    virgl)
+      Virgl="yes"
+      Sharegpu="no"
+      [ "$Xcontainer" = "auto" ] && Xcontainer="yes"
+    ;;
+    *)
+      note "Option --gpu: Unknown argument '$Sharegpu'.
+  Fallback: Disabling option --gpu."
+      check_fallback
+      Sharegpu="no"
+    ;;
+  esac
+
+  # --backend
+  [ -z "$Imagename" ] && {
+    # Only create X server / --xonly
+    Backend="${Backend:-host}"
+    Containercommand="sleep infinity"
+    Showdisplayenvironment="${Showdisplayenvironment:-yes}"
+  }
+  Backend="${Backend:-docker}"
+  [ -n "$Xserver" ] && Autochooseserver="no"
 }
 check_option_interferences() {  # check multiple option interferences, change settings if needed
   local Message
@@ -7988,17 +8079,17 @@ check_option_interferences() {  # check multiple option interferences, change se
               [ "$Sharegpu" = "yes" ] && note "Option --virgl will supersede effect of option --gpu."
             ;;
             *) 
-              note "Option --virgl is supported with
+              note "Option --gpu=virgl is supported with
   backends docker|podman|nerdctl only.
-  Fallback: Disabling option --virgl."
+  Fallback: Disabling option --gpu=virgl."
               check_fallback
               Virgl=""
             ;;
           esac
         ;;
         no)
-          note "Option --virgl is supported only with option --xc yet.
-  Fallback: Disabling option --virgl."
+          note "Option --gpu=virgl is supported only with option --xc yet.
+  Fallback: Disabling option --gpu=virgl."
           check_fallback
           Virgl=""
         ;;
@@ -8086,6 +8177,13 @@ check_option_interferences() {  # check multiple option interferences, change se
 
   # --ipc=host: Check auto-enabling
   [ "$Xserver" = "--hostdisplay" ] && [ "$Trusted" = "yes" ] && [ "$Hostmitshm" = "yes" ] && [ "$Shareipc" != "host" ] && [ "$Runsoverssh" = "no" ] && {
+    # make XlibNoSHM.so available on host                    ### FIXME maybe not the best place here
+    [ "$Xcontainerimage" ] && [ ! -f "$Mitshmlib" ] && {
+      note "Copying XlibNoSHM.so from x11docker/xserver 
+  to $Mitshmlib
+  to make it available for --hostdisplay."
+      $Backendbin run --rm --user "$Hostuseruid:$Hostusergid" --volume "$Localsharedir":"$Localsharedir" -- "$Xcontainerimage" cp "/XlibNoSHM.so" "$Mitshmlib"
+    }
     [ -f "$Mitshmlib" ] && {
       ### FIXME check for possible existing LD_PRELOAD in container
       store_runoption env "LD_PRELOAD=/lib/x86_64-linux-gnu/libdl.so.2:$Sharefoldercontainer/XlibNoSHM.so"
@@ -8481,6 +8579,35 @@ check_optionset() {             # check if unallowed options in $2 are set for o
     }
   done
   return "${Return:-1}"
+}
+check_snap() {
+  # Docker installed in snap (noteable Ubuntu Server)
+  [ "$Runsinsnap" = "yes" ] && [ -z "$Snapsupport" ] && {
+    note "It seems docker runs in snap.
+  This limits possibilities to use docker and x11docker.
+  Fallback: Enabling option --snap"
+    Snapsupport="yes"
+    check_fallback
+  }
+  [ -d "/snap/docker" ] && [ "$Snapsupport" = "no" ] && note "Detected /snap/docker.
+  If you run Docker in snap, you might need option --snap to support this setup."
+  [ "$Snapsupport" = "yes" ] && {
+    note "Option --snap to support a docker-in-snap setup
+  causes some restrictions:
+  Option --newprivileges=yes is enabled, snap needs it for unknown reasons.
+  Option --xoverip is enabled because sharing unix sockets fails.
+  Option --network is enabled because X over TCP is not possible otherwise.
+  Option --hostdisplay is not available because it would need a shared unix socket.
+  Option --xc to run X in container is not available.
+  Option --gpu only works with --xorg and with indirect rendering (--iglx).
+  Options --printer and --pulseaudio only work in TCP mode.
+  Recommendation: Purge the Docker snap installation and install Docker natively."
+    [ "$Allownewprivileges" = "auto" ] && Allownewprivileges="yes"
+    Xoverip="yes"
+    Xcontainer="no"
+    Xtoolscontainer="no"
+    [ "$Network" = "none" ] && Network=""
+  }
 }
 create_cachefiles() {           # create empty cache files owned by unprivileged user
   local Line
@@ -9376,12 +9503,12 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,weston-xwayland,xpra-xwayland,xpra2-xwayland,xwayland"                                          # X servers depending on a Wayland compositor
   Longoptions="$Longoptions,hostwayland,kwin,weston"                                                                        # Wayland compositors without X
   Longoptions="$Longoptions,border::,dpi:,fullscreen,output-count:,rotate:,scale:,size:,xfishtank"                          # X/Wayland appearance options
-  Longoptions="$Longoptions,clean-xhost,composite::,display:,iglx,keymap:,no-auth,vt::,westonini:,xhost::,xoverip,xtest::"  # X/Wayland config
+  Longoptions="$Longoptions,clean-xhost,composite::,display:,keymap:,no-auth,vt::,westonini:,xhost::,xoverip,xtest::"       # X/Wayland config
   Longoptions="$Longoptions,enforce-i,fallback::,preset:,pull::"                                                            # x11docker config
   Longoptions="$Longoptions,cachebasedir:,home::,homebasedir:,share:"                                                       # Host folders
-  Longoptions="$Longoptions,alsa::,clipboard,gpu,lang::,printer::,pulseaudio::,webcam"                                      # Host integration features
+  Longoptions="$Longoptions,alsa::,clipboard,gpu::,lang::,printer::,pulseaudio::,webcam"                                    # Host integration features
   Longoptions="$Longoptions,backend:,env:,mobyvm,name:,no-entrypoint,no-setup,runtime:,snap,workdir:"                       # Container config
-  Longoptions="$Longoptions,cap-default,ipc::,limit::,newprivileges::,network::"                                          # Container capabilities
+  Longoptions="$Longoptions,cap-default,ipc::,limit::,newprivileges::,network::"                                            # Container capabilities
   Longoptions="$Longoptions,group-add:,hostuser:,password::,sudouser::,user:,shell:"                                        # Container user
   Longoptions="$Longoptions,dbus::,init::,hostdbus,sharecgroup"                                                             # Container init and DBus
   Longoptions="$Longoptions,stdin,interactive"                                                                              # Container interaction
@@ -9391,8 +9518,8 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,build,cleanup,help,launcher,licence,license,version"                                            # Special options without starting X or container
   Longoptions="$Longoptions,install,remove,update,update-master"                                                            # Installation
   #
-  Longoptions="$Longoptions,keepcache,virgl,xopt:,xorgconf:"                                                                # Experimental
-  Longoptions="$Longoptions,dbus-system,exe,homedir:,hostipc,hostnet,kwin-xwayland,no-internet,no-xhost"                    # Deprecated
+  Longoptions="$Longoptions,keepcache,xopt:,xorgconf:"                                                                      # Experimental
+  Longoptions="$Longoptions,dbus-system,exe,homedir:,hostipc,hostnet,iglx,kwin-xwayland,no-internet,no-xhost"               # Deprecated
   Longoptions="$Longoptions,sharedir:,sharessh,systemd,showenv,showid,showinfofile,showpid1"                                # Deprecated
   Longoptions="$Longoptions,cachedir:,no-init,nothing,no-xtest,openrc,podman,pull::,ps,pw::,runit,silent,starter"           # Removed
   Longoptions="$Longoptions,stderr,stdout,sys-admin,sysvinit,tini,trusted,untrusted,vcxsrv,xdummy"                          # Removed
@@ -9448,7 +9575,7 @@ ${1:-}"
 
      #### Influencing automatic choice of X server or Wayland compositor
       -d|--desktop)           Desktopmode="yes" ;;                   # image contains a desktop environment.
-      -g|--gpu)               Sharegpu="yes" ;;                      # share files in /dev/dri, allow GPU usage
+      -g|--gpu)               Sharegpu="${2:-yes}" ; shift ;;        # GPU access
       -W|--wayland)           Setupwayland="yes" ;;                  # set up wayland environment, regards --desktop
       -w)                                      Windowmanagermode="auto" ; Desktopmode="yes" ;;
          --wm)                case "${2:-}" in                       # choose window manager
@@ -9475,7 +9602,6 @@ ${1:-}"
          --display)           Newdisplaynumber="${2:-}"              # Display number to use for new X server or Wayland compositor
                               [ "$(cut -c1 <<< "$Newdisplaynumber")" = ":" ] && Newdisplaynumber="$(cut -c2- <<< "$Newdisplaynumber")"
                               shift ;;
-         --iglx)              Iglx="yes" ;;                          # Indirect rendering; broken since Xorg ~18.2 except with closed NVIDIA. libgl needs a fix.
          --keymap)            Xkblayout="${2:-}" ; shift ;;          # Keymap layout for xkbcomp. Compare /usr/share/X11/xkb/symbols
          --vt)                Newxvt="${2:-auto}" ; shift ;;         # Virtual console to use for --xorg
          --xoverip)           Xoverip="yes" ;;                       # Use X over TCP/IP instead of sharing X socket
@@ -9592,7 +9718,6 @@ ${2:-}"                       ; shift ;;                             # Add custo
 
      #### Experimental options
          --keepcache)         Preservecachefiles="yes" ;          note "Option --keepcache: experimental option." ;;
-         --virgl)             Virgl="yes" ;                       note "Option --virgl: experimental option." ;;
          --xopt)              Xserveroptions="${2:-}" ;   shift ; note "Option --xopt: experimental option." ;;      # Custom X server options
          --xorgconf)          Xorgconf="${2:-}" ;         shift ; note "Option --xorgconf: experimental option." ;;  # Custom xorg.conf
 
@@ -9612,6 +9737,8 @@ ${2:-}"                       ; shift ;;                             # Add custo
          --hostnet)           Network="host"
                               note "Option --hostnet is deprecated.
   Please use --network=host instead." ;;
+         --iglx)              Sharegpu="iglx"           ;    note "Option --iglx is deprecated.
+  Please use option --gpu=iglx instead." ;;
          --kwin-xwayland)     Xserver="--kwin-xwayland" ;    note "Option --kwin-xwayland is deprecated.
   Please use option --weston-xwayland instead." ;;
          --no-internet)       Network="none"
@@ -9671,28 +9798,6 @@ ${2:-}"                       ; shift ;;                             # Add custo
     shift
   done
 
-  Customdockeroptions="${Customdockeroptions//"--cap-add "/"--cap-add="}"
-  Customdockeroptions="${Customdockeroptions//"--runtime "/"--runtime="}"
-  Customdockeroptions="${Customdockeroptions//"--ipc "/"--ipc="}"
-  Customdockeroptions="${Customdockeroptions//"--network "/"--network="}"
-  Customdockeroptions="${Customdockeroptions//"--net "/"--network="}"
-  Customdockeroptions="${Customdockeroptions//"--net="/"--network="}"
-  Customdockeroptions="${Customdockeroptions//"--user "/"--user="}"
-  grep -q -- "--runtime=kata-runtime"   <<< "$Customdockeroptions" && Runtime="kata-runtime"
-  grep -q -- "--runtime=nvidia"         <<< "$Customdockeroptions" && Runtime="nvidia"
-  grep -q -- "--runtime=runc"           <<< "$Customdockeroptions" && Runtime="runc"
-  grep -q -- "--runtime=crun"           <<< "$Customdockeroptions" && Runtime="crun"
-  grep -q -- "--runtime=sysbox-runc"    <<< "$Customdockeroptions" && Runtime="sysbox-runc"
-
-  [ -n "$Xserver" ] && Autochooseserver="no"
-  [ -z "$Imagename" ] && {
-    # Only create X server / --xonly
-    Backend="${Backend:-host}"
-    Containercommand="sleep infinity"
-    Showdisplayenvironment="${Showdisplayenvironment:-yes}"
-  }
-  Backend="${Backend:-docker}"
-
   # Generate a list of options in use
   for Line in -a,--xpra -A,--xpra-xwayland -c,--clipboard -d,--desktop -D,--debug -f,--fullscreen -g,--gpu -e,--exe -F,--xfishtank -h,--hostdisplay -H,--hostwayland -i,--interactive -I,--network -K,--kwin -l,--lang -m,--home -n,--nxagent -p,--pulseaudio -P,--printer -q,--quiet -t,--tty -T,--weston -v,--verbose -w,--wm -W,--wayland -x,--xorg -X,--xwayland -y,--xephyr -Y,--weston-xwayland; do
     grep -q -x -- "$(cut -d, -f1 <<< "$Line")" <<< "$Optionset" && Optionset="$Optionset
@@ -9741,114 +9846,40 @@ main() {
 
   declare_variables
   parse_options "$@"
-
   [ -n "$Containeruserpassword" ] && {     # --password
     check_optionset "--password" "$(grep -v -- '--password' <<< "$Optionsetall")" ||:
     set_password "$Containeruserpassword"
     finish
   }
-
-  [ "$Silent" = "yes" ]    && exec {FDstderr}>/dev/null                           # --quiet
-  [ "$Debugmode" = "yes" ] && {                                                   # --debug
-    set -Eu
-    trap 'traperror $? $LINENO $BASH_LINENO "$BASH_COMMAND" $(printf "::%s" ${FUNCNAME[@]})'  ERR
-  }
-
-  # check host, create cache
+  check_options
   check_host                    # get some infos about host system #time0,234
   check_hostuser                # find unprivileged host user                     # --hostuser
   create_cachefiles             # create cache files owned by unprivileged user   # --cachebasedir
   setup_verbosity               # create [and show] summary logfile               # --verbose
   check_hostxenv                # check X environment from host
-  storeinfo "x11dockerpid=$$"   # store pid of x11docker
-
-  case "$Backend" in
-    host) ;;
-    proot|chroot)
-      command -v "$Backend" >/dev/null || error "--backend=$Backend: command $Backend not found."
-    ;;
-    docker|podman|nerdctl)
-      # Check whether docker daemon is running, get docker info
-      Backendinfo="$($Backendbin info --format='{{json .}}' 2>>$Containerlogfile)" || error "'$Backend info' failed.
-  If using docker: Is docker daemon running at all?
-  Try to start docker daemon with 'systemctl start docker'.
-  Last lines of log:
-$(rmcr < "$Containerlogfile" | tail)"
-      check_runtime
-      # make XlibNoSHM.so available on host
-      [ "$Xcontainerimage" ] && [ ! -e "$Mitshmlib" ] && {
-        note "Copying XlibNoSHM.so from x11docker/xserver 
-  to $Mitshmlib
-  to make it available for --hostdisplay."
-        $Backendbin run --rm --user "$Hostuseruid:$Hostusergid" --volume "$Localsharedir":"$Localsharedir" -- "$Xcontainerimage" cp "/XlibNoSHM.so" "$Mitshmlib"
-      }
-    ;;
-  esac
-
-  debugnote "
-x11docker version: $Version
-Backend version:   $(${Backendbin:-:} --version 2>&1)
-OCI Runtime:       $Runtime
-Host system:       $(grep '^PRETTY_NAME' /etc/os-release 2>/dev/null | cut -d= -f2 || echo "$Hostsystem")
-Host architecture: $Hostarchitecture
-Command:           '$0' $(for Line in "$@"; do echo -n "'$Line' " ; done)
-Parsed options:    $Parsedoptions_global"
 
   # Special x11docker jobs
   [ "$Createlauncher" = "yes" ] && {
     create_launcher                                                               # --launcher: Create application launcher icon on desktop
-    exit
+    finish
   }
   [ "$Cleanup" = "yes" ] && {                                                     # --cleanup: Clean up cache and orphaned x11docker containers
     check_optionset "--cleanup" "$(grep -v -E -- '--cleanup|--backend' <<< "$Optionsetall")" ||:
     cleanup
-    exit
+    finish
   }
   [ "$Installermode" ] && {                                                       # --install, --update, --update-master, --remove
     check_optionset "$Installermode" "$(grep -v -E -- '--install|--update|--update-master|--remove' <<< "$Optionsetall")" ||:
     installer "$Installermode"
-    exit
+    finish
   }
   [ "$Buildimage" ] && {                                                          # --build: Build image from x11docker repository
     check_optionset "--build" "$(grep -v -E -- '--build|--backend' <<< "$Optionsetall")" ||:
     buildimage "$Imagename"
-    exit
+    finish
   }
 
-  # check options
-  case "$Fallback" in
-    yes|no) ;;
-    *) error "Option --fallback: Unknown argument '$Fallback'" ;;
-  esac
-
-  # Docker installed in snap (noteable Ubuntu Server)
-  [ "$Runsinsnap" = "yes" ] && [ -z "$Snapsupport" ] && {
-    note "It seems docker runs in snap.
-  This limits possibilities to use docker and x11docker.
-  Fallback: Enabling option --snap"
-    Snapsupport="yes"
-    check_fallback
-  }
-  [ -d "/snap/docker" ] && [ "$Snapsupport" = "no" ] && note "Detected /snap/docker.
-  If you run Docker in snap, you might need option --snap to support this setup."
-  [ "$Snapsupport" = "yes" ] && {
-    note "Option --snap to support a docker-in-snap setup
-  causes some restrictions:
-  Option --newprivileges=yes is enabled, snap needs it for unknown reasons.
-  Option --xoverip is enabled because sharing unix sockets fails.
-  Option --network is enabled because X over TCP is not possible otherwise.
-  Option --hostdisplay is not available because it would need a shared unix socket.
-  Option --xc to run X in container is not available.
-  Option --gpu only works with --xorg and with indirect rendering (--iglx).
-  Options --printer and --pulseaudio only work in TCP mode.
-  Recommendation: Purge the Docker snap installation and install Docker natively."
-    [ "$Allownewprivileges" = "auto" ] && Allownewprivileges="yes"
-    Xoverip="yes"
-    Xcontainer="no"
-    Xtoolscontainer="no"
-    [ "$Network" = "none" ] && Network=""
-  }
-
+  check_snap                     # check if docker is installed in snap; causes restrictions
   check_containeruser            # unprivileged user in container                 # --user
   check_xcontainer               # check if x11docker/xserver can/will be used    # --xc
   check_xserver                  # check chosen X server or auto-choose one
@@ -9887,10 +9918,18 @@ Parsed options:    $Parsedoptions_global"
   $Compositorcommand"
   [ "$Shareclipboard" = "yes" ]  && setup_clipboard ||:                           # --clipboard
   [ "$Sharehostdbus" = "yes" ]   && setup_hostdbus                                # --hostdbus
-
   setup_initsystem               # init in container. Default: tini               # --init
 
-  debugnote "Users and terminal:
+  storeinfo "x11dockerpid=$$"   # store pid of x11docker
+  debugnote "
+x11docker version: $Version
+Backend version:   $(${Backendbin:-:} --version 2>&1)
+OCI Runtime:       $Runtime
+Host system:       $(grep '^PRETTY_NAME' /etc/os-release 2>/dev/null | cut -d= -f2 || echo "$Hostsystem")
+Host architecture: $Hostarchitecture
+Command:           '$0' $(for Line in "$@"; do echo -n "'$Line' " ; done)
+Parsed options:    $Parsedoptions_global
+Users and terminal:
   x11docker was started by:                       $Startuser
   As host user serves (running X, storing cache): $Hostuser
   Container user will be:                         $( [ "$Createcontaineruser" = "yes" ] && echo "$Containeruser" || echo "(retaining USER of image)")
