@@ -4524,40 +4524,75 @@ check_runtime() {               # option --runtime
   return 0
 }
 check_cgroup() {                # check [and create] cgroup mountpoint for systemd or elogind
-  local Wantedcgroup
-  [ "$Sharecgroup" = "yes" ] && [ "$Dbussystem" = "yes" ] && {
-    [ "$Initsystem" = "systemd" ] && Wantedcgroup="systemd" || Wantedcgroup="elogind"
-    findmnt "/sys/fs/cgroup/$Wantedcgroup" >/dev/null || {
-      # Check [and create] cgroup mountpoint for $Wantedcgroup
-      [ "$Wantedcgroup" = "systemd" ] || $Backendbin run --rm --entrypoint env "$Imagename" sh -c 'ls /lib/elogind/elogind || ls /usr/sbin/elogind || ls /usr/libexec/elogind' && {
-        [ "$(id -u)"  = "0" ] && note "Creating cgroup mountpoint for '$Wantedcgroup'."
-        [ "$(id -u)" != "0" ] && {
-          note "Want to create and mount a cgroup for $Wantedcgroup.
-  As x11docker currently does not run as root, this will probably fail.
-  Please run x11docker as root.
+  local Remounted Needcgroup
 
-  Alternatively, create cgroup mountpoint yourself with:
-    mkdir -p /sys/fs/cgroup/$Wantedcgroup
-    mount -t cgroup cgroup /sys/fs/cgroup/$Wantedcgroup -o none,name=$Wantedcgroup
+  [ "$Initsystem" = "systemd" ] && Needcgroup="systemd" || Needcgroup="elogind"
 
-  If you get a read-only error message, remove write protection with:
+  [ "$Backend" = "docker" ] && {
+    case "$Cgroupversion" in
+      v1) 
+        Sharecgroup="yes"
+      ;;
+      v2)
+        case "$Initsystem" in
+          systemd)
+            Remountcgroup="yes"
+            warning "Option --init=systemd: To support systemd in docker container
+  with cgroupv2 on host, x11docker shortly runs a privileged container
+  of '$Imagename' with 'nsenter' to remount the container's /sys/fs/cgroup.
+  Evil images might be set up to abuse these privileges."
+          ;;
+        esac
+      ;;
+    esac
+    case "$Initsystem" in
+      sysvinit|openrc|runit)
+        Sharecgroup="yes"
+      ;;
+    esac
+  }
+
+  [ "$Sharecgroup" = "yes" ] && warning "Option --init=$Initsystem: Sharing /sys/fs/cgroup from host."
+
+  findmnt "/sys/fs/cgroup/$Needcgroup" >/dev/null || {
+    case "$Initsystem" in
+      systemd)
+        case "$Cgroupversion" in
+          v1) 
+            [ "$Startuser" != "root" ] && note "Option --init=$Initsystem: Did not find /sys/fs/cgroup/$Needcgroup
+  Startup of container is likely to fail."
+          ;;
+          v2)
+            Needcgroup=""
+          ;;
+        esac
+      ;;
+      *)
+        note "Option --init=$Initsystem: Did not find /sys/fs/cgroup/$Needcgroup
+  A possible elogind service in container is likely to fail."
+      ;;
+    esac
+    [ "$Needcgroup" ] && note "Option --init=$Initsystem: To create and mount a cgroup
+  for $Needcgroup, please run x11docker as root.
+  Or create cgroup mountpoint on host yourself with:
     mount -o remount,rw cgroup /sys/fs/cgroup
+    mkdir -p /sys/fs/cgroup/$Needcgroup
+    mount -t cgroup cgroup /sys/fs/cgroup/$Needcgroup -o none,name=$Needcgroup"
+  }
 
-  You can restore write protection after cgroup creation with:
-    mount -o remount,ro cgroup /sys/fs/cgroup"
-          [ "$Wantedcgroup" = "elogind" ] && note 'If you do not want or need elogind in container,
-  just ignore message above.'
-        }
-        findmnt /sys/fs/cgroup -O ro >/dev/null && {
-          mount -o remount,rw cgroup /sys/fs/cgroup >> "$Containerlogfile" 2>&1
-          Remounted=yes
-        }
-        mkdir -p /sys/fs/cgroup/elogind >> "$Containerlogfile" 2>&1
-        mount -t cgroup cgroup /sys/fs/cgroup/elogind -o none,name=elogind  >> "$Containerlogfile" 2>&1
-        [ "${Remounted:-}" = "yes" ] && mount -o remount,ro cgroup /sys/fs/cgroup  >> "$Containerlogfile" 2>&1
-      }
+  [ "$Needcgroup" ] && [ "$Sharecgroup" = "yes" ] && [ "$Startuser" = "root" ] && {
+    note "Option --init=$Initsystem: Creating cgroup mountpoint on host for '$Needcgroup'."
+    findmnt /sys/fs/cgroup -O ro >/dev/null && {
+      mount -o remount,rw cgroup /sys/fs/cgroup >> "$Containerlogfile" 2>&1
+      Remounted=yes
+    }
+    mkdir -p /sys/fs/cgroup/$Needcgroup >> "$Containerlogfile" 2>&1
+    mount -t cgroup cgroup /sys/fs/cgroup/$Needcgroup -o none,name=$Needcgroup  >> "$Containerlogfile" 2>&1
+    [ "${Remounted:-}" = "yes" ] && {
+      mount -o remount,ro cgroup /sys/fs/cgroup  >> "$Containerlogfile" 2>&1
     }
   }
+  
   return 0
 }
 check_containerhomebasedir() {  # options --homebasedir, --home
@@ -4762,7 +4797,7 @@ check_containeruser() {         # check container user and shared home folder (a
   esac
   return 0
 }
-create_backendcommand() {       ### create command to run docker
+create_backendcommand() {       ### create command to run docker|podman|nerdctl ###
   local Line= Memory Tini= Grouplist=
 
   case "$Backend" in
@@ -5035,12 +5070,22 @@ create_backendcommand() {       ### create command to run docker
     systemd)
       Backendcommand="$Backendcommand \\
   --tmpfs /var/lib/journal"
-      [ "$Backend" = "podman" ] && Backendcommand="$Backendcommand \\
-  --systemd=always"
-      [ "$Remountcgroup" = "yes" ] && Backendcommand="$Backendcommand \\
-  --cgroupns private"
   esac
-
+  case "$Initsystem" in
+    systemd|sysvinit|openrc|runit)
+      case "$Backend" in
+        podman)
+          Backendcommand="$Backendcommand \\
+  --systemd=always"
+        ;;
+      esac
+      [ "$Remountcgroup" = "yes" ] && {
+        $Backendbin run --help | grep -q -- '--cgroupns' && Backendcommand="$Backendcommand \\
+  --cgroupns private"
+      }
+    ;;
+  esac
+  
   # stop signal for some init systems
   [ "$Stopsignal" ] && {
     case "$Backend" in
@@ -5442,9 +5487,6 @@ setup_capabilities() {          # check linux capabilities needed by container
   in many ways without you noticing. Default password: x11docker"
 
   # enable dbus
-  case "$Initsystem" in
-    systemd|sysvinit|openrc|runit) Dbussystem="yes" ;;
-  esac
   [ "$Dbussystem" = "yes" ]    && {
     Dbusrunsession="yes"
     store_runoption cap "CHOWN FOWNER" ### FIXME: CHOWN needed indeed here?
@@ -5520,17 +5562,6 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
   # some init system setup also in containerrootrc
   local Message=
 
-  case "$Initsystem" in
-    tini|systemd|sysvinit|openrc|runit|dockerinit|s6-overlay|none) ;;
-    *)
-      note "Option --init: Unknown init system $Initsystem
-  Possible: tini systemd sysvinit openrc runit s6-overlay none
-  Fallback: Using --init=tini instead."
-      check_fallback
-      Initsystem="tini"
-    ;;
-  esac
-
   # --init in Mobyvm. /usr/bin/docker-init is not available in MSYS2/Cygwin/WSL1
   case "$Mobyvm" in
     yes) [ "$Initsystem" = "tini" ] && Initsystem="dockerinit" ;;
@@ -5552,7 +5583,7 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
 
   case "$Initsystem" in
     docker|podman|nerdctl)
-      store_runoption env "container=docker"   # At least OpenRC and systemd regard this hint
+      store_runoption env "container=$Backend"   # At least OpenRC and systemd regard this hint
     ;;
   esac
 
@@ -5603,25 +5634,6 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
     systemd)
       Stopsignal="SIGRTMIN+3"
       Containerusergroups="$Containerusergroups systemd-journal"
-      # workaround to support cgroupv2
-      [ "$Sharecgroup" = "no" ] && {
-        [ "$Backend" = "docker" ] && {
-          case "$Cgroupversion" in
-            v2)
-                Remountcgroup="yes"
-                warning "Option --init=systemd: To support systemd in docker container
-  with cgroupv2 on host, x11docker shortly runs a privileged container
-  of '$Imagename' with 'nsenter' to remount the container's /sys/fs/cgroup.
-  Evil images might be set up to abuse these privileges."
-            ;;
-            v1)
-              Sharecgroup="yes"
-              warning "Option --init=systemd with cgroupv1
-  shares access to host cgroups in /sys/fs/cgroup."
-            ;;
-          esac
-        }
-      }
     ;;
     runit)
       Stopsignal="HUP"
@@ -5681,7 +5693,13 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
       }
     ;;
   esac
-
+  
+  case "$Initsystem" in
+    systemd|sysvinit|openrc|runit)
+      check_cgroup
+    ;;
+  esac
+  
   return 0
 }
 store_runoption() {             # store env, cap or volume/device for docker command
@@ -7068,13 +7086,24 @@ start_container() {             # docker run
       # Get ID of container
       Containerid="$(parse_inspect "$Containerinspect" "Id")"
       storeinfo "containerid=$Containerid"
+
+      # --init=systemd cgroupv2
       [ "$Remountcgroup" = "yes" ] && {
         debugnote "start_container(): Remounting /sys/fs/cgroup to :rw with nsenter"
         # Compare https://github.com/mviereck/x11docker/issues/349
-        $Backendbin run --rm --cap-add "SYS_ADMIN" --cap-add="SYS_PTRACE" --security-opt "apparmor=unconfined" --pid="container:$Containerid" "$Imagename" \
-                    nsenter -t 1 -m -p /bin/sh -c 'mount -o remount,rw /sys/fs/cgroup/ ; touch /nsenter_is_ready' >> "$Containerlogfile" 2>&1 || {
-          note "--init=systemd: Failed to remount /sys/fs/cgroup in container.
+        Remountcommand="$Backendbin run --rm --cap-add SYS_ADMIN --cap-add=SYS_PTRACE --security-opt apparmor=unconfined --pid=container:$Containerid -- $Imagename"
+        Remountcommand="$Remountcommand nsenter -t 1 -m -C -p /bin/sh -c '"
+        Remountcommand="$Remountcommand         set -x ; "
+        Remountcommand="$Remountcommand         mount -v -o remount,rw /sys/fs/cgroup/ && "
+        Remountcommand="$Remountcommand touch /nsenter_is_ready || echo \"ERROR: cgroup mount failed.\" '"
+        debugnote "start_container(): nsenter command:
+  $Remountcommand"
+        echo "cgroup mount with nsenter:" >> "$Containerlogfile"
+        eval $Remountcommand >> "$Containerlogfile" 2>&1 || {
+          note "--init=$Initsystem: Failed to remount /sys/fs/cgroup in container.
   Startup of systemd might fail.
+  nsenter command:
+    $Remountcommand
   Last lines of log:
 $(tail "$Containerlogfile")"
         }
@@ -7798,7 +7827,7 @@ check_options_arguments() {     # check for [likely] valid arguments
   # --runfromhost
   # --runasuser
   
-  # scale, rotate vt xtest init runtime
+  # scale rotate vt xtest runtime
 
   # --fallback
   case "$Fallback" in
@@ -7878,6 +7907,18 @@ check_options_arguments() {     # check for [likely] valid arguments
   Fallback: Disabling option --gpu."
       check_fallback
       Sharegpu="no"
+    ;;
+  esac
+
+  # --init
+  case "$Initsystem" in
+    tini|systemd|sysvinit|openrc|runit|dockerinit|s6-overlay|none) ;;
+    *)
+      note "Option --init: Unknown init system $Initsystem
+  Possible: tini systemd sysvinit openrc runit s6-overlay none
+  Fallback: Using --init=tini instead."
+      check_fallback
+      Initsystem="tini"
     ;;
   esac
 
@@ -8508,6 +8549,11 @@ check_options_interferences() { # check multiple option interferences, change se
       check_fallback
       Setupwayland="no"
     ;;
+  esac
+
+  # --init
+  case "$Initsystem" in
+    systemd|sysvinit|openrc|runit) Dbussystem="yes" ;;
   esac
 
   # --interactive
@@ -9393,7 +9439,6 @@ declare_variables() {           # declare global variables
   Containersetup="yes"
   Customdockeroptions=""                          # -- [...] -- : Custom options for "docker run".
   Defaultruntime=""
-  Rootlessbackend=""                               # Check for rootful/rootless docker depending on DOCKER_HOST
   Imagename=""                                    # Image to run
   Interactive="no"                                # --interactive: Run docker with interactive tty yes/no
   Limitresources=""                               # --limit: Limit access to CPU and RAM, 0.1 ... 1.0
@@ -9402,7 +9447,8 @@ declare_variables() {           # declare global variables
   Optionset=""                                    # list of set options for later support check
   Optionsetall=""                                 # list of all available long options
   Remountcgroup=""                                # --init=systemd with cgroupv2 in docker workaround
-  Rootfs=""
+  Rootfs=""                                       # --backend=proot
+  Rootlessbackend=""                              # Check for rootful/rootless docker depending on DOCKER_HOST
   Runtime=""                                      # Runtime to use. runc|nvidia|kata-runtime|crun
   Snapsupport=""                                  # --snap: Fallback mode to support docker in snap
   Shareipc="no"
@@ -9590,7 +9636,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,build,cleanup,help,launcher,licence,license,version"                                            # Special options without starting X or container
   Longoptions="$Longoptions,install,remove,update,update-master"                                                            # Installation
   #
-  Longoptions="$Longoptions,keepcache,xopt:,xorgconf:"                                                                      # Experimental
+  Longoptions="$Longoptions,keepcache,remountcgroup,xopt:,xorgconf:"                                                        # Experimental
   Longoptions="$Longoptions,dbus-system,exe,homedir:,hostipc,hostnet,iglx,kwin-xwayland,no-internet,no-xhost"               # Deprecated
   Longoptions="$Longoptions,sharedir:,sharessh,systemd,showenv,showid,showinfofile,showpid1"                                # Deprecated
   Longoptions="$Longoptions,cachedir:,no-init,nothing,no-xtest,openrc,podman,pull::,ps,pw::,runit,silent,starter"           # Removed
@@ -9790,6 +9836,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
 
      #### Experimental options
          --keepcache)         Preservecachefiles="yes" ;          note "Option --keepcache: experimental option." ;;
+         --remountcgroup)     Remountcgroup="yes" ;               note "Option --remountcgroup: experimental option." ;;
          --xopt)              Xserveroptions="${2:-}" ;   shift ; note "Option --xopt: experimental option." ;;      # Custom X server options
          --xorgconf)          Xorgconf="${2:-}" ;         shift ; note "Option --xorgconf: experimental option." ;;  # Custom xorg.conf
 
@@ -10024,7 +10071,6 @@ main() {
   case "$Backend" in
     docker|podman|nerdctl)
       check_image
-      check_cgroup
       setup_capabilities         # add linux capabilities if needed for some options. Default: --cap-drop=ALL
     ;;
   esac
