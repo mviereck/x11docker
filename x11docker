@@ -1109,7 +1109,7 @@ convertpath() {                 # convert unix and windows paths
   Containerpath="$Path"
   [ "$Containeruser" = "RETAIN" ] || {
     [ "$Sharehome" = "host" ] || {
-      grep -q "^$Containeruserhome" <<< "$Path" && Containerpath="$(sed "s%^$Containeruserhome%/home.host%" <<< "$Containerpath")"
+      [ -n "$Containeruserhome" ] && grep -q "^$Containeruserhome" <<< "$Path" && Containerpath="$(sed "s%^$Containeruserhome%/home.host%" <<< "$Containerpath")"
     }
     [ "$Containerpath" = "$Containeruserhosthome" ] && [ "$Persistanthomevolume" != "$Containeruserhosthome" ] && Containerpath="/home.host/$Containeruser"
   }
@@ -2027,7 +2027,7 @@ setup_hostdbus() {              # option --hostdbus: connect to host DBus sessio
   grep -q "unix:path" <<< "$DBUS_SESSION_BUS_ADDRESS" && {
     # DBus socket file
     case "$Runtime" in
-      kata-runtime|sysbox-runc)
+      kata-runtime)
         note "Option --hostdbus with a unix socket is not possible
   with --runtime=$Runtime."
         check_fallback
@@ -2075,7 +2075,7 @@ setup_printer() {               # option --printer: connect to cups printer serv
       Sharecupsmode="socket"
       [ "$Snapsupport" = "yes" ]      && Sharecupsmode="tcp"
       [ "$Runtime" = "kata-runtime" ] && Sharecupsmode="tcp"
-      [ "$Runtime" = "sysbox-runc" ]  && Sharecupsmode="tcp"
+      #[ "$Runtime" = "sysbox-runc" ]  && Sharecupsmode="tcp"
     ;;
   esac
 
@@ -2171,10 +2171,10 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
   [ -z "$Pulseaudiomode" ] && Pulseaudiomode="socket"
   [ "$Pulseaudiomode" = "auto" ] && {
     Pulseaudiomode="socket"
-    [ "$Containeruser" = "$Hostuser" ]               || Pulseaudiomode="tcp"
-    [ "$Runtime" = "kata-runtime" ]                  && Pulseaudiomode="tcp"
-    [ "$Snapsupport" = "yes" ]                       && Pulseaudiomode="tcp"
-    [ "$Runtime" = "sysbox-runc" ]                   && Pulseaudiomode="tcp"
+    [ "$Containeruser" = "$Hostuser" ]                        || Pulseaudiomode="tcp"
+    [ "$Runtime" = "kata-runtime" ]                           && Pulseaudiomode="tcp"
+    [ "$Runtime" = "sysbox-runc" ]                            && Pulseaudiomode="tcp"
+    [ "$Snapsupport" = "yes" ]                                && Pulseaudiomode="tcp"
     unpriv 'LC_ALL=C pactl info | grep -q "User Name: pulse"' && Pulseaudiomode="tcp"
     [ "$Pulseaudiomode" = "tcp" ] && note "Option --pulseaudio: Enabling TCP mode"
   }
@@ -2584,7 +2584,7 @@ check_xcontainer() {            # option --xc: check image x11docker/xserver
   - on console
   - on MS Windows
   - without image x11docker/xserver.
-  - with runtimes kata-runtime and sysbox-runc
+  - with runtime kata-runtime
   Fallback: Setting --xc=no"
         check_fallback
         Xcontainer="no"
@@ -2592,7 +2592,7 @@ check_xcontainer() {            # option --xc: check image x11docker/xserver
     ;;
     auto)
       case "$Runtime" in
-        kata-runtime|sysbox-runc)      Xcontainer="no" ;;
+        kata-runtime)                  Xcontainer="no" ;;
       esac
       [ -z "$Xcontainerimage" ]     && Xcontainer="no"
     ;;
@@ -2636,7 +2636,7 @@ check_xdepends() {              # check dependencies on host for X server option
         Return=1
       }
       case "$Runtime" in
-        kata-runtime|sysbox-runc)
+        kata-runtime)
           $Message "${1:-} is not supported with --runtime=$Runtime"
           Return=1
         ;;
@@ -3002,7 +3002,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
       --tty|--weston|--kwin|--hostwayland) ;;
       *)
         case "$Runtime" in
-          kata-runtime|sysbox-runc)
+          kata-runtime)
             Xoverip="yes"
             [ "$Network" = "none" ] && {
               note "Option --runtime=$Runtime works only with X over IP.
@@ -3159,11 +3159,14 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   Xserveroptions_custom="$Xserveroptions"
   Xserveroptions=""
 
-  [ "$Xcontainer" = "yes" ]    && Usemitshm="yes"
-  [ "$Shareipc" = "host" ]     && Usemitshm="yes"
-  [ "$Xcontainer" = "no" ]     &&[ "$Shareipc" != "host" ]                               && Usemitshm="no"
-  [ "$Containeruser" != "$Hostuser" ]                                                    && Usemitshm="no"
-  [ "$Xoverip" = "yes" ]                                                                 && Usemitshm="no"
+  [ "$Xcontainer" = "yes" ]                             && Usemitshm="yes"
+  [ "$Shareipc" = "host" ]                              && Usemitshm="yes"
+  [ "$Xcontainer" = "no" ] &&[ "$Shareipc" != "host" ]  && Usemitshm="no"
+  [ "$Containeruser" != "$Hostuser" ]                   && Usemitshm="no"
+  [ "$Xoverip" = "yes" ]                                && Usemitshm="no"
+  case "$Runtime" in
+    kata-runtime|sysbox-runc)                              Usemitshm="no" ;;
+  esac
 
   #### General X server options
   case "$Xserver" in
@@ -4453,13 +4456,9 @@ check_image() {                 # get some image information
       [ "$Imageuser" ] && note "Found 'USER $Imageuser' in image.
   If you want to run with user $Imageuser instead of host user $Containeruser,
   than run with option --user=RETAIN."
-      storeinfo containeruser="$Containeruser"
-    ;;
-    no)
-      Containeruser="${Imageuser:-root}"
-      storeinfo containeruser="$Containeruser"
     ;;
   esac
+  storeinfo containeruser="$Containeruser"
 
   # Check ENTRYPOINT
   Imageentrypoint="$(parse_inspect "$Imageinspect" "Config" "Entrypoint")"
@@ -5222,9 +5221,16 @@ $Nvidiainstallerfile|$Rootfs/$Nvidiacontainerfile"
         case "$Backend" in
           docker|podman|nerdctl)
             Backendcommand="$Backendcommand \\
-  --mount $(convertpath mount $Cachefolder/tmp/.X11-unix/X$Newdisplaynumber:ro $Newxsocket)"
-            [ "$Shareipc" = "no" ] && [ "$Containeruser" = "$Hostuser" ] && Backendcommand="$Backendcommand \\
+  --mount $(convertpath mount "$Cachefolder/tmp/.X11-unix/X$Newdisplaynumber:ro" "$Newxsocket")"
+            [ "$Shareipc" = "no" ] && [ "$Containeruser" = "$Hostuser" ] && {
+              case "$Runtime" in
+                kata-runtime|sysbox-runc) ;;
+                *)
+                  Backendcommand="$Backendcommand \\
   --ipc=container:$Xcontainername"
+                ;;
+              esac
+            }
           ;;
           proot)
             Backendcommand="$Backendcommand \\
@@ -5233,7 +5239,7 @@ $Nvidiainstallerfile|$Rootfs/$Nvidiacontainerfile"
         esac
       }
       [ "$Virgl" = "yes" ] && Backendcommand="$Backendcommand \\
-  --volume $Cachefolder/tmp/.virgl_test:/tmp/.virgl_test"
+  --mount $(convertpath mount "$Cachefolder/tmp/.virgl_test" "/tmp/.virgl_test")"
     ;;
     no)
       [ "$Newxsocket" ] && {
@@ -5587,7 +5593,7 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
       [ -e "$Tinibinaryfile" ]                                      || Tinibinaryfile=""
       [ "$Tinibinaryfile" ] && {
         case "$Runtime" in
-          kata-runtime|sysbox-runc)
+          kata-runtime)
             # avoid sharing same file that might be shared with runc already.
             cp -u "$Tinibinaryfile"  "$Localsharedir/tini-static-kata"
             Tinibinaryfile="$Localsharedir/tini-static-kata"
@@ -7058,14 +7064,14 @@ start_container() {             # docker run
       [ "$Pid1pid" = "0" ] && Pid1pid=""
 
       [ -z "$Pid1pid" ] && error "start_container(): Did not receive PID of PID1 in container.
-      Maybe the container immediately stopped for unknown reasons.
-      Just in case, check if host and image architecture are compatible:
-      Host architecture: $Hostarchitecture, image architecture: $Imagearchitecture.
-      Output of \"$Backend ps | grep x11docker\":
-      $Backendbin ps | grep x11docker)
+  Maybe the container immediately stopped for unknown reasons.
+  Just in case, check if host and image architecture are compatible:
+  Host architecture: $Hostarchitecture, image architecture: $Imagearchitecture.
+  Output of \"$Backend ps | grep x11docker\":
+$Backendbin ps | grep x11docker)
 
-      Content of container log:
-      $(rmcr < "$Containerlogfile" | uniq )"
+  Content of container log:
+$(rmcr < "$Containerlogfile" | uniq )"
 
       # Get IP of container
       Containerip="$(parse_inspect "$Containerinspect" "NetworkSettings" "IPAddress")"
@@ -8581,9 +8587,12 @@ check_options_interferences() { # check multiple option interferences, change se
   case "$Runtime" in
     ""|runc|crun|oci) ;;
     sysbox-runc)
+      note "Option --runtime=sysbox-runc is experimental yet.
+  Capability settings do not work as intended.
+  Needs sysbox >=0.5.0."
       check_optionset "--runtime=sysbox-runc" "--alsa --webcam" ||:
-      Sharewebcam="no"
-      Sharealsa="no"
+      #Sharewebcam="no"
+      #Sharealsa="no"
     ;;
     nvidia)
       [ "$Sharegpu" = "no" ] && {
@@ -8815,7 +8824,7 @@ check_options_messages() {      # some messages depending on options, but not ch
   with su or sudo, you might need to add either option --xoverip
   or (discouraged) option --network=host."
 
-  # --user=RETAIN / keep container defined in image
+  # --user=RETAIN / keep container user defined in image
   case "$Createcontaineruser" in
     no)
       [ "$Sudouser" ] && note "Option --sudouser has limited support with --user=RETAIN.
@@ -9050,7 +9059,7 @@ setup_fifo() {                  # set up fifo channels (also option --stdin)
   esac
 
   [ "$Runtime" = "kata-runtime" ] && Usemkfifo="no"
-  [ "$Runtime" = "sysbox-runc" ]  && Usemkfifo="no"
+  #[ "$Runtime" = "sysbox-runc" ]  && Usemkfifo="no"
   # redirect stdin to named pipe. Named pipe is shared with container and used as stdin of container command in containerrc
   [ "$Forwardstdin" = "yes" ] && {
     case "$Usemkfifo" in
@@ -9068,7 +9077,7 @@ setup_fifo() {                  # set up fifo channels (also option --stdin)
       unpriv "mkfifo '$Messagefifo' && chmod 666 '$Messagefifo'"
       unpriv "mkfifo '$Timetosaygoodbyefifo'"
     ;;
-    no) # Windows, kata, sysbox
+    no) # Windows, kata
       mkfile "$Watchpidfifo"
       mkfile "$Messagefifo" 666
       mkfile "$Timetosaygoodbyefifo" 666

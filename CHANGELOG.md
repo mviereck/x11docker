@@ -8,10 +8,13 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
- - `--gpu=virgl`: Experimental option for GPU access with `virgl_test_server`.
+ - `--gpu=virgl`: Experimental GPU access with `virgl_test_server`.
    Currently only along with option `--xc`.
-   Allows acceleration for Xephyr, nxagent, xpra etc.
+   Allows acceleration for Xephyr, nxagent, Xvfb etc.
  - `--gpu=iglx`: Enable indirect rendering (`--xorg` only). Replaces `--iglx`.
+### Fixed
+ - `--user=RETAIN`: Fix container pathes for shared files.
+   [(#417)](https://github.com/mviereck/x11docker/issues/417)
 ### Deprecated
  - `--iglx`: Use `--gpu=iglx` instead.
 
