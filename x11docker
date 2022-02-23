@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.1.1-beta-4"
+Version="7.1.1-beta-5"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -129,7 +129,8 @@ Host integration:
  -P, --printer [=MODE] Share host printers through CUPS server.
                        Optional MODE can be 'socket' or 'tcp'. Default: socket
  -p, --pulseaudio [=MODE]  Sound with pulseaudio. Needs 'pulseaudio' on host
-                       and in image. Optional arg MODE can be 'socket' or 'tcp'.
+                       and in image. Optional arg MODE can be 'socket', 'tcp'
+                       or 'host'. tcp mode needs network access with --network.
      --webcam          Share host webcam device files.
 
 Shared host folders or volumes:
@@ -2231,6 +2232,11 @@ $(nl -ba < "$Pulseaudioconf")"
       [ -e "$Hostuserhome/.config/pulse/cookie" ] && cp "$Hostuserhome/.config/pulse/cookie" "$Pulseaudiocookie" || note "Option --pulseaudio: Did not find cookie
   $Hostuserhome/.config/pulse/cookie"
       store_runoption env "PULSE_SERVER=tcp:$Hostip:$Pulseaudioport"
+    ;;
+    host)
+      Pulseaudiosocket="$(LC_ALL=C pactl info | grep 'Server String' |rev|cut -d' ' -f1|rev)"
+      store_runoption env "PULSE_SERVER=unix:/tmp/pulseaudio.socket.host"
+#      store_runoption env "PULSE_COOKIE=$(convertpath share "$Pulseaudiocookie")"
     ;;
   esac
   return 0
@@ -5333,18 +5339,34 @@ $Newxsocket|$Rootfs/$Newxsocket"
   }
 
   # --pulseaudio
-  [ "$Pulseaudiomode" = "socket" ] && {
-    case "$Backend" in
-      docker|podman|nerdctl)
-        Backendcommand="$Backendcommand \\
+  case "$Pulseaudiomode" in
+    socket)
+      case "$Backend" in
+        docker|podman|nerdctl)
+          Backendcommand="$Backendcommand \\
   --mount $(convertpath mount "$Pulseaudioconf:ro" "/etc/pulse/client.conf")"
-        ;;
-      proot)
-        Backendcommand="$Backendcommand \\
+          ;;
+        proot)
+          Backendcommand="$Backendcommand \\
   --bind=$Pulseaudioconf:/etc/pulse/client.conf"
-      ;;
-    esac
-  }
+        ;;
+      esac
+    ;;
+    host)
+      case "$Backend" in
+        docker|podman|nerdctl)
+          Backendcommand="$Backendcommand \\
+  --mount $(convertpath mount "$Pulseaudiosocket" "/tmp/pulseaudio.socket.host") \\
+  --mount $(convertpath mount "$Pulseaudioconf:ro" "/etc/pulse/client.conf")"
+          ;;
+        proot)
+          Backendcommand="$Backendcommand \\
+  --bind=$Pulseaudiosocket:/tmp/pulseaudio.socket.host \\
+  --bind=$Pulseaudioconf:/etc/pulse/client.conf"
+        ;;
+      esac
+    ;;
+  esac
 
   # --workdir
   case "$Containersetup" in
@@ -6247,6 +6269,7 @@ chmod +x $(convertpath share "$Containerrc")
   esac
   case "$Backend" in
     proot)                        echo "echo 'exec /bin/sh - $(convertpath share "$Containerrc")'                          >>/usr/local/bin/x11docker-login" ;;
+#    docker|podman|nerdctl|chroot) echo "echo \"/bin/sh  $(convertpath share "$Containerrc")\" >>/usr/local/bin/x11docker-login" ;;
     docker|podman|nerdctl|chroot) echo "echo \"exec su - -s /bin/sh  \$Containeruser $(convertpath share "$Containerrc")\" >>/usr/local/bin/x11docker-login" ;;
   esac
 
@@ -6427,7 +6450,7 @@ com.deepin.userexperience.Daemon
 #      echo 'output_log=$(convertpath share $Containerlogfile)' >> \$Service
 #      echo 'error_log=$(convertpath share $Containerlogfile)' >> \$Service
 #      cat \$Service
-      
+
 for Service in /usr/share/dbus-1/system-services/* /usr/share/dbus-1/services/*; do  # find is not available on fedora
   Name=\"\$(cat \$Service | grep Name= | cut -d= -f2)\"
   Command=\"\$(cat \"\$Service\" | grep Exec= | cut -d= -f2)\"
@@ -6706,7 +6729,6 @@ TTYVHangup=yes
 KillMode=process
 IgnoreSIGPIPE=no
 SendSIGHUP=yes
-
 [Install]
 WantedBy=x11docker.target
 WantedBy=getty.target
@@ -7324,7 +7346,6 @@ $(tail "$Xpraclientlogfile")"
 start_pulseaudiotcp() {         # option --pulseaudio=tcp: load Pulseaudio TCP module authenticated with container IP
   local Containerip
   Containerip="$(storeinfo dump containerip)"
-set -x
   #Pulseaudiomoduleid="$(unpriv "pactl load-module module-native-protocol-tcp  listen=${Containerip:-"127.0.0.1"}" )"
   Pulseaudiomoduleid="$(unpriv "pactl load-module module-native-protocol-tcp  port=$Pulseaudioport listen=${Containerip:-"127.0.0.1"}" )"
 #  Pulseaudiomoduleid="$(unpriv "pactl load-module module-native-protocol-tcp  port=$Pulseaudioport auth-ip-acl=${Containerip:-"127.0.0.1"}" )"
@@ -7333,7 +7354,6 @@ set -x
   } || note "Option --pulseaudio: command pactl failed.
   Is pulseaudio running at all on your host?
   You can try option --alsa instead."
-  set +x
   return 0
 }
 
@@ -7991,7 +8011,7 @@ check_options_arguments() {     # check for [likely] valid arguments
   
   # --pulseaudio
   case "$Pulseaudiomode" in
-    socket|tcp|auto|"") ;;
+    socket|tcp|auto|host|"") ;;
     *)
       note "Option --pulseaudio: Unknown argument '$Pulseaudiomode'.
   Fallback: Setting --pulseaudio=auto."

@@ -13,7 +13,7 @@ Project website: https://github.com/mviereck/x11docker
    Allows acceleration for Xephyr, nxagent, Xvfb etc.
  - `--gpu=iglx`: Enable indirect rendering (`--xorg` only). Replaces `--iglx`.
 ### Fixed
- - `--user=RETAIN`: Fix container pathes for shared files.
+ - `--user=RETAIN`: Some fixes.
    [(#417)](https://github.com/mviereck/x11docker/issues/417)
 ### Deprecated
  - `--iglx`: Use `--gpu=iglx` instead.
@@ -24,6 +24,8 @@ Project website: https://github.com/mviereck/x11docker
    [(#224)](https://github.com/mviereck/x11docker/issues/224)
  - `--backend=host`: Run application from host. Replaces `-e, --exe`.
  - `--ipc [=ARG]`: Replaces former `--hostipc`.
+ - `--pulseaudio=host`: New argument to share host pulseaudio socket.
+   [(#418)](https://github.com/mviereck/x11docker/issues/418)
 ### Changed
  - `--hostdisplay`: Use `XlibNoSHM.so` from `x11docker/xserver` if available.
    This avoids the need of `--ipc=host`.
