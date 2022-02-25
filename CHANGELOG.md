@@ -15,6 +15,8 @@ Project website: https://github.com/mviereck/x11docker
 ### Fixed
  - `--user=RETAIN`: Some fixes.
    [(#417)](https://github.com/mviereck/x11docker/issues/417)
+ - `--init=systemd`: Changed login and service setup to support arch containers.
+   [(#417)](https://github.com/mviereck/x11docker/issues/417)
 ### Deprecated
  - `--iglx`: Use `--gpu=iglx` instead.
 

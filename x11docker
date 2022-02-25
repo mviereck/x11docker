@@ -4103,8 +4103,12 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   declare -f pspid
   declare -f rocknroll
   declare -f storeinfo
-  declare -f storepid
   echo "$Messagefifofuncs"
+  [ "$Xcontainer" = "yes" ] && {
+    echo "storepid() { : ; }"
+  } || {
+    declare -f storepid
+  }
 
   echo               "getscreensize() {"
   echo               "  CurrentXaxis=\"\$(xrandr | grep primary | cut -d' ' -f4 | cut -dx -f1 )\""
@@ -5820,7 +5824,7 @@ exec 1>>$(convertpath share "$Containerlogfile") 2>&1
   declare -f storeinfo
   declare -f rocknroll
   echo "$Messagefifofuncs"
-  
+
   echo "
 Messagefile=$(convertpath share "$Messagefifo")
 Storeinfofile='$(convertpath share "$Storeinfofile")'
@@ -5841,6 +5845,12 @@ done
 [ \"\$Error\" ] && error 'Commands for container setup missing in image.
   You can try with option --no-setup to avoid this error.'
 
+# /etc/profile.d
+"
+  while read Line; do
+    echo "echo 'export $Line' >> /etc/profile.d/10-x11docker-env.sh"
+  done <<< $(store_runoption dump env)
+  echo "
 # Container system
 Containersystem=\"\$(grep '^ID=' /etc/os-release 2>/dev/null | cut -d= -f2 || echo 'unknown')\"
 verbose \"Container system ID: \$Containersystem\"
@@ -5941,14 +5951,14 @@ exec 1>&5 2>&6
       none|dockerinit)
         case "$Backend" in
           proot)                 echo "exec /bin/sh $(convertpath share "$Containerrc")" ;;
-          chroot      )          echo "exec /bin/sh /usr/local/bin/x11docker-login" ;;
+          chroot      )          echo "exec /bin/sh /usr/local/bin/x11docker-su" ;;
           docker|podman|nerdctl) echo "exec /usr/local/bin/x11docker-agetty" ;;
         esac
       ;;
       tini)
         case "$Backend" in
           proot)                 echo "exec env TINI_SUBREAPER=1 '$Tinicontainerpath' /bin/sh $(convertpath share "$Containerrc")" ;;
-          chroot)                echo "exec env TINI_SUBREAPER=1 '$Tinicontainerpath' /bin/sh /usr/local/bin/x11docker-login" ;;
+          chroot)                echo "exec env TINI_SUBREAPER=1 '$Tinicontainerpath' /bin/sh /usr/local/bin/x11docker-su" ;;
           docker|podman|nerdctl) echo "exec '$Tinicontainerpath' -- /usr/local/bin/x11docker-agetty" ;;
         esac
       ;;
@@ -6173,7 +6183,7 @@ verbose \"Container environment:
 \$(env | sort)\"
 "
 
-    [ "$Initsystem" = 'systemd' ] && echo "systemctl --user start dbus"
+    [ "$Initsystem" = 'systemd' ] && echo "systemctl --user start dbus"  ### FIXME
     case "$Interactive" in
       no)
         echo "LD_PRELOAD= tail -f $(convertpath share "$Cmdstdoutlogfile")     2>/dev/null & Stdoutpid=\$!"
@@ -6187,7 +6197,7 @@ verbose \"Container environment:
         echo "exec \$Dbus sh $(convertpath share "$Cmdrc") >> $(convertpath share "$Cmdstdoutlogfile") 2>>$(convertpath share "$Cmdstderrlogfile")"
       ;;
       yes)
-        echo "$Cmdexec \$Dbus $Containerentrypoint $Containercommand <&0"
+        echo "$Cmdexec \$Dbus sh $(convertpath share "$Cmdrc") <&0"
       ;;
     esac
   } >> "$Containerrc"
@@ -6255,6 +6265,7 @@ rootrc_create_helperscripts() {
 
 mkdir -p /usr/local/bin
 
+### x11docker-message
 echo \"#! /bin/sh
 # Send messages to x11docker on host.
 # To be sourced by other scripts.
@@ -6262,43 +6273,56 @@ $Messagefifofuncs_escaped
 Messagefile=$(convertpath share "$Messagefifo")
 \" >/usr/local/bin/x11docker-message
 
+### x11docker-su
 echo \"#! /bin/sh
 # User switch from root in containerrootrc to unprivileged user in containerrc.
-# Additionally, su triggers logind and elogind. (Except su from busybox?)
-# Called by x11docker-agetty.
+# Called e.g. by x11docker-agetty.
 . /usr/local/bin/x11docker-message
-debugnote 'Running x11docker-login'
+debugnote 'Running x11docker-su'
 chmod +x $(convertpath share "$Containerrc")
-\" >/usr/local/bin/x11docker-login
+\" >/usr/local/bin/x11docker-su
 "
-  case "$Initsystem" in
-    systemd)                      echo "echo \"loginctl enable-linger \$Containeruser \"                                   >>/usr/local/bin/x11docker-login" ;;
-  esac
   case "$Backend" in
-    proot)                        echo "echo 'exec /bin/sh - $(convertpath share "$Containerrc")'                          >>/usr/local/bin/x11docker-login" ;;
-#    docker|podman|nerdctl|chroot) echo "echo \"/bin/sh  $(convertpath share "$Containerrc")\" >>/usr/local/bin/x11docker-login" ;;
-    docker|podman|nerdctl|chroot) echo "echo \"exec su - -s /bin/sh  \$Containeruser $(convertpath share "$Containerrc")\" >>/usr/local/bin/x11docker-login" ;;
+    proot)                        echo "echo 'exec /bin/sh - $(convertpath share "$Containerrc")'                          >>/usr/local/bin/x11docker-su" ;;
+    docker|podman|nerdctl|chroot) echo "echo \"exec su - -s /bin/sh  \$Containeruser $(convertpath share "$Containerrc")\" >>/usr/local/bin/x11docker-su" ;;
   esac
 
   echo "
-chmod +x /usr/local/bin/x11docker-login
+chmod +x /usr/local/bin/x11docker-su
 
+### x11docker-agetty
 echo \"#! /bin/sh
 # Run agetty to get a valid console.
 # Needed at least for --interactive.
-# Runs x11docker-login.
+# Runs x11docker-su.
 # Called at different places depending on init system.
 . /usr/local/bin/x11docker-message
 debugnote 'Running x11docker-agetty'
-[ -e /sbin/agetty ] && exec agetty -a \$Containeruser -l /usr/local/bin/x11docker-login console
+"
+  case "$Initsystem" in
+    systemd)
+      echo "
+#su \$Containeruser -c 'mkdir -p \$Containeruserhome/.config/systemd/user/default.target.wants' ### FIXME fails for unknown reasons, authentication issue
+#mkdir -p -m 777 \$Containeruserhome/.config/systemd/user/default.target.wants
+#ln -s /etc/systemd/user/x11docker-containerrc.service \$Containeruserhome/.config/systemd/user/default.target.wants/x11docker-containerrc.service
+[ -e /sbin/agetty ] && exec agetty --autologin \$Containeruser console
+" 
+    ;;
+    *)
+      echo "
+[ -e /sbin/agetty ] && exec agetty --autologin \$Containeruser -l /usr/local/bin/x11docker-su console
+"
+    ;;
+  esac
+  echo "
 debugnote 'x11docker-agetty: agetty not found.'
-[ '$Interactive' = 'yes' ] && note '/sbin/agetty not found. --interactive can fail.
+note '/sbin/agetty not found. Startup can fail.
   Please install package util-linux in image.'
-exec /usr/local/bin/x11docker-login
+exec /usr/local/bin/x11docker-su
 \" >/usr/local/bin/x11docker-agetty
-
 chmod +x /usr/local/bin/x11docker-agetty
 
+### x11docker-watch
 echo \"#! /bin/sh
 # Wait for end of x11docker and shut down container.
 # Started in background by x11docker for sysvinit|runit|openrc.
@@ -6314,8 +6338,9 @@ halt
 halt -f
 poweroff
 \" >/usr/local/bin/x11docker-watch
-
 chmod +x /usr/local/bin/x11docker-watch
+
+###
 "
   return 0
 }
@@ -6653,6 +6678,8 @@ rootrc_prepare_init_systemd() {
   echo "
 # --init=systemd
 
+echo '/bin/sh $(convertpath share "$Containerrc")' > /etc/profile.d/90-x11docker-containerrc.sh
+
 # remove failing and annoying services
 Unservicelist='
 apt-daily.service
@@ -6714,9 +6741,9 @@ Also=x11docker-journal.service
 \" > /etc/systemd/system/x11docker.target
 
 echo \"[Unit]
-Description=x11docker start service
-# start on console to support --interactive
-# runs x11docker-agetty->x11docker-login->containerrc->cmdrc
+Description=x11docker agetty service
+# initiate console
+# runs x11docker-agetty->x11docker-su or login->containerrc->cmdrc
 Wants=multi-user.target
 Wants=x11docker-watch.service
 Wants=x11docker-journal.service
@@ -6751,6 +6778,15 @@ ExecStart=/bin/sh -c 'while sleep 1; do systemctl is-active console-getty >/dev/
 [Install]
 WantedBy=x11docker.target
 \" > /etc/systemd/system/x11docker-watch.service
+
+echo \"[Unit]
+Description=x11docker containerrc service
+[Service]
+Type=simple
+ExecStart=sh $(convertpath share "$Containerrc")
+[Install]
+WantedBy=default.target
+\" > /etc/systemd/user/x11docker-containerrc.service
 
 echo \"[Unit]
 Description=x11docker journal log service
@@ -9077,6 +9113,7 @@ $Hostuserhome/.cache/x11docker/symlink
   Pulseaudiosocket="$Sharefolder/$Pulseaudiosocket"
   Storeinfofile="$Sharefolder/$Storeinfofile"                       && mkfile $Storeinfofile 666
   Storepidfile="$Sharefolder/$Storepidfile"                         && mkfile $Storepidfile
+  Systemdjournallogfile="$Sharefolder/$Systemdjournallogfile"       && mkfile $Systemdjournallogfile
   Timetosaygoodbyefile="$Sharefolder/$Timetosaygoodbyefile"         && mkfile $Timetosaygoodbyefile
   Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo"
   Westonini="$Sharefolder/$Westonini"                               && mkfile $Westonini
