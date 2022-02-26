@@ -3812,7 +3812,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   --pull=never \\
   --init \\
   --name $Xcontainername \\
-  --user ${Containeruseruid:-$Hostuseruid}:${Containerusergid:-$Hostusergid} \\
+  --user ${Hostuseruid}:${Hostusergid} \\
   --env HOME=/tmp \\
   --cap-drop ALL \\
   --security-opt=no-new-privileges \\
@@ -4698,6 +4698,7 @@ check_containerhome() {         # option --home: check HOME of container user.
   case "$Sharehome" in
     host)
       Containeruserhomebasefolder="/home"
+      [ "$Containeruser" = "root" ] && Containeruserhomebasefolder="/"
       # A change can break existing configs, e.g. playonlinux
 #      Containeruserhomebasefolder="/home.x11docker"
       [ "$Persistanthomevolume" = "$Containeruserhosthome" ] && {
@@ -4709,6 +4710,7 @@ check_containerhome() {         # option --home: check HOME of container user.
     no)
 #      Containeruserhomebasefolder="/home.tmp"
       Containeruserhomebasefolder="/home"
+      [ "$Containeruser" = "root" ] && Containeruserhomebasefolder="/"
     ;;
     volume)
       Containeruserhomebasefolder="/home.volume/$Persistanthomevolume"
@@ -5847,6 +5849,17 @@ done
 
 # /etc/profile.d
 "
+  case "$Initsystem" in
+    systemd|openrc|sysvinit|runit)
+      echo "
+install -m 666 /dev/null /etc/profile.d/90-x11docker-containerrc.sh
+echo '
+echo > /etc/profile.d/90-x11docker-containerrc.sh
+exec /bin/sh $(convertpath share "$Containerrc")
+' >> /etc/profile.d/90-x11docker-containerrc.sh
+"
+    ;;
+  esac
   while read Line; do
     echo "echo 'export $Line' >> /etc/profile.d/10-x11docker-env.sh"
   done <<< $(store_runoption dump env)
@@ -6132,6 +6145,11 @@ export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR
       # Check for dbus user daemon command
       echo "command -v dbus-run-session >/dev/null && Dbus=dbus-run-session || note \"Option --dbus: dbus seems to be not installed.
   Cannot run a DBus user session. Please install package dbus in image.\""
+      case "$Initsystem" in
+        systemd|sysvinit|openrc|runit)
+          echo "Dbus="
+        ;;
+      esac
     }
     echo "export DISPLAY='$Newdisplay' XAUTHORITY=$(convertpath share "$Xclientcookie")"
     case "$Xserver" in
@@ -6231,7 +6249,6 @@ Timetosaygoodbyefile=$(convertpath share "$Timetosaygoodbyefile")
     echo "
 debugnote \"cmdrc: Running container command:
   $Containerentrypoint $Containercommand\"
-note \"Container command: $Containerentrypoint $Containercommand\"
 "
     case "$Backend" in
       host|chroot)
@@ -6294,17 +6311,14 @@ chmod +x /usr/local/bin/x11docker-su
 echo \"#! /bin/sh
 # Run agetty to get a valid console.
 # Needed at least for --interactive.
-# Runs x11docker-su.
+# Runs x11docker-su or agetty with login
 # Called at different places depending on init system.
 . /usr/local/bin/x11docker-message
 debugnote 'Running x11docker-agetty'
 "
   case "$Initsystem" in
-    systemd)
+    systemd|openrc|sysvinit|runit)
       echo "
-#su \$Containeruser -c 'mkdir -p \$Containeruserhome/.config/systemd/user/default.target.wants' ### FIXME fails for unknown reasons, authentication issue
-#mkdir -p -m 777 \$Containeruserhome/.config/systemd/user/default.target.wants
-#ln -s /etc/systemd/user/x11docker-containerrc.service \$Containeruserhome/.config/systemd/user/default.target.wants/x11docker-containerrc.service
 [ -e /sbin/agetty ] && exec agetty --autologin \$Containeruser console
 " 
     ;;
@@ -6316,7 +6330,7 @@ debugnote 'Running x11docker-agetty'
   esac
   echo "
 debugnote 'x11docker-agetty: agetty not found.'
-note '/sbin/agetty not found. Startup can fail.
+note '/sbin/agetty not found. Startup can fail, --interactive can misbehave.
   Please install package util-linux in image.'
 exec /usr/local/bin/x11docker-su
 \" >/usr/local/bin/x11docker-agetty
@@ -6526,7 +6540,7 @@ rootrc_prepare_init_openrc() {
   echo "
 # --init=openrc
 
-# Tell openrc that it runs in docker container
+# Tell openrc that it runs in a container
 sed -e 's/#rc_sys=\"\"/rc_sys=\"$Backend\"/g' -i /etc/rc.conf
 
 # Create and enable x11docker service containing container command
@@ -6536,7 +6550,7 @@ depend() {
   after *
 }
 start() {
-  ebegin 'Starting containerrc'
+  ebegin 'Starting x11docker-agetty'
   /usr/local/bin/x11docker-agetty
   openrc-shutdown --poweroff 0
   shutdown 0
@@ -6545,12 +6559,11 @@ start() {
   eend \$?
 }
 \" > /etc/init.d/x11docker.service
-
 chmod +x /etc/init.d/x11docker.service
 rc-update add x11docker.service default
 
 # DBus service
-echo '#!/sbin/openrc-run
+[ -e /etc/init.d/dbus ] || echo '#!/sbin/openrc-run
 start() {
   ebegin \"Starting D-BUS system messagebus\"
   /usr/bin/dbus-uuidgen --ensure=/etc/machine-id
@@ -6582,6 +6595,7 @@ rc-update add dbus default
 rootrc_prepare_init_runit() {
   echo "
 # --init=runit
+
 # create and enable x11docker service containing container command
 mkdir -p /etc/sv/x11docker
 mkdir -p /etc/runit/runsvdir/default
@@ -6677,8 +6691,6 @@ touch /etc/runit/stopit
 rootrc_prepare_init_systemd() {
   echo "
 # --init=systemd
-
-echo '/bin/sh $(convertpath share "$Containerrc")' > /etc/profile.d/90-x11docker-containerrc.sh
 
 # remove failing and annoying services
 Unservicelist='
