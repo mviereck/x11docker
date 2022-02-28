@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.1.1-beta-8"
+Version="7.1.1-beta-9"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -1727,7 +1727,7 @@ set_password() {                # option --password: set container user password
   return 0
 }
 
-#### features
+#### host integration features
 check_windowmanager() {         # option --wm: search a host window manager
   # check --wm arguments, adjust mode
   case "$Xcontainer" in
@@ -1845,7 +1845,7 @@ setup_clipboard() {             # option --clipboard: create shareclipboard scri
 
   case "$Xserver" in
     --tty|--weston|--hostwayland|--kwin)
-      warning "Option --clipboard is not supported for $Xserver.
+      note "Option --clipboard is not supported for $Xserver.
   Fallback: Disabling option --clipboard."
       check_fallback
       Shareclipboard="no"
@@ -1910,6 +1910,7 @@ while rocknroll ; do
   mysleep 0.3                       # sleep a bit to avoid high cpu usage
 done
 " >> "$Clipboardrc"
+cat $Clipboardrc
     ;;
   esac
   return 0
@@ -3777,8 +3778,8 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   [ -n "$Hostdisplay" ] && {
     Xc_hostx="\\
   --env DISPLAY=$Hostdisplay \\
-  --env XAUTHORITY=/Xauthority \\
-  --mount type=bind,source=$Hostxauthority,target=/Xauthority,readonly"
+  --env XAUTHORITY=$Hostxauthority \\
+  --mount type=bind,source=$Hostxauthority,target=$Hostxauthority,readonly"
     [ -S "/tmp/.X11-unix/X$Hostdisplaynumber" ] && Xc_hostx="$Xc_hostx \\
   --mount type=bind,source=/tmp/.X11-unix/X$Hostdisplaynumber,target=/X$Hostdisplaynumber,readonly"
   }
@@ -4550,11 +4551,16 @@ check_cgroup() {                # check [and create] cgroup mountpoint for syste
       v2)
         case "$Initsystem" in
           systemd)
-            Remountcgroup="yes"
-            warning "Option --init=systemd: To support systemd in docker container
+            case "$Runtime" in
+              sysbox-runc) ;;
+              *)
+                Remountcgroup="yes"
+                warning "Option --init=systemd: To support systemd in docker container
   with cgroupv2 on host, x11docker shortly runs a privileged container
   of '$Imagename' with 'nsenter' to remount the container's /sys/fs/cgroup.
   Evil images might be set up to abuse these privileges."
+              ;;
+            esac
           ;;
         esac
       ;;
@@ -5999,8 +6005,8 @@ exec 1>&5 2>&6
         echo '  error "Option --init=systemd: systemd not found."'
         echo '  exit 64'
         echo '}'
-        echo "export SYSTEMD_LOG_LEVEL=info"
-        echo "export SYSTEMD_LOG_TARGET=console"
+        echo 'export SYSTEMD_LOG_LEVEL=info'
+        echo 'export SYSTEMD_LOG_TARGET=console'
         echo 'exec $Systemd --show-status=yes'
       ;;
     esac
@@ -6066,6 +6072,8 @@ verbose \"containerrc: Container system:
         }
       ;;
     esac
+    
+    [ "$Initsystem" = 'systemd' ] && echo "systemctl --user start dbus"  ### FIXME
 
     echo "
 # USER and HOME
@@ -6091,11 +6099,11 @@ export USER=\"\$Containeruser\"
       ;;
     esac
 
-
     echo "
 [ \"\$Containeruserhome\" ] && export HOME=\"\$Containeruserhome\"
 
 # XDG_RUNTIME_DIR
+
 Containeruseruid=\$(id -u \$Containeruser)
 export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR
 [ -e /run/user/\$Containeruseruid ] && {
@@ -6201,7 +6209,6 @@ verbose \"Container environment:
 \$(env | sort)\"
 "
 
-    [ "$Initsystem" = 'systemd' ] && echo "systemctl --user start dbus"  ### FIXME
     case "$Interactive" in
       no)
         echo "LD_PRELOAD= tail -f $(convertpath share "$Cmdstdoutlogfile")     2>/dev/null & Stdoutpid=\$!"
@@ -7180,7 +7187,6 @@ $(rmcr < "$Containerlogfile" | uniq )"
 
       # --init=systemd cgroupv2
       [ "$Remountcgroup" = "yes" ] && {
-        debugnote "start_container(): Remounting /sys/fs/cgroup to :rw with nsenter"
         # Compare https://github.com/mviereck/x11docker/issues/349
         Remountcommand="$Backendbin run --rm --user root"
         Remountcommand="$Remountcommand --cap-add SYS_ADMIN --cap-add=SYS_PTRACE --security-opt apparmor=unconfined"
@@ -7193,7 +7199,7 @@ $(rmcr < "$Containerlogfile" | uniq )"
         Remountcommand="$Remountcommand         findmnt /sys/fs/cgroup -O rw || mount -v -o remount,rw /sys/fs/cgroup/ ; "
         Remountcommand="$Remountcommand         findmnt /sys/fs/cgroup -O rw || echo \"ERROR: cgroup mount failed.:NOTE\" >>/x11docker/message.fifo ; "
         Remountcommand="$Remountcommand         touch /nsenter_is_ready'"
-        note "start_container(): nsenter command:
+        debugnote "start_container(): Remounting /sys/fs/cgroup to :rw with nsenter:
   $Remountcommand"
         echo "cgroup mount with nsenter:" >> "$Containerlogfile"
         eval $Remountcommand >> "$Containerlogfile" 2>&1 || {
@@ -8706,11 +8712,13 @@ check_options_interferences() { # check multiple option interferences, change se
     sysbox-runc)
       note "Option --runtime=sysbox-runc is experimental yet.
   Capability settings do not work as intended.
-  Needs sysbox >=0.5.0."
+  Needs sysbox >=0.5.0 and linux kernel >=5.12."
       check_optionset "--runtime=sysbox-runc" "--alsa --webcam" ||:
-      Switchcontaineruser="yes"
-      #Sharewebcam="no"
-      #Sharealsa="no"
+      Switchcontaineruser="yes" ### FIXME not needed once cap settings are regarded
+      verlt "5.12" "$(uname -r)" && error "Option --runtime=sysbox-runc needs at least
+  Linux kernel version >=5.12"
+      verlt "0.5" "$(sysbox-runc -v | grep version | tr -d ' \t'| cut -d: -f2)" && error "Option --runtime=sysbox-runc needs at least
+  Sysbox version >=0.5.0"
     ;;
     nvidia)
       [ "$Sharegpu" = "no" ] && {
@@ -10145,7 +10153,6 @@ main() {
   [ "$Pulseaudiomode" ]          && setup_sound_pulseaudio                        # --pulseaudio
   [ "$Sharealsa" = "yes" ]       && setup_sound_alsa                              # --alsa
   [ "$Cleanxhost" = "yes" ]      && clean_xhost                                   # --clean-xhost
-  [ "$Shareclipboard" = "yes" ]  && setup_clipboard ||:                           # --clipboard
   [ "$Sharehostdbus" = "yes" ]   && setup_hostdbus                                # --hostdbus
 
   #### Create command to run X server [and/or Wayland compositor]
@@ -10157,6 +10164,7 @@ main() {
     start_xcontainer
   }
   store_newxenv
+  [ "$Shareclipboard" = "yes" ]  && setup_clipboard ||:                           # --clipboard
   [ "$Xserver" != "--xorg" ]     && [ -n "$Newxvt" ] && note "Option --vt only takes effect with option --xorg."
   [ "$Xserver" = "--xorg" ]      && check_vt                                      # --vt: find free tty/virtual terminal for Xorg
   create_xcommand                # set up start command for X server              # all X server and Wayland options
