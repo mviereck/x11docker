@@ -90,6 +90,7 @@ For a quick start:
    - `--gpu` for hardware acceleration. 
  - [Examples](#examples):
    ```sh
+   x11docker x11docker/xfce thunar
    x11docker --desktop x11docker/xfce
    x11docker --gpu x11docker/xfce glxgears
    ```
@@ -254,7 +255,8 @@ Container runtimes known and supported by x11docker are:
    `kata` aims to combine the security advantages of containers and virtual machines.
    - Some x11docker options are not possible with `--runtime=kata-runtime`. Most important: `--hostdisplay`, `--webcam` and all Wayland related options. 
      For `--gpu` only `--xorg` with indirect rendering is supported. 
- - [`sysbox-runtime`](https://github.com/nestybox/sysbox): Based on runc, aims to enhance container isolation. Support is experimental yet.
+ - [`sysbox-runtime`](https://github.com/nestybox/sysbox): Based on runc, aims to enhance container isolation. 
+   Support is experimental yet. Needs Sybox>=0.5.0 and kernel version >=5.12.
  
 Using different runtimes is well tested for rootful Docker, but not for other [backend setups](#backend-docker-podman-or-nerdctl).
  
@@ -283,26 +285,30 @@ Possible runtime configuration in `/etc/docker/daemon.json`:
   }
 }
 ```
- 
+
 ### Backends other than docker
 x11docker supports container tools [Docker](https://en.wikipedia.org/wiki/Docker_(software)), [podman](http://docs.podman.io/en/latest/) 
 and [nerdctl](https://github.com/containerd/nerdctl) with option `--backend=BACKEND` in rootful and rootless mode.
- - By default x11docker tries to run `docker`. Alternatively set option `--backend=podman` or `--backend=nerdctl`.
+Supported `--backend` arguments: `docker` `podman` `nerdctl` `proot` `host`
+
+Container backends:
+ - By default x11docker tries to run `docker`.
+   - To change the default `--backend=docker` to another one like `--backend=podman`, create a [`default` file for `--preset`](#default-preset-for-all-x11docker-sessions).
  - Recommended for rootful container backend: `docker` or `podman`
  - Recommended for rootless container backend: `podman` 
    - Only `podman` allows option `--home` in rootless mode yet.
    - Only `podman` provides useful file ownerships with option `--share` in rootless mode yet.
-   
+
 Other supported backends that are in fact no containers:
  - `--backend=host` runs a host application on a new X server. No containerization is involved.
  - `--backend=proot` runs a command in a rootfs file system, i.e. in a folder that contains a full linux system.
+   - `--backend=proot` is useful if you cannot use or install a real container backend for some reasons. 
+     A statical build of [`proot`](https://github.com/proot-me/proot) is available, too.
    - `proot` is similar to `chroot`, but does not need root privileges.
-   - Either specify path to a folder with a rootfs as IMAGENAME, or provide one to call with 'image-name' at `~/.local/share/x11docker/ROOTFS/image-name`.
-   - Tool [`image2rootfs`}(https://github.com/mviereck/image2rootfs) helps to create a rootfs from docker images.
+   - Either specify a path to a folder with a rootfs as IMAGENAME, or provide a rootfs to call with 'image-name' at `~/.local/share/x11docker/ROOTFS/image-name`.
+     - Tool [`image2rootfs`}(https://github.com/mviereck/image2rootfs) helps to create a rootfs from docker images.
    - Changes done in the `proot` environment are persistent, in opposite to backends `docker|podman|nerdctl` that always run a fresh container.
    - Prefer a real container backend as they provide better isolation from host.
-
-To change the default `--backend=docker` to another one like `--backend=podman`, create a [`default` file for `--preset`](#default-preset-for-all-x11docker-sessions).
 
 ### Preconfiguration with --preset
 For often used option combinations you might want to use option `--preset FILENAME` to have a command shortcut. 

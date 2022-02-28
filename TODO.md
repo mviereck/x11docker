@@ -2,12 +2,9 @@
 x11docker ToDo notes
 
 ## Work in progress
- - --xc --user=root fails
-
  - centralize argument checks
  - change global "no" to ""
  - --xc=backend
- - --xc: Sysbox and runc both in use
  - --pulseaudio=host: check possible tcp setup
  
  - `--interactive --init=runit|openrc|sysvinit`: no job control in shell
@@ -35,7 +32,6 @@ x11docker ToDo notes
    - --xpra-xwayland --xc: xpra client fails with keyboard error 
  
 ## Issues to fix
- - sysbox: warning on capabilities
  - --build: download files for COPY/ADD (x11docker/check, x11docker/xserver)
  - `--remove`: give note about not removed files in `~./config/x11docker` and `/etc/x11docker`
  - `--update`: Check if installs not into `/usr/bin` or `/usr/local/bin`. Do not install other files then.
@@ -73,7 +69,6 @@ x11docker ToDo notes
  - `--wayland --user`: wayland socket access denied due to `XDG_RUNTIME_DIR` file access permissions
 
 ## Nice to fix (images)
- - `x11docker/check`: Print several checks in terminal before running gui
  - `x11docker/fluxbox` on arch host: background can miss, sometimes no context menu. Where is the difference to other hosts?
 
 ## 3rd party bugs
@@ -86,7 +81,7 @@ x11docker ToDo notes
    https://bugzilla.redhat.com/show_bug.cgi?id=1498669
   
 ## Improvements
- - `--cleanup`: avoid hardcoded paths
+ - `--cleanup`: avoid hardcoded pathes
  - dependency wiki: Cygwin packages
  - `x11docker/check`: palinopsia: check video RAM size with `glxinfo`, adjust requested RAM size.
  - further checks of `/etc/pam.d`

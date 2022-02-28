@@ -6,17 +6,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [7.1.1](https://github.com/mviereck/x11docker/releases/tag/v7.1.1) - 2022-02-28
 ### Added
  - `--gpu=virgl`: Experimental GPU access with `virgl_test_server`.
    Currently only along with option `--xc`.
    Allows acceleration for Xephyr, nxagent, Xvfb etc.
  - `--gpu=iglx`: Enable indirect rendering (`--xorg` only). Replaces `--iglx`.
+ - `--pulseaudio=host`: Workaround to support Pipewire.
+   [(#418)](https://github.com/mviereck/x11docker/issues/418)
 ### Fixed
- - `--user=RETAIN`: Some fixes.
-   [(#417)](https://github.com/mviereck/x11docker/issues/417)
  - `--init=systemd`: Changed login and service setup to support arch containers.
    [(#417)](https://github.com/mviereck/x11docker/issues/417)
+ - `--user=RETAIN`: Some fixes.
+   [(#417)](https://github.com/mviereck/x11docker/issues/417)
+ - `--clipboard`: Fix for `--xc`.
 ### Deprecated
  - `--iglx`: Use `--gpu=iglx` instead.
 
