@@ -2,15 +2,16 @@
 x11docker ToDo notes
 
 ## Work in progress
+ 
  - centralize argument checks
  - change global "no" to ""
  - --xc=backend
  - --pulseaudio=host: check possible tcp setup
- 
- - `--interactive --init=runit|openrc|sysvinit`: no job control in shell
+
+ - --interactive --init=runit|openrc|sysvinit: no job control in shell
  - --init=openrc|runit: elogind fails
  - check elogind with cgroupv2. maybe drop --sharecgroup and set up in container only
- 
+
  - sommelier
  - --backend=systemd-nspawn|lxc|lxd|runc
  - check empty XDG_RUNTIME_DIR e.g. with --user, --hostuser
@@ -21,16 +22,16 @@ x11docker ToDo notes
    - --init except systemd possible?
    - clean /tmp
    - how to disable old binds? issue e.g. with/without --home, --share
-   
+
  - --tty should not fall back to X (seen with --gpu)
  
  - kata: add new runtime for nerdctl io.containerd.kata.v2
-   
+
  - X in container:
    - use xauth and others from image if not available on host
    - missing: Xorg, Weston/Kwin on console, xpra-xwayland
    - --xpra-xwayland --xc: xpra client fails with keyboard error 
- 
+
 ## Issues to fix
  - --build: download files for COPY/ADD (x11docker/check, x11docker/xserver)
  - `--remove`: give note about not removed files in `~./config/x11docker` and `/etc/x11docker`
