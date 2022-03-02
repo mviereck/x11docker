@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+### Fixed
+ - `-g, --gpu`: Fix parsing for `-g`(no optional argument).
+   [(#419)](https://github.com/mviereck/x11docker/issues/419)
+ - `--backend=proot`: fix `--interactive`.
+
 ## [7.1.2](https://github.com/mviereck/x11docker/releases/tag/v7.1.1) - 2022-03-01
 ### Fixed
  - `--share`: Mount Docker volumes (regression fix).
