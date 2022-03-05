@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.1.3"
+Version="7.1.4-beta-1"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -104,7 +104,8 @@ Basic settings:
                                 ~/.local/share/x11docker/ROOTFS/image-name
                        Tool 'image2rootfs' helps to create a rootfs from docker
                        images: https://github.com/mviereck/image2rootfs
-     --xc [=yes|no]    Run X server in container of x11docker/xserver.
+     --xc [=yes|no|BACKEND]  Run X server in container of x11docker/xserver.
+                       BACKEND can specify one of docker|podman|nerdctl.
      --xonly           Only start empty X server.
 
 Host integration:
@@ -2223,7 +2224,7 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
 
   case "$Pulseaudiomode" in
     socket|tcp)
-      grep -q -i "PipeWire" <<< "$(pactl info)" && note "Option --pulseaudio: Found pipewire sound server.
+      grep -q -i "PipeWire" <<< "$(unpriv "pactl info")" && note "Option --pulseaudio: Found pipewire sound server.
   If pulseaudio sound fails, you can try --pulseaudio=host instead."
     ;;
   esac
@@ -2271,7 +2272,7 @@ $(nl -ba < "$Pulseaudioconf")"
       store_runoption env "PULSE_SERVER=tcp:$Hostip:$Pulseaudioport"
     ;;
     host)
-      Pulseaudiosocket="$(LC_ALL=C pactl info | grep 'Server String' |rev|cut -d' ' -f1|rev)"
+      Pulseaudiosocket="$(unpriv "env LC_ALL=C pactl info" | grep 'Server String' |rev|cut -d' ' -f1|rev)"
       store_runoption env "PULSE_SERVER=unix:/tmp/pulseaudio.socket.host"
 #      store_runoption env "PULSE_COOKIE=$(convertpath share "$Pulseaudiocookie")"
     ;;
@@ -3200,13 +3201,13 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   Xserveroptions_custom="$Xserveroptions"
   Xserveroptions=""
 
-  [ "$Xcontainer" = "yes" ]                             && Usemitshm="yes"
-  [ "$Shareipc" = "host" ]                              && Usemitshm="yes"
-  [ "$Xcontainer" = "no" ] &&[ "$Shareipc" != "host" ]  && Usemitshm="no"
-  [ "$Containeruser" != "$Hostuser" ]                   && Usemitshm="no"
-  [ "$Xoverip" = "yes" ]                                && Usemitshm="no"
+  [ "$Xcontainer" = "yes" ] && [ "$Xcontainerbackend" = "$Backend" ] && Usemitshm="yes"
+  [ "$Shareipc" = "host" ]                                           && Usemitshm="yes"
+  [ "$Xcontainer" = "no" ] &&[ "$Shareipc" != "host" ]               && Usemitshm="no"
+  [ "$Containeruser" != "$Hostuser" ]                                && Usemitshm="no"
+  [ "$Xoverip" = "yes" ]                                             && Usemitshm="no"
   case "$Runtime" in
-    kata-runtime|sysbox-runc)                              Usemitshm="no" ;;
+    kata-runtime|sysbox-runc)                                           Usemitshm="no" ;;
   esac
 
   #### General X server options
@@ -3795,7 +3796,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   mkfile "$Xcontainerrc"
   mkfile "$Cachefolder/etcpasswd.xcontainer"
   echo "$Containeruser:x:${Containeruseruid:-$Hostuseruid}:${Containerusergid:-$Hostusergid}:$Containeruser,,,:/tmp:/bin/bash" >> "$Cachefolder/etcpasswd.xcontainer"
-  
+
   # code snippets
   Xc_containerx="\\
   --mount type=bind,source=$Cachefolder/tmp,target=/tmp \\
@@ -3839,13 +3840,19 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   --pull=never \\
   --init \\
   --name $Xcontainername \\
-  --user ${Hostuseruid}:${Hostusergid} \\
   --env HOME=/tmp \\
   --cap-drop ALL \\
   --security-opt=no-new-privileges \\
   --mount type=bind,source=$Sharefolder,target=$Sharefolder \\
   --mount type=bind,source=$Cachefolder/etcpasswd.xcontainer,target=/etc/passwd,readonly \\
   --mount type=bind,source=$Xcontainerrc,target=/xcontainerrc,readonly"
+  [ "$Containeruser" = "$Hostuser" ] && {
+    Xcontainercommand="$Xcontainercommand \\
+  --user ${Containeruseruid}:${Containerusergid}"
+  } || {
+    Xcontainercommand="$Xcontainercommand \\
+  --user ${Hostuseruid}:${Hostusergid}"
+  }
 
   case "$Xoverip" in
     no) Xcontainercommand="$Backendbin \\
@@ -3877,6 +3884,18 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   case "$Runtime" in
     "") ;;
     kata-runtime) ;;
+    sysbox-runc)
+      case "$Xserver" in
+        *xwayland)
+          Xcontainercommand="$Xcontainercommand \\
+  --runtime runc"
+        ;;
+        *)
+          Xcontainercommand="$Xcontainercommand \\
+  --runtime $Runtime"
+        ;;
+      esac
+    ;;
     *)
       Xcontainercommand="$Xcontainercommand \\
   --runtime $Runtime"
@@ -5203,7 +5222,7 @@ $Nvidiainstallerfile|$Rootfs/$Nvidiacontainerfile"
           docker|podman|nerdctl)
             Backendcommand="$Backendcommand \\
   --mount $(convertpath mount "$Cachefolder/tmp/.X11-unix/X$Newdisplaynumber:ro" "$Newxsocket")"
-            [ "$Shareipc" = "no" ] && [ "$Containeruser" = "$Hostuser" ] && {
+            [ "$Shareipc" = "no" ] && [ "$Containeruser" = "$Hostuser" ] && [ "$Xcontainerbackend" = "$Backend" ] && {
               case "$Runtime" in
                 kata-runtime|sysbox-runc) ;;
                 *)
@@ -9336,21 +9355,25 @@ check_options_interferences() { # check multiple option interferences, change se
   case "$Runtime" in
     ""|runc|crun|oci) ;;
     sysbox-runc)
-      note "Option --runtime=sysbox-runc is experimental yet.
-  Capability settings do not work as intended.
-  Needs sysbox >=0.5.0 and linux kernel >=5.12."
-      check_optionset "--runtime=sysbox-runc" "--alsa --webcam" ||:
-      Switchcontaineruser="yes" ### FIXME not needed once cap settings are regarded
+      case "$Backend" in
+        docker) ;;
+        *) note "Option --runtime=$Runtime --backend=$Backend: $Runtime is known
+  to work with Docker only yet." ;;
+      esac
+      store_runoption env "SYSBOX_HONOR_CAPS=TRUE"
+      check_optionset "--runtime=sysbox-runc" "--alsa --webcam" || check_fallback
       verlt "$(uname -r)" "5.12" && error "Option --runtime=sysbox-runc needs at least
   Linux kernel version >=5.12"
       verlt "$(sysbox-runc -v | grep version | tr -d ' \t'| cut -d: -f2)" "0.5" && error "Option --runtime=sysbox-runc needs at least
   Sysbox version >=0.5.0"
+      [ "$Sharegpu" = "yes" ] && note "Option --gpu with option --runtime=$Runtime:
+  GPU access might fail for some applications."
     ;;
     nvidia)
       [ "$Sharegpu" = "no" ] && {
         note "Option --runtime=nvidia: Enabling option --gpu"
-        Sharegpu="yes"
         check_fallback
+        Sharegpu="yes"
       }
     ;;
     kata-runtime)

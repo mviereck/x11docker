@@ -6,7 +6,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [7.1.3](https://github.com/mviereck/x11docker/releases/tag/v7.1.3) - 2022-03-02
+## [Unreleased]
+### Added
+ - `--xc=BACKEND`: Optional argument to choose backend for X container.
+
+## [7.1.3](https://github.com/mviereck/x11docker/releases/tag/v7.1.3) - 2022-03-02 
 ### Fixed
  - `-g, --gpu`: Fix parsing for `-g`(no optional argument).
    [(#419)](https://github.com/mviereck/x11docker/issues/419)
