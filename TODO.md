@@ -5,8 +5,8 @@ x11docker ToDo notes
  
  - centralize argument checks
  - change global "no" to ""
- - --xc=backend
  - --pulseaudio=host: check possible tcp setup
+ - --interactive fails now with old systemd versions.
 
  - --interactive --init=runit|openrc|sysvinit: no job control in shell
  - --init=openrc|runit: elogind fails
