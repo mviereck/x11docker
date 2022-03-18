@@ -10,8 +10,9 @@ Project website: https://github.com/mviereck/x11docker
 ### Added
  - `--xc=BACKEND`: Optional argument to choose backend for X container.
 ### Fixed
- - `--build`, `--cleanup`: Fix backend check.
+ - `--build`, `--cleanup`: Fix backend check (regression).
    [(#423)](https://github.com/mviereck/x11docker/issues/423)
+ - `--scale`: Fix for `--xpra*` (regression).
 
 ## [7.1.3](https://github.com/mviereck/x11docker/releases/tag/v7.1.3) - 2022-03-02 
 ### Fixed
