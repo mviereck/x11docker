@@ -2621,7 +2621,7 @@ check_xcontainer() {            # option --xc: check image x11docker/xserver
   return 0
 }
 check_xdepends() {              # check dependencies on host for X server option $1
-  # Return 1 if something is missing
+  # Return 1 if something is missing or not possible
   local Return= Message=
 
   [ "$Lastcheckedxserver" = "${1:-}" ] && debugnote "Dependencies of ${1:-} already checked: $Lastcheckedxserverresult " && return "$Lastcheckedxserverresult"
@@ -2629,6 +2629,15 @@ check_xdepends() {              # check dependencies on host for X server option
   case "$Autochooseserver" in
     yes) Message="debugnote" ;;
     no)  Message="note" ;;
+  esac
+  # --desktop
+  case "$Xserver" in
+    --hostdisplay|--hostwayland)
+      [ "$Desktopmode" = "yes" ] && {
+        $Message "${1:-} does not support option --desktop."
+        Return=1
+      }
+    ;;
   esac
   # xinit
   case "${1:-}" in
@@ -2676,6 +2685,13 @@ check_xdepends() {              # check dependencies on host for X server option
   different from host user $Hostuser (option --user=$Containeruser)."
         Return=1
       }
+    ;;
+  esac
+  [ "$Setupwayland" = "yes" ] && case "$Xserver" in
+    --weston|--kwin|--hostwayland) ;;
+    *) 
+      $Message "${1:-} does not support a Wayland environment." 
+      Return=1
     ;;
   esac
   # X command
@@ -3073,12 +3089,22 @@ check_xserver() {               # check chosen X server, auto-choose X server
   or WAYLAND_DISPLAY and XDG_RUNTIME_DIR accordingly."
   }
 
+  # --wayland
+  case "$Xserver" in
+    --weston|--kwin|--hostwayland) Setupwayland="yes" ;;
+  esac
+  [ "$Setupwayland" = "yes" ]          && { check_xdepends "$Xserver"        || Xserver="--hostwayland" ; }
+  [ "$Xserver" = "--kwin" ]            && { check_xdepends --kwin            || Xserver="--weston" ; }
+  [ "$Xserver" = "--hostwayland" ]     && { check_xdepends --hostwayland     || Xserver="--weston"  ; }
+  [ "$Xserver" = "--weston" ]          && { check_xdepends --weston          || Xserver="--kwin" ; }
+  [ "$Setupwayland" = "yes" ]          && { Autochooseserver="no" check_xdepends $Xserver || error "Failed to set up a Wayland environment.
+  Please install 'weston' or 'kwin_wayland'." ; }
+
   ## check if dependencies for chosen X server are installed, fall back to best alternatives if not
   [ "$Xserver" = "--xwin" ]            && { check_xdepends --xwin            || Xserver="--runx" ; }
   [ "$Xserver" = "--runx" ]            && { check_xdepends --runx            || Xserver="--hostdisplay" ; }
   [ "$Xserver" = "--hostdisplay" ]     && { check_xdepends --hostdisplay     || Xserver="--xpra2" ; }
   [ "$Xserver" = "--xephyr" ]          && { check_xdepends --xephyr          || Xserver="--nxagent" ; }
-  [ "$Xserver" = "--hostwayland" ]     && { check_xdepends --hostwayland     || Xserver="--weston"  ; }
   [ "$Xserver" = "--nxagent" ]         && { check_xdepends --nxagent         || { [ "$Desktopmode" = "yes" ] && Xserver="--xephyr"        || Xserver="--xpra2" ; } ; }
   [ "$Xserver" = "--xpra2" ]           && { check_xdepends --xpra2           || Xserver="--xpra" ; }
   [ "$Xserver" = "--xpra" ]            && { check_xdepends --xpra            || { check_xdepends --nxagent   && Xserver="--nxagent"       || Xserver="--xephyr" ; } ; }
@@ -3088,15 +3114,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
   [ "$Xserver" = "--xwayland" ]        && { check_xdepends --xwayland        || Xserver="--weston-xwayland" ; }
   #[ "$Xserver" = "--xpra-xwayland" ]   && { check_xdepends --xpra-xwayland   || { [ "$Desktopmode" = "yes" ] && Xserver="--kwin-xwayland" || Xserver="--hostdisplay" ; } ; }
   [ "$Xserver" = "--kwin-xwayland" ]   && { check_xdepends --kwin-xwayland   || Xserver="--weston-xwayland" ; }
-  [ "$Xserver" = "--kwin" ]            && { check_xdepends --kwin            || Xserver="--weston" ; }
   #[ "$Xserver" = "--weston-xwayland" ] && { check_xdepends --weston-xwayland || Xserver="--kwin-xwayland" ; }
-  [ "$Xserver" = "--weston" ]          && { check_xdepends --weston          || Xserver="--kwin" ; }
-
-  case "$Xserver" in
-    --weston|--kwin|--hostwayland) Setupwayland="yes" ;;
-  esac
-  [ "$Setupwayland" = "yes" ]          && { Autochooseserver="no" check_xdepends $Xserver || error "Failed to set up a Wayland environment.
-  Please install 'weston' or 'kwin_wayland'." ; }
 
    # Xephyr as fallback for all options. Last fallback: Xorg
   check_xdepends $Xserver || Xserver="--xephyr"
@@ -8794,10 +8812,6 @@ check_options_arguments() {     # check for [likely] valid arguments
 check_options_interferences() { # check multiple option interferences, change settings if needed
   local Message
 
-  [ "$Desktopmode" = "no" ] && case "$Xserver" in
-    --xephyr|--weston-xwayland|--kwin-xwayland|--xorg|--xwayland) Windowmanagermode="auto" ;;
-  esac
-
   case "$Xserver" in
     --xorg) # check if --xorg can run
       [ "$Autochooseserver" = "yes" ] && [ "$Codename" = "xonly" ] && error "Will not run an empty Xorg in auto-choosing mode.
@@ -8831,9 +8845,10 @@ check_options_interferences() { # check multiple option interferences, change se
     ;;
     --tty)
       [ "$Interactive" = "no" ] && {
-        tput lines >/dev/null 2>&1 && store_runoption env "LINES=$(tput lines)"
-        tput cols  >/dev/null 2>&1 && store_runoption env "COLUMNS=$(tput cols)"
-        #verbose "Option --tty: Setting LINES and COLUMNS to terminal size ${COLUMNS}x${LINES}."
+        tput lines >/dev/null 2>&1 && {
+          store_runoption env "LINES=$(tput lines)"
+          store_runoption env "COLUMNS=$(tput cols)"
+        }
       }
     ;;
     --hostdisplay)
@@ -8856,7 +8871,7 @@ check_options_interferences() { # check multiple option interferences, change se
   esac
 
   # check if a host window manager is needed
-  [ "$Desktopmode" = "no" ] && [ -z "$Windowmanagermode" ] && case "$Xserver" in
+  [ "$Desktopmode" = "no" ] && [ "$Windowmanagermode" = "none" ] && case "$Xserver" in
     --xephyr|--weston-xwayland|--kwin-xwayland|--xorg|--xwayland)
       note "Option $Xserver: x11docker assumes that you need
   a window manager. If you don't want this, run with option --desktop.
@@ -8867,16 +8882,13 @@ check_options_interferences() { # check multiple option interferences, change se
           no)  note "Did not find a nice solution to run a seamless application
   on your desktop. (Only insecure option --hostdisplay would work).
   It is recommended to install xpra or nxagent
-  to allow a seamless mode without the need of a window manager from host." ;;
+  to allow a seamless mode without the need of a window manager." ;;
           yes) note "Did not find a nice solution to run a seamless application with
   option --gpu on your desktop. (Only insecure option --hostdisplay would work).
   It is recommended to install xpra, weston, Xwayland and xdotool
-  to allow a seamless mode without the need of a window manager from host." ;;
+  to allow a seamless mode without the need of a window manager." ;;
         esac
       }
-    ;;
-    *)
-      Windowmanagermode="none"
     ;;
   esac
 
@@ -8888,7 +8900,7 @@ check_options_interferences() { # check multiple option interferences, change se
         command -v xauth >/dev/null || {
           case "$Xoverip" in
             yes)
-              [ -z "$Hostxauthority" ] && [ "$Xserver" = "--hostdisplay" ] && Message=warning || Message=error
+              [ -z "$Hostxauthority" ] && [ "$Xserver" = "--hostdisplay" ] && Message="warning" || Message="error"
               $Message "Command 'xauth' not found.
       SECURITY RISK!
   Your X server would be accessible over network without authentication!
@@ -8925,18 +8937,14 @@ check_options_interferences() { # check multiple option interferences, change se
 
   # --hostdisplay with SSH
   [ "$Xserver" = "--hostdisplay" ] && [ "$Runsoverssh" = "yes" ] && {
-    [ "$Network" != "host" ]  && {
-      warning "For SSH connection with option --hostdisplay
-  x11docker must enable option --network=host.
-  It is recommended to use other X server options
+    [ "$Network" != "host" ]  && error "For SSH connection with option --hostdisplay
+  x11docker needs insecure option --network=host.
+  It is recommended to use another X server option
   like --xpra, --xephyr or --nxagent."
-      check_fallback
-      Network="host"
-    }
     [ "$Trusted" = "no" ] && {
       warning "For SSH connection with option --hostdisplay
   x11docker must allow trusted cookies.
-  It is recommended to use other X server options
+  It is recommended to use another X server option
   like --xpra, --xephyr or --nxagent."
       Trusted="yes"
     }
@@ -8951,11 +8959,13 @@ check_options_interferences() { # check multiple option interferences, change se
   Consider to use options --xpra or --nxagent instead of --hostdisplay."
         Trusted="yes"
       }
-    } || note "Command 'xdpyinfo' not found. Need it to check
+    } || {
+      note "Command 'xdpyinfo' not found. Need it to check
   whether Xorg supports untrusted cookies for --hostdisplay
   and whether extension MIT-SHM for shared memory is enabled.
   Please install 'xdpyinfo'.
   $Wikipackages"
+    }
   }
 
   # --clipboard
@@ -8981,8 +8991,8 @@ check_options_interferences() { # check multiple option interferences, change se
       esac
       case "$Xserver" in
         --xpra*|--hostdisplay|--kwin|--weston|--tty|--xwin|--runx) ;;
-        *) note "Sharing picture clips with option --clipboard
-  is only possible with options --xpra, --xpra-xwayland and --hostdisplay." ;;
+        *) note "Sharing picture clips with option --clipboard is only
+  possible with --xpra* options and --hostdisplay." ;;
       esac
     ;;
   esac
@@ -9302,19 +9312,7 @@ check_options_interferences() { # check multiple option interferences, change se
   esac
 
   # --wayland
-  [ "$Setupwayland" = "yes" ] && case "$Xserver" in
-    --weston|--kwin|--hostwayland) 
-      Dbusrunsession="yes"
-    ;;
-    *)
-      note "Option --wayland: Sharing Wayland socket is not supported
-  for X server option $Xserver.
-  You can try --weston, --kwin or --hostwayland instead.
-  Fallback: Disabling option --wayland."
-      check_fallback
-      Setupwayland="no"
-    ;;
-  esac
+  [ "$Setupwayland" = "yes" ] && Dbusrunsession="yes"
 
   # --init
   case "$Initsystem" in
@@ -9452,10 +9450,6 @@ check_options_messages() {      # some messages depending on options, but not ch
           esac
         ;;
       esac
-      [ "$Desktopmode" = "yes" ] && note "Can not avoid to use host window manager
-  along with option --hostdisplay.
-  You may get strange interferences with your host desktop.
-  Can be interesting though, having two overlapping desktops."
     ;;
 
     --xorg)
