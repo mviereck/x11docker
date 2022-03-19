@@ -4609,9 +4609,25 @@ check_runtime() {               # option --runtime
     podman)  Defaultruntime="$(parse_inspect "$Backendinfo" "host"  "ociRuntime" "name" | tr -d '"')" ;;
     nerdctl) Defaultruntime="" ;;
   esac
-
   debugnote "Default runtime: $Defaultruntime"
   [ -z "$Runtime" ]        && Runtime="$Defaultruntime"
+
+  case "$Runtime" in
+    ""|runc|crun|oci|nvidia|kata-runtime) ;;
+    sysbox-runc)
+      store_runoption env "SYSBOX_HONOR_CAPS=TRUE"
+      check_optionset "--runtime=sysbox-runc" "--alsa --webcam" ||:
+      verlt "$(uname -r)" "5.12" && error "Option --runtime=sysbox-runc needs at least
+  Linux kernel version >=5.12"
+      verlt "$(sysbox-runc -v | grep version | tr -d ' \t'| cut -d: -f2)" "0.5" && error "Option --runtime=sysbox-runc needs at least
+  Sysbox version >=0.5.0"
+    ;;
+    *)
+      note "Option --runtime: x11docker does not know runtime: '$Runtime'
+  Will try to use it anyway.
+  If that fails, you can try options --snap or --no-setup."
+    ;;
+  esac
 
   return 0
 }
@@ -8886,64 +8902,29 @@ check_options_arguments() {     # check for [likely] valid arguments
 check_options_interferences() { # check multiple option interferences, change settings if needed
   local Message
 
-  case "$Xserver" in
-    --xorg) 
-      # check if --xorg can be started by an unprivileged user
-      [ -e "/etc/X11/Xwrapper.config" ] && sed 's/ //g' /etc/X11/Xwrapper.config | grep -xq "allowed_users=anybody" && sed 's/ //g' /etc/X11/Xwrapper.config | grep -xq "needs_root_rights=yes" && {
-        Xlegacywrapper="yes"
-      } || {
-        Xlegacywrapper="no"
-      }
-    ;;
-    --tty)
-      [ "$Interactive" = "no" ] && {
-        tput lines >/dev/null 2>&1 && {
-          store_runoption env "LINES=$(tput lines)"
-          store_runoption env "COLUMNS=$(tput cols)"
-        }
-      }
-      check_optionset "--tty" "--border --clipboard --composite --desktop --display --dpi
-                               --fullscreen --keymap --no-auth --output-count --rotate
-                               --scale --size --vt --wm --westonini --xc --xfishtank
-                               --xhost --xonly --xoverip --xtest" ||:
-    ;;
-    --hostdisplay)
-      [ "$Winsubsystem" ] && Trusted="yes" || Trusted="no"
-      [ -n "$(cut -d: -f1 <<< "$Hostdisplay")" ] && Xoverip="yes"
-      [ -z "$Hostxauthority" ] && {
-        note "Option --hostdisplay: You host X server seems to run
-  without cookie authentication. Cannot set up a cookie for X access.
-  Fallback: Enabling option --no-auth."
+  # --runtime
+  case "$Runtime" in
+    nvidia)
+      [ "$Sharegpu" = "no" ] && {
+        note "Option --runtime=nvidia: Enabling option --gpu"
         check_fallback
-        Xauthentication="no"
+        Sharegpu="yes"
       }
-      check_optionset "$Xserver" "--xtest" || Xtest=""
+    ;;
+    kata-runtime)
+      [ "$Network" = "host" ] && {
+        note "Option --network=host: Sharing host network stack does not work
+  with --runtime=kata-runtime. Fallback: Allowing default kata --network."
+        check_fallback
+        Network=""
+      }
+      check_optionset "--runtime=kata-runtime" "--alsa --webcam" ||:
+      Sharewebcam="no"
+      Sharealsa="no"
     ;;
   esac
 
-  # check if a host window manager is needed
-  [ "$Desktopmode" = "no" ] && [ "$Windowmanagermode" = "none" ] && case "$Xserver" in
-    --xephyr|--weston-xwayland|--kwin-xwayland|--xorg|--xwayland)
-      note "Option $Xserver: x11docker assumes that you need
-  a window manager. If you don't want this, run with option --desktop.
-  Enabling option --wm to provide a window manager."
-      Windowmanagermode="auto"
-      [ "$Autochooseserver" = "yes" ] && [ "$Runsonconsole" = "no" ] && {
-        case "$Sharegpu" in
-          no)  note "Did not find a nice solution to run a seamless application
-  on your desktop. (Only insecure option --hostdisplay would work).
-  It is recommended to install xpra or nxagent
-  to allow a seamless mode without the need of a window manager." ;;
-          yes) note "Did not find a nice solution to run a seamless application with
-  option --gpu on your desktop. (Only insecure option --hostdisplay would work).
-  It is recommended to install xpra, weston, Xwayland and xdotool
-  to allow a seamless mode without the need of a window manager." ;;
-        esac
-      }
-    ;;
-  esac
-
-  # check xauth
+  # xauth
   [ "$Xauthentication" = "yes" ] && case "$Xserver" in
     --tty|--weston|--kwin|--hostwayland) Xauthentication="no" ;;
     *)
@@ -8976,73 +8957,181 @@ check_options_interferences() { # check multiple option interferences, change se
     ;;
   esac
 
-  # --fullscreen is nonsense on tty at all. Avoids weston error on tty.
-  [ "$Runsonconsole" = "yes" ] && Fullscreen="no"
-
-  # --hostdisplay --gpu
-  [ "$Xserver" = "--hostdisplay" ] && [ "$Sharegpu" = "yes" ]  && [ "$Trusted" = "no" ] && {
-    note "Option --gpu: To allow GPU acceleration with --hostdisplay,
-  x11docker will allow trusted cookies."
-    Trusted="yes"
+  # --clipboard
+  [ "$Shareclipboard" = "yes" ] && [ -z "$Hostdisplay" ] && {
+    note "Option --clipboard: Did not find a host display
+  to share the clipboard with. DISPLAY is empty.
+  Fallback: Disabling option --clipboard."
+    check_fallback
+    Shareclipboard="no"
+  }
+  [ "$Shareclipboard" = "yes" ] && {
+    case "$Xserver" in
+      --weston|--kwin|--tty) 
+        note "Option --clipboard: Sharing clipboard is not supported
+  with option $Xserver. Fallback: Disabling option --clipboard."
+        check_fallback
+        Shareclipboard="no"
+      ;;
+      --hostwayland) 
+        note "Option --clipboard: Sharing clipboard may or may not work.
+  Cannot enable or disable it, it depends on your Wayland compositor."
+        Shareclipboard="no"
+      ;;
+      --hostdisplay)
+        [ "$Trusted" = "no" ] && warning "Option --clipboard: To allow clipboard sharing with
+  option --hostdisplay, trusted cookies will be enabled.
+  No protection against X security leaks is left!
+  Consider to use another X server option."
+        Trusted="yes"
+      ;;
+    esac
   }
 
-  # --hostdisplay with SSH
-  [ "$Xserver" = "--hostdisplay" ] && [ "$Runsoverssh" = "yes" ] && {
-    [ "$Network" != "host" ]  && error "For SSH connection with option --hostdisplay
+  # X server
+  case "$Xserver" in
+    --xorg) 
+      # check if --xorg can be started by an unprivileged user
+      [ -e "/etc/X11/Xwrapper.config" ] && sed 's/ //g' /etc/X11/Xwrapper.config | grep -xq "allowed_users=anybody" && sed 's/ //g' /etc/X11/Xwrapper.config | grep -xq "needs_root_rights=yes" && {
+        Xlegacywrapper="yes"
+      } || {
+        Xlegacywrapper="no"
+      }
+      # xrandr: --scale --size --rotate
+      command -v xrandr >/dev/null || {
+        { [ "$Scaling" ] || [ -n "$Rotation" ] || [ -n "$Screensize" ] ; } && {
+          note "Option --xorg needs 'xrandr' to support
+  options --size, --scale and --rotate.
+  Fallback: Disabling options --size, --scale and --rotate.
+  Please install 'xrandr'.
+  $Wikipackagesimage"
+          check_fallback
+          Screensize=""
+          Rotation=""
+          Scaling=""
+        }
+      }
+    ;;
+    --tty)
+      [ "$Interactive" = "no" ] && {
+        tput lines >/dev/null 2>&1 && {
+          store_runoption env "LINES=$(tput lines)"
+          store_runoption env "COLUMNS=$(tput cols)"
+        }
+      }
+      check_optionset "--tty" "--border --clipboard --composite --desktop --display --dpi
+                               --fullscreen --keymap --no-auth --output-count --rotate
+                               --scale --size --vt --wm --westonini --xc --xfishtank
+                               --xhost --xonly --xoverip --xtest" ||:
+    ;;
+    --hostdisplay)
+      [ "$Winsubsystem" ] && Trusted="yes" || Trusted="no"
+      [ -n "$(cut -d: -f1 <<< "$Hostdisplay")" ] && Xoverip="yes"
+      check_optionset "$Xserver" "--xtest" || Xtest=""
+      [ "$Xauthentication" = "yes" ] && [ -z "$Hostxauthority" ] && {
+        note "Option --hostdisplay: You host X server seems to run
+  without cookie authentication. Cannot set up a cookie for X access.
+  Fallback: Enabling option --no-auth."
+        check_fallback
+        Xauthentication="no"
+      }
+      [ "$Xauthentication" = "yes" ] && [ "$Sharegpu" = "yes" ] && [ "$Trusted" = "no" ] && {
+        note "Option --gpu: To allow GPU acceleration with --hostdisplay,
+  x11docker will allow trusted cookies."
+        Trusted="yes"
+      }
+      [ "$Runsoverssh" = "yes" ] && {
+        [ "$Network" != "host" ]  && error "For SSH connection with option --hostdisplay
   x11docker needs insecure option --network=host.
   It is recommended to use another X server option
   like --xpra, --xephyr or --nxagent."
-    [ "$Trusted" = "no" ] && {
-      warning "For SSH connection with option --hostdisplay
+        [ "$Xauthentication" = "yes" ] && [ "$Trusted" = "no" ] && {
+          note "For SSH connection with option --hostdisplay
   x11docker must allow trusted cookies.
   It is recommended to use another X server option
   like --xpra, --xephyr or --nxagent."
-      Trusted="yes"
-    }
-  }
-
-  # --hostdisplay with untrusted cookies: check xdpyinfo
-  [ "$Xserver" = "--hostdisplay" ] && [ "$Trusted" = "no" ] && {
-    command -v xdpyinfo >/dev/null && {
-      xdpyinfo | grep -q SECURITY || {
-        note "Your X server does not support untrusted cookies.
+          Trusted="yes"
+        }
+      }
+      # untrusted cookies: check xdpyinfo
+      [ "$Trusted" = "no" ] && {
+        command -v xdpyinfo >/dev/null && {
+          xdpyinfo | grep -q SECURITY || {
+            note "Your X server does not support untrusted cookies.
   Have to allow trusted cookies.
   Consider to use options --xpra or --nxagent instead of --hostdisplay."
-        Trusted="yes"
-      }
-    } || {
-      note "Command 'xdpyinfo' not found. Need it to check
+            Trusted="yes"
+          }
+        } || {
+          note "Command 'xdpyinfo' not found. Need it to check
   whether Xorg supports untrusted cookies for --hostdisplay
   and whether extension MIT-SHM for shared memory is enabled.
   Please install 'xdpyinfo'.
   $Wikipackages"
-    }
-  }
-
-  # --clipboard
-  case "$Shareclipboard" in
-    yes)
-      case "$Xserver" in
-        --weston|--kwin|--tty) 
-          note "Sharing clipboard with $Xserver is not supported"
-          Shareclipboard="no"
-        ;;
-        --hostwayland) 
-          note "Sharing clipboard may or may not work.
-  Cannot enable or disable it, it depends on your Wayland compositor."
-          Shareclipboard="no"
-        ;;
-        --hostdisplay)
-          [ "$Trusted" = "no" ] && warning "Option --clipboard: To allow clipboard sharing with
-  option --hostdisplay, trusted cookies will be enabled.
-  No protection against X security leaks is left!
-  Consider to use another X server option."
-          Trusted="yes"
-        ;;
-      esac
+        }
+      }
+      [ "$Trusted" = "no" ] && warning "Option --hostdisplay: Clipboard isolation might fail."
+      # MIT-SHM
+      [ "$Trusted" = "yes" ] && [ "$Hostmitshm" = "yes" ] && [ "$Shareipc" != "host" ] && [ "$Runsoverssh" = "no" ] && {
+        # make XlibNoSHM.so available on host                    ### FIXME maybe not the best place here
+        [ "$Xcontainerimage" ] && [ ! -f "$Mitshmlib" ] && {
+          note "Copying XlibNoSHM.so from x11docker/xserver 
+  to $Mitshmlib
+  to make it available for --hostdisplay."
+          $Backendbin run --rm --user "$Hostuseruid:$Hostusergid" --volume "$Localsharedir":"$Localsharedir" -- "$Xcontainerimage" cp "/XlibNoSHM.so" "$Mitshmlib"
+        }
+        [ -f "$Mitshmlib" ] && {
+          ### FIXME check for possible existing LD_PRELOAD in container
+          store_runoption env "LD_PRELOAD=/lib/x86_64-linux-gnu/libdl.so.2:$Sharefoldercontainer/XlibNoSHM.so"
+          cp "$Mitshmlib" "$Sharefolder"
+        } || {
+          case "$Backend" in
+            docker|podman|nerdctl)
+              note "Option --hostdisplay: To allow --hostdisplay with trusted cookies,
+  x11docker must share host IPC namespace with container (option --ipc=host)
+  to allow shared memory for X extension MIT-SHM.
+  You can avoid this if you provide image x11docker/xserver
+  that contains an X library XlibNoSHM.so to avoid MIT-SHM issues."
+              case $Shareipc in
+                no|host) 
+                  Shareipc="host"
+                ;;
+                *) 
+                  note "Option --ipc: Did not change IPC settings due to 
+  custom setup (--ipc='$Shareipc'). Issues noted above might occure."
+                ;;
+              esac
+            ;;
+          esac
+        }
+      }
     ;;
   esac
-  [ "$Trusted" = "no" ] && warning "Option --hostdisplay: Clipboard isolation might fail."
+
+  # window manager
+  [ "$Desktopmode" = "no" ] && [ "$Windowmanagermode" = "none" ] && case "$Xserver" in
+    --xephyr|--weston-xwayland|--kwin-xwayland|--xorg|--xwayland)
+      note "Option $Xserver: x11docker assumes that you need
+  a window manager. If you don't want this, run with option --desktop.
+  Enabling option --wm to provide a window manager."
+      Windowmanagermode="auto"
+      [ "$Autochooseserver" = "yes" ] && [ "$Runsonconsole" = "no" ] && {
+        case "$Sharegpu" in
+          no)  note "Did not find a nice solution to run a seamless application
+  on your desktop. (Only insecure option --hostdisplay would work).
+  It is recommended to install xpra or nxagent
+  to allow a seamless mode without the need of a window manager." ;;
+          yes) note "Did not find a nice solution to run a seamless application with
+  option --gpu on your desktop. (Only insecure option --hostdisplay would work).
+  It is recommended to install xpra, weston, Xwayland and xdotool
+  to allow a seamless mode without the need of a window manager." ;;
+        esac
+      }
+    ;;
+  esac
+
+  # --fullscreen is nonsense on tty at all. Avoids weston error on tty.
+  [ "$Runsonconsole" = "yes" ] && Fullscreen="no"
 
   # --gpu=virgl
   case "$Virgl" in
@@ -9120,41 +9209,6 @@ check_options_interferences() { # check multiple option interferences, change se
     esac
   }
 
-  # --ipc=host: Check auto-enabling
-  [ "$Xserver" = "--hostdisplay" ] && [ "$Trusted" = "yes" ] && [ "$Hostmitshm" = "yes" ] && [ "$Shareipc" != "host" ] && [ "$Runsoverssh" = "no" ] && {
-    # make XlibNoSHM.so available on host                    ### FIXME maybe not the best place here
-    [ "$Xcontainerimage" ] && [ ! -f "$Mitshmlib" ] && {
-      note "Copying XlibNoSHM.so from x11docker/xserver 
-  to $Mitshmlib
-  to make it available for --hostdisplay."
-      $Backendbin run --rm --user "$Hostuseruid:$Hostusergid" --volume "$Localsharedir":"$Localsharedir" -- "$Xcontainerimage" cp "/XlibNoSHM.so" "$Mitshmlib"
-    }
-    [ -f "$Mitshmlib" ] && {
-      ### FIXME check for possible existing LD_PRELOAD in container
-      store_runoption env "LD_PRELOAD=/lib/x86_64-linux-gnu/libdl.so.2:$Sharefoldercontainer/XlibNoSHM.so"
-      cp "$Mitshmlib" "$Sharefolder"
-    } || {
-      case "$Backend" in
-        docker|podman|nerdctl)
-          note "Option --hostdisplay: To allow --hostdisplay with trusted cookies,
-  x11docker must share host IPC namespace with container (option --ipc=host)
-  to allow shared memory for X extension MIT-SHM.
-  You can avoid this if you provide image x11docker/xserver
-  that contains an X library XlibNoSHM.so to avoid MIT-SHM issues."
-          case $Shareipc in
-            no|host) 
-              Shareipc="host"
-            ;;
-            *) 
-              note "Option --ipc: Did not change IPC settings due to 
-  custom setup. Issues noted above might occure."
-            ;;
-          esac
-        ;;
-      esac
-    }
-  }
-
   # --keymap: XKB keyboard layout
   [ -n "$Xkblayout" ] && {
     case "$Xserver" in
@@ -9173,7 +9227,7 @@ check_options_interferences() { # check multiple option interferences, change se
     [ "$Xkblayout" = "clone" ] && case "$Xserver" in
       --nxagent) ;;
       *)
-        note "--keymap=clone is supported with --nxagent only.
+        note "Option --keymap=clone is supported with --nxagent only.
   Fallback: Disabling option --keymap."
         check_fallback
         Xkblayout=""
@@ -9196,23 +9250,6 @@ check_options_interferences() { # check multiple option interferences, change se
     ;;
   esac
 
-  # xrandr: --scale --size --rotate
-  command -v xrandr >/dev/null || case "$Xserver" in
-    --xorg)
-      { [ "$Scaling" ] || [ -n "$Rotation" ] || [ -n "$Screensize" ] ; } && {
-        note "Option --xorg needs 'xrandr' to support
-  options --size, --scale and --rotate.
-  Fallback: Disabling options --size, --scale and --rotate.
-  Please install 'xrandr'.
-  $Wikipackagesimage"
-        check_fallback
-        Screensize=""
-        Rotation=""
-        Scaling=""
-      }
-    ;;
-  esac
-
   # --dpi
   [ -n "$Dpi" ] && case "$Xserver" in
     --weston|--kwin|--hostwayland|--hostdisplay)
@@ -9225,8 +9262,8 @@ check_options_interferences() { # check multiple option interferences, change se
 
   # --output-count
   [ "$Outputcount" != "1" ] && [ "$Runsonconsole" = "yes" ] && {
-    note "Option --output-count only works in nested/windowed mode,
-  but not on tty. Fallback: disabling option --output-count."
+    note "Option --output-count works in nested/windowed mode only,
+  but not on console. Fallback: disabling option --output-count."
     check_fallback
     Outputcount="1"
   }
@@ -9279,11 +9316,6 @@ check_options_interferences() { # check multiple option interferences, change se
       Sharecupsmode=""
       Pulseaudiomode=""
       Sharewebcam="no"
-      case "$Xserver" in
-        --xwin|--runx) note "Windows firewall settings can forbid application access
-  to the X server. If no application window appears, but no obvious error
-  is shown, please check your firewall settings. Compare issue #108 on github." ;;
-      esac
     ;;
   esac
 
@@ -9298,18 +9330,8 @@ check_options_interferences() { # check multiple option interferences, change se
   # --interactive
   case "$Interactive" in
     yes)
-      case "$Winsubsystem" in
-        MSYS2|CYGWIN|WSL1)
-          Winpty="$(command -v winpty)"
-          Winpty="$(escapestring "$Winpty")"
-          [ "$Winpty" ] || error "Option -i, --interactive: On MS Windows you need 'winpty'
-  to run x11docker in interactive mode. MSYS2 provides winpty as a package.
-  On Cygwin it can be compiled from source. WSL1 isn't supported yet.
-  WSL2 might work, but is not tested yet."
-        ;;
-      esac
       [ "$Forwardstdin" = "yes" ] && {
-        note "You cannot use --stdin along with --interactive.
+        note "Option --stdin is not compatible with option --interactive.
   Fallback: Disabling option --stdin."
         check_fallback
         Forwardstdin="no"
@@ -9321,58 +9343,19 @@ check_options_interferences() { # check multiple option interferences, change se
         check_fallback
         Interactive="no"
       }
+      case "$Winsubsystem" in
+        MSYS2|CYGWIN|WSL1)
+          Winpty="$(command -v winpty)"
+          Winpty="$(escapestring "$Winpty")"
+          [ -z "$Winpty" ] && error "Option --interactive on MS Windows needs 'winpty'
+  to run x11docker in interactive mode. MSYS2 provides winpty as a package.
+  On Cygwin it can be compiled from source. WSL1 isn't supported yet.
+  WSL2 might work, but is not tested yet."
+        ;;
+      esac
     ;;
   esac
   [ "$Interactive" = "yes" ] && Showcontaineroutput="no"
-
-  case "$Runtime" in
-    ""|runc|crun|oci) ;;
-    sysbox-runc)
-      case "$Backend" in
-        docker) ;;
-        *) note "Option --runtime=$Runtime --backend=$Backend: $Runtime is known
-  to work with Docker only yet." ;;
-      esac
-      store_runoption env "SYSBOX_HONOR_CAPS=TRUE"
-      check_optionset "--runtime=sysbox-runc" "--alsa --webcam" ||:
-      verlt "$(uname -r)" "5.12" && error "Option --runtime=sysbox-runc needs at least
-  Linux kernel version >=5.12"
-      verlt "$(sysbox-runc -v | grep version | tr -d ' \t'| cut -d: -f2)" "0.5" && error "Option --runtime=sysbox-runc needs at least
-  Sysbox version >=0.5.0"
-      [ "$Sharegpu" = "yes" ] && note "Option --gpu with option --runtime=$Runtime:
-  GPU access might fail for some applications."
-    ;;
-    nvidia)
-      [ "$Sharegpu" = "no" ] && {
-        note "Option --runtime=nvidia: Enabling option --gpu"
-        check_fallback
-        Sharegpu="yes"
-      }
-    ;;
-    kata-runtime)
-      note "Option --runtime=kata-runtime: Be aware not to share
-  the same files with runc and kata-runtime containers at the same time.
-  Otherwise container startup may fail."
-      [ "$Network" = "host" ] && {
-        note "Option --network=host: Sharing host network stack does not work
-  with --runtime=kata-runtime. Fallback: Setting --network=bridge."
-        check_fallback
-        Network="bridge"
-      }
-      [ "$Shareipc" = "host" ] && {
-        note "Option --ipc=host: Only IPC of the qemu VM is shared with
-  --runtime=kata-runtime."
-      }
-      check_optionset "--runtime=kata-runtime" "--alsa --webcam"
-      Sharewebcam="no"
-      Sharealsa="no"
-    ;;
-    *)
-      note "Option --runtime: x11docker does not know runtime: $Runtime
-  Will try to use it anyway.
-  If that fails, you can try options --snap or --no-setup."
-    ;;
-  esac
 
   return 0
 }
@@ -9514,6 +9497,11 @@ check_options_messages() {      # some messages depending on options, but not ch
   interface in all versions. Some GTK3 Wayland applications depend on it.
   If application startup fails, try --weston instead."
     ;;
+    --xwin|--runx) 
+      note "Windows firewall settings can forbid application access
+  to the X server. If no application window appears, but no obvious error
+  is shown, please check your firewall settings. Compare issue #108 on github."
+    ;;
   esac
 
   # NVIDIA without --gpu
@@ -9614,6 +9602,23 @@ check_options_messages() {      # some messages depending on options, but not ch
   (Bug report at https://bugzilla.redhat.com/show_bug.cgi?id=1498665 )" ;;
     esac
   }
+
+  case "$Runtime" in
+    sysbox-runc)
+      [ "$Sharegpu" = "yes" ] && note "Option --gpu with option --runtime=$Runtime:
+  GPU access might fail for some applications."
+      case "$Backend" in
+        docker) ;;
+        *) note "Option --runtime=$Runtime --backend=$Backend: $Runtime is known
+  to work with Docker only yet." ;;
+      esac
+    ;;
+    kata-runtime)
+      note "Option --runtime=kata-runtime: Be aware not to share
+  the same files with runc and kata-runtime containers at the same time.
+  Otherwise container startup may fail."
+    ;;
+  esac
 
   # --scale
   [ "$Scaling" ] && case "$Xserver" in
