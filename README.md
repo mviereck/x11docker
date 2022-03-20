@@ -1,4 +1,4 @@
-# x11docker: ![x11docker logo](x11docker.png) Run GUI applications in Docker
+# x11docker: ![x11docker logo](x11docker.png) Run GUI applications in Docker or podman containers.
 
 ## Avoid X security leaks and enhance container security
 [![DOI](http://joss.theoj.org/papers/10.21105/joss.01349/status.svg)](https://doi.org/10.21105/joss.01349)
@@ -81,7 +81,7 @@ For a quick start:
    ```
  - Install [dependencies](#dependencies):
    - Either pull image `x11docker/xserver` or install at least `nxagent` or `xpra` and `xephyr`.
- - [Run]((#terminal-syntax)) a GUI in container with:
+ - [Run](#terminal-syntax) a GUI in container with:
    ```sh
    x11docker IMAGENAME [COMMAND]
    ```
