@@ -13,6 +13,8 @@ Project website: https://github.com/mviereck/x11docker
  - `--build`, `--cleanup`: Fix backend check (regression).
    [(#423)](https://github.com/mviereck/x11docker/issues/423)
  - `--scale`: Fix for `--xpra*` (regression).
+ - `--share`: MS Windows: fix parsing of partition pathes like `/mnt/c`.
+   [(#424)](https://github.com/mviereck/x11docker/issues/424)
 
 ## [7.1.3](https://github.com/mviereck/x11docker/releases/tag/v7.1.3) - 2022-03-02 
 ### Fixed
