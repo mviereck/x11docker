@@ -2,6 +2,7 @@
 
 ## Avoid X security leaks and enhance container security
 [![DOI](http://joss.theoj.org/papers/10.21105/joss.01349/status.svg)](https://doi.org/10.21105/joss.01349)
+<iframe src="https://github.com/sponsors/mviereck/button" title="Sponsor mviereck" height="35" width="116" style="border: 0;"></iframe>
 
 ## Table of contents
  - [Introduction](#introduction)
@@ -599,7 +600,9 @@ I'll help where I can, but there is no organisation behind `x11docker` that can 
 ## Donation
 If you like to make a donation: Thank you! :)
 
-I don't take the money myself, but please spend some to [Galsan Tschinag](http://galsan-tschinag.de/portrait/) in Mongolia ([Wikipedia](https://en.wikipedia.org/wiki/Galsan_Tschinag)). 
+<iframe src="https://github.com/sponsors/mviereck/card" title="Sponsor mviereck" height="225" width="600" style="border: 0;"></iframe>
+
+Instead of sponsoring me, you can as well spend some to [Galsan Tschinag](http://galsan-tschinag.de/portrait/) in Mongolia ([Wikipedia](https://en.wikipedia.org/wiki/Galsan_Tschinag)). 
 One of his great projects is the afforestation of Mongolia.
 A donation account in Germany is provided by [Förderverein Mongolei e.V.](http://foerderverein-mongolei.de/spenden/).
 ```
