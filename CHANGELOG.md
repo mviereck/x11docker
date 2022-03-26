@@ -15,6 +15,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--scale`: Fix for `--xpra*` (regression).
  - `--share`: MS Windows: fix parsing of partition pathes like `/mnt/c`.
    [(#424)](https://github.com/mviereck/x11docker/issues/424)
+ - `--xc`: do not use on console.
 
 ## [7.1.3](https://github.com/mviereck/x11docker/releases/tag/v7.1.3) - 2022-03-02 
 ### Fixed
