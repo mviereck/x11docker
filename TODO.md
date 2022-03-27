@@ -22,8 +22,6 @@ x11docker ToDo notes
    - --init except systemd possible?
    - clean /tmp
    - how to disable old binds? issue e.g. with/without --home, --share
-
- - --tty should not fall back to X (seen with --gpu)
  
  - kata: add new runtime for nerdctl io.containerd.kata.v2
 

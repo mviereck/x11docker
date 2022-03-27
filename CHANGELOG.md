@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [7.1.4](https://github.com/mviereck/x11docker/releases/tag/v7.1.4) - 2022-03-27 
 ### Added
  - `--xc=BACKEND`: Optional argument to choose backend for X container.
 ### Fixed
@@ -15,7 +15,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--scale`: Fix for `--xpra*` (regression).
  - `--share`: MS Windows: fix parsing of partition pathes like `/mnt/c`.
    [(#424)](https://github.com/mviereck/x11docker/issues/424)
- - `--xc`: do not use on console.
+ - `--xc`: do not use on console (affected `--weston-*`).
 
 ## [7.1.3](https://github.com/mviereck/x11docker/releases/tag/v7.1.3) - 2022-03-02 
 ### Fixed
