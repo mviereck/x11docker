@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Fixed
+ - `--xpra`: Fix for `--xoverip`.
+   [(#428)](https://github.com/mviereck/x11docker/issues/428)
+
 ## [7.1.4](https://github.com/mviereck/x11docker/releases/tag/v7.1.4) - 2022-03-27 
 ### Added
  - `--xc=BACKEND`: Optional argument to choose backend for X container.
