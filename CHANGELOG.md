@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
+### Added
+ - `--clipboard`: Some basic graphic clips support for `--xephyr` and the like.
+   [(#428)](https://github.com/mviereck/x11docker/issues/428)
 ### Fixed
  - `--xpra`: Fix for `--xoverip`.
    [(#428)](https://github.com/mviereck/x11docker/issues/428)

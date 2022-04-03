@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.1.5-beta-3"
+Version="7.1.5-beta-4"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -111,7 +111,7 @@ Basic settings:
 Host integration:
      --alsa [=ALSA_CARD]  Sound with ALSA. You can define a desired sound card
                        with ALSA_CARD. List of available sound cards: aplay -l
- -c, --clipboard       Share clipboard. Graphical clips with --xpra only.
+ -c, --clipboard       Share clipboard.
  -g, --gpu [=yes|no|iglx|virgl] GPU access for hardware accelerated OpenGL.
                        Works best with open source drivers on host and in image.
                        For closed source nvidia drivers regard terminal output.
@@ -1847,11 +1847,10 @@ clean_xhost() {                 # option --clean-xhost: disable xhost policies o
 setup_clipboard() {             # option --clipboard: create shareclipboard script
   # Clipboard sharing works different depending on the new X server
   #  - xpra and nxagent have their own clipboard management.
-  #  - Only xpra supports image clips.
   #  - --hostdisplay accesses the clipboard from host X directly
-  #  - Other X servers: A script is created to synchronize clipboard between X servers.
+  #  - Other X servers: A script is created to synchronize clipboard between X servers. Graphic clips have basic support only.
   #  - No clipboard support for Wayland yet.
-  # The script uses xclip or xsel. It is executed in xinitrc.
+  # The script uses xclip and base64. It is executed in xinitrc.
 
   local Clipsend= Clipreceive=
 
@@ -1863,31 +1862,19 @@ setup_clipboard() {             # option --clipboard: create shareclipboard scri
       Shareclipboard="no"
       return 1
     ;;
-    --nxagent|--xpra*|--xwin) ;; # have their own clipboard management, look at create_xcommand().
+    --nxagent|--xpra*|--xwin|--runx) ;; # have their own clipboard management, look at create_xcommand().
 
     --xephyr|--xorg|--xvfb|--xwayland|--weston-xwayland)
-      # check for either xclip or xsel
-      command -v xsel >/dev/null && {
-        Clipsend="xsel --clipboard --input"
-        Clipreceive="xsel --clipboard --output"
-      }
-      [ "$Xcontainer" = "yes" ] || command -v xclip >/dev/null && {
-        Clipsend="xclip -selection clipboard -in"
-        Clipreceive="xclip -selection clipboard -out"
-      }
-      [ -z "$Clipsend" ] && {
-        note "Option --clipboard: Need either xclip or xsel
-  for clipboard sharing with X server $Xserver.
+      [ "$Xcontainer" = "yes" ] || { command -v xclip >/dev/null && command -v base64 >/dev/null ; } || {
+        note "Option --clipboard with $Xserver needs xclip and base64,
+  but one of them is not installed on your system.
   Fallback: Disabling option --clipboard."
         check_fallback
         Shareclipboard="no"
+        return 1
       }
-      [ -z "$Hostdisplay" ] && {
-        note "Option --clipboard: No host display DISPLAY found
-  to share clipboard. Fallback: Disabling option --clipboard"
-        check_fallback
-        Shareclipboard="no"
-      }
+      Clipsend="xclip -selection clipboard -in"
+      Clipreceive="xclip -selection clipboard -out"
 
       echo "#! /usr/bin/env bash
 # share clipboard between X servers $Hostdisplay and $Newdisplay
@@ -1897,23 +1884,33 @@ $(declare -f rocknroll)
 Timetosaygoodbyefile='$Timetosaygoodbyefile'
 
 while rocknroll ; do
-  # read content of clipboard of first X server $Hostdisplay
-  X1clip=\"\$(env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipreceive)\"
+  # check for image clip on host display
+  X1targets=\"\$(env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipreceive -t TARGETS)\"
+  grep -q 'image/png' <<< \"\$X1targets\" && Png='-t image/png' || Png=''
 
-  # check if clipboard of first X server has changed; if yes, send new content to second X server
+  # read content of clipboard of first X server $Hostdisplay
+  X1clip=\"\$(env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipreceive \$Png | base64)\"
+
+  # check if clipboard of host X server has changed; if yes, send new content to new X server
   [ -n \"\$X1clip\" ] && [ \"\$Shareclip\" != \"\$X1clip\" ] && {
     Shareclip=\"\$X1clip\"
-    env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipsend <<<  \"\$Shareclip\"
+    base64 -d <<< \"\$Shareclip\" | env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipsend \$Png
   }
   mysleep 0.3                       # sleep a bit to avoid high cpu usage
 
-  # read content of clipboard of second X server $Newdisplay
-  X2clip=\"\$(env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipreceive)\"
+  ######
 
-  # check if clipboard of second X server has changed; if yes, send new content to first X server
+  # check for image clip on new display
+  X2targets=\"\$(env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipreceive -t TARGETS)\"
+  grep -q 'image/png' <<< \"\$X2targets\" && Png='-t image/png' || Png=''
+
+  # read content of clipboard of new X server $Newdisplay
+  X2clip=\"\$(env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipreceive \$Png | base64)\"
+
+  # check if clipboard of new X server has changed; if yes, send new content to host X server
   [ -n \"\$X2clip\" ] && [ \"\$Shareclip\" != \"\$X2clip\" ] && {
     Shareclip=\"\$X2clip\"
-    env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipsend <<<  \"\$Shareclip\"
+    base64 -d <<< \"\$Shareclip\" | env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipsend \$Png
   }
   mysleep 0.3                       # sleep a bit to avoid high cpu usage
 done
@@ -4437,7 +4434,6 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
       --hostdisplay) ;;                                     # already same clipboard
       *)                                                    # synchronizing between different X servers
         echo         "# option '-c, --clipboard': Run clipboard script "
-        echo         "# (text copy only) (xpra has its own clipboard management including images)"
         echo         "bash $Clipboardrc"
         echo         ""
       ;;
@@ -9522,15 +9518,6 @@ check_options_messages() {      # some messages depending on options, but not ch
   [ "$Capdropall" = "no" ] && warning "Option --cap-default disables security hardening
   for containers done by x11docker. Default docker capabilities are allowed.
   This is considered to be less secure."
-
-  # --clipboard
-  [ "$Shareclipboard" = "yes" ] && case "$Xserver" in
-    --xpra*|--hostdisplay|--xwin|--runx) ;;
-    *) 
-      note "Sharing picture clips with option --clipboard is only
-  possible with --xpra* options and --hostdisplay."
-    ;;
-  esac
 
   # --fullscreen
   [ "$Fullscreen" = "yes" ] && {
