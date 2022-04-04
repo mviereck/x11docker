@@ -1844,7 +1844,7 @@ clean_xhost() {                 # option --clean-xhost: disable xhost policies o
   echo "Option --clean-xhost:" >> "$Xinitlogfile"
   DISPLAY="$Hostdisplay" XAUTHORITY="$Hostxauthority" disable_xhost >> "$Xinitlogfile" 2>&1
 }
-setup_clipboard() {             # option --clipboard: create shareclipboard script
+create_clipboardrc() {          # option --clipboard: create shareclipboard script
   # Clipboard sharing works different depending on the new X server
   #  - xpra and nxagent have their own clipboard management.
   #  - --hostdisplay accesses the clipboard from host X directly
@@ -1853,29 +1853,7 @@ setup_clipboard() {             # option --clipboard: create shareclipboard scri
   #  - no clipboard support for Wayland yet.
   # The script uses xclip and base64. It is executed in xinitrc.
 
-  case "$Xserver" in
-    --tty|--weston|--hostwayland|--kwin)
-      note "Option --clipboard is not supported for $Xserver.
-  Fallback: Disabling option --clipboard."
-      check_fallback
-      Shareclipboard="no"
-      return 1
-    ;;
-    --nxagent|--xpra*|--xwin|--runx) ;; # have their own clipboard management, look at create_xcommand().
-
-    --xephyr|--xorg|--xvfb|--xwayland|--weston-xwayland)
-      [ "$Xcontainer" = "yes" ] || { command -v xclip >/dev/null && command -v base64 >/dev/null ; } || {
-        note "Option --clipboard with $Xserver needs xclip and base64,
-  but one of them is not installed on your system.
-  Fallback: Disabling option --clipboard."
-        check_fallback
-        Shareclipboard="no"
-        return 1
-      }
-
-      # create clipboardrc
-      {
-        echo "#! /usr/bin/env bash
+  echo "#! /usr/bin/env bash
 # share clipboard between X servers $Hostdisplay and $Newdisplay
 
 $(declare -f mysleep)
@@ -1891,19 +1869,19 @@ Selection[2]=primary
 OtherX[1]=2
 OtherX[2]=1
 "
-        echo '
+  echo '
 while rocknroll ; do
   for S in 1 2; do
     for X in 1 2; do
       export ${X1auth[$X]}
-      Targets="$(xclip -selection ${Selection[$S]} -out -t TARGETS 2>/dev/null)"
+      Targets="$(xclip -out -selection ${Selection[$S]} -t TARGETS 2>/dev/null)"
 
       [ -n "$Targets" ] && {
         # check for image clip
-        grep -q "image/png" <<< "$Targets" && Png="-t image/png" || Png=""
+        grep -q "image/png" <<< "$Targets" && Imagetarget="-t image/png" || Imagetarget=""
 
         # read content of ${Selection[$S]} of X server $X
-        Clip[$X$S]="$(xclip -selection ${Selection[$S]} -out $Png | base64)"
+        Clip[$X$S]="$(xclip -out -selection ${Selection[$S]} $Imagetarget | base64)"
 
         # check if ${Selection[$S]} of X server $X has changed
         [ -n "${Clip[$X$S]}" ] && [ "${Clipold[$X$S]}" != "${Clip[$X$S]}" ] && {
@@ -1912,7 +1890,7 @@ while rocknroll ; do
           # send only to other clipboard of X server if it has different content. Important to keep higlighted text selection.
           [ "${Clipold[${OtherX[$X]}$S]}" != "${Clip[$X$S]}" ] && {
             export ${X2auth[$X]}
-            base64 -d <<< "${Clip[$X$S]}" | xclip -selection ${Selection[$S]} -in $Png
+            base64 -d <<< "${Clip[$X$S]}" | xclip -in -selection ${Selection[$S]} $Imagetarget
             #echo "SEND FROM $X (${Selection[$S]}): $(base64 -d <<< "${Clip[$X$S]}")" >&2
           }
         }
@@ -1923,9 +1901,6 @@ while rocknroll ; do
   mysleep 0.3
 done
 '
-      } >> "$Clipboardrc"
-    ;;
-  esac
   return 0
 }
 setup_gpu_devicelist() {        # option --gpu: print list of GPU devices
@@ -4437,9 +4412,9 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   echo               "storeinfo xinitrc=ready"
   echo               ""
 
-  [ "$Shareclipboard" = "yes" ] && [ -n "$Hostdisplay" ] && {
+  [ "$Shareclipboard" = "yes" ] && {
     case "$Xserver" in
-      --xpra*|--nxagent|--xwin) ;;           # have their own clipboard management
+      --xpra*|--nxagent|--xwin|--runx) ;;                   # have their own clipboard management
       --hostdisplay) ;;                                     # already same clipboard
       *)                                                    # synchronizing between different X servers
         echo         "# option '-c, --clipboard': Run clipboard script "
@@ -8971,30 +8946,6 @@ check_options_interferences() { # check multiple option interferences, change se
     ;;
   esac
 
-  # --clipboard
-  [ "$Shareclipboard" = "yes" ] && [ -z "$Hostdisplay" ] && {
-    note "Option --clipboard: Did not find a host display
-  to share the clipboard with. DISPLAY is empty.
-  Fallback: Disabling option --clipboard."
-    check_fallback
-    Shareclipboard="no"
-  }
-  [ "$Shareclipboard" = "yes" ] && {
-    case "$Xserver" in
-      --weston|--kwin|--tty) 
-        note "Option --clipboard: Sharing clipboard is not supported
-  with option $Xserver. Fallback: Disabling option --clipboard."
-        check_fallback
-        Shareclipboard="no"
-      ;;
-      --hostwayland) 
-        note "Option --clipboard: Sharing clipboard may or may not work.
-  Cannot enable or disable it, it depends on your Wayland compositor."
-        Shareclipboard="no"
-      ;;
-    esac
-  }
-
   # X server
   case "$Xserver" in
     --xorg) 
@@ -9140,6 +9091,33 @@ check_options_interferences() { # check multiple option interferences, change se
   It is recommended to install xpra, weston, Xwayland and xdotool
   to allow a seamless mode without the need of a window manager." ;;
         esac
+      }
+    ;;
+  esac
+
+  # --clipboard
+  [ "$Shareclipboard" = "yes" ] && [ -z "$Hostdisplay" ] && {
+    note "Option --clipboard: Did not find a host display
+  to share the clipboard with. DISPLAY is empty.
+  Fallback: Disabling option --clipboard."
+    check_fallback
+    Shareclipboard="no"
+  }
+  [ "$Shareclipboard" = "yes" ] && case "$Xserver" in
+    --nxagent|--xpra*|--xwin|--runx) ;; # have their own clipboard management, look at create_xcommand().
+    --tty|--weston|--hostwayland|--kwin)
+      note "Option --clipboard is not supported for $Xserver.
+  Fallback: Disabling option --clipboard."
+      check_fallback
+      Shareclipboard="no"
+    ;;
+    --xephyr|--xorg|--xvfb|--xwayland|--weston-xwayland)
+      [ "$Xcontainer" = "yes" ] || command -v xclip >/dev/null || {
+        note "Option --clipboard with $Xserver needs xclip,
+  but xclip is not installed on your system.
+  Fallback: Disabling option --clipboard."
+        check_fallback
+        Shareclipboard="no"
       }
     ;;
   esac
@@ -10219,7 +10197,7 @@ main() {
     start_xcontainer
   }
   store_newxenv
-  [ "$Shareclipboard" = "yes" ]  && setup_clipboard ||:                           # --clipboard
+  [ "$Shareclipboard" = "yes" ]  && create_clipboardrc >> "$Clipboardrc"          # --clipboard
   [ "$Xserver" != "--xorg" ]     && [ -n "$Newxvt" ] && note "Option --vt only takes effect with option --xorg."
   [ "$Xserver" = "--xorg" ]      && check_vt                                      # --vt: find free tty/virtual terminal for Xorg
   create_xcommand                # set up start command for X server              # all X server and Wayland options
