@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.1.5-beta-4"
+Version="7.1.5-beta-5"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -1848,11 +1848,10 @@ setup_clipboard() {             # option --clipboard: create shareclipboard scri
   # Clipboard sharing works different depending on the new X server
   #  - xpra and nxagent have their own clipboard management.
   #  - --hostdisplay accesses the clipboard from host X directly
-  #  - Other X servers: A script is created to synchronize clipboard between X servers. Graphic clips have basic support only.
-  #  - No clipboard support for Wayland yet.
+  #  - other X servers: A script is created to synchronize clipboard between X servers. Graphic clips have basic support only.
+  #  - supports selections clipboard and primary
+  #  - no clipboard support for Wayland yet.
   # The script uses xclip and base64. It is executed in xinitrc.
-
-  local Clipsend= Clipreceive=
 
   case "$Xserver" in
     --tty|--weston|--hostwayland|--kwin)
@@ -1873,48 +1872,58 @@ setup_clipboard() {             # option --clipboard: create shareclipboard scri
         Shareclipboard="no"
         return 1
       }
-      Clipsend="xclip -selection clipboard -in"
-      Clipreceive="xclip -selection clipboard -out"
 
-      echo "#! /usr/bin/env bash
+      # create clipboardrc
+      {
+        echo "#! /usr/bin/env bash
 # share clipboard between X servers $Hostdisplay and $Newdisplay
 
 $(declare -f mysleep)
 $(declare -f rocknroll)
 Timetosaygoodbyefile='$Timetosaygoodbyefile'
 
+X1auth[1]='DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority'
+X2auth[1]='DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie'
+X1auth[2]='DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie'
+X2auth[2]='DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority'
+Selection[1]=clipboard
+Selection[2]=primary
+OtherX[1]=2
+OtherX[2]=1
+"
+        echo '
 while rocknroll ; do
-  # check for image clip on host display
-  X1targets=\"\$(env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipreceive -t TARGETS)\"
-  grep -q 'image/png' <<< \"\$X1targets\" && Png='-t image/png' || Png=''
+  for S in 1 2; do
+    for X in 1 2; do
+      export ${X1auth[$X]}
+      Targets="$(xclip -selection ${Selection[$S]} -out -t TARGETS 2>/dev/null)"
 
-  # read content of clipboard of first X server $Hostdisplay
-  X1clip=\"\$(env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipreceive \$Png | base64)\"
+      [ -n "$Targets" ] && {
+        # check for image clip
+        grep -q "image/png" <<< "$Targets" && Png="-t image/png" || Png=""
 
-  # check if clipboard of host X server has changed; if yes, send new content to new X server
-  [ -n \"\$X1clip\" ] && [ \"\$Shareclip\" != \"\$X1clip\" ] && {
-    Shareclip=\"\$X1clip\"
-    base64 -d <<< \"\$Shareclip\" | env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipsend \$Png
-  }
-  mysleep 0.3                       # sleep a bit to avoid high cpu usage
+        # read content of ${Selection[$S]} of X server $X
+        Clip[$X$S]="$(xclip -selection ${Selection[$S]} -out $Png | base64)"
 
-  ######
+        # check if ${Selection[$S]} of X server $X has changed
+        [ -n "${Clip[$X$S]}" ] && [ "${Clipold[$X$S]}" != "${Clip[$X$S]}" ] && {
+          Clipold[$X$S]="${Clip[$X$S]}"
 
-  # check for image clip on new display
-  X2targets=\"\$(env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipreceive -t TARGETS)\"
-  grep -q 'image/png' <<< \"\$X2targets\" && Png='-t image/png' || Png=''
-
-  # read content of clipboard of new X server $Newdisplay
-  X2clip=\"\$(env DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie $Clipreceive \$Png | base64)\"
-
-  # check if clipboard of new X server has changed; if yes, send new content to host X server
-  [ -n \"\$X2clip\" ] && [ \"\$Shareclip\" != \"\$X2clip\" ] && {
-    Shareclip=\"\$X2clip\"
-    base64 -d <<< \"\$Shareclip\" | env DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority $Clipsend \$Png
-  }
-  mysleep 0.3                       # sleep a bit to avoid high cpu usage
+          # send only to other clipboard of X server if it has different content. Important to keep higlighted text selection.
+          [ "${Clipold[${OtherX[$X]}$S]}" != "${Clip[$X$S]}" ] && {
+            export ${X2auth[$X]}
+            base64 -d <<< "${Clip[$X$S]}" | xclip -selection ${Selection[$S]} -in $Png
+            #echo "SEND FROM $X (${Selection[$S]}): $(base64 -d <<< "${Clip[$X$S]}")" >&2
+          }
+        }
+      }
+    done
+  done
+  # sleep a bit to avoid high cpu usage
+  mysleep 0.3
 done
-" >> "$Clipboardrc"
+'
+      } >> "$Clipboardrc"
     ;;
   esac
   return 0
