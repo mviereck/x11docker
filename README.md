@@ -442,7 +442,9 @@ To allow advanced usage of x11docker abilities have a look at chapter [Dependenc
 
 ### Installation from distribution repositories
 x11docker is available as a package in some distributions:
-[![Packaging status](https://repology.org/badge/vertical-allrepos/x11docker.svg?allow_ignored=1)](https://repology.org/project/x11docker/versions)
+
+[![Packaging status](https://repology.org/badge/vertical-allrepos/x11docker.svg)](https://repology.org/project/x11docker/versions)
+
 Much thanks to the maintainers that decided to provide these packages! 
 
 ### Manual installation
