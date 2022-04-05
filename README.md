@@ -441,13 +441,9 @@ Basically it is just a wrapper for X servers and container backends docker, podm
 To allow advanced usage of x11docker abilities have a look at chapter [Dependencies](#dependencies).
 
 ### Installation from distribution repositories
-x11docker is available as a package in some distributions. If you know of more packages in other distributions, please tell me.
- - [Alpine](https://pkgs.alpinelinux.org/package/edge/testing/x86/x11docker): `apk add x11docker`
- - [archlinux (AUR)](https://aur.archlinux.org/packages/x11docker/)
- - [fedora](https://packages.fedoraproject.org/pkgs/x11docker/x11docker/index.html) `dnf install x11docker`
- - [NixOS](https://search.nixos.org/packages?channel=unstable&from=0&size=50&sort=relevance&query=x11docker): `nix-env -i x11docker`
-
-Thanks to the maintainers that decided to provide these packages! 
+x11docker is available as a package in some distributions:
+[![Packaging status](https://repology.org/badge/vertical-allrepos/x11docker.svg?allow_ignored=1)](https://repology.org/project/x11docker/versions)
+Much thanks to the maintainers that decided to provide these packages! 
 
 ### Manual installation
 #### Installation options
