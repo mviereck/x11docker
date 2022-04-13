@@ -14,6 +14,7 @@ Project website: https://github.com/mviereck/x11docker
 ### Fixed
  - `--xpra`: Fix for `--xoverip`.
    [(#428)](https://github.com/mviereck/x11docker/issues/428)
+ - `--nxagent`: Fix for `--xc`.
 
 ## [7.1.4](https://github.com/mviereck/x11docker/releases/tag/v7.1.4) - 2022-03-27 
 ### Added
@@ -43,7 +44,7 @@ Project website: https://github.com/mviereck/x11docker
    Currently only along with option `--xc`.
    Allows acceleration for Xephyr, nxagent, Xvfb etc.
  - `--gpu=iglx`: Enable indirect rendering (`--xorg` only). Replaces `--iglx`.
- - `--pulseaudio=host`: Workaround to support Pipewire.
+ - `--pulseaudio=host`: New argument to share pulseaudio host unix socket.
    [(#418)](https://github.com/mviereck/x11docker/issues/418)
 ### Fixed
  - `--init=systemd`: Changed login and service setup to support arch containers.
