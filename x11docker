@@ -1844,6 +1844,60 @@ clean_xhost() {                 # option --clean-xhost: disable xhost policies o
   echo "Option --clean-xhost:" >> "$Xinitlogfile"
   DISPLAY="$Hostdisplay" XAUTHORITY="$Hostxauthority" disable_xhost >> "$Xinitlogfile" 2>&1
 }
+create_clipboardrcX() {
+  # prepared for upcoming xclip with a -waitforchange option
+
+  echo "#! /usr/bin/env bash
+$(declare -f rocknroll)
+$(declare -f mysleep)
+Timetosaygoodbyefile='$Timetosaygoodbyefile'
+X1auth='DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority'
+X2auth='DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie'
+"
+  echo '
+clipexchange() {
+  # Send clipboard content of one X server to another X server and update on changes.
+  # Run function twice with switched credentials to sync the clipboards.
+  # $1  credentials to access 1. X server
+  # $2  credentials to access 2. X server
+  # $3  selection to use (primary or clipboard)
+  # X credentials look like "DISPLAY=:0 XAUTHORITY=~/.Xauthority"
+
+  local Selection Copyq
+  Selection="${3:-}"
+
+  while rocknroll; do
+    Targets="$(env ${1:-} xclip -out -selection $Selection -t TARGETS 2>/dev/null)"
+
+    [ -n "$Targets" ] && {
+      # check for image clip
+      grep -q "image/png" <<< "$Targets" && Imagetarget="-t image/png" || Imagetarget=""
+
+      # read content of $Selection of X server $1
+      Clip="$(env ${1:-} xclip -out -selection $Selection $Imagetarget | base64)"
+
+      [ -n "$Clip" ] && [ "$Clip" != "$Clipold" ] && {
+        Clipold="$Clip"
+
+        # send only to clipboard of other X server if it has different content. Important to keep highlighted text selection.
+        Clipold2="$(env ${2:-} xclip -out -selection $Selection $Imagetarget | base64)"
+        [ "$Clipold2" != "$Clip" ] && {
+          base64 -d <<< "$Clip" | env ${2:-} xclip -in -selection $Selection $Imagetarget
+          #echo "SEND $Selection to ${2:-} : $(base64 -d <<< "$Clip")"
+        }
+      }
+      # wait a bit to avoid high CPU usage
+      mysleep 0.5
+    }
+  done
+}
+clipexchange "$X1auth" "$X2auth" clipboard &
+clipexchange "$X1auth" "$X2auth" primary &
+sleep 1 # copy from 1 to 2 will take precedence at startup
+clipexchange "$X2auth" "$X1auth" clipboard &
+clipexchange "$X2auth" "$X1auth" primary &
+'
+}
 create_clipboardrc() {          # option --clipboard: create shareclipboard script
   # Clipboard sharing works different depending on the new X server
   #  - xpra and nxagent have their own clipboard management.
@@ -1871,9 +1925,9 @@ OtherX[2]=1
 Copyq[1]=':'
 Copyq[2]=':'
 "
-  [ "$Xcontainer" = "yes" ] && echo '
-command -v copyq && Copyq[2]="copyq select 0"
-'
+#  [ "$Xcontainer" = "yes" ] && echo '
+#command -v copyq && Copyq[2]="copyq select 0"
+#'
   echo '
 while rocknroll ; do
   for S in 1 2; do
@@ -1892,8 +1946,8 @@ while rocknroll ; do
         [ -n "${Clip[$X$S]}" ] && [ "${Clipold[$X$S]}" != "${Clip[$X$S]}" ] && {
           Clipold[$X$S]="${Clip[$X$S]}"
 
-          # provide multiple TARGETS in container (--xc only). xclip can provide only one.
-          [ "${Selection[$S]}" = "clipboard" ] && ${Copyq[$X]}
+          ## provide multiple TARGETS in container (--xc only). xclip can provide only one.
+          #[ "${Selection[$S]}" = "clipboard" ] && ${Copyq[$X]}
 
           # send only to clipboard of other X server if it has different content. Important to keep highlighted text selection.
           [ "${Clip[${OtherX[$X]}$S]}" != "${Clip[$X$S]}" ] && {
@@ -1906,7 +1960,7 @@ while rocknroll ; do
     done
   done
   # sleep a bit to avoid high cpu usage
-  mysleep 0.3
+  mysleep 0.5
 done
 '
   return 0
@@ -4429,9 +4483,9 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
       --hostdisplay) ;;                                     # already same clipboard
       *)                                                    # synchronizing between different X servers
         echo         "# option '-c, --clipboard': Run clipboard script "
-        [ "$Xcontainer" = "yes" ] && {
-          echo       "copyq &"
-        }
+        #[ "$Xcontainer" = "yes" ] && {
+        #  echo       "copyq &"
+        #}
         echo         "bash $Clipboardrc"
         echo         ""
       ;;
