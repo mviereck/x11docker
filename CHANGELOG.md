@@ -17,6 +17,8 @@ Project website: https://github.com/mviereck/x11docker
  - `--nxagent`: Fix for `--xc`.
  - `--update*`, `--install`, `--cleanup`: Fix error messages, exit once done.
    [(#435)](https://github.com/mviereck/x11docker/issues/435)
+ - `--hostuser`: Fixes for `--backend=host|proot`
+   [(#437)](https://github.com/mviereck/x11docker/issues/437)
 
 ## [7.1.4](https://github.com/mviereck/x11docker/releases/tag/v7.1.4) - 2022-03-27 
 ### Added
