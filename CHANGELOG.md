@@ -15,6 +15,8 @@ Project website: https://github.com/mviereck/x11docker
  - `--xpra`: Fix for `--xoverip`.
    [(#428)](https://github.com/mviereck/x11docker/issues/428)
  - `--nxagent`: Fix for `--xc`.
+ - `--nxagent`: Fixes for `--keymap`.
+   [(#208)](https://github.com/mviereck/x11docker/issues/208)
  - `--update*`, `--install`, `--cleanup`: Fix error messages, exit once done.
    [(#435)](https://github.com/mviereck/x11docker/issues/435)
  - `--hostuser`: Fixes for `--backend=host|proot`
