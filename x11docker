@@ -2000,22 +2000,38 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
 
   Containerusergroups="$Containerusergroups video render"
 
-  # check driver name and provide it to VA-API
-  command -v glxinfo >/dev/null && {
-    Drivername="$(glxinfo | grep 'OpenGL vendor string' | cut -d: -f2 | tr -d ' ')"
-    store_runoption env "LIBVA_DRIVER_NAME=$Drivername"
-  } || {
-    note "Option --gpu: glxinfo not found.
-  x11docker needs it to detect the name of your GPU driver.
-  This in turn is needed to support accelerated Video decoding (VA-API).
-  Please install mesa-utils to provide glxinfo.
-  $Wikipackages"
-  }
-
   # share device files
   while read -r Gpudevice ; do
     store_runoption volume "$Gpudevice"
   done < <(setup_gpu_devicelist)
+
+  # support for prime-run / discrete NVIDIA card #394
+  [ -n "$__NV_PRIME_RENDER_OFFLOAD" ] && store_runoption env "__NV_PRIME_RENDER_OFFLOAD=$__NV_PRIME_RENDER_OFFLOAD" && DRI_PRIME="1"
+  [ -n "$__VK_LAYER_NV_optimus" ]     && store_runoption env "__VK_LAYER_NV_optimus=$__VK_LAYER_NV_optimus"         && DRI_PRIME="1"
+  [ -n "$__GLX_VENDOR_LIBRARY_NAME" ] && store_runoption env "__GLX_VENDOR_LIBRARY_NAME=$__GLX_VENDOR_LIBRARY_NAME" && DRI_PRIME="1"
+
+  # Video decoding: VA-API and VDPAU, also DRI_PRIME #443
+  # Infos at https://wiki.archlinux.org/title/Hardware_video_acceleration
+  lspci -k | grep -q -e amdgpu -e radeon && {
+    store_runoption env "LIBVA_DRIVER_NAME=${LIBVA_DRIVER_NAME:-radeonsi}"
+    store_runoption env "VDPAU_DRIVER=${VDPAU_DRIVER:-radeonsi}"
+  }
+  lspci -k | grep -q nouveau && {
+    store_runoption env "LIBVA_DRIVER_NAME=${LIBVA_DRIVER_NAME:-nouveau}"
+    store_runoption env "VDPAU_DRIVER=${VDPAU_DRIVER:-nouveau}"
+  }
+  lspci -k | grep -q nvidia && {
+    store_runoption env "LIBVA_DRIVER_NAME=${LIBVA_DRIVER_NAME:-nvidia}" # could also be set to "vdpau"
+    store_runoption env "VDPAU_DRIVER=${VDPAU_DRIVER:-nvidia}"
+  }
+  lspci -k | grep -q i915 && {
+    [ -n "${DRI_PRIME:-}" ] && {
+      store_runoption env "DRI_PRIME=${DRI_PRIME:-1}"
+    } || {
+      store_runoption env "LIBVA_DRIVER_NAME=${LIBVA_DRIVER_NAME:-i965}"
+      store_runoption env "VDPAU_DRIVER=${VDPAU_DRIVER:-va_gl}"
+    }
+  }
 
   [ -z "$Nvidiaversion" ] && return 0
 
@@ -9727,6 +9743,7 @@ declare_variables() {           # declare global variables
   CUPS_SERVER=$(check_envvar "${CUPS_SERVER:-}")
   DBUS_SESSION_BUS_ADDRESS=$(check_envvar "${DBUS_SESSION_BUS_ADDRESS:-}")
   DISPLAY=$(check_envvar "${DISPLAY:-}")
+  DRI_PRIME=$(check_envvar "${DRI_PRIME:-}")
   DOCKER_HOST=$(check_envvar "${DOCKER_HOST:-}")
   GDK_BACKEND=$(check_envvar "${GDK_BACKEND:-}")
   HOME=$(check_envvar "${HOME:-}")

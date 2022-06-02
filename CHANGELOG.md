@@ -12,6 +12,8 @@ Project website: https://github.com/mviereck/x11docker
    selection for `--xephyr` and the like.
    [(#428)](https://github.com/mviereck/x11docker/issues/428)
 ### Fixed
+ - `--gpu`: Support VA-API, VDPAU, DRI_PRIME.
+   [(#443)](https://github.com/mviereck/x11docker/issues/443)
  - `--xpra`: Fix for `--xoverip`.
    [(#428)](https://github.com/mviereck/x11docker/issues/428)
  - `--nxagent`: Fix for `--xc`.
