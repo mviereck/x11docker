@@ -7,12 +7,19 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
+### Added
+ - `--xc --xorg`: Experimental support of Xorg in container.
+   [(#7)](https://github.com/mviereck/x11docker/issues/7)
+   [(#40)](https://github.com/mviereck/x11docker/issues/40)
+   [(#221)](https://github.com/mviereck/x11docker/issues/221)
+   [(#258)](https://github.com/mviereck/x11docker/issues/258)
+   [(#444)](https://github.com/mviereck/x11docker/issues/444)
 ### Changed
- - `--clipboard`: Added support for basic graphics clips and middle mouse click
-   selection for `--xephyr` and the like.
+ - `--clipboard`: Added support for basic graphics clips and
+   middle mouse click selection for `--xephyr` and the like.
    [(#428)](https://github.com/mviereck/x11docker/issues/428)
 ### Fixed
- - `--gpu`: Support VA-API, VDPAU, DRI_PRIME.
+ - `--gpu`: Support VA-API, VDPAU (video acceleration) and variable `DRI_PRIME`.
    [(#443)](https://github.com/mviereck/x11docker/issues/443)
  - `--xpra`: Fix for `--xoverip`.
    [(#428)](https://github.com/mviereck/x11docker/issues/428)
