@@ -8,7 +8,10 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
- - `--xc --xorg`: Experimental support of Xorg in container.
+ - `--xc`: Support Weston in container on console, too.
+   [(#40)](https://github.com/mviereck/x11docker/issues/40)
+   [(#444)](https://github.com/mviereck/x11docker/issues/444)
+ - `--xc --xorg`: Experimental support of Xorg container.
    [(#7)](https://github.com/mviereck/x11docker/issues/7)
    [(#40)](https://github.com/mviereck/x11docker/issues/40)
    [(#221)](https://github.com/mviereck/x11docker/issues/221)

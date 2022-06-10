@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.1.5-beta-17"
+Version="7.2.0-beta-1"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -1846,7 +1846,7 @@ clean_xhost() {                 # option --clean-xhost: disable xhost policies o
   echo "Option --clean-xhost:" >> "$Xinitlogfile"
   DISPLAY="$Hostdisplay" XAUTHORITY="$Hostxauthority" disable_xhost >> "$Xinitlogfile" 2>&1
 }
-create_clipboardrc() {
+create_clipboardrc() {          # option --clipboard: create shareclipboard script
   # prepared for upcoming xclip with a -waitforchange option
 
   echo "#! /usr/bin/env bash
@@ -1899,65 +1899,6 @@ sleep 1 # copy from 1 to 2 will take precedence at startup
 clipexchange "$X2auth" "$X1auth" clipboard &
 clipexchange "$X2auth" "$X1auth" primary &
 '
-}
-create_clipboardrcX() {          # option --clipboard: create shareclipboard script
-  # Clipboard sharing works different depending on the new X server
-  #  - xpra and nxagent have their own clipboard management.
-  #  - --hostdisplay accesses the clipboard from host X directly
-  #  - other X servers: A script is created to synchronize clipboard between X servers. Graphic clips have basic support only.
-  #  - supports selections clipboard and primary
-  #  - no clipboard support for Wayland yet.
-  # The script uses xclip and base64. It is executed in xinitrc.
-
-  echo "#! /usr/bin/env bash
-# share clipboard between X servers $Hostdisplay and $Newdisplay
-
-$(declare -f mysleep)
-$(declare -f rocknroll)
-Timetosaygoodbyefile='$Timetosaygoodbyefile'
-
-X1auth[1]='DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority'
-X2auth[1]='DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie'
-X1auth[2]='DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie'
-X2auth[2]='DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority'
-Selection[1]=clipboard
-Selection[2]=primary
-OtherX[1]=2
-OtherX[2]=1
-"
-  echo '
-while rocknroll ; do
-  for S in 1 2; do
-    for X in 1 2; do
-      export ${X1auth[$X]}
-      Targets="$(xclip -out -selection ${Selection[$S]} -t TARGETS 2>/dev/null)"
-
-      [ -n "$Targets" ] && {
-        # check for image clip
-        grep -q "image/png" <<< "$Targets" && Imagetarget="-t image/png" || Imagetarget=""
-
-        # read content of ${Selection[$S]} of X server $X
-        Clip[$X$S]="$(xclip -out -selection ${Selection[$S]} $Imagetarget | base64)"
-
-        # check if ${Selection[$S]} of X server $X has changed
-        [ -n "${Clip[$X$S]}" ] && [ "${Clipold[$X$S]}" != "${Clip[$X$S]}" ] && {
-          Clipold[$X$S]="${Clip[$X$S]}"
-
-          # send only to clipboard of other X server if it has different content. Important to keep highlighted text selection.
-          [ "${Clip[${OtherX[$X]}$S]}" != "${Clip[$X$S]}" ] && {
-            export ${X2auth[$X]}
-            base64 -d <<< "${Clip[$X$S]}" | xclip -in -selection ${Selection[$S]} $Imagetarget
-            #echo "SEND FROM $X (${Selection[$S]}): $(base64 -d <<< "${Clip[$X$S]}")" >&2
-          }
-        }
-      }
-      # sleep a bit to avoid high cpu usage
-      mysleep 0.1
-    done
-  done
-done
-'
-  return 0
 }
 setup_gpu_devicelist() {        # option --gpu: print list of GPU devices
   find /dev/dri /dev/nvidia* /dev/vga_arbiter /dev/nvhost* /dev/nvmap -maxdepth 0 2>/dev/null ||:
@@ -2550,7 +2491,7 @@ check_screensize() {            # check physical and virtual screen size (also o
   [ -z "$Screensize" ] && case "$Xserver" in
     --xorg) ;;  # Xorg autodetects screen size, preset only with option --size
     --weston-xwayland|--weston|--kwin|--kwin-xwayland)
-      [ "$Runsonconsole" = "no" ] && Screensize="${Xaxis}x${Yaxis}"
+      [ "$Runsonconsole" = "no" ] && [ -z "$Newxvt" ] && Screensize="${Xaxis}x${Yaxis}"
     ;;
     *) Screensize="${Xaxis}x${Yaxis}" ;;
   esac
@@ -2652,9 +2593,9 @@ check_xcontainer() {            # option --xc: check image x11docker/xserver
     yes|auto) 
       case "$Backend" in
         host|proot|chroot)
-          podman   inspect "$Xcontainerimage" >/dev/null 2>&1 && Xcontainerbackend="podman"
+          docker   inspect "$Xcontainerimage" >/dev/null 2>&1 && Xcontainerbackend="docker"
           [ -z "$Xcontainerbackend" ] && {
-            docker inspect "$Xcontainerimage" >/dev/null 2>&1 && Xcontainerbackend="docker"
+            podman inspect "$Xcontainerimage" >/dev/null 2>&1 && Xcontainerbackend="podman"
           }
           [ "$Xcontainer" = "yes" ] && [ -z "$Xcontainerbackend" ] && {
             note "Option --xc: Image $Xcontainerimage not found
@@ -2707,8 +2648,10 @@ check_xcontainer() {            # option --xc: check image x11docker/xserver
 
   case "$Xcontainer" in
     yes|auto)
-      Xcontaineroptions="$($Xcontainerbackend inspect -f '{{.Config.Labels.options}}' $Xcontainerimage)"
+      Xcontainerinspect="$($Xcontainerbackend inspect $Xcontainerimage)"
+      Xcontaineroptions="$(parse_inspect "$Xcontainerinspect" "Config" "Labels" "options")"
       Xcontaineroptions="${Xcontaineroptions:-"--nxagent --xpra --xpra2 --xpra2-xwayland --xephyr --weston-xwayland --xvfb --xwayland --weston"}"
+      Xcontaineroptionsconsole="$(parse_inspect "$Xcontainerinspect" "Config" "Labels" "options_console")"
     ;;
   esac
 
@@ -2721,8 +2664,15 @@ check_xdepends() {              # check dependencies on host for X server option
   [ "${1:-}" = "--tty" ] && return 0
   [ "$Lastcheckedxserver" = "${1:-}" ] && debugnote "Dependencies of ${1:-} already checked: $Lastcheckedxserverresult " && return "$Lastcheckedxserverresult"
 
-  grep -q -w -- "${1:-}" <<< "$Xcontaineroptions"   && Xcopt="yes"
-  [ "$Xcontainer" = "auto" ] && "${1:-}" = "--xorg" && Xcopt=""
+  case "$Runsonconsole" in
+    no)
+      grep -q -w -- "${1:-}" <<< "$Xcontaineroptions"          && Xcopt="yes"
+    ;;
+    yes)
+      grep -q -w -- "${1:-}" <<< "$Xcontaineroptionsconsole"   && Xcopt="yes"
+    ;;
+  esac
+  #[ "$Xcontainer" = "auto" ] && [ "${1:-}" = "--xorg" ]        && Xcopt=""
 
   case "$Autochooseserver" in
     yes) Message="xdependsmessage debugnote" ;;
@@ -3038,17 +2988,29 @@ check_xdepends() {              # check dependencies on host for X server option
   # --xc
   case "$Xcontainer" in
     yes)
-      [ "$Xcopt" ] && {
-        [ "$Runsonconsole" = "yes" ] && case "${1:-}" in
-          --weston|--weston-xwayland)
-            $Message "${1:-} with option --xc does not run on console."
+      [ -z "$Xcopt" ] && {
+        case "${1:-}" in
+          --xorg)
+            $Message "${1:-} is not supported by installed version of x11docker/xserver (option --xc). Please update image."
             Return=1
           ;;
+          --weston|--weston-xwayland)
+            $Message "${1:-} on console is not supported by installed version of x11docker/xserver (option --xc). Please update image."
+            Return=1
+          ;;
+          *)
+            case "$Runsonconsole" in
+              yes)
+                $Message "${1:-} on console is not supported with option --xc yet."
+                Return=1
+              ;;
+              no)
+                $Message "${1:-} is not supported with option --xc yet."
+                Return=1
+              ;;
+            esac
+          ;;
         esac
-        :
-      } || {
-        $Message "${1:-} not supported yet to run inside of container."
-        Return=1
       }
     ;;
     no)
@@ -3390,6 +3352,7 @@ create_modelinefile() {         # generate a set of smaller modelines for screen
 }
 create_xcommand() {             ### create command to start X server and/or Wayland compositor
   local Xserveroptions_custom= Xpraoptions= Nxagentoptions= Compositorpid= Weston= Westonoutput= Count= Usemitshm Xkbmodel
+  local Connector Connectorlist Status
 
   Xserveroptions_custom="$Xserveroptions"
   Xserveroptions=""
@@ -3645,23 +3608,23 @@ locking=false
 background-color=0xff002244
 animation=fade
 startup-animation=fade
-[keyboard]
-" >> "$Westonini"
+[keyboard]" >> "$Westonini"
       # --keymap: keyboard layout
       [ -n "$Xkblayout" ] && echo "keymap_layout=$Xkblayout" >> "$Westonini"
-      [ -z "$Xkblayout" ] && [ "$Runsonconsole" = "yes" ] && echo "$(echo -n "keymap_layout=" && grep XKBLAYOUT <"/etc/default/keyboard" | cut -d= -f2 | cut -d'"' -f2)" >> "$Westonini"
+      [ -z "$Xkblayout" ] && [ -n "$Newxvt" ] && echo "$(echo -n "keymap_layout=" && grep XKBLAYOUT <"/etc/default/keyboard" | cut -d= -f2 | cut -d'"' -f2)" >> "$Westonini"
 
-      case "$Runsonconsole" in
-        no)   # Display prefix X or WL; needed to indicate if host Wayland or host X provides the nested window.
+      case "$Newxvt" in
+        "")   # Display prefix X or WL; needed to indicate if host Wayland or host X provides the nested window.
           #[ -n "$Hostwaylandsocket" ] && [ "$Xserver" != "--xpra-xwayland" ] && [ "$Hostsystem" != "ubuntu" ] && [ "$Fullscreen" = "no" ] && Westonoutput="WL"
           [ -n "$Hostdisplay" ] && Westonoutput="X"
           [ -z "$Westonoutput" ] && [ -n "$Hostwaylandsocket" ] && Westonoutput="WL"
         ;;
-        yes)  # short start&stop of Weston to grep name of monitor. Needed instead of WL or X prefix
-          [ -n "$Screensize" ] || [ "$Scaling" ] || [ -n "$Rotation" ] && {
-            Westonoutput="$(weston_getoutputname)"
-            debugnote "$Xserver: Detected screen output for weston: $Westonoutput"
-          }
+        *)  # get monitor name(s)
+          for Status in /sys/class/drm/*/status; do 
+            Connector="${Status%/status}"
+            Connector="${Connector#*/card?-}"
+            [ "$(cat $Status)" = "connected" ] && Connectorlist="$Connectorlist $Connector"
+          done
         ;;
       esac
     ;;
@@ -3675,8 +3638,6 @@ startup-animation=fade
   -verbose"
       [ "$Xorgconf" ] && Xserveroptions="$Xserveroptions \\
   -config '$Xorgconf'"       # --xorgconf
-#      [ "$Runsonconsole" = "yes" ] && Xserveroptions="$Xserveroptions \\
-#  -keeptty"
       Xcommand="$(get_xpath Xorg) :$Newdisplaynumber vt$Newxvt $Xserveroptions"
     ;;
     --xpra|--xpra2)
@@ -3738,17 +3699,18 @@ mode=$Screensize" >> "$Westonini"
     --weston|--weston-xwayland)
       Xcommand="$(get_xpath Xwayland) :$Newdisplaynumber -ac $Xserveroptions"
 
-      [ -n "$Westonoutput" ] && for ((Count=1 ; Count<="$Outputcount" ; Count++)) ; do
+      [ -n "${Westonoutput:-$Connectorlist}" ] && for ((Count=1 ; Count<="$Outputcount" ; Count++)) ; do
         [ "$Westonoutput" = "WL" ] || [ "$Westonoutput" = "X" ] || {
           Count=""
           [ -z "$Screensize" ] && Screensize="preferred"
         }
-        echo "[output]
-name=$Westonoutput$Count
-mode=$Screensize
-" >> "$Westonini"
-        [ "$Scaling" ]        && echo "scale=$Scaling"      >> "$Westonini"
-        [ -n "$Rotation" ]    && echo "transform=$Rotation" >> "$Westonini"
+        for Connector in ${Westonoutput:-$Connectorlist}; do
+          echo "[output]
+name=$Connector$Count
+mode=$Screensize" >> "$Westonini"
+          [ "$Scaling" ]        && echo "scale=$Scaling"      >> "$Westonini"
+          [ -n "$Rotation" ]    && echo "transform=$Rotation" >> "$Westonini"
+        done
         [ "$Count" ] || break
       done
 
@@ -3764,11 +3726,11 @@ mode=$Screensize
         X)  Compositorcommand="$Compositorcommand \\
   --backend=x11-backend.so" ;;
         *)
-          case "$Runsonconsole" in
-            yes) Compositorcommand="$Compositorcommand \\
-  --backend=drm-backend.so" ;;
-            no)  Compositorcommand="$Compositorcommand \\
+          case "$Newxvt" in
+            "")  Compositorcommand="$Compositorcommand \\
   --backend=x11-backend.so" ;;
+            *) Compositorcommand="$Compositorcommand \\
+  --backend=drm-backend.so" ;;
           esac
         ;;
       esac
@@ -3978,18 +3940,26 @@ esac
   return 0
 }
 create_xcontainercommand() {    # option --xc: create docker command for X in container
-  local Xcontainerrc Xc_hostx= Xc_hostwayland= Xc_nomitshm Xc_containerwayland Xc_gpu Gpudevice Xc_unpriv Xc_user
+  local Xcontainerrc Gpudevice
+  local Xc_hostx Xc_hostwayland Xc_containerwayland Xc_gpu Xc_nomitshm
+  local Xc_capdrop Xc_nopriv Xc_user Xc_console Xc_systemd
 
   Xcontainername="x11docker_X${Newdisplaynumber}_xserver_${Cachenumber}"
   Xcontainerrc="$Cachefolder/xcontainerrc"
   mkfile "$Xcontainerrc"
+
   mkfile "$Cachefolder/etcpasswd.xcontainer"
+  echo "root:x:0:0:root:/root:/bin/bash" >> "$Cachefolder/etcpasswd.xcontainer"
   echo "$Containeruser:x:${Containeruseruid:-$Hostuseruid}:${Containerusergid:-$Hostusergid}:$Containeruser,,,:/tmp:/bin/bash" >> "$Cachefolder/etcpasswd.xcontainer"
 
-  # code snippets:
+  ## code snippets:
+
   # drop privileges
-  Xc_unpriv="--cap-drop ALL \\
+  Xc_capdrop="\\
+  --cap-drop ALL"
+  Xc_nopriv="\\
   --security-opt=no-new-privileges"
+
   # user
   [ "$Containeruser" = "$Hostuser" ] && {
     Xc_user="\\
@@ -3998,11 +3968,23 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
     Xc_user="$Xc_user \\
   --user ${Hostuseruid}:${Hostusergid}"
   }
+  case "$Xcontainerbackend" in
+    docker)
+      Xc_user="$Xc_user \\
+  --userns=host"
+    ;;
+    podman)
+      Xc_user="$Xc_user \\
+  --userns=keep-id"
+    ;;
+  esac
+
   # X in container
   Xc_containerx="\\
   --mount type=bind,source=$Cachefolder/tmp,target=/tmp \\
   --mount type=bind,source=$Xservercookie,target=$Xservercookie \\
   --mount type=bind,source=$Modelinefilebasepath,target=$Modelinefilebasepath,readonly"
+
   # access to host X
   [ -n "$Hostdisplay" ] && {
     Xc_hostx="\\
@@ -4012,19 +3994,23 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
     [ -S "/tmp/.X11-unix/X$Hostdisplaynumber" ] && Xc_hostx="$Xc_hostx \\
   --mount type=bind,source=/tmp/.X11-unix/X$Hostdisplaynumber,target=/X$Hostdisplaynumber,readonly"
   }
+
   # access to host Wayland
   [ -S "$XDG_RUNTIME_DIR/$Hostwaylandsocket" ] && Xc_hostwayland="\\
   --mount type=bind,source=$XDG_RUNTIME_DIR/$Hostwaylandsocket,target=/$Hostwaylandsocket,readonly \\
   --env XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR \\
   --env GDK_BACKEND=wayland \\
   --env WAYLAND_DISPLAY=$Hostwaylandsocket"
+
   # Wayland in container
   Xc_containerwayland="\\
   --env XDG_RUNTIME_DIR=/run/user/$Containeruseruid \\
   --mount type=bind,source=$Cachefolder/XDG_RUNTIME_DIR,target=/run/user/$Containeruseruid"
+
   # container X should not use MIT-SHM
   Xc_nomitshm="\\
   --env LD_PRELOAD=/lib/x86_64-linux-gnu/libdl.so.2:/XlibNoSHM.so"
+
   # GPU
   Xc_gpu="\\
   --group-add $(getent group video | cut -d: -f3) \\
@@ -4041,13 +4027,42 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
     rootrc_nvidia_installer >> "$Sharefolder/nvidia_installer"
   }
 
-  # create command
-  Xcontainercommand="$Xcontainerbackend run --rm --detach \\
+  # console
+  Xc_console="\\
+  --cap-add SYS_TTY_CONFIG \\
+  --cap-add DAC_OVERRIDE \\
+  --cap-add KILL \\
+  --device=/dev/input \\
+  --device=/dev/tty${Newxvt} \\
+  --mount type=bind,source=/var/run/dbus,target=/var/run/dbus
+  --mount type=bind,source=/run/udev/data,target=/run/udev/data,readonly"
+
+  # Weston
+  Xc_weston="\\
+  --cap-add SETUID \\
+  --cap-add SETGID \\
+  --cap-add CHOWN \\
+  --group-add 104 \\
+  --env XDG_VTNR=$Newxvt \\
+  --mount type=bind,source=$Compositorlogfile,target=/x11docker/compositor.log"
+
+  # connect to systemd from host (not used yet)
+  Xc_systemd="\\
+  --pid=host \\
+  --env XDG_SEAT=$XDG_SEAT \\
+  --env XDG_SESSION_ID=$XDG_SESSION_ID \\
+  --mount type=bind,source=/run/systemd,target=/run/systemd \\
+  --mount type=bind,source=/run/user,target=/run/user \\
+  --mount type=bind,source=/run/dbus,target=/run/dbus \\
+  --mount type=bind,source=/sys/fs/cgroup,target=/sys/fs/cgroup"
+
+
+  ## create command
+  Xcontainercommand="$Xcontainerbackend run --rm --pull=never \\
+  --detach \\
   --tty \\
-  --pull=never \\
   --init \\
   --name $Xcontainername \\
-  --env HOME=/tmp \\
   --mount type=bind,source=$Sharefolder,target=$Sharefolder \\
   --mount type=bind,source=$Cachefolder/etcpasswd.xcontainer,target=/etc/passwd,readonly \\
   --mount type=bind,source=$Xcontainerrc,target=/xcontainerrc,readonly"
@@ -4069,13 +4084,6 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   --ipc=shareable"
         ;;
       esac
-    ;;
-  esac
-
-  case "$Xcontainerbackend" in
-    podman)
-      Xcontainercommand="$Xcontainercommand \\
-  --userns=keep-id"
     ;;
   esac
 
@@ -4103,19 +4111,15 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   # add code snippets
   case "$Xserver" in
     --xorg)
+      Xcontainercommand="$Xcontainercommand $Xc_capdrop"
       Xcontainercommand="$Xcontainercommand $Xc_user"
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
       Xcontainercommand="$Xcontainercommand $Xc_gpu"
-      Xcontainercommand="$Xcontainercommand \\
-  --cap-drop ALL \\
-  --cap-add SYS_TTY_CONFIG \\
-  --cap-add DAC_OVERRIDE \\
-  --device=/dev/input \\
-  --device=/dev/tty${Newxvt} \\
-  --mount type=bind,source=/run/udev/data,target=/run/udev/data,readonly"
+      Xcontainercommand="$Xcontainercommand $Xc_console"
     ;;
     --xephyr)
-      Xcontainercommand="$Xcontainercommand $Xc_unpriv"
+      Xcontainercommand="$Xcontainercommand $Xc_capdrop"
+      Xcontainercommand="$Xcontainercommand $Xc_nopriv"
       Xcontainercommand="$Xcontainercommand $Xc_user"
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
       Xcontainercommand="$Xcontainercommand $Xc_hostx"
@@ -4123,7 +4127,8 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
       Xcontainercommand="$Xcontainercommand $Xc_gpu"
     ;;
     --nxagent)
-      Xcontainercommand="$Xcontainercommand $Xc_unpriv"
+      Xcontainercommand="$Xcontainercommand $Xc_capdrop"
+      Xcontainercommand="$Xcontainercommand $Xc_nopriv"
       Xcontainercommand="$Xcontainercommand $Xc_user"
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
       Xcontainercommand="$Xcontainercommand $Xc_hostx"
@@ -4133,7 +4138,8 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   --env NX_CLIENT=$Nxagentclientrc"
     ;;
     --xpra)
-      Xcontainercommand="$Xcontainercommand $Xc_unpriv"
+      Xcontainercommand="$Xcontainercommand $Xc_capdrop"
+      Xcontainercommand="$Xcontainercommand $Xc_nopriv"
       Xcontainercommand="$Xcontainercommand $Xc_user"
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
       [ -n "$Hostdisplay" ] && [ -z "$Hostwaylandsocket" ] && {
@@ -4146,13 +4152,15 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
       Xcontainercommand="$Xcontainercommand $Xc_gpu"
     ;;
     --xpra2)
-      Xcontainercommand="$Xcontainercommand $Xc_unpriv"
+      Xcontainercommand="$Xcontainercommand $Xc_capdrop"
+      Xcontainercommand="$Xcontainercommand $Xc_nopriv"
       Xcontainercommand="$Xcontainercommand $Xc_user"
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
       Xcontainercommand="$Xcontainercommand $Xc_gpu"
     ;;
     --xpra-xwayland)
-      Xcontainercommand="$Xcontainercommand $Xc_unpriv"
+      Xcontainercommand="$Xcontainercommand $Xc_capdrop"
+      Xcontainercommand="$Xcontainercommand $Xc_nopriv"
       Xcontainercommand="$Xcontainercommand $Xc_user"
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
       Xcontainercommand="$Xcontainercommand $Xc_hostx"
@@ -4161,17 +4169,32 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
       Xcontainercommand="$Xcontainercommand $Xc_nomitshm"
     ;;
     --weston-xwayland)
-      Xcontainercommand="$Xcontainercommand $Xc_unpriv"
-      Xcontainercommand="$Xcontainercommand $Xc_user"
-      Xcontainercommand="$Xcontainercommand $Xc_containerx"
-      Xcontainercommand="$Xcontainercommand $Xc_hostx"
-      Xcontainercommand="$Xcontainercommand $Xc_hostwayland"
-      Xcontainercommand="$Xcontainercommand $Xc_containerwayland"
-      Xcontainercommand="$Xcontainercommand $Xc_nomitshm"
-      Xcontainercommand="$Xcontainercommand $Xc_gpu"
+      case "$Newxvt" in
+        "")
+          Xcontainercommand="$Xcontainercommand $Xc_capdrop"
+          Xcontainercommand="$Xcontainercommand $Xc_nopriv"
+          Xcontainercommand="$Xcontainercommand $Xc_user"
+          Xcontainercommand="$Xcontainercommand $Xc_containerx"
+          Xcontainercommand="$Xcontainercommand $Xc_hostx"
+          Xcontainercommand="$Xcontainercommand $Xc_hostwayland"
+          Xcontainercommand="$Xcontainercommand $Xc_containerwayland"
+          Xcontainercommand="$Xcontainercommand $Xc_nomitshm"
+          Xcontainercommand="$Xcontainercommand $Xc_gpu"
+        ;;
+        *)
+          Xcontainercommand="$Xcontainercommand $Xc_capdrop"
+          #Xcontainercommand="$Xcontainercommand $Xc_user"   # disabled to allow tty switch
+          Xcontainercommand="$Xcontainercommand $Xc_containerx"
+          Xcontainercommand="$Xcontainercommand $Xc_containerwayland"
+          Xcontainercommand="$Xcontainercommand $Xc_gpu"
+          Xcontainercommand="$Xcontainercommand $Xc_weston"
+          Xcontainercommand="$Xcontainercommand $Xc_console"
+        ;;
+      esac
     ;;
     --xpra2-xwayland)
-      Xcontainercommand="$Xcontainercommand $Xc_unpriv"
+      Xcontainercommand="$Xcontainercommand $Xc_capdrop"
+      Xcontainercommand="$Xcontainercommand $Xc_nopriv"
       Xcontainercommand="$Xcontainercommand $Xc_user"
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
       Xcontainercommand="$Xcontainercommand $Xc_hostx"
@@ -4179,23 +4202,38 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
       Xcontainercommand="$Xcontainercommand $Xc_gpu"
     ;;
     --xwayland)
-      Xcontainercommand="$Xcontainercommand $Xc_unpriv"
+      Xcontainercommand="$Xcontainercommand $Xc_capdrop"
+      Xcontainercommand="$Xcontainercommand $Xc_nopriv"
       Xcontainercommand="$Xcontainercommand $Xc_user"
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
       Xcontainercommand="$Xcontainercommand $Xc_hostwayland"
       Xcontainercommand="$Xcontainercommand $Xc_gpu"
     ;;
     --weston)
-      Xcontainercommand="$Xcontainercommand $Xc_unpriv"
-      Xcontainercommand="$Xcontainercommand $Xc_user"
-      Xcontainercommand="$Xcontainercommand $Xc_hostx"
-      Xcontainercommand="$Xcontainercommand $Xc_hostwayland"
-      Xcontainercommand="$Xcontainercommand $Xc_containerwayland"
-      Xcontainercommand="$Xcontainercommand $Xc_nomitshm"
-      Xcontainercommand="$Xcontainercommand $Xc_gpu"
+      case "$Newxvt" in
+        "")
+          Xcontainercommand="$Xcontainercommand $Xc_capdrop"
+          Xcontainercommand="$Xcontainercommand $Xc_nopriv"
+          Xcontainercommand="$Xcontainercommand $Xc_user"
+          Xcontainercommand="$Xcontainercommand $Xc_hostx"
+          Xcontainercommand="$Xcontainercommand $Xc_hostwayland"
+          Xcontainercommand="$Xcontainercommand $Xc_containerwayland"
+          Xcontainercommand="$Xcontainercommand $Xc_nomitshm"
+          Xcontainercommand="$Xcontainercommand $Xc_gpu"
+        ;;
+        *)
+          Xcontainercommand="$Xcontainercommand $Xc_capdrop"
+          Xcontainercommand="$Xcontainercommand $Xc_user"
+          Xcontainercommand="$Xcontainercommand $Xc_containerwayland"
+          Xcontainercommand="$Xcontainercommand $Xc_gpu"
+          Xcontainercommand="$Xcontainercommand $Xc_weston"
+          Xcontainercommand="$Xcontainercommand $Xc_console"
+        ;;
+      esac
     ;;
     --kwin)
-      Xcontainercommand="$Xcontainercommand $Xc_unpriv"
+      Xcontainercommand="$Xcontainercommand $Xc_nopriv"
+      Xcontainercommand="$Xcontainercommand $Xc_capdrop"
       Xcontainercommand="$Xcontainercommand $Xc_user"
       Xcontainercommand="$Xcontainercommand $Xc_hostx"
       Xcontainercommand="$Xcontainercommand $Xc_hostwayland"
@@ -4209,6 +4247,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   Xcontainercommand="$Xcontainercommand \\
   $Xcontainerimage bash /xcontainerrc"
 
+  # xcontainerrc
   echo "#! /bin/bash
 # script running in X server container (option --xc)
 exec >> $Xinitlogfile 2>&1
@@ -4230,8 +4269,11 @@ case $Usemkfifo in
   yes) read -n1 goodbye <$Timetosaygoodbyefifo ;;
   no)  while rocknroll; do sleep 1; done ;;
 esac
-killall Xorg # --xorg: avoid freeze that happens if container stops before Xorg is down
+
+# avoid freeze on console that happens if container stops before Xorg or weston is down
+killall Xorg weston
 sleep 1
+
 exit 0
 " >> "$Xcontainerrc"
 
@@ -7456,7 +7498,8 @@ start_compositor() {            # start Wayland compositor Weston or KWin
   case "$Xcontainer" in
     yes)
       $Xcontainerbackend exec --detach "$Xcontainername" sh -c "$Command >> '$Compositorlogfile'  2>&1" 2>> "$Compositorlogfile"
-      Compositorpid="$(ps aux | grep "$(cut -c1-50 <<< "$Command")" | grep -v grep | awk '{print $2}')"
+#      Compositorpid="$(ps aux | tr -d' ' | grep "$(cut -c1-50 <<< $(tr -d' ' <<< "$Command"))" | grep -v grep | awk '{print $2}')"
+      Compositorpid="$(ps aux | grep weston | grep "$Newwaylandsocket" | head -n1 | awk '{print $2}')"
     ;;
     no)
       unpriv "$Command  >> '$Compositorlogfile'  2>&1 & echo compositorpid=\$! >> '$Storeinfofile'"
@@ -8984,7 +9027,7 @@ check_options_arguments() {     # check for [likely] valid arguments
 
   # --vt
   [ -n "$Newxvt" ] && {
-    isint "$Newxvt" || {
+    [ "$Newxvt" = "auto" ] || isint "$Newxvt" || {
       note "Option --vt: Argument must be a positive integer: $Newxvt
   Fallback: Disabling option --vt"
       check_fallback
@@ -9209,6 +9252,24 @@ check_options_interferences() { # check multiple option interferences, change se
       }
     ;;
   esac
+
+  # --vt
+  [ -n "$Newxvt" ] && {
+    case "$Xserver" in
+      --weston|--weston-xwayland)
+        [ -n "$Hostdisplay" ] && error "Option $Xserver: Opening a TTY for weston on console
+  while still running on X would break TTY switching.
+  Please run nested without option --vt or switch to console first."
+      ;;
+    esac
+    case "$Xserver" in
+      --weston)
+        [ "$Xcontainer" = "yes" ] && note "Option $Xserver: TTY switching will not work
+  with weston on console running in a container (option --xc).
+  Alternative: Run with --xc=no using weston from host."
+      ;;
+    esac
+  }
 
   # window manager
   [ "$Desktopmode" = "no" ] && [ "$Windowmanagermode" = "none" ] && case "$Xserver" in
@@ -9634,6 +9695,13 @@ check_options_messages() {      # some messages depending on options, but not ch
   is shown, please check your firewall settings. Compare issue #108 on github."
     ;;
   esac
+  case "$Xserver" in
+    --weston|--weston-xwayland)
+      [ "$Xcontainer" = "yes" ] && [ "$Runsonconsole" = "yes" ] && note "Option --xc: Running $Xserver in container on console
+  is experimental and might misbehave, fail or crash.
+  Please report issues at https://github.com/mviereck/x11docker"
+    ;;
+  esac
 
   # NVIDIA without --gpu
   [ "$Nvidiaversion" ] && [ "$Sharegpu" = "no" ] && case "$Xserver" in
@@ -10033,6 +10101,7 @@ declare_variables() {           # declare global variables
   Xcontainerip=""
   Xcontainername=""
   Xcontaineroptions=""
+  Xcontaineroptionsconsole=""
   Xtoolscontainer="no"
 
   # Window manager
@@ -10335,8 +10404,8 @@ main() {
   check_newxenv                  # find free display
   store_newxenv
   [ "$Shareclipboard" = "yes" ]  && create_clipboardrc >> "$Clipboardrc"          # --clipboard
-  [ "$Xserver" != "--xorg" ]     && [ -n "$Newxvt" ] && note "Option --vt only takes effect with option --xorg."
-  [ "$Xserver" = "--xorg" ]      && check_vt                                      # --vt: find free tty/virtual terminal for Xorg
+  #[ "$Xserver" != "--xorg" ]     && [ -n "$Newxvt" ] && note "Option --vt only takes effect with option --xorg." && Newxvt=""
+  [ "$Xserver" = "--xorg" ] || [ -n "$Newxvt" ] || [ "$Runsonconsole" = "yes" ] && check_vt   # --vt: find free tty/virtual terminal for Xorg or weston
   create_xcommand                # set up start command for X server              # all X server and Wayland options
   [ "$Xcommand" ]                && debugnote "X server command:
   $Xcommand"
