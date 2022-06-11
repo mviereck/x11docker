@@ -2,7 +2,11 @@
 x11docker ToDo notes
 
 ## Work in progress
- 
+ - --xc --xorg: MIT-SHM fails
+ - --xc=podman --xorg fails
+ - --xc --weston on console: tty switch fails with unprivileged user
+
+ - --backend=host: check X container
  - centralize argument checks
  - change global "no" to ""
  - --pulseaudio=host: check possible tcp setup
