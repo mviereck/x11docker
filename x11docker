@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.2.0-beta-8"
+Version="7.2.0-beta-9"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -2449,13 +2449,14 @@ check_screensize() {            # check physical and virtual screen size (also o
 
   # check whole display size, can include multiple monitors
   [ -n "$Hostdisplay" ] && {
-    command -v xrandr >/dev/null && {
-      Line="$(xrandr 2>/dev/null | grep current | head -n1 | cut -d, -f2)"
+    [ "$Xcontainer" = "no" ] && command -v xrandr >/dev/null && xrandr >> "$Xrandroutput" 2>>$Xinitlogfile
+    [ -s "$Xrandroutput" ] && {
+      Line="$(grep current "$Xrandroutput" | head -n1 | cut -d, -f2)"
       Maxxaxis="$(echo "$Line" | cut -d' ' -f3)"
       Maxyaxis="$(echo "$Line" | cut -d' ' -f5)"
       [ -z "$Maxxaxis" ] && {
-        Maxxaxis="$(xrandr 2>/dev/null | grep ' connected' | head -n1 | cut -dx -f1 | rev | cut -d' ' -f1 | rev)"
-        Maxyaxis="$(xrandr 2>/dev/null | grep ' connected' | head -n1 | cut -dx -f2 | cut -d' ' -f1 | cut -d+ -f1)"
+        Maxxaxis="$(grep ' connected' "$Xrandroutput" | head -n1 | cut -dx -f1 | rev | cut -d' ' -f1 | rev)"
+        Maxyaxis="$(grep ' connected' "$Xrandroutput" | head -n1 | cut -dx -f2 | cut -d' ' -f1 | cut -d+ -f1)"
       }
     }
     [ -z "$Maxxaxis" ] && note "check_screensize(): Could not determine your screen size.
@@ -2511,12 +2512,15 @@ check_screensize() {            # check physical and virtual screen size (also o
     *) Screensize="${Xaxis}x${Yaxis}" ;;
   esac
 
-  command -v cvt >/dev/null && Modeline="$(cvt "$Xaxis" "$Yaxis" | tail -n1 | cut -d' ' -f2-)"
-  Modeline="$(echo $Modeline | cut -d_ -f1)\" $(echo $Modeline | cut -d_ -f2- | cut -d' ' -f2-)"
-
+  command -v cvt >/dev/null && {
+    Modeline="$(cvt "$Xaxis" "$Yaxis" | tail -n1 | cut -d' ' -f2-)"
+    Modeline="$(echo $Modeline | cut -d_ -f1)\" $(echo $Modeline | cut -d_ -f2- | cut -d' ' -f2-)"
+  } || {
+    debugnote "check_screensize(): command cvt not found."
+  }
   verbose "Virtual screen size: $Screensize"
   verbose "Physical screen size:
-  $(xrandr 2>/dev/null | grep Screen ||:)"
+  $(grep Screen "$Xrandroutput")"
 
   # create set of Modelines if needed
   case "$Xserver" in
@@ -2602,6 +2606,7 @@ check_vt() {                    # option --xorg: find free vt / tty
   return 0
 }
 check_xcontainer() {            # option --xc: check image x11docker/xserver
+  local Auto=
   case "$Xcontainer" in
     no) ;;
     yes|auto) 
@@ -2617,6 +2622,7 @@ check_xcontainer() {            # option --xc: check image x11docker/xserver
   Fallback: Disabling option --xc"
             check_fallback
             Xcontainer="no"
+            Xcontainerimage=""
           }
         ;;
         docker|podman|nerdctl)
@@ -2634,15 +2640,20 @@ check_xcontainer() {            # option --xc: check image x11docker/xserver
   Fallback: Disabling option --xc"
         check_fallback
         Xcontainer="no"
+        Xcontainerimage=""
       }
     ;;
   esac
 
   case "$Xcontainer" in
-    yes)
+    yes|auto)
+      [ "$Xcontainer" = "auto" ]    && Xcontainer="yes" && Auto="yes"
       [ -z "$Xcontainerimage" ]     && Xcontainer="no"
       [ "$Winsubsystem" ]           && Xcontainer="no"
-      [ "$Xcontainer" = "no" ] && {
+      case "$Runtime" in
+        kata-runtime)                  Xcontainer="no" ;;
+      esac
+      [ "$Xcontainer" = "no" ] && [ -z "$Auto" ] && {
         note "Option --xc not possible:
   - on MS Windows
   - without image x11docker/xserver.
@@ -2651,12 +2662,6 @@ check_xcontainer() {            # option --xc: check image x11docker/xserver
         check_fallback
         Xcontainer="no"
       }
-    ;;
-    auto)
-      case "$Runtime" in
-        kata-runtime)                  Xcontainer="no" ;;
-      esac
-      [ -z "$Xcontainerimage" ]     && Xcontainer="no"
     ;;
   esac
 
@@ -3371,6 +3376,17 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   Xserveroptions_custom="$Xserveroptions"
   Xserveroptions=""
 
+  [ "$Xcontainer" = "no" ] && [ -n "$Hostdisplay" ] && {
+    command -v >/dev/null && {
+      xdpyinfo >> "$Xdpyinfooutput"
+    } || {
+      note "Command xdpyinfo not found.
+  Need it to check dpi settings and MIT-SHM configuration of host X.
+  Please consider to install xdpyinfo.
+  $Wikipackages"
+    }
+  }
+
   [ "$Xcontainer" = "yes" ] && [ "$Xcontainerbackend" = "$Backend" ] && Usemitshm="yes"
   [ "$Shareipc" = "host" ]                                           && Usemitshm="yes"
   [ "$Xcontainer" = "yes" ] && [ -n "$Newxvt" ]                      && Usemitshm="no"
@@ -3496,14 +3512,8 @@ create_xcommand() {             ### create command to start X server and/or Wayl
     --weston|--kwin|--tty|--hostdisplay) ;;
     --xwin|--runx) ;;
     *)
-      [ -z "$Dpi" ] && [ -n "$Hostdisplay" ] && {
-        xdpyinfo >/dev/null 2>&1 && {
-          Dpi="$(xdpyinfo | grep dots | cut -dx -f2 | cut -d' ' -f1)"
-        } || {
-          [ -n "$Hostdisplay" ] && [ -z "$(command -v xdpyinfo)" ] && note "Could not determine dpi settings. If you encounter too big or
-  too small fonts with $Xserver, please install xdpyinfo or use option --dpi.
-  $Wikipackages"
-        }
+      [ -z "$Dpi" ] && [ -s "$Xdpyinfooutput" ] && Dpi="$(grep dots "$Xdpyinfooutput" | cut -dx -f2 | cut -d' ' -f1)"
+      [ -n "$Dpi" ] && {
         case "$Xserver" in
           --xpra*)
             [ "$Scaling" ] && [ "$Desktopmode" = "no" ] && {
@@ -4008,7 +4018,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   --mount type=bind,source=/tmp/.X11-unix/X$Hostdisplaynumber,target=/X$Hostdisplaynumber,readonly"
   [ -s "$Hostxauthority" ] && Xc_hostx="$Xc_hostx \\
   --env XAUTHORITY=$Hostxauthority \\
-  --mount type=bind,source=$Hostxauthority,target=$Hostxauthority,readonly"
+  --mount type=bind,source=$Hostxauthority,target=$Hostxauthority"
   }
 
   # access to host Wayland
@@ -4273,13 +4283,28 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
 mkdir -p -m 1777 /tmp/.X11-unix
 [ -S /X${Hostdisplaynumber} ] && ln -v -s /X$Hostdisplaynumber /tmp/.X11-unix/X$Hostdisplaynumber
 [ -S /${Hostwaylandsocket} ]  && ln -v -s /$Hostwaylandsocket \$XDG_RUNTIME_DIR/$Hostwaylandsocket
+
+[ ! -s '$Xrandroutput' ]   && xrandr   >> '$Xrandroutput'
+[ ! -s '$Xdpyinfooutput' ] && xdpyinfo >> '$Xdpyinfooutput'
 " >> "$Xcontainerrc"
+
+echo '
+# set host cookie to ffff, just in case xauth failed on host in check_hostxenv()
+[ -n "$XAUTHORITY" ] && {
+  Cookie="$(xauth -i -f "${XAUTHORITY:-}" nlist "$DISPLAY" 2>/dev/null | sed -e "s/^..../ffff/")"
+  echo "$Cookie" | xauth -i -f "$HOME/Xauthority.host" nmerge -
+  truncate -s0 "${XAUTHORITY:-}"
+  cat "$HOME/Xauthority.host" >> "${XAUTHORITY:-}"
+}
+' >> "$Xcontainerrc"
 
   [ "$Virgl" = "yes" ] && echo "
 virgl_test_server &
 " >> "$Xcontainerrc"
 
   echo "
+echo 'X server container is ready'
+
 # wait for the end
 case $Usemkfifo in
   yes) read -n1 goodbye <$Timetosaygoodbyefifo ;;
@@ -4356,7 +4381,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
         echo         'debugnote "xinitrc: Option --runx: Using cookie: $XAUTHORITY"'
         echo         "cp -T \"\$XAUTHORITY\" '$Xclientcookie'"
         echo         "cp -T \"\$XAUTHORITY\" '$Xservercookie'"
-        echo         "debugnote \"xinitrc: Cookie: \$(xauth -f $Xclientcookie list 2>&1)\""
+        echo         "debugnote \"xinitrc: Cookie: \$(xauth -i -f $Xclientcookie list 2>&1)\""
       }
       echo           "export $Newxenv"
     ;;
@@ -4400,7 +4425,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
         echo         "  [ '$Trusted' = 'untrusted' ] && note 'Could not create untrusted cookie.
   Maybe your X server misses extension SECURITY.'"
         [ "$Xserver" = "--hostdisplay" ] && {
-          [ "$Shareipc" != "host" ] && [ "$Runsoverssh" = "no" ] && [ "$Hostmitshm" = "yes" ] && [ "$Xtoolscontainer" = "no" ] && {
+          [ "$Shareipc" != "host" ] && [ "$Runsoverssh" = "no" ] && [ "$Hostmitshm" = "yes" ] && [ -z "$Xcontainerimage" ] && {
             echo     "  warning 'Option --hostdisplay: Memory access failures and rendering glitches
   may occur due to unrestricted cookie.
   Avoid them with isolation breaking option --ipc=host,
@@ -4424,7 +4449,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
         echo         "Cookie=\"\$(xauth -i -f $Xclientcookie nlist | sed -e 's/^..../ffff/')\""
         echo         "echo \"\$Cookie\" | xauth -v -i -f $Xclientcookie nmerge -"
         echo         ""
-        echo         "debugnote \"xinitrc: Created cookie: \$(xauth -f $Xclientcookie list 2>&1)\""
+        echo         "debugnote \"xinitrc: Created cookie: \$(xauth -i -f $Xclientcookie list 2>&1)\""
         echo         "ls -l $Xclientcookie"
         echo         "truncate -s0 $Xservercookie"
         echo         "cat $Xclientcookie >> $Xservercookie"
@@ -4491,15 +4516,17 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   case "$Xserver" in
     --xpra|--xpra2|--xvfb)
       echo           "# create set of different screen resolutions"
-      echo           "xrandr --newmode $Modeline"
-      echo           "xrandr --addmode \$Output $(echo $Modeline | cut -d " " -f1)"
       echo           "while read Line; do"
       echo           "  Line=\"\$(echo \"\$Line\" | sed 's/Modeline//g')\""
       echo           "  Line=\"\$(echo \"\$Line\" | sed 's/\"//g')\""
       echo           "  xrandr --newmode \$Line 2>/dev/null"
       echo           "  xrandr --addmode \"\$Output\" \$(echo \$Line | cut -d' ' -f1) 2>/dev/null"
       echo           "done < \"$Modelinefile\""
-      [ "$Xserver" != "--xvfb" ] && [ "$Desktopmode" = "yes" ] && echo "xrandr --output  \$Output --mode $(echo $Modeline | cut -d " " -f1)"
+      [ -n "$Modeline" ] && {
+        echo         "xrandr --newmode $Modeline"
+        echo         "xrandr --addmode \$Output $(echo $Modeline | cut -d " " -f1)"
+        [ "$Xserver" != "--xvfb" ] && [ "$Desktopmode" = "yes" ] && echo "xrandr --output  \$Output --mode $(echo $Modeline | cut -d " " -f1)"
+      }
       echo           ""
     ;;
     --xorg) # --xorg: --scale, --size, --rotate
@@ -4589,7 +4616,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
       echo           "  Yaxis=${Yaxis:-768}"
       echo           "  Screensize=\"\${Xaxis}x\${Yaxis}\""
       echo           "  note \"Could not detect any connected monitor."
-      echo           "  Running on a server? Will try to set a framebuffer size"
+      echo           "  Running on a server? Is xrandr installed? Will try to set a framebuffer size"
       echo           "  with \"xrandr --fb \$Screensize\" that may serve as a virtual display.\""
       echo           "  xrandr --fb \$Screensize"
       echo           "}"
@@ -4698,16 +4725,6 @@ XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
     done
   }
   return 0
-}
-weston_getoutputname() {        # short startup of weston on tty to grep output name
-  unpriv "$Weston --no-config --backend=drm-backend.so >> '$Compositorlogfile' 2>&1 & echo compositorpid=\$! >> '$Storeinfofile'"
-  waitforlogentry "weston-screencheck" "$Compositorlogfile" "connector" "$Compositorerrorcodes"
-
-  grep Output < "$Compositorlogfile" | grep connector | head -n1 | cut -d ' ' -f3 | rev | cut -c2- | rev
-
-  termpid "$(storeinfo dump compositorpid)" weston
-  storeinfo drop compositorpid
-  mkfile "$Compositorlogfile"
 }
 
 #### backend command setup
@@ -7553,11 +7570,14 @@ start_xcontainer() {            # --xc
 $(tail "$Xinitlogfile")"
     return 1
   }
+
   [ "$Nvidiainstallerfile" ] && {
     note "Installing NVIDIA driver in X container."
     docker exec --tty --privileged --user=root "$Xcontainername" bash "$Sharefolder/nvidia_installer" >> "$Xinitlogfile" 2>&1 || note 'ERROR: NVIDIA driver installation in X container failed.'
   }
-#  watchpid CONTAINER$Xcontainername
+
+  waitforlogentry "start_xcontainer()" "$Xinitlogfile" "X server container is ready" || return 1
+
   return 0
 }
 start_xserver() {               # start X server
@@ -7587,11 +7607,10 @@ start_xserver() {               # start X server
       unpriv                                                                         "bash  '$Xinitrc'               >> '$Xinitlogfile'  2>&1 " ;;
     --runx) unpriv                                                      "$Xcommand -- bash  '$Xinitrc'               >> '$Xinitlogfile'  2>&1 " ;;
   esac
-  Exitcode="$?"
-  [ -n "$Xcontainerexitcode" ] && Exitcode="$Xcontainerexitcode"
+  Exitcode="${Exitcode:-$?}"
   [ "$Exitcode" != 0 ] && rocknroll && note "X server $Xserver returned error code $Exitcode.
   Last lines of xinit logfile:
-$(tail "$Xinitlogfile")
+$(tail -n15 "$Xinitlogfile")
 
   $( [ -s "$Compositorlogfile" ] && echo "Last lines of compositor log:
 $(tail "$Compositorlogfile")")"
@@ -8131,7 +8150,12 @@ check_hostxenv() {              # check environment variables for host X display
   [ -z "$XAUTHORITY" ]   && [ -e "$Hostuserhome/.Xauthority" ] && XAUTHORITY="$Hostuserhome/.Xauthority"
   [ -z "$XAUTHORITY" ]   && [ "$Runsoverssh" = "yes" ] && [ -e "$Hostuserhome/.Xauthority" ] && XAUTHORITY="$Hostuserhome/.Xauthority"
   [ "${XAUTHORITY:-}" ]  && {
-    xauth -i -f "${XAUTHORITY:-}" nlist "$Hostdisplay" 2>/dev/null | sed -e 's/^..../ffff/' | unpriv "xauth -f '$Hostxauthority' nmerge - 2>/dev/null"
+    command -v xauth >/dev/null && {
+      xauth -i -f "${XAUTHORITY:-}" nlist "$Hostdisplay" 2>/dev/null | sed -e 's/^..../ffff/' | unpriv "xauth -i -f '$Hostxauthority' nmerge - 2>/dev/null"
+    } || {
+      unpriv "cp '${XAUTHORITY:-}' '$Hostxauthority'"
+      debugnote "xauth not found or failed. Cookie not set to ffff."
+    }
     chown "$Hostuser" "$Hostxauthority"
     chmod 600 "$Hostxauthority"
     export XAUTHORITY
@@ -8195,7 +8219,6 @@ check_snap() {                  # check if docker is installed in snap. Causes r
     [ "$Allownewprivileges" = "auto" ] && Allownewprivileges="yes"
     Xoverip="yes"
     Xcontainer="no"
-    Xtoolscontainer="no"
     [ "$Network" = "none" ] && Network=""
     case "$Sharegpu" in
       yes|virgl|iglx)
@@ -8311,11 +8334,13 @@ $Hostuserhome/.cache/x11docker/symlink
   Timetosaygoodbyefifo="$Sharefolder/$Timetosaygoodbyefifo"
   Westonini="$Sharefolder/$Westonini"                               && mkfile $Westonini
   Xclientcookie="$Sharefolder/$Xclientcookie"                       && mkfile $Xclientcookie
+  Xdpyinfooutput="$Sharefolder/$Xdpyinfooutput"                     && mkfile $Xdpyinfooutput
   Xkbkeymapfile="$Sharefolder/$Xkbkeymapfile"                       && mkfile $Xkbkeymapfile
   Xinitlogfile="$Sharefolder/$Xinitlogfile"                         && mkfile $Xinitlogfile
   Xinitrc="$Sharefolder/$Xinitrc"                                   && mkfile $Xinitrc
   Xpraclientlogfile="$Sharefolder/$Xpraclientlogfile"               && mkfile $Xpraclientlogfile
   Xpraserverlogfile="$Sharefolder/$Xpraserverlogfile"               && mkfile $Xpraserverlogfile
+  Xrandroutput="$Sharefolder/$Xrandroutput"                         && mkfile $Xrandroutput
   
   case "$Backend" in
     proot|chroot)
@@ -9114,7 +9139,7 @@ check_options_interferences() { # check multiple option interferences, change se
   [ "$Xauthentication" = "yes" ] && case "$Xserver" in
     --tty|--weston|--kwin|--hostwayland) Xauthentication="no" ;;
     *)
-      [ "$Xtoolscontainer" = "no" ] && {
+      [ "$Xcontainer" = "no" ] && {
         command -v xauth >/dev/null || {
           case "$Xoverip" in
             yes)
@@ -10110,8 +10135,10 @@ declare_variables() {           # declare global variables
   Customwestonini=""                              # --westonini: Custom config file for weston
   Westonini="weston.ini"                          # Generated config file for weston
   Xclientcookie="Xauthority.client"               # Generated X client cookie. Normally same as $Xservercookie, except for --hostdisplay and --nxagent
+  Xdpyinfooutput="xdpyinfo.txt"                   # Output of xdpyinfo
   Xkbkeymapfile="xkb.keymap"                      # --keymap: File to store output of host keymap in xinitrc
   Xorgconf=""                                     # --xorgconf: custom xorg.conf
+  Xrandroutput="xrandr.txt"                       # Output of xrandr
   Xservercookie="Xauthority.server"               # Generated X server cookie
 
   # X in container
@@ -10123,7 +10150,6 @@ declare_variables() {           # declare global variables
   Xcontainername=""
   Xcontaineroptions=""
   Xcontaineroptionsconsole=""
-  Xtoolscontainer="no"
 
   # Window manager
   Windowmanagermode="none"                        # --wm: Window manager to use: container/host/auto
@@ -10411,7 +10437,6 @@ main() {
   check_xdg_runtime_dir
   check_options_messages         # some messages depending on options, but not changing anything
   setup_fifo                     # open message channels for container, xinitrc and watchpidlist()
-  check_screensize               # size of host X and of new X server             # --size #time0,213
   [ "$Windowmanagermode" ]       && check_windowmanager                           # --wm
   [ "$Sharegpu" = "yes" ]        && setup_gpu ||:                                 # --gpu
   [ "$Sharewebcam" = "yes" ]     && setup_webcam                                  # --webcam
@@ -10427,17 +10452,18 @@ main() {
   [ "$Shareclipboard" = "yes" ]  && create_clipboardrc >> "$Clipboardrc"          # --clipboard
   #[ "$Xserver" != "--xorg" ]     && [ -n "$Newxvt" ] && note "Option --vt only takes effect with option --xorg." && Newxvt=""
   [ "$Xserver" = "--xorg" ] || [ -n "$Newxvt" ] || [ "$Runsonconsole" = "yes" ] && check_vt   # --vt: find free tty/virtual terminal for Xorg or weston
-  create_xcommand                # set up start command for X server              # all X server and Wayland options
-  [ "$Xcommand" ]                && debugnote "X server command:
-  $Xcommand"
-  [ "$Compositorcommand" ]       && debugnote "Compositor command:
-  $Compositorcommand"
-  { [ "$Xcontainer" = "yes" ] || [ "$Xtoolscontainer" = "yes" ] ; } && {          # --xc
+  [ "$Xcontainer" = "yes" ] && {                                                  # --xc
     create_xcontainercommand
     debugnote "X container command:
   $Xcontainercommand"
     start_xcontainer
   }
+  check_screensize               # size of host X and of new X server             # --size
+  create_xcommand                # set up start command for X server              # all X server and Wayland options
+  [ "$Xcommand" ]                && debugnote "X server command:
+  $Xcommand"
+  [ "$Compositorcommand" ]       && debugnote "Wayland compositor command:
+  $Compositorcommand"
 
   storeinfo "x11dockerpid=$$"    # store pid of x11docker
   debugnote "x11docker version:  $Version
