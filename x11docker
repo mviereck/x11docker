@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.2.0-beta-9"
+Version="7.2.0-beta-10"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -2647,9 +2647,10 @@ check_xcontainer() {            # option --xc: check image x11docker/xserver
 
   case "$Xcontainer" in
     yes|auto)
-      [ "$Xcontainer" = "auto" ]    && Xcontainer="yes" && Auto="yes"
-      [ -z "$Xcontainerimage" ]     && Xcontainer="no"
-      [ "$Winsubsystem" ]           && Xcontainer="no"
+      [ "$Xcontainer" = "auto" ]                                     && Xcontainer="yes" && Auto="yes"
+      [ -z "$Xcontainerimage" ]                                      && Xcontainer="no"
+      [ "$Winsubsystem" ]                                            && Xcontainer="no"
+      [ "$Runsonconsole" = "yes" ] && [ "$Rootlessbackend" = "yes" ] && Xcontainer="no"
       case "$Runtime" in
         kata-runtime)                  Xcontainer="no" ;;
       esac
@@ -2658,9 +2659,9 @@ check_xcontainer() {            # option --xc: check image x11docker/xserver
   - on MS Windows
   - without image x11docker/xserver.
   - with runtime kata-runtime
+  - with rootless docker or podman on console
   Fallback: Setting --xc=no"
         check_fallback
-        Xcontainer="no"
       }
     ;;
   esac
@@ -3007,30 +3008,44 @@ check_xdepends() {              # check dependencies on host for X server option
   # --xc
   case "$Xcontainer" in
     yes)
-      [ -z "$Xcopt" ] && {
-        case "${1:-}" in
-          --xorg)
-            $Message "${1:-} is not supported by installed version of x11docker/xserver (option --xc). Please update image."
-            Return=1
-          ;;
-          --weston|--weston-xwayland)
-            $Message "${1:-} on console is not supported by installed version of x11docker/xserver (option --xc). Please update image."
-            Return=1
-          ;;
-          *)
-            case "$Runsonconsole" in
-              yes)
-                $Message "${1:-} on console is not supported with option --xc yet."
-                Return=1
-              ;;
-              no)
-                $Message "${1:-} is not supported with option --xc yet."
-                Return=1
-              ;;
-            esac
-          ;;
-        esac
-      }
+      case "$Xcopt" in
+        "")
+          case "${1:-}" in
+            --xorg)
+              $Message "${1:-} is not supported by installed version of x11docker/xserver (option --xc). Please update image."
+              Return=1
+            ;;
+            --weston|--weston-xwayland)
+              $Message "${1:-} on console is not supported by installed version of x11docker/xserver (option --xc). Please update image."
+              Return=1
+            ;;
+            *)
+              case "$Runsonconsole" in
+                yes)
+                  $Message "${1:-} on console is not supported with option --xc yet."
+                  Return=1
+                ;;
+                no)
+                  $Message "${1:-} is not supported with option --xc yet."
+                  Return=1
+                ;;
+              esac
+            ;;
+         esac
+        ;;
+        *)
+          [ "$Rootlessbackend" = "yes" ] && case "$Xserver" in
+            --xorg)
+              $Message "${1:-} in container (option --xc) with rootless $Backend not possible."
+              Return=1
+            ;;
+            --weston*)
+              $Message "${1:-} in container (option --xc) on console with rootless $Backend not possible."
+              Return=1
+            ;;
+          esac
+        ;;
+      esac
     ;;
     no)
       case "${1:-}" in
@@ -4425,11 +4440,15 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
         echo         "  [ '$Trusted' = 'untrusted' ] && note 'Could not create untrusted cookie.
   Maybe your X server misses extension SECURITY.'"
         [ "$Xserver" = "--hostdisplay" ] && {
-          [ "$Shareipc" != "host" ] && [ "$Runsoverssh" = "no" ] && [ "$Hostmitshm" = "yes" ] && [ -z "$Xcontainerimage" ] && {
-            echo     "  warning 'Option --hostdisplay: Memory access failures and rendering glitches
+          echo       "  Hostmitshm='$Hostmitshm'"
+          [ "$Xcontainer" = "yes" ] && {
+            echo     "  xdpyinfo | grep -q MIT-SHM && Hostmitshm='yes' || Hostmitshm='no'"
+          }
+          [ "$Shareipc" != "host" ] && [ "$Runsoverssh" = "no" ] && [ -z "$Xcontainerimage" ] && {
+            echo     '  [ "$Hostmitshm" = "yes" ] && warning "Option --hostdisplay: Memory access failures and rendering glitches
   may occur due to unrestricted cookie.
   Avoid them with isolation breaking option --ipc=host,
-  or use another X server option like --nxagent or --xpra.'"
+  or use another X server option like --nxagent or --xpra."'
           }
           echo       "  [ '$Trusted' = 'untrusted' ] && warning 'SECURITY RISK! Keylogging and remote host control "
           echo       "  may be possible! Better avoid using option --hostdisplay,"
@@ -7864,7 +7883,7 @@ Fallback: using command '$Containercommand' and enabling option --interactive."
       Runtime=""
       Sharevolumes=""
       Sharecgroup="no"
-      Sudouser="no"
+      Sudouser=""
       Sharewebcam=""
     ;;
     chroot) ### FIXME
@@ -9250,8 +9269,8 @@ check_options_interferences() { # check multiple option interferences, change se
             Trusted="yes"
           }
         } || {
-          note "Command 'xdpyinfo' not found. Need it to check
-  whether Xorg supports untrusted cookies for --hostdisplay
+          note "Option --hostdisplay: Command 'xdpyinfo' not found.
+  Need it to check whether Xorg supports untrusted cookies
   and whether extension MIT-SHM for shared memory is enabled.
   Please install 'xdpyinfo'.
   $Wikipackages"
@@ -9412,8 +9431,7 @@ check_options_interferences() { # check multiple option interferences, change se
 
       [ -z "$Workdir" ] && [ "$Sharehome" != "no" ] && note "Option --no-setup: You might need to specify
   e.g. '--workdir=/tmp' or '--env HOME=/tmp' to allow proper functionality."
-
-      [ "$Sudouser" != "no" ] && [ "$Containeruser" != "root" ] && note "Option --no-setup does not support option --sudouser.
+      [ -n "$Sudouser" ] && [ "$Containeruser" != "root" ] && note "Option --no-setup does not support option --sudouser.
   Fallback: Enabling needed container capabilities to allow sudo
   just in case the container user is set up for su and/or sudo.
   Consider to use --user=root."
