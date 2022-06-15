@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.2.0-beta-10"
+Version="7.2.0-beta-11"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -1749,7 +1749,7 @@ set_password() {                # option --password: set container user password
     }
   }
   Password="$(perl -e "print crypt(\"$Password\", \"salt\")")"
-  mkfolder -p "$(dirname "$Passwordfile")"
+  mkfolder "$(dirname "$Passwordfile")"
   echo "$Containeruserpassword" > "$Passwordfile"
   chmod 600                       "$Passwordfile"
   note "Option --password: Password changed, exiting."
@@ -2598,11 +2598,6 @@ check_vt() {                    # option --xorg: find free vt / tty
   Access it with [CTRL][ALT][F$Newxvt]."
   }
 
-  warning "On debian 9, switching often between multiple X servers can
-  cause a crash of one X server. This bug may be debian specific and is probably
-  some sort of race condition. If you know more about this or it occurs on
-  other systems, too, please report at https://github.com/mviereck/x11docker.
-  You can avoid this issue with switching to a black tty before switching to X."
   return 0
 }
 check_xcontainer() {            # option --xc: check image x11docker/xserver
@@ -3992,6 +3987,26 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   echo "root:x:0:0:root:/root:/bin/bash" >> "$Cachefolder/etcpasswd.xcontainer"
   echo "$Containeruser:x:${Containeruseruid:-$Hostuseruid}:${Containerusergid:-$Hostusergid}:$Containeruser,,,:/tmp:/bin/bash" >> "$Cachefolder/etcpasswd.xcontainer"
 
+  # check if X container should run rootful or rootless (for tty access it must be rootful)
+  case "$Rootless" in
+    yes)
+      case "$Newxvt" in
+        "")
+          Xcdockerhost="$DOCKER_HOST"
+          Xcrootless="yes"
+        ;;
+        *)
+          Xcdockerhost=""
+          Xcrootless="no"
+        ;;
+      esac
+    ;;
+    *)
+      Xcdockerhost=""
+      Xcrootless="no"
+    ;;
+  esac
+
   ## code snippets:
 
   # drop privileges
@@ -4008,16 +4023,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
     Xc_user="$Xc_user \\
   --user ${Hostuseruid}:${Hostusergid}"
   }
-  case "$Xcontainerbackend" in
-    docker)
-      Xc_user="$Xc_user \\
-  --userns=host"
-    ;;
-    podman)
-      Xc_user="$Xc_user \\
-  --userns=keep-id"
-    ;;
-  esac
+  [ "$Xcrootless" = "yes" ] && Xc_user=""
 
   # X in container
   Xc_containerx="\\
@@ -4102,8 +4108,8 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   Xcontainercommand="$Xcontainerbackend run --rm --pull=never \\
   --detach \\
   --tty \\
-  --init \\
   --name $Xcontainername \\
+  --security-opt label=type:container_runtime_t \\
   --mount type=bind,source=$Sharefolder,target=$Sharefolder \\
   --mount type=bind,source=$Cachefolder/etcpasswd.xcontainer,target=/etc/passwd,readonly \\
   --mount type=bind,source=$Xcontainerrc,target=/xcontainerrc,readonly"
@@ -4291,6 +4297,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   # xcontainerrc
   echo "#! /bin/bash
 # script running in X server container (option --xc)
+set -x
 exec >> $Xinitlogfile 2>&1
 $(declare -f rocknroll)
 Timetosaygoodbyefile=$Timetosaygoodbyefile
@@ -5289,7 +5296,7 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
     # Disable user namespacing to avoid file permission issues with --home or --share. Files need same UID/GID.
     case "$Backend" in
       podman)
-        Backendcommand="$Backendcommand \\
+        [ "$Rootlessbackend" = "yes" ] && Backendcommand="$Backendcommand \\
   --userns=keep-id"
       ;;
       docker)
@@ -5570,7 +5577,7 @@ $Nvidiainstallerfile|$Rootfs/$Nvidiacontainerfile"
               case "$Runtime" in
                 kata-runtime|sysbox-runc) ;;
                 *)
-                  Backendcommand="$Backendcommand \\
+                  [ "$Xcrootless" = "$Rootlessbackend" ] && Backendcommand="$Backendcommand \\
   --ipc=container:$Xcontainername"
                 ;;
               esac
@@ -5946,14 +5953,16 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
   case "$Initsystem" in
     none|dockerinit) ;;
     tini)
-      Tinibinaryfile="$(command -v docker-init ||:)"
-      [ -z "$Tinibinaryfile" ]                                      && Tinibinaryfile="/snap/docker/current/bin/docker-init"
-      [ -e "$Tinibinaryfile" ]                                      || Tinibinaryfile="/snap/docker/current/usr/bin/docker-init"
-      [ -e "/usr/bin/tini-static" ]                                 && Tinibinaryfile="/usr/bin/tini-static"
-      [ -e "/usr/local/share/x11docker/tini-static" ]               && Tinibinaryfile="/usr/local/share/x11docker/tini-static"
-      [ -e "$Localsharedir/tini-static" ]                           && Tinibinaryfile="$Localsharedir/tini-static"
+      Tinibinaryfile="$(command -v catatonit ||:)"
+      [ -z "$Tinibinaryfile" ]                                      && Tinibinaryfile="/usr/libexec/catatonit/catatonit"
+      [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="$(command -v docker-init ||:)"
+      [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="/snap/docker/current/bin/docker-init"
+      [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="/snap/docker/current/usr/bin/docker-init"
+      [ -x "/usr/bin/tini-static" ]                                 && Tinibinaryfile="/usr/bin/tini-static"
+      [ -x "/usr/local/share/x11docker/tini-static" ]               && Tinibinaryfile="/usr/local/share/x11docker/tini-static"
+      [ -x "$Localsharedir/tini-static" ]                           && Tinibinaryfile="$Localsharedir/tini-static"
       Tinibinaryfile="$(myrealpath "$Tinibinaryfile" 2>/dev/null ||:)"
-      [ -e "$Tinibinaryfile" ]                                      || Tinibinaryfile=""
+      [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile=""
       [ "$Tinibinaryfile" ] && {
         case "$Runtime" in
           kata-runtime)
@@ -5962,29 +5971,18 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
             Tinibinaryfile="$Localsharedir/tini-static-kata"
           ;;
         esac
-        [ -x "$Tinibinaryfile" ] || {
-          chmod +x "$Tinibinaryfile" || {
-            warning "Your tini binary is not executable. Please run
-    chmod +x $Tinibinaryfile"
-            Initsystem="none"
-          }
-        }
       } || {
         Initsystem="none"
       }
       [ "$Initsystem" = "none" ] && {  ### FIXME --backend=host,proot
-        note "Did not find container init system 'tini'.
-  This is a bug in your distributions docker package.
-  Normally, docker provides init system tini as '/usr/bin/docker-init'.
+        note "Did not find container init system 'tini' or 'catatonit'.
+  This is a bug in your distributions docker or podman package.
+  x11docker uses container init for clean process handling
+  and fast container shutdown.
 
-  x11docker uses tini for clean process handling and fast container shutdown.
-  To provide tini yourself, please download tini-static:
-    https://github.com/krallin/tini/releases/download/v0.18.0/tini-static
-  Store it in one of:
-    $Localsharedir/
-    /usr/local/share/x11docker/"
+  Please install catatonit to provide a container init system."
       }
-      verbose "--init: Found tini binary: ${Tinibinaryfile:-(none)}"
+      verbose "--init: Found init binary: ${Tinibinaryfile:-(none)}"
       [ "$Tinibinaryfile" ] && storeinfo "tini=$Tinibinaryfile"
     ;;
     systemd)
@@ -7409,7 +7407,14 @@ start_container() {             # docker run
         proot|chroot) unpriv "$Backendcommand" & Pid1pid=$! ;;
         docker|podman|nerdctl)
           #read Containerid < <(eval $Backendcommand 2>> $Containerlogfile | rmcr)
-          eval $Backendcommand >> "$Containerlogfile" 2>&1 ||: &
+          case "$Rootlessbackend" in
+            yes)
+              unpriv "$Backendcommand >> "$Containerlogfile" 2>&1" ||: &
+            ;;
+            *)
+              eval $Backendcommand >> "$Containerlogfile" 2>&1 ||: &
+            ;;
+          esac
         ;;
       esac
     ;;
@@ -7421,7 +7426,14 @@ start_container() {             # docker run
           [ "$Winpty" ] && {
             $Winpty bash "$Backendcommandfile" <&0 &
           } || {
-            eval $Backendcommand <&0 &
+            case "$Rootlessbackend" in
+              yes)
+                unpriv "$Backendcommand" <&0 &
+              ;;
+              *)
+                eval $Backendcommand <&0 &
+              ;;
+            esac
           }
         ;;
       esac
@@ -7574,10 +7586,26 @@ start_xcontainer() {            # --xc
   local Containerinspect Xpid1pid
 
   Xcontainercommand="$(tr -d '\\\n' <<< "$Xcontainercommand")"
-  read Xcontainerid< <($Xcontainercommand 2>> "$Xinitlogfile")
+  #read Xcontainerid< <($Xcontainercommand 2>> "$Xinitlogfile")
+  case "$Xcrootless" in
+    yes)
+      read Xcontainerid< <(unpriv "env DOCKER_HOST=$Xcdockerhost $Xcontainercommand 2>> $Xinitlogfile")
+    ;;
+    no)
+      read Xcontainerid< <(        env DOCKER_HOST=$Xcdockerhost $Xcontainercommand 2>> $Xinitlogfile)
+    ;;
+  esac
   storeinfo "Xcontainerid=$Xcontainerid"
 
-  Containerinspect="$($Xcontainerbackend inspect "$Xcontainername" 2>> "$Xinitlogfile" | rmcr)"
+  case "$Xcrootless" in
+    yes)
+      Containerinspect="$(unpriv "env DOCKER_HOST=$Xcdockerhost $Xcontainerbackend inspect $Xcontainername 2>> $Xinitlogfile" | rmcr)"
+    ;;
+    no)
+      Containerinspect="$(        env DOCKER_HOST=              $Xcontainerbackend inspect "$Xcontainername" 2>> "$Xinitlogfile" | rmcr)"
+    ;;
+  esac
+
   [ "$Containerinspect" != "[]" ] && {
     Xcontainerip="$(parse_inspect "$Containerinspect" "NetworkSettings" "IPAddress")"
     storeinfo "Xcontainerip=$Xcontainerip"
@@ -7592,7 +7620,14 @@ $(tail "$Xinitlogfile")"
 
   [ "$Nvidiainstallerfile" ] && {
     note "Installing NVIDIA driver in X container."
-    docker exec --tty --privileged --user=root "$Xcontainername" bash "$Sharefolder/nvidia_installer" >> "$Xinitlogfile" 2>&1 || note 'ERROR: NVIDIA driver installation in X container failed.'
+    case "$Xcrootless" in
+      yes)
+        unpriv "env DOCKER_HOST=$Xcdockerhost $Backendbin exec --tty --privileged --user=root $Xcontainername bash $Sharefolder/nvidia_installer" >> "$Xinitlogfile" 2>&1 || note 'ERROR: NVIDIA driver installation in X container failed.'
+      ;;
+      no)
+        env DOCKER_HOST= $Backendbin exec --tty --privileged --user=root "$Xcontainername" bash "$Sharefolder/nvidia_installer" >> "$Xinitlogfile" 2>&1 || note 'ERROR: NVIDIA driver installation in X container failed.'
+      ;;
+    esac
   }
 
   waitforlogentry "start_xcontainer()" "$Xinitlogfile" "X server container is ready" || return 1
@@ -7612,13 +7647,19 @@ start_xserver() {               # start X server
           esac
         ;;
         yes)
-          $Xcontainerbackend exec "$Xcontainername" env WAYLAND_DISPLAY="$Newwaylandsocket" xinit "$Xinitrc" -- $Xcommand  >> "$Xinitlogfile"  2>&1 || {
-            Xcontainerexitcode=$?
-            case "$Xcontainerexitcode" in
-              137) Exitcode="0" ;; # docker error indicating that xinit did not shut down fast enough on SIGTERM. Ignore it.
-              *)   Exitcode="$Xcontainerexitcode" ;;
-            esac
-          }
+          case "$Xcrootless" in
+            yes)
+              unpriv "env DOCKER_HOST=$Xcdockerhost $Xcontainerbackend exec $Xcontainername env WAYLAND_DISPLAY=$Newwaylandsocket xinit $Xinitrc -- $Xcommand"  >> "$Xinitlogfile"  2>&1
+            ;;
+            no)
+              env DOCKER_HOST= $Xcontainerbackend exec "$Xcontainername" env WAYLAND_DISPLAY="$Newwaylandsocket" xinit "$Xinitrc" -- $Xcommand  >> "$Xinitlogfile"  2>&1
+            ;;
+          esac
+          Xcontainerexitcode=$?
+          case "$Xcontainerexitcode" in
+            137) Exitcode="0" ;; # docker error indicating that xinit did not shut down fast enough on SIGTERM. Ignore it.
+            *)   Exitcode="$Xcontainerexitcode" ;;
+          esac
         ;;
       esac
     ;;
@@ -7754,13 +7795,34 @@ check_backend() {               # option --backend
   # rootful or rootless
   case "$Backend" in
     docker)
-      grep -q "/run/user/" <<< "${DOCKER_HOST:-}" && Rootlessbackend="yes"
+      grep -q "/run/user/" <<< "${DOCKER_HOST:-}" && {
+        Rootlessbackend="yes"
+        Rootless="yes"
+      }
     ;;
     podman|nerdctl|proot)
-      [ "$(id -u)" != "0" ] && Rootlessbackend="yes"
+      [ "$(id -u)" != "0" ] && {
+        Rootlessbackend="yes"
+        Rootless="yes"
+      }
     ;;
   esac
-
+  case "$Rootless" in
+    yes)
+      case "$Backend" in
+        docker)
+          DOCKER_HOST="${DOCKER_HOST:-$XDG_RUNTIME_DIR/docker.sock}"
+          DOCKER_HOST="${DOCKER_HOST#unix://}"
+          [ -e "${DOCKER_HOST:-}" ] || error "Option --rootless --backend=docker: docker user socket not found.
+  Docker user daemon not running? Try to start it with:
+    systemctl --user start docker"
+          DOCKER_HOST="unix://$DOCKER_HOST"
+          export DOCKER_HOST
+        ;;
+      esac
+    ;;
+  esac
+set +x
   case "$Backend" in
     docker|podman|nerdctl)
       # Check whether docker daemon is running, get docker info
@@ -7805,7 +7867,7 @@ $(rmcr < "$Containerlogfile" | tail)"
     podman)
       # /proc/sys/kernel/unprivileged_userns_clone might exist on debian only.
       # https://github.com/mviereck/x11docker/issues/255#issuecomment-758014962
-      [ "$(cat /proc/sys/kernel/unprivileged_userns_clone)" = "0" ] && error "Option --backend=podman: Linux kernel disallows
+      [ "$(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null)" = "0" ] && error "Option --backend=podman: Linux kernel disallows
   unprivileged user namespace setup. Please run as root:
     sysctl -w kernel.unprivileged_userns_clone=1"
       store_runoption cap "CHOWN"
@@ -8120,6 +8182,12 @@ check_hostuser() {              # check for unprivileged host user
   Hostusergid="$(id -g "$Hostuser")"
   [ "$Hostuser" = "$Startuser" ] && Hostuserhome="$HOME"
 
+  # How to run as unprivileged user in unpriv()
+  case "$Hostuser" in
+    "$Startuser") Unpriv="eval" ;;   # alternatively: bash -c
+    *)            Unpriv="su $Hostuser -c" ;;
+  esac
+
   [ -z "$Hostuserhome" ] && Hostuserhome=$(getent passwd "$Hostuser" 2>/dev/null | cut -d: -f6)
   [ -z "$Hostuserhome" ] && {
     Hostuserhome="/tmp/home/$Hostuser"
@@ -8130,10 +8198,6 @@ check_hostuser() {              # check for unprivileged host user
     check_fallback
   }
   debugnote "host user: $Hostuser $Hostuseruid:$Hostusergid $Hostuserhome"
-  
-  Localsharedir="$Hostuserhome/.local/share/x11docker"
-  mkfolder "$Localsharedir"
-  Mitshmlib="$Localsharedir/XlibNoSHM.so"
 
   [ "$Hostuser" = "root" ] && warning "Running as user root.
   Maybe \$(logname) did not provide an unprivileged user.
@@ -8143,11 +8207,9 @@ check_hostuser() {              # check for unprivileged host user
   id | grep -q "(docker)" && warning "User $Hostuser is member of group docker.
   That allows unprivileged processes on host to gain root privileges."
 
-  # How to run as unprivileged user in unpriv()
-  case "$Hostuser" in
-    "$Startuser") Unpriv="eval" ;;   # alternatively: bash -c
-    *)            Unpriv="su $Hostuser -c" ;;
-  esac
+  Localsharedir="$Hostuserhome/.local/share/x11docker"
+  mkfolder "$Localsharedir"
+  Mitshmlib="$Localsharedir/XlibNoSHM.so"
 
   return 0
 }
@@ -8528,7 +8590,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,build,cleanup,help,launcher,licence,license,version"                                            # Special options without starting X or container
   Longoptions="$Longoptions,install,remove,update,update-master"                                                            # Installation
   #
-  Longoptions="$Longoptions,keepcache,remountcgroup,xopt:,xorgconf:"                                                        # Experimental
+  Longoptions="$Longoptions,keepcache,remountcgroup,rootless,xopt:,xorgconf:"                                               # Experimental
   Longoptions="$Longoptions,dbus-system,exe,homedir:,hostipc,hostnet,iglx,kwin-xwayland,no-internet,no-xhost"               # Deprecated
   Longoptions="$Longoptions,sharedir:,sharessh,systemd,showenv,showid,showinfofile,showpid1"                                # Deprecated
   Longoptions="$Longoptions,cachedir:,no-init,nothing,no-xtest,openrc,podman,pull::,ps,pw::,runit,silent,starter"           # Removed
@@ -8640,7 +8702,7 @@ ${2:-${LANG:-}}" ; shift                                             # Locale/la
                               Langwunsch="${Langwunsch:-$LC_ALL}"
                               [ "$Langwunsch" ] || note "Option --lang: Environment variable \$LANG is empty.
   Please specify desired language locale with e.g. --lang=en_US or --lang=zh_CN." ;;
-      -P|--printer)           Sharecupsmode="${2:-auto}" ; shift ;;   # Printer sharing with CUPS
+      -P|--printer)           Sharecupsmode="${2:-auto}" ; shift ;;  # Printer sharing with CUPS
       -p)                     Pulseaudiomode="auto" ;;               # Pulseaudio sound
          --pulseaudio)        Pulseaudiomode="${2:-auto}"; shift ;;  # Pulseaudio sound
          --webcam)            Sharewebcam="yes" ;;                   # Webcam sharing
@@ -8673,7 +8735,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
          --systemd)           Initsystem="systemd" ; note "Option --systemd is deprecated. Please use: --init=systemd" ;;
 
      #### Container configuration
-         --backend)           Backend="${2:-}" ; shift ;;   # container backend to use: docker, podman, nerdctl, others
+         --backend)           Backend="${2:-}" ; shift ;;             # container backend to use: docker, podman, nerdctl, others
          --cap-default)       Capdropall="no" ;;                     # Don't use --cap-drop=ALL --security-opt=no-new-privileges
          --env)               store_runoption env "${2:-}"           # Set container environment variables
                               shift ;;
@@ -8726,6 +8788,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
      #### Experimental options
          --keepcache)         Preservecachefiles="yes" ;          note "Option --keepcache: experimental option." ;;
          --remountcgroup)     Remountcgroup="yes" ;               note "Option --remountcgroup: experimental option." ;;
+         --rootless)          Rootless="yes" ;;
          --xopt)              Xserveroptions="${2:-}" ;   shift ; note "Option --xopt: experimental option." ;;      # Custom X server options
          --xorgconf)          Xorgconf="${2:-}" ;         shift ; note "Option --xorgconf: experimental option." ;;  # Custom xorg.conf
 
@@ -10229,6 +10292,7 @@ declare_variables() {           # declare global variables
   Optionsetall=""                                 # list of all available long options
   Remountcgroup=""                                # --init=systemd with cgroupv2 in docker workaround
   Rootfs=""                                       # --backend=proot
+  Rootless=""                                     # Check for rootful/rootless docker depending on DOCKER_HOST
   Rootlessbackend=""                              # Check for rootful/rootless docker depending on DOCKER_HOST
   Runtime=""                                      # Runtime to use. runc|nvidia|kata-runtime|crun
   Snapsupport=""                                  # --snap: Fallback mode to support docker in snap
