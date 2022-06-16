@@ -4734,6 +4734,221 @@ XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
 }
 
 #### backend command setup
+check_backend() {               # options --backend, --rootless
+  case "$Mobyvm" in
+    no)
+      Backendbin="$(command -v "$Backend")"
+    ;;
+    yes)
+      case "$Backend" in
+        docker|host) ;;
+        *) 
+          error "Option --backend=$Backend is not supported on MS Windows yet.
+  If you need this, ask for support at https://github.com/mviereck/x11docker"
+          return 1
+        ;;
+      esac
+      Backendbin="docker.exe"
+      command -v "$Backendbin" >/dev/null || {
+        PATH="${PATH:-}:$(convertpath subsystem "C:/Program Files/docker"):$(convertpath subsystem "C:/Program Files/Docker/Docker/resources/bin")"
+        export PATH
+      }
+    ;;
+  esac
+
+  case "$Backend" in
+    docker|podman|nerdctl|proot|chroot)
+      [ -z "$Backendbin" ] && error "Option --backend=$Backend: No binary found for $Backend."
+    ;;
+    host) Backendbin="" ;;
+  esac
+
+  # rootful or rootless
+  [ "$Rootlessbackend" = "no" ] && export DOCKER_HOST=
+  [ -z "$Rootlessbackend" ] && case "$Backend" in
+    docker) 
+      grep -q "/run/user/" <<< "${DOCKER_HOST:-}" && Rootlessbackend="yes"
+      [ "$(id -un)" = "root" ] && id -G -n | grep -q -w 'docker' && Rootlessbackend="no"
+    ;;
+    podman|nerdctl)
+      [ "$(id -u)" = "0" ] && Rootlessbackend="no" || Rootlessbackend="yes" ;;
+    proot) Rootlessbackend="yes" ;;
+    host) ;;
+  esac
+  case "$Rootlessbackend" in
+    yes)
+      case "$Backend" in
+        docker)
+          DOCKER_HOST="${DOCKER_HOST:-/run/user/$Hostuseruid/docker.sock}"
+          DOCKER_HOST="${DOCKER_HOST#unix://}"
+          [ -e "${DOCKER_HOST:-}" ] || error "Option --rootless --backend=docker: docker user socket not found.
+  Docker user daemon not running? Try to start it with:
+    systemctl --user start docker"
+          DOCKER_HOST="unix://$DOCKER_HOST"
+          export DOCKER_HOST
+        ;;
+      esac
+    ;;
+    no)
+      case "$Backend" in
+        docker)
+          [ "$(id -un)" = "root" ] || id -G -n | grep -q -w 'docker' || error "Option --rootless=no: Please run x11docker as root
+  to allow rootful $Backend."
+        ;;
+        podman|nerdctl)
+          [ "$(id -un)" != "root" ] && error "Option --rootless=no: Please run x11docker as root
+  to allow rootful $Backend."
+        ;;
+      esac
+    ;;
+  esac
+
+  case "$Backend" in
+    docker|podman|nerdctl)
+      # Check whether docker daemon is running, get docker info ### FIXME rootless check/unpriv
+      unpriv_backend "$Backendbin info" >/dev/null 2>>$Containerlogfile || error "'$Backend info' failed.
+  If using docker: Is docker daemon running at all?
+  Maybe you need root privileges to run docker?
+  Try to start docker daemon with 'systemctl start docker'.
+  Last lines of log:
+$(rmcr < "$Containerlogfile" | tail)"
+      Backendinfo="$(unpriv_backend "$Backendbin info --format='{{json .}}'" 2>>$Containerlogfile)"
+      check_runtime
+    ;;
+  esac
+  case "$Backend" in
+    docker|podman|nerdctl|proot|chroot)
+      [ "${Imagename:0:1}" = "/" ] && {
+        Rootfs="$Imagename"
+        Imagename="$(basename "$Rootfs")"
+      }
+      Imagebasename="$(echo "$Imagename" | tr / - | cut -d: -f1)"
+      Codename="${Codename:-"$Imagename $Containercommand"}"
+      verbose "Image name: $Imagename
+  Container command: $Containercommand"
+    ;;
+    host)
+      Containercommand="$Imagename $Containercommand"
+      [ "$Customdockeroptions" ] && error "Option --backend=$Backend does not take CUSTOM_RUN_OPTIONS.
+  If your command args contain ' -- ', run like
+  x11docker --backend=$Backend [OPTIONS] -- -- COMMAND -- ARGS"
+      Imagename=""
+      Imagebasename="$(basename "$Containercommand" | cut -d' ' -f1)"
+      Codename="${Codename:-"$Imagebasename"}"
+    ;;
+  esac
+  Codename="$(unspecialstring "$Codename" | cut -c1-40)"
+  Codename="${Codename:-noname}"
+  Imagebasename="$(unspecialstring "$Imagebasename")"  # must be - for backwards compatibility of --home
+  Imagebasename="${Imagebasename:-noname}"
+
+  case "$Backend" in
+    docker) ;;
+    podman)
+      # /proc/sys/kernel/unprivileged_userns_clone might exist on debian only.
+      # https://github.com/mviereck/x11docker/issues/255#issuecomment-758014962
+      [ "$(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null)" = "0" ] && error "Option --backend=podman: Linux kernel disallows
+  unprivileged user namespace setup. Please run as root:
+    sysctl -w kernel.unprivileged_userns_clone=1"
+      store_runoption cap "CHOWN"
+    ;;
+    nerdctl)
+      note "Option --backend=nerdctl: nerdctl only supports a subset
+  of docker options. That limits support of x11docker features."
+      Switchcontaineruser="yes"
+      [ "$Capdropall" = "yes" ] && warning "Option --backend=nerdctl: x11docker
+  will allow some user switching capabilities that would be dropped with
+  other backends. (Because 'nerdctl --exec' does not support option --user.)
+  Though, these are still within nerdctl default capabilities."
+    ;;
+    proot)
+      warning "Option --backend=$Backend: Your host system is NOT PROTECTED.
+  There is close to no isolation like a real container could provide.
+  Effectively applications in proot have the same privileges as if
+  they would have been installed and started directly on the host system."
+      check_optionset "--backend=$Backend" "--cap-default --hostipc --ipc --limit --network --newprivileges --no-setup --runtime --sharecgroup --user" ||:
+      check_optionset "--backend=$Backend" "--user" || error "--backend=$Backend: Option --user is not allowed.
+  Please try option --hostuser instead."
+      # set defaults. Some might look misleading just to avoid later messages, but not affecting the setup.
+      Network="host"
+      Shareipc="host"
+      Createcontaineruser="yes"
+      Containersetup="yes"
+      Capdropall="yes"
+      Allownewprivileges="no"
+      Runtime=""
+      Sharecgroup="no"
+      Limitresources=""
+      # needed
+      Switchcontaineruser="yes"
+
+      [ -z "$Rootfs" ] && [ -d "$Hosthomebasefolder/ROOTFS/$Imagebasename" ] && Rootfs="$Hosthomebasefolder/ROOTFS/$Imagebasename"
+      [ -z "$Rootfs" ] && error "--backend=$Backend: Did not find a rootfs for $Imagename
+  in $Hosthomebasefolder/ROOTFS/$Imagebasename"
+      [ -z "$Containercommand" ] && [ -e "$Rootfs/start" ] && Containercommand="/bin/sh /start"
+      [ -z "$Containercommand" ] && {
+        [ -e "$Rootfs/bin/bash" ]                          && Containercommand="/bin/bash" || Containercommand="/bin/sh"
+        [ "$Containerusershell" != "auto" ]                && Containercommand="$Containerusershell"
+        note "--backend=$Backend: No command specified.
+Fallback: using command '$Containercommand' and enabling option --interactive."
+        check_fallback
+        Interactive="yes"
+      }
+      [ "$Sudouser" ] && note "--backend=$Backend --sudouser: sudo fails in $Backend.
+  Workaround: starting with user root.
+  You can switch to user $Containeruser with 'su $Containeruser'.
+  Note that root in $Backend is a fake and does not have real root privileges." ### FIXME chroot
+    ;;
+    host)
+      warning "Option --backend=host provides no isolation at all.
+  It only provides an X server for a host application."
+      storeinfo "containerrootrc=ready"
+      Sharefoldercontainer="$Sharefolder"
+      # --dbus, --hostdbus, --init
+      check_optionset "--backend=$Backend" "--alsa --cap-default --group-add --hostipc --ipc --limit --home --name --network --newprivileges --no-entrypoint --no-setup \
+                       --printer --pulseaudio --runasroot --runtime --share --sharecgroup --sudouser --webcam" ||:
+      check_optionset "--backend=$Backend" "--user" || error "--backend=$Backend: Option --user is not allowed.
+  Please try option --hostuser instead."
+      # set defaults. Some might look misleading just to avoid later messages, but not affecting the setup.
+      Sharealsa="no"
+      Capdropall="yes"
+      Shareipc="host"
+      [ "$Langwunsch" ] && store_runoption env "LANG=$Langwunsch"
+      Limitresources=""
+      Network="host"
+      Allownewprivileges="no"
+      Noentrypoint=""
+      Containersetup="yes"
+      Sharecupsmode=""
+      Pulseaudiomode=""
+      Runasroot=""
+      Runtime=""
+      Sharevolumes=""
+      Sharecgroup="no"
+      Sudouser=""
+      Sharewebcam=""
+    ;;
+    chroot) ### FIXME
+      warning "--backend=$Backend is highly experimental.
+   Prefer to use another backend. Even 'proot' is more reliable.
+   Isolation is close to not existant."
+      [ -z "$Rootfs" ] && [ -d "$Hosthomebasefolder/ROOTFS/$Imagebasename" ] && Rootfs="$Hosthomebasefolder/ROOTFS/$Imagebasename"
+      [ -z "$Rootfs" ] && error "--backend=$Backend: Did not find a rootfs for $Imagename
+  in $Hosthomebasefolder/ROOTFS/$Imagebasename"
+      [ -z "$Containercommand" ] && [ -e "$Rootfs/start" ] && Containercommand="/bin/sh /start"
+      [ -z "$Containercommand" ] && {
+        [ -e "$Rootfs/bin/bash" ]                          && Containercommand="/bin/bash" || Containercommand="/bin/sh"
+        [ "$Containerusershell" != "auto" ]                && Containercommand="$Containerusershell"
+        note "--backend=$Backend: No command specified.
+Fallback: using command '$Containercommand' and enabling option --interactive."
+        check_fallback
+        Interactive="yes"
+      }
+      Switchcontaineruser="yes"
+    ;;
+  esac
+  return 0
+}
 check_image() {                 # get some image information
 
   # Check if image $Imagename is available locally
@@ -7699,221 +7914,6 @@ start_pulseaudiotcp() {         # option --pulseaudio=tcp: load Pulseaudio TCP m
 }
 
 #### main init routines
-check_backend() {               # options --backend, --rootless
-  case "$Mobyvm" in
-    no)
-      Backendbin="$(command -v "$Backend")"
-    ;;
-    yes)
-      case "$Backend" in
-        docker|host) ;;
-        *) 
-          error "Option --backend=$Backend is not supported on MS Windows yet.
-  If you need this, ask for support at https://github.com/mviereck/x11docker"
-          return 1
-        ;;
-      esac
-      Backendbin="docker.exe"
-      command -v "$Backendbin" >/dev/null || {
-        PATH="${PATH:-}:$(convertpath subsystem "C:/Program Files/docker"):$(convertpath subsystem "C:/Program Files/Docker/Docker/resources/bin")"
-        export PATH
-      }
-    ;;
-  esac
-
-  case "$Backend" in
-    docker|podman|nerdctl|proot|chroot)
-      [ -z "$Backendbin" ] && error "Option --backend=$Backend: No binary found for $Backend."
-    ;;
-    host) Backendbin="" ;;
-  esac
-
-  # rootful or rootless
-  [ "$Rootlessbackend" = "no" ] && export DOCKER_HOST=
-  [ -z "$Rootlessbackend" ] && case "$Backend" in
-    docker) 
-      grep -q "/run/user/" <<< "${DOCKER_HOST:-}" && Rootlessbackend="yes"
-      [ "$(id -un)" = "root" ] && id -G -n | grep -q -w 'docker' && Rootlessbackend="no"
-    ;;
-    podman|nerdctl)
-      [ "$(id -u)" = "0" ] && Rootlessbackend="no" || Rootlessbackend="yes" ;;
-    proot) Rootlessbackend="yes" ;;
-    host) ;;
-  esac
-  case "$Rootlessbackend" in
-    yes)
-      case "$Backend" in
-        docker)
-          DOCKER_HOST="${DOCKER_HOST:-/run/user/$Hostuseruid/docker.sock}"
-          DOCKER_HOST="${DOCKER_HOST#unix://}"
-          [ -e "${DOCKER_HOST:-}" ] || error "Option --rootless --backend=docker: docker user socket not found.
-  Docker user daemon not running? Try to start it with:
-    systemctl --user start docker"
-          DOCKER_HOST="unix://$DOCKER_HOST"
-          export DOCKER_HOST
-        ;;
-      esac
-    ;;
-    no)
-      case "$Backend" in
-        docker)
-          [ "$(id -un)" = "root" ] || id -G -n | grep -q -w 'docker' || error "Option --rootless=no: Please run x11docker as root
-  to allow rootful $Backend."
-        ;;
-        podman|nerdctl)
-          [ "$(id -un)" != "root" ] && error "Option --rootless=no: Please run x11docker as root
-  to allow rootful $Backend."
-        ;;
-      esac
-    ;;
-  esac
-
-  case "$Backend" in
-    docker|podman|nerdctl)
-      # Check whether docker daemon is running, get docker info ### FIXME rootless check/unpriv
-      unpriv_backend "$Backendbin info" >/dev/null 2>>$Containerlogfile || error "'$Backend info' failed.
-  If using docker: Is docker daemon running at all?
-  Maybe you need root privileges to run docker?
-  Try to start docker daemon with 'systemctl start docker'.
-  Last lines of log:
-$(rmcr < "$Containerlogfile" | tail)"
-      Backendinfo="$(unpriv_backend "$Backendbin info --format='{{json .}}'" 2>>$Containerlogfile)"
-      check_runtime
-    ;;
-  esac
-  case "$Backend" in
-    docker|podman|nerdctl|proot|chroot)
-      [ "${Imagename:0:1}" = "/" ] && {
-        Rootfs="$Imagename"
-        Imagename="$(basename "$Rootfs")"
-      }
-      Imagebasename="$(echo "$Imagename" | tr / - | cut -d: -f1)"
-      Codename="${Codename:-"$Imagename $Containercommand"}"
-      verbose "Image name: $Imagename
-  Container command: $Containercommand"
-    ;;
-    host)
-      Containercommand="$Imagename $Containercommand"
-      [ "$Customdockeroptions" ] && error "Option --backend=$Backend does not take CUSTOM_RUN_OPTIONS.
-  If your command args contain ' -- ', run like
-  x11docker --backend=$Backend [OPTIONS] -- -- COMMAND -- ARGS"
-      Imagename=""
-      Imagebasename="$(basename "$Containercommand" | cut -d' ' -f1)"
-      Codename="${Codename:-"$Imagebasename"}"
-    ;;
-  esac
-  Codename="$(unspecialstring "$Codename" | cut -c1-40)"
-  Codename="${Codename:-noname}"
-  Imagebasename="$(unspecialstring "$Imagebasename")"  # must be - for backwards compatibility of --home
-  Imagebasename="${Imagebasename:-noname}"
-
-  case "$Backend" in
-    docker) ;;
-    podman)
-      # /proc/sys/kernel/unprivileged_userns_clone might exist on debian only.
-      # https://github.com/mviereck/x11docker/issues/255#issuecomment-758014962
-      [ "$(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null)" = "0" ] && error "Option --backend=podman: Linux kernel disallows
-  unprivileged user namespace setup. Please run as root:
-    sysctl -w kernel.unprivileged_userns_clone=1"
-      store_runoption cap "CHOWN"
-    ;;
-    nerdctl)
-      note "Option --backend=nerdctl: nerdctl only supports a subset
-  of docker options. That limits support of x11docker features."
-      Switchcontaineruser="yes"
-      [ "$Capdropall" = "yes" ] && warning "Option --backend=nerdctl: x11docker
-  will allow some user switching capabilities that would be dropped with
-  other backends. (Because 'nerdctl --exec' does not support option --user.)
-  Though, these are still within nerdctl default capabilities."
-    ;;
-    proot)
-      warning "Option --backend=$Backend: Your host system is NOT PROTECTED.
-  There is close to no isolation like a real container could provide.
-  Effectively applications in proot have the same privileges as if
-  they would have been installed and started directly on the host system."
-      check_optionset "--backend=$Backend" "--cap-default --hostipc --ipc --limit --network --newprivileges --no-setup --runtime --sharecgroup --user" ||:
-      check_optionset "--backend=$Backend" "--user" || error "--backend=$Backend: Option --user is not allowed.
-  Please try option --hostuser instead."
-      # set defaults. Some might look misleading just to avoid later messages, but not affecting the setup.
-      Network="host"
-      Shareipc="host"
-      Createcontaineruser="yes"
-      Containersetup="yes"
-      Capdropall="yes"
-      Allownewprivileges="no"
-      Runtime=""
-      Sharecgroup="no"
-      Limitresources=""
-      # needed
-      Switchcontaineruser="yes"
-
-      [ -z "$Rootfs" ] && [ -d "$Hosthomebasefolder/ROOTFS/$Imagebasename" ] && Rootfs="$Hosthomebasefolder/ROOTFS/$Imagebasename"
-      [ -z "$Rootfs" ] && error "--backend=$Backend: Did not find a rootfs for $Imagename
-  in $Hosthomebasefolder/ROOTFS/$Imagebasename"
-      [ -z "$Containercommand" ] && [ -e "$Rootfs/start" ] && Containercommand="/bin/sh /start"
-      [ -z "$Containercommand" ] && {
-        [ -e "$Rootfs/bin/bash" ]                          && Containercommand="/bin/bash" || Containercommand="/bin/sh"
-        [ "$Containerusershell" != "auto" ]                && Containercommand="$Containerusershell"
-        note "--backend=$Backend: No command specified.
-Fallback: using command '$Containercommand' and enabling option --interactive."
-        check_fallback
-        Interactive="yes"
-      }
-      [ "$Sudouser" ] && note "--backend=$Backend --sudouser: sudo fails in $Backend.
-  Workaround: starting with user root.
-  You can switch to user $Containeruser with 'su $Containeruser'.
-  Note that root in $Backend is a fake and does not have real root privileges." ### FIXME chroot
-    ;;
-    host)
-      warning "Option --backend=host provides no isolation at all.
-  It only provides an X server for a host application."
-      storeinfo "containerrootrc=ready"
-      Sharefoldercontainer="$Sharefolder"
-      # --dbus, --hostdbus, --init
-      check_optionset "--backend=$Backend" "--alsa --cap-default --group-add --hostipc --ipc --limit --home --name --network --newprivileges --no-entrypoint --no-setup \
-                       --printer --pulseaudio --runasroot --runtime --share --sharecgroup --sudouser --webcam" ||:
-      check_optionset "--backend=$Backend" "--user" || error "--backend=$Backend: Option --user is not allowed.
-  Please try option --hostuser instead."
-      # set defaults. Some might look misleading just to avoid later messages, but not affecting the setup.
-      Sharealsa="no"
-      Capdropall="yes"
-      Shareipc="host"
-      [ "$Langwunsch" ] && store_runoption env "LANG=$Langwunsch"
-      Limitresources=""
-      Network="host"
-      Allownewprivileges="no"
-      Noentrypoint=""
-      Containersetup="yes"
-      Sharecupsmode=""
-      Pulseaudiomode=""
-      Runasroot=""
-      Runtime=""
-      Sharevolumes=""
-      Sharecgroup="no"
-      Sudouser=""
-      Sharewebcam=""
-    ;;
-    chroot) ### FIXME
-      warning "--backend=$Backend is highly experimental.
-   Prefer to use another backend. Even 'proot' is more reliable.
-   Isolation is close to not existant."
-      [ -z "$Rootfs" ] && [ -d "$Hosthomebasefolder/ROOTFS/$Imagebasename" ] && Rootfs="$Hosthomebasefolder/ROOTFS/$Imagebasename"
-      [ -z "$Rootfs" ] && error "--backend=$Backend: Did not find a rootfs for $Imagename
-  in $Hosthomebasefolder/ROOTFS/$Imagebasename"
-      [ -z "$Containercommand" ] && [ -e "$Rootfs/start" ] && Containercommand="/bin/sh /start"
-      [ -z "$Containercommand" ] && {
-        [ -e "$Rootfs/bin/bash" ]                          && Containercommand="/bin/bash" || Containercommand="/bin/sh"
-        [ "$Containerusershell" != "auto" ]                && Containercommand="$Containerusershell"
-        note "--backend=$Backend: No command specified.
-Fallback: using command '$Containercommand' and enabling option --interactive."
-        check_fallback
-        Interactive="yes"
-      }
-      Switchcontaineruser="yes"
-    ;;
-  esac
-  return 0
-}
 check_fallback() {              # --fallback
   # Option --fallback
   case "$Fallback" in
