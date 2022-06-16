@@ -8,6 +8,7 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
+ - `--rootless [=yes|no]`: New option to enable rootless backend.
  - `--xc`: Support Weston in container on console, too.
    [(#40)](https://github.com/mviereck/x11docker/issues/40)
    [(#444)](https://github.com/mviereck/x11docker/issues/444)
@@ -21,6 +22,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--clipboard`: Added support for basic graphics clips and
    middle mouse click selection for `--xephyr` and the like.
    [(#428)](https://github.com/mviereck/x11docker/issues/428)
+ - `--vt`: enforces start on console.
 ### Fixed
  - `--gpu`: Support VA-API, VDPAU (video acceleration) and variable `DRI_PRIME`.
    [(#443)](https://github.com/mviereck/x11docker/issues/443)
@@ -33,6 +35,7 @@ Project website: https://github.com/mviereck/x11docker
    [(#435)](https://github.com/mviereck/x11docker/issues/435)
  - `--hostuser`: Fixes for `--backend=host|proot`
    [(#437)](https://github.com/mviereck/x11docker/issues/437)
+ - `--xc`: No X tool dependencies on host.
 
 ## [7.1.4](https://github.com/mviereck/x11docker/releases/tag/v7.1.4) - 2022-03-27 
 ### Added

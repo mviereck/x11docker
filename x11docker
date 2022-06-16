@@ -104,6 +104,11 @@ Basic settings:
                                 ~/.local/share/x11docker/ROOTFS/image-name
                        Tool 'image2rootfs' helps to create a rootfs from docker
                        images: https://github.com/mviereck/image2rootfs
+     --rootless [=yes|no]  Use (or disallow) rootless backend.
+                       Default behaviour without option --rootless:
+                       --backend=docker: rootful unless DOCKER_HOST is set.
+                       --backend=podman: rootless except for user root
+                       --backend=nerdctl: rootless except for user root
      --xc [=yes|no|BACKEND]  Run X server in container of x11docker/xserver.
                        BACKEND can specify one of docker|podman|nerdctl.
      --xonly           Only start empty X server.
@@ -213,8 +218,7 @@ X and Wayland special configuration:
      --keymap=LAYOUT   Set keyboard layout for new X server, e.g. de, us, ru.
                        For possible LAYOUT look at /usr/share/X11/xkb/symbols.
      --no-auth         Allow access to X for everyone. Security risk!
-     --vt [=N]         Use vt / tty N. Regarded by --xorg only.
-                       Without N automatically search an unused tty.
+     --vt [=N]         Use vt / tty N. Without N search an unused tty.
      --westonini=FILE  Custom weston.ini for --weston and --weston-xwayland.
      --xhost [=STR]    Set \"xhost STR\" on new X server (see 'man xhost').
                        Without STR will set:  +SI:localuser:\$USER
@@ -569,7 +573,7 @@ finish() {                      # trap EXIT routine to clean up background proce
             mysleep "$(awk "BEGIN { print $Count * 0.1 }")"
             debugnote "finish(): Waiting for container PID 1: $Pid1pid to terminate."
           done
-          checkpid "$Pid1pid" && $Backendbin stop "$Containername"
+          checkpid "$Pid1pid" && unpriv_backend "$Backendbin stop $Containername"
         ;;
         Xcontainerpid1)
           Xpid1pid="$Pid"
@@ -581,7 +585,7 @@ finish() {                      # trap EXIT routine to clean up background proce
             mysleep "$(awk "BEGIN { print $Count * 0.1 }")"
             debugnote "finish(): Waiting for X container PID 1: $Xpid1pid to terminate."
           done
-          checkpid "$Xpid1pid" && $Backendbin stop "$Xcontainername"
+          checkpid "$Xpid1pid" && unpriv_xcbackend "$Xcontainerbackend stop $Xcontainername"
         ;;
         *)
           termpid "$Pid" "$Name"
@@ -601,7 +605,7 @@ finish() {                      # trap EXIT routine to clean up background proce
         Debugmode="yes"
         debugnote "finish(): Container still running. Executing 'docker stop'.
   Will wait up to 15 seconds for docker to finish."
-        $Backendbin stop "$Containername" >> "$Containerlogfile" 2>&1
+        unpriv_backend "$Backendbin stop $Containername" >> "$Containerlogfile" 2>&1
 
         Zeit="$(date +%s)"
         while :; do
@@ -621,14 +625,7 @@ finish() {                      # trap EXIT routine to clean up background proce
     rm -R $Cachefolder
   or let x11docker do the cleanup work for you:
     x11docker --cleanup"
-          Preservecachefiles="yes"
         } || debugnote "finish(): Container terminated successfully"
-      }
-
-      # remove container
-      [ "$Preservecachefiles" = "no" ] && [ "$Containername" ] && {
-        debugnote "Removing container $Containername
-        $($Backendbin rm -f "$Containername" 2>&1)"
       }
     ;;
     chroot)
@@ -723,7 +720,7 @@ containerisrunning() {          # check if container is running
   storeinfo test containerid || return 1
   case "$Mobyvm" in
     no)   checkpid      "$(storeinfo dump pid1pid)" ;;
-    yes)  $Backendbin inspect "$(storeinfo dump containerid)" >/dev/null 2>&1 ;;
+    yes)  unpriv_backend "$Backendbin inspect '$(storeinfo dump containerid)'" >/dev/null 2>&1 ;;
   esac
 }
 pspid() {                       # ps -p $1 --no-headers
@@ -835,7 +832,7 @@ $(for Line in $Watchpidlist; do pspid "$Line" || echo "(pid $Line not found)" ; 
     done
     # Container PID not watchable in MSYS2/Cygwin/WSL1.
     [ "$Containername" ] && {
-      $Backendbin inspect "$Containername" >/dev/null || {
+      unpriv_backend "$Backendbin inspect '$Containername'" >/dev/null || {
         debugnote "watchpidlist(): Container $Containername has terminated"
         saygoodbye "watchpidlist $Containername"
       }
@@ -1369,7 +1366,7 @@ buildimage() {                  # --build: build image from x11docker repository
   }
 
   note "Building $Imagename"
-  $Backendbin build -t "$Imagename" "$Buildpath" || error "Option --build: Building image '$Imagename' failed."
+  unpriv_backend "$Backendbin build -t $Imagename $Buildpath'" || error "Option --build: Building image '$Imagename' failed."
 
   rm -rf "$Buildpath"
   return 0
@@ -1391,13 +1388,13 @@ cleanup() {                     # --cleanup : check for non-removed containers a
   
   case "$Backend" in
     docker|podman|nerdctl)
-      Orphanedcontainers="$($Backendbin ps -a | grep x11docker_X | rev | cut -d' ' -f1 | rev)"
+      Orphanedcontainers="$(unpriv_backend "$Backendbin ps -a" | grep x11docker_X | rev | cut -d' ' -f1 | rev)"
       Orphanedcontainers="$Orphanedcontainers $(find "$Cachebasefolder" -mindepth 2 -maxdepth 2 -type f -name 'container.id' -exec cat {} \;)"
       Orphanedcontainers="$(env IFS='' echo $Orphanedcontainers)"
 
       # check for double entrys name/id, check for already non-existing containers
       for Line in $Orphanedcontainers; do
-        Containerinspect="$($Backendbin inspect "$Line" 2>/dev/null)"
+        Containerinspect="$(unpriv_backend "$Backendbin inspect '$Line'" 2>/dev/null)"
         [ -n "$Containerinspect" ] && {
           Containerid="$(parse_inspect "$Containerinspect" "Id")"
           Orphanedcontainers="$(sed "s%$Line%$Containerid%" <<< "$Orphanedcontainers")"
@@ -1429,7 +1426,7 @@ $Orphanedfolders"
 
     [ -n "$Orphanedcontainers" ] && {
       note "Removing containers with: $Backendbin rm -f $Orphanedcontainers"
-      bash -c "$Backendbin rm -f $Orphanedcontainers" 2>&1
+      unpriv_backend "$Backendbin rm -f $Orphanedcontainers" 2>&1
     }
     [ -n "$Orphanedfolders" ] && {
       note "Removing cache files with: rm -R -f $Orphanedfolders"
@@ -1450,7 +1447,7 @@ $Orphanedfolders"
 
   case "$Backend" in
     docker)
-      $Backendbin info >/dev/null 2>/dev/null || warning "Could not check for $Backend containers.
+      unpriv_backend "$Backendbin info" >/dev/null 2>/dev/null || warning "Could not check for $Backend containers.
   Please run 'x11docker --cleanup' as root
   to make sure that no orphaned containers are left."
     ;;
@@ -2448,7 +2445,7 @@ check_screensize() {            # check physical and virtual screen size (also o
   [ -z "$Hostdisplay" ] && [ -n "$Hostwaylandsocket" ] && verbose "check_screensize(): Skipping check on pure Wayland environment"
 
   # check whole display size, can include multiple monitors
-  [ -n "$Hostdisplay" ] && {
+  [ -n "$Hostdisplay" ] && [ -z "$Newxvt" ] && {
     [ "$Xcontainer" = "no" ] && command -v xrandr >/dev/null && xrandr >> "$Xrandroutput" 2>>$Xinitlogfile
     [ -s "$Xrandroutput" ] && {
       Line="$(grep current "$Xrandroutput" | head -n1 | cut -d, -f2)"
@@ -2520,7 +2517,7 @@ check_screensize() {            # check physical and virtual screen size (also o
   }
   verbose "Virtual screen size: $Screensize"
   verbose "Physical screen size:
-  $(grep Screen "$Xrandroutput")"
+  $(grep Screen "$Xrandroutput" ||:)"
 
   # create set of Modelines if needed
   case "$Xserver" in
@@ -2600,52 +2597,59 @@ check_vt() {                    # option --xorg: find free vt / tty
 
   return 0
 }
-check_xcontainer() {            # option --xc: check image x11docker/xserver
-  local Auto=
+check_xcontainer() {            # option --xc: check backend, rootless and image x11docker/xserver
+  local Auto= Fail=
+
+  # check if X container should run rootful or rootless (for tty access it must be rootful)
+  case "$Rootlessbackend" in
+    yes)
+      { [ "$Xserver" = "--xorg" ] || [ -n "$Newxvt" ] ; } && Xcrootless="no" || Xcrootless="yes"
+    ;;
+    no)
+      Xcrootless="no"
+    ;;
+  esac
+  [ "$Xcrootless" != "$Rootlessbackend" ] && [ "$Xcontainer" = "yes" ] && note 
+
+  # check if image x11docker/xserver is available
   case "$Xcontainer" in
     no) ;;
     yes|auto) 
       case "$Backend" in
-        host|proot|chroot)
-          docker   inspect "$Xcontainerimage" >/dev/null 2>&1 && Xcontainerbackend="docker"
-          [ -z "$Xcontainerbackend" ] && {
-            podman inspect "$Xcontainerimage" >/dev/null 2>&1 && Xcontainerbackend="podman"
-          }
-          [ "$Xcontainer" = "yes" ] && [ -z "$Xcontainerbackend" ] && {
-            note "Option --xc: Image $Xcontainerimage not found
-  at backends podman or docker.
-  Fallback: Disabling option --xc"
-            check_fallback
-            Xcontainer="no"
-            Xcontainerimage=""
-          }
-        ;;
         docker|podman|nerdctl)
           Xcontainerbackend="$Backend"
-          $Xcontainerbackend inspect "$Xcontainerimage" >/dev/null 2>&1 || Xcontainerimage="" 
+          unpriv_xcbackend "$Xcontainerbackend inspect $Xcontainerimage" >/dev/null 2>&1 || Fail="yes"
+        ;;
+        host|proot|chroot)
+          unpriv_xcbackend "docker   inspect $Xcontainerimage" >/dev/null 2>&1 && Xcontainerbackend="docker"
+          [ -z "$Xcontainerbackend" ] && {
+            unpriv_xcbackend "podman inspect $Xcontainerimage" >/dev/null 2>&1 && Xcontainerbackend="podman"
+          }
+          [ "$Xcontainer" = "yes" ] && [ -z "$Xcontainerbackend" ] && Xcontainerbackend="docker or podman" && Fail="yes"
         ;;
       esac
     ;;
     docker|podman|nerdctl)
       Xcontainerbackend="$Xcontainer"
       Xcontainer="yes"
-      $Xcontainerbackend inspect "$Xcontainerimage" >/dev/null 2>&1 || {
-        note "Option --xc: Image $Xcontainerimage not found
-  at backend '$Xcontainerbackend'.
-  Fallback: Disabling option --xc"
-        check_fallback
-        Xcontainer="no"
-        Xcontainerimage=""
-      }
+      unpriv_xcbackend "$Xcontainerbackend inspect $Xcontainerimage" >/dev/null 2>&1 || Fail="yes"
     ;;
   esac
 
+  [ "$Fail" = "yes" ] && {
+    [ "$Xcontainer" = "yes" ] && {
+      note "Option --xc: Image $Xcontainerimage not found
+  at backend '$Xcontainerbackend' (rootless: $Xcrootless).
+  Fallback: Disabling option --xc"
+      check_fallback
+    }
+    Xcontainer="no"
+  }
+
   case "$Xcontainer" in
     yes|auto)
-      [ "$Xcontainer" = "auto" ]                                     && Xcontainer="yes" && Auto="yes"
-      [ -z "$Xcontainerimage" ]                                      && Xcontainer="no"
-      [ "$Winsubsystem" ]                                            && Xcontainer="no"
-      [ "$Runsonconsole" = "yes" ] && [ "$Rootlessbackend" = "yes" ] && Xcontainer="no"
+      [ "$Xcontainer" = "auto" ]    && Xcontainer="yes" && Auto="yes"
+      [ "$Winsubsystem" ]           && Xcontainer="no"
       case "$Runtime" in
         kata-runtime)                  Xcontainer="no" ;;
       esac
@@ -2654,7 +2658,6 @@ check_xcontainer() {            # option --xc: check image x11docker/xserver
   - on MS Windows
   - without image x11docker/xserver.
   - with runtime kata-runtime
-  - with rootless docker or podman on console
   Fallback: Setting --xc=no"
         check_fallback
       }
@@ -2663,7 +2666,7 @@ check_xcontainer() {            # option --xc: check image x11docker/xserver
 
   case "$Xcontainer" in
     yes|auto)
-      Xcontainerinspect="$($Xcontainerbackend inspect $Xcontainerimage)"
+      Xcontainerinspect="$(unpriv_xcbackend "$Xcontainerbackend inspect $Xcontainerimage")"
       Xcontaineroptions="$(parse_inspect "$Xcontainerinspect" "Config" "Labels" "options")"
       Xcontaineroptions="${Xcontaineroptions:-"--nxagent --xpra --xpra2 --xpra2-xwayland --xephyr --weston-xwayland --xvfb --xwayland --weston"}"
       Xcontaineroptionsconsole="$(parse_inspect "$Xcontainerinspect" "Config" "Labels" "options_console")"
@@ -3028,18 +3031,6 @@ check_xdepends() {              # check dependencies on host for X server option
             ;;
          esac
         ;;
-        *)
-          [ "$Rootlessbackend" = "yes" ] && case "$Xserver" in
-            --xorg)
-              $Message "${1:-} in container (option --xc) with rootless $Backend not possible."
-              Return=1
-            ;;
-            --weston*)
-              $Message "${1:-} in container (option --xc) on console with rootless $Backend not possible."
-              Return=1
-            ;;
-          esac
-        ;;
       esac
     ;;
     no)
@@ -3085,6 +3076,16 @@ check_xdepends() {              # check dependencies on host for X server option
       ;;
       --weston|--kwin|--hostwayland)
         $Message "${1:-} does not support X over TCP (--xoverip)."
+      ;;
+    esac
+  }
+  # --vt
+  [ "$Newxvt" ] && {
+    case "${1:-}" in
+      --xorg|--weston|--weston-wayland|--kwin) ;;
+      *)
+        $Message "${1:-} cannot claim a new virtual terminal (option --vt)."
+        Return=1
       ;;
     esac
   }
@@ -3987,26 +3988,6 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   echo "root:x:0:0:root:/root:/bin/bash" >> "$Cachefolder/etcpasswd.xcontainer"
   echo "$Containeruser:x:${Containeruseruid:-$Hostuseruid}:${Containerusergid:-$Hostusergid}:$Containeruser,,,:/tmp:/bin/bash" >> "$Cachefolder/etcpasswd.xcontainer"
 
-  # check if X container should run rootful or rootless (for tty access it must be rootful)
-  case "$Rootless" in
-    yes)
-      case "$Newxvt" in
-        "")
-          Xcdockerhost="$DOCKER_HOST"
-          Xcrootless="yes"
-        ;;
-        *)
-          Xcdockerhost=""
-          Xcrootless="no"
-        ;;
-      esac
-    ;;
-    *)
-      Xcdockerhost=""
-      Xcrootless="no"
-    ;;
-  esac
-
   ## code snippets:
 
   # drop privileges
@@ -4297,7 +4278,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   # xcontainerrc
   echo "#! /bin/bash
 # script running in X server container (option --xc)
-set -x
+
 exec >> $Xinitlogfile 2>&1
 $(declare -f rocknroll)
 Timetosaygoodbyefile=$Timetosaygoodbyefile
@@ -4757,7 +4738,7 @@ XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
 check_image() {                 # get some image information
 
   # Check if image $Imagename is available locally
-  Imageinspect="$($Backendbin inspect "$Imagename" 2>> "$Containerlogfile")" || error "Image $Imagename not found locally.
+  Imageinspect="$(unpriv_backend "$Backendbin inspect $Imagename" 2>> $Containerlogfile)" || error "Image $Imagename not found locally.
   Please pull or build image first."
 
   # Check architecture
@@ -4969,7 +4950,7 @@ check_containerhome() {         # option --home: check HOME of container user.
   ## option '--home=DIR':    Share custom host folder as home
 
   # rootless with userns-remap
-  [ "$Rootlessbackend" ] && {
+  [ "$Rootlessbackend" = "yes" ] && {
     case "$Backend" in
       docker|nerdctl)
         [ "$Sharehome" != "no" ] && {
@@ -5153,7 +5134,9 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
   case "$Backend" in
     docker|podman|nerdctl)
       Backendcommand="$Backendbin run"
-      $Backendbin run --help 2>/dev/null | grep -q -- '--pull' && Backendcommand="$Backendcommand \\
+      [ "$Preservecachefiles" = "no" ] && Backendcommand="$Backendcommand \\
+  --rm"
+      unpriv_backend "$Backendbin run --help" 2>/dev/null | grep -q -- '--pull' && Backendcommand="$Backendcommand \\
   --pull never"
     ;;
     proot)
@@ -5429,7 +5412,7 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
         ;;
       esac
       [ "$Remountcgroup" = "yes" ] && {
-        $Backendbin run --help | grep -q -- '--cgroupns' && Backendcommand="$Backendcommand \\
+        unpriv_backend "$Backendbin run --help" | grep -q -- '--cgroupns' && Backendcommand="$Backendcommand \\
   --cgroupns private"
       }
     ;;
@@ -6371,12 +6354,12 @@ verbose \"containerrc: Container system:
           IFS=$'\n'
           while read -r Line; do
             echo "export $(escapestring "$Line")"
-          done < <($Backendbin run --rm --entrypoint env "$Imagename" env 2>> "$Containerlogfile" | rmcr | grep -v 'HOSTNAME=' ||: )
+          done < <(unpriv_backend "$Backendbin run --rm --entrypoint env $Imagename env" 2>> "$Containerlogfile" | rmcr | grep -v 'HOSTNAME=' ||: )
           IFS=$' \t\n'
         }
       ;;
     esac
-    
+
     [ "$Initsystem" = 'systemd' ] && echo "systemctl --user start dbus"  ### FIXME
 
     echo "
@@ -7406,15 +7389,7 @@ start_container() {             # docker run
         host)         unpriv "bash '$Containerrc'" & Pid1pid=$! ;;
         proot|chroot) unpriv "$Backendcommand" & Pid1pid=$! ;;
         docker|podman|nerdctl)
-          #read Containerid < <(eval $Backendcommand 2>> $Containerlogfile | rmcr)
-          case "$Rootlessbackend" in
-            yes)
-              unpriv "$Backendcommand >> "$Containerlogfile" 2>&1" ||: &
-            ;;
-            *)
-              eval $Backendcommand >> "$Containerlogfile" 2>&1 ||: &
-            ;;
-          esac
+          unpriv_backend "$Backendcommand" >> $Containerlogfile 2>&1 ||: &
         ;;
       esac
     ;;
@@ -7426,14 +7401,7 @@ start_container() {             # docker run
           [ "$Winpty" ] && {
             $Winpty bash "$Backendcommandfile" <&0 &
           } || {
-            case "$Rootlessbackend" in
-              yes)
-                unpriv "$Backendcommand" <&0 &
-              ;;
-              *)
-                eval $Backendcommand <&0 &
-              ;;
-            esac
+            unpriv_backend "$Backendcommand" <&0 &
           }
         ;;
       esac
@@ -7445,7 +7413,7 @@ start_container() {             # docker run
     docker|podman|nerdctl)
       # Wait for container to be ready
       for ((Count=1 ; Count<=40 ; Count++)); do
-        $Backendbin exec "$Containername" sh -c ":" 2>&1 | rmcr >> "$Containerlogfile" && {
+        unpriv_backend "$Backendbin exec $Containername sh -c ':'" 2>&1 | rmcr >> $Containerlogfile && {
           debugnote 'start_container(): Container is up and running.'
           break
         } || {
@@ -7458,13 +7426,13 @@ start_container() {             # docker run
       # store stdout and stderr
       [ "$Containersetup" = "no" ] && {
         # Store container output separated for stdout and stderr
-        $Backendbin logs -f "$Containername" 1>> "$Cmdstdoutlogfile" 2>> "$Cmdstderrlogfile" &
+        unpriv_backend "$Backendbin logs -f $Containername" 1>> "$Cmdstdoutlogfile" 2>> "$Cmdstderrlogfile" & ### FIXME rootless, unpriv
         storepid $! dockerlogs
       }
 
       # Wait for pid 1 in container
       for ((Count=1 ; Count<=40 ; Count++)); do
-        Containerinspect="$($Backendbin inspect "$Containername" 2>> "$Containerlogfile" | rmcr)"
+        Containerinspect="$(unpriv_backend "$Backendbin inspect $Containername" 2>> $Containerlogfile | rmcr)"
         [ "$Containerinspect" != "[]" ] && Pid1pid="$(parse_inspect "$Containerinspect" "State" "Pid")"
         debugnote "start_container(): $Count. check for PID 1: $Pid1pid"
         case "$Mobyvm" in
@@ -7480,8 +7448,6 @@ start_container() {             # docker run
   Maybe the container immediately stopped for unknown reasons.
   Just in case, check if host and image architecture are compatible:
   Host architecture: $Hostarchitecture, image architecture: $Imagearchitecture.
-  Output of \"$Backend ps | grep x11docker\":
-$Backendbin ps | grep x11docker)
 
   Content of container log:
 $(rmcr < "$Containerlogfile" | uniq )"
@@ -7510,7 +7476,7 @@ $(rmcr < "$Containerlogfile" | uniq )"
         debugnote "start_container(): Remounting /sys/fs/cgroup to :rw with nsenter:
   $Remountcommand"
         echo "cgroup mount with nsenter:" >> "$Containerlogfile"
-        eval $Remountcommand >> "$Containerlogfile" 2>&1 || {
+        unpriv_backend "$Remountcommand" >> "$Containerlogfile" 2>&1 || {
           note "--init=$Initsystem: Failed to remount /sys/fs/cgroup in container.
   Startup of systemd might fail.
   nsenter command:
@@ -7543,9 +7509,9 @@ $(tail "$Containerlogfile")"
       ;;
       host) ;; # no containerrootrc
       docker|podman|nerdctl)
-        $Backendbin exec "$Containername" sh -c "cp $(convertpath share "$Containerrootrc") /tmp/containerrootrc ; chmod 644 /tmp/containerrootrc" 2>&1 | rmcr >> "$Containerlogfile"
+        # copy to /tmp because host HOME might be nosuid or noexec
         # run container root setup. containerrc will wait until setup script is ready.
-        $Backendbin exec -u root "$Containername" /bin/sh /tmp/containerrootrc 2>&1 | rmcr >> "$Containerlogfile"
+        unpriv_backend "$Backendbin exec -u root $Containername sh -c 'cp $(convertpath share "$Containerrootrc") /tmp/containerrootrc ; chmod 644 /tmp/containerrootrc ; exec /bin/sh /tmp/containerrootrc'" 2>&1 | rmcr >> $Containerlogfile
       ;;
     esac
   }
@@ -7563,7 +7529,7 @@ start_compositor() {            # start Wayland compositor Weston or KWin
 
   case "$Xcontainer" in
     yes)
-      $Xcontainerbackend exec --detach "$Xcontainername" sh -c "$Command >> '$Compositorlogfile'  2>&1" 2>> "$Compositorlogfile"
+      unpriv_xcbackend "$Xcontainerbackend exec --detach $Xcontainername sh -c '$Command >> $Compositorlogfile  2>&1'" 2>> $Compositorlogfile
 #      Compositorpid="$(ps aux | tr -d' ' | grep "$(cut -c1-50 <<< $(tr -d' ' <<< "$Command"))" | grep -v grep | awk '{print $2}')"
       Compositorpid="$(ps aux | grep weston | grep "$Newwaylandsocket" | head -n1 | awk '{print $2}')"
     ;;
@@ -7587,25 +7553,10 @@ start_xcontainer() {            # --xc
 
   Xcontainercommand="$(tr -d '\\\n' <<< "$Xcontainercommand")"
   #read Xcontainerid< <($Xcontainercommand 2>> "$Xinitlogfile")
-  case "$Xcrootless" in
-    yes)
-      read Xcontainerid< <(unpriv "env DOCKER_HOST=$Xcdockerhost $Xcontainercommand 2>> $Xinitlogfile")
-    ;;
-    no)
-      read Xcontainerid< <(        env DOCKER_HOST=$Xcdockerhost $Xcontainercommand 2>> $Xinitlogfile)
-    ;;
-  esac
+  read Xcontainerid< <(unpriv_xcbackend "$Xcontainercommand" 2>> $Xinitlogfile)
   storeinfo "Xcontainerid=$Xcontainerid"
 
-  case "$Xcrootless" in
-    yes)
-      Containerinspect="$(unpriv "env DOCKER_HOST=$Xcdockerhost $Xcontainerbackend inspect $Xcontainername 2>> $Xinitlogfile" | rmcr)"
-    ;;
-    no)
-      Containerinspect="$(        env DOCKER_HOST=              $Xcontainerbackend inspect "$Xcontainername" 2>> "$Xinitlogfile" | rmcr)"
-    ;;
-  esac
-
+  Containerinspect="$(unpriv_xcbackend "$Xcontainerbackend inspect $Xcontainername" 2>> $Xinitlogfile | rmcr)"
   [ "$Containerinspect" != "[]" ] && {
     Xcontainerip="$(parse_inspect "$Containerinspect" "NetworkSettings" "IPAddress")"
     storeinfo "Xcontainerip=$Xcontainerip"
@@ -7620,14 +7571,7 @@ $(tail "$Xinitlogfile")"
 
   [ "$Nvidiainstallerfile" ] && {
     note "Installing NVIDIA driver in X container."
-    case "$Xcrootless" in
-      yes)
-        unpriv "env DOCKER_HOST=$Xcdockerhost $Backendbin exec --tty --privileged --user=root $Xcontainername bash $Sharefolder/nvidia_installer" >> "$Xinitlogfile" 2>&1 || note 'ERROR: NVIDIA driver installation in X container failed.'
-      ;;
-      no)
-        env DOCKER_HOST= $Backendbin exec --tty --privileged --user=root "$Xcontainername" bash "$Sharefolder/nvidia_installer" >> "$Xinitlogfile" 2>&1 || note 'ERROR: NVIDIA driver installation in X container failed.'
-      ;;
-    esac
+    unpriv_xcbackend "$Xcontainerbackend exec --tty --privileged --user=root $Xcontainername bash $Sharefolder/nvidia_installer" >> "$Xinitlogfile" 2>&1 || note 'ERROR: NVIDIA driver installation in X container failed.'
   }
 
   waitforlogentry "start_xcontainer()" "$Xinitlogfile" "X server container is ready" || return 1
@@ -7647,14 +7591,7 @@ start_xserver() {               # start X server
           esac
         ;;
         yes)
-          case "$Xcrootless" in
-            yes)
-              unpriv "env DOCKER_HOST=$Xcdockerhost $Xcontainerbackend exec $Xcontainername env WAYLAND_DISPLAY=$Newwaylandsocket xinit $Xinitrc -- $Xcommand"  >> "$Xinitlogfile"  2>&1
-            ;;
-            no)
-              env DOCKER_HOST= $Xcontainerbackend exec "$Xcontainername" env WAYLAND_DISPLAY="$Newwaylandsocket" xinit "$Xinitrc" -- $Xcommand  >> "$Xinitlogfile"  2>&1
-            ;;
-          esac
+          unpriv_xcbackend "$Xcontainerbackend exec $Xcontainername env WAYLAND_DISPLAY=$Newwaylandsocket xinit $Xinitrc -- $Xcommand"  >> "$Xinitlogfile"  2>&1
           Xcontainerexitcode=$?
           case "$Xcontainerexitcode" in
             137) Exitcode="0" ;; # docker error indicating that xinit did not shut down fast enough on SIGTERM. Ignore it.
@@ -7703,7 +7640,7 @@ $Xpraservercommand"
       #Xpraserverpid=$!
     ;;
     yes)
-      $Xcontainerbackend exec --detach "$Xcontainername" sh -c "$(tr -d '\\\n' <<< "$Xpraservercommand") >> '$Xpraserverlogfile' 2>&1" >> "$Xpraserverlogfile" 2>&1
+      unpriv_xcbackend "$Xcontainerbackend exec --detach $Xcontainername sh -c '$(tr -d '\\\n' <<< "$Xpraservercommand")'" >> "$Xpraserverlogfile" 2>&1
       #Xpraserverpid="$(ps aux | grep "/usr/bin/xpra start $Newdisplay" | grep -v grep | awk '{print $2}')"
     ;;
   esac
@@ -7720,7 +7657,7 @@ $Xpraenv $Xpraclientcommand"
 $Xpraclientcommand"
   echo "x11docker [$(timestamp)]: Starting Xpra client" >> "$Xpraclientlogfile"
   [ "$Xcontainer" = "yes" ] && [ "$Xserver" != "--xpra2" ] && [ "$Xserver" != "--xpra2-xwayland" ] && {
-    $Xcontainerbackend exec --detach "$Xcontainername" sh -c "$(tr -d '\\\n' <<< "$Xpraclientcommand") >> '$Xpraclientlogfile' 2>&1" >> "$Xpraclientlogfile" 2>&1
+    unpriv_xcbackend "$Xcontainerbackend exec --detach $Xcontainername sh -c '$(tr -d '\\\n' <<< "$Xpraclientcommand")'" >> "$Xpraclientlogfile" 2>&1
     :
   } || {
     unpriv "$Xpraclientcommand ||:" >> "$Xpraclientlogfile" 2>&1 &
@@ -7763,7 +7700,7 @@ start_pulseaudiotcp() {         # option --pulseaudio=tcp: load Pulseaudio TCP m
 }
 
 #### main init routines
-check_backend() {               # option --backend
+check_backend() {               # options --backend, --rootless
   case "$Mobyvm" in
     no)
       Backendbin="$(command -v "$Backend")"
@@ -7793,25 +7730,22 @@ check_backend() {               # option --backend
   esac
 
   # rootful or rootless
-  case "$Backend" in
-    docker)
-      grep -q "/run/user/" <<< "${DOCKER_HOST:-}" && {
-        Rootlessbackend="yes"
-        Rootless="yes"
-      }
+  [ "$Rootlessbackend" = "no" ] && export DOCKER_HOST=
+  [ -z "$Rootlessbackend" ] && case "$Backend" in
+    docker) 
+      grep -q "/run/user/" <<< "${DOCKER_HOST:-}" && Rootlessbackend="yes"
+      [ "$(id -un)" = "root" ] && id -G -n | grep -q -w 'docker' && Rootlessbackend="no"
     ;;
-    podman|nerdctl|proot)
-      [ "$(id -u)" != "0" ] && {
-        Rootlessbackend="yes"
-        Rootless="yes"
-      }
-    ;;
+    podman|nerdctl)
+      [ "$(id -u)" = "0" ] && Rootlessbackend="no" || Rootlessbackend="yes" ;;
+    proot) Rootlessbackend="yes" ;;
+    host) ;;
   esac
-  case "$Rootless" in
+  case "$Rootlessbackend" in
     yes)
       case "$Backend" in
         docker)
-          DOCKER_HOST="${DOCKER_HOST:-$XDG_RUNTIME_DIR/docker.sock}"
+          DOCKER_HOST="${DOCKER_HOST:-/run/user/$Hostuseruid/docker.sock}"
           DOCKER_HOST="${DOCKER_HOST#unix://}"
           [ -e "${DOCKER_HOST:-}" ] || error "Option --rootless --backend=docker: docker user socket not found.
   Docker user daemon not running? Try to start it with:
@@ -7822,17 +7756,17 @@ check_backend() {               # option --backend
       esac
     ;;
   esac
-set +x
+
   case "$Backend" in
     docker|podman|nerdctl)
-      # Check whether docker daemon is running, get docker info
-      $Backendbin info 1>/dev/null 2>>$Containerlogfile || error "'$Backend info' failed.
+      # Check whether docker daemon is running, get docker info ### FIXME rootless check/unpriv
+      unpriv_backend "$Backendbin info" >/dev/null 2>>$Containerlogfile || error "'$Backend info' failed.
   If using docker: Is docker daemon running at all?
   Maybe you need root privileges to run docker?
   Try to start docker daemon with 'systemctl start docker'.
   Last lines of log:
 $(rmcr < "$Containerlogfile" | tail)"
-      Backendinfo="$($Backendbin info --format='{{json .}}' 2>>$Containerlogfile)"
+      Backendinfo="$(unpriv_backend "$Backendbin info --format='{{json .}}'" 2>>$Containerlogfile)"
       check_runtime
     ;;
   esac
@@ -8579,7 +8513,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,enforce-i,fallback::,preset:,pull::"                                                            # x11docker config
   Longoptions="$Longoptions,cachebasedir:,home::,homebasedir:,share:"                                                       # Host folders
   Longoptions="$Longoptions,alsa::,clipboard,gpu::,lang::,printer::,pulseaudio::,webcam"                                    # Host integration features
-  Longoptions="$Longoptions,backend:,env:,mobyvm,name:,no-entrypoint,no-setup,runtime:,snap,workdir:"                       # Container config
+  Longoptions="$Longoptions,backend:,env:,mobyvm,name:,no-entrypoint,no-setup,rootless::,runtime:,snap,workdir:"            # Container config
   Longoptions="$Longoptions,cap-default,ipc::,limit::,newprivileges::,network::"                                            # Container capabilities
   Longoptions="$Longoptions,group-add:,hostuser:,password::,sudouser::,user:,shell:"                                        # Container user
   Longoptions="$Longoptions,dbus::,init::,hostdbus,sharecgroup"                                                             # Container init and DBus
@@ -8590,7 +8524,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,build,cleanup,help,launcher,licence,license,version"                                            # Special options without starting X or container
   Longoptions="$Longoptions,install,remove,update,update-master"                                                            # Installation
   #
-  Longoptions="$Longoptions,keepcache,remountcgroup,rootless,xopt:,xorgconf:"                                               # Experimental
+  Longoptions="$Longoptions,keepcache,remountcgroup,xopt:,xorgconf:"                                                        # Experimental
   Longoptions="$Longoptions,dbus-system,exe,homedir:,hostipc,hostnet,iglx,kwin-xwayland,no-internet,no-xhost"               # Deprecated
   Longoptions="$Longoptions,sharedir:,sharessh,systemd,showenv,showid,showinfofile,showpid1"                                # Deprecated
   Longoptions="$Longoptions,cachedir:,no-init,nothing,no-xtest,openrc,podman,pull::,ps,pw::,runit,silent,starter"           # Removed
@@ -8748,6 +8682,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
          --newprivileges)     Allownewprivileges="${2:-yes}" ; shift ;; # [Don't] set --security-opt=no-new-privileges
          --no-entrypoint)     Noentrypoint="yes" ;;                  # Disable ENTRYPOINT of image
          --no-setup)          Containersetup="no" ;;                 # No setup of x11docker inside of container (noteable disables containerrootrc() )
+         --rootless)          Rootlessbackend="${2:-yes}"; shift ;;
          --runtime)           Runtime="${2:-}" ; shift               # Runtime=runc|nvidia|kata-runtime|crun
                               [ "$Runtime" = "kata" ]   && Runtime="kata-runtime"
                               [ "$Runtime" = "sysbox" ] && Runtime="sysbox-runc" ;;
@@ -8788,7 +8723,6 @@ ${2:-}"                       ; shift ;;                             # Add custo
      #### Experimental options
          --keepcache)         Preservecachefiles="yes" ;          note "Option --keepcache: experimental option." ;;
          --remountcgroup)     Remountcgroup="yes" ;               note "Option --remountcgroup: experimental option." ;;
-         --rootless)          Rootless="yes" ;;
          --xopt)              Xserveroptions="${2:-}" ;   shift ; note "Option --xopt: experimental option." ;;      # Custom X server options
          --xorgconf)          Xorgconf="${2:-}" ;         shift ; note "Option --xorgconf: experimental option." ;;  # Custom xorg.conf
 
@@ -9093,6 +9027,13 @@ check_options_arguments() {     # check for [likely] valid arguments
     ;;
   esac
 
+  # --rootless
+  case "$Rootlessbackend" in
+    yes|no|"") ;;
+    *) error "Option --rootless: Unknown argument: $Rootlessbackend
+      Allowed values: yes|no" ;;
+  esac
+
   # --rotate
   [ -n "$Rotation" ] && {
     grep -q -w "$Rotation" <<< "0 90 180 270 flipped flipped-90 flipped-180 flipped-270" || {
@@ -9347,7 +9288,7 @@ check_options_interferences() { # check multiple option interferences, change se
           note "Copying XlibNoSHM.so from x11docker/xserver 
   to $Mitshmlib
   to make it available for --hostdisplay."
-          $Backendbin run --rm --user "$Hostuseruid:$Hostusergid" --volume "$Localsharedir":"$Localsharedir" -- "$Xcontainerimage" cp "/XlibNoSHM.so" "$Mitshmlib"
+          unpriv_xcbackend "$Xcontainerbackend run --rm --user '$Hostuseruid:$Hostusergid' --volume '$Localsharedir':'$Localsharedir' -- '$Xcontainerimage' cp /XlibNoSHM.so $Mitshmlib"
         }
         [ -f "$Mitshmlib" ] && {
           ### FIXME check for possible existing LD_PRELOAD in container
@@ -10231,6 +10172,7 @@ declare_variables() {           # declare global variables
   Xcontainername=""
   Xcontaineroptions=""
   Xcontaineroptionsconsole=""
+  Xcrootless=""
 
   # Window manager
   Windowmanagermode="none"                        # --wm: Window manager to use: container/host/auto
@@ -10292,7 +10234,6 @@ declare_variables() {           # declare global variables
   Optionsetall=""                                 # list of all available long options
   Remountcgroup=""                                # --init=systemd with cgroupv2 in docker workaround
   Rootfs=""                                       # --backend=proot
-  Rootless=""                                     # Check for rootful/rootless docker depending on DOCKER_HOST
   Rootlessbackend=""                              # Check for rootful/rootless docker depending on DOCKER_HOST
   Runtime=""                                      # Runtime to use. runc|nvidia|kata-runtime|crun
   Snapsupport=""                                  # --snap: Fallback mode to support docker in snap
@@ -10460,6 +10401,18 @@ stdout() {
 unpriv() {                      # run a command as unprivileged user. Needed if x11docker was started by root or with sudo.
   # $Unpriv is declared in check_hostuser: 'eval' or 'su $Hostuser -c'
   $Unpriv "${1:-}"
+}
+unpriv_backend(){               # run container backend rootful or rootless
+  case "$Rootlessbackend" in
+    yes) unpriv                  "${1:-}" ;;
+    no)  eval   "env DOCKER_HOST= ${1:-}" ;;
+  esac
+}
+unpriv_xcbackend(){             # run X container backend rootful or rootless
+  case "$Xcrootless" in
+    yes) unpriv                  "${1:-}" ;;
+    no)  eval   "env DOCKER_HOST= ${1:-}" ;;
+  esac
 }
 main() {
   [ "$(uname -s)" = "Darwin" ] && echo "Error: x11docker does not run on Mac" >&2 && exit 64
