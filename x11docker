@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.2.0-beta-17"
+Version="7.2.0"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -2645,6 +2645,20 @@ check_xcontainer() {            # option --xc: check backend, rootless and image
 
   case "$Xcontainer" in
     yes|auto)
+      case "$Xcontainerbackend" in
+        podman|nerdctl)
+          [ "$Startuser" != "root" ] && [ "$Xcrootless" = "no" ] && {
+            [ "$Xcontainer" = "yes" ] && {
+              note "Option --xc with rootful X container backend $Xcontainerbackend
+  needs to be started with root privileges. root needed to claim a tty.
+  Fallback: Disabling option --xc"
+              check_fallback
+            }
+            Xcontainer="no"
+            Auto="yes"
+          }
+        ;;
+      esac
       [ "$Xcontainer" = "auto" ]    && Xcontainer="yes" && Auto="yes" && note "Option --xc for X in container enabled automatically."
       [ "$Winsubsystem" ]           && Xcontainer="no"
       case "$Runtime" in
@@ -2662,7 +2676,7 @@ check_xcontainer() {            # option --xc: check backend, rootless and image
   esac
 
   case "$Xcontainer" in
-    yes|auto)
+    yes)
       Xcontainerinspect="$(unpriv_xcbackend "$Xcontainerbackend inspect $Xcontainerimage")"
       Xcontaineroptions="$(parse_inspect "$Xcontainerinspect" "Config" "Labels" "options")"
       Xcontaineroptions="${Xcontaineroptions:-"--nxagent --xpra --xpra2 --xpra2-xwayland --xephyr --weston-xwayland --xvfb --xwayland --weston"}"
@@ -2679,6 +2693,11 @@ check_xdepends() {              # check dependencies on host for X server option
   # Return 1 if something is missing or not possible
   local Return= Message= Xcopt=
 
+  case "$Autochooseserver" in
+    yes) Message="xdependsmessage debugnote" ;;
+    no)  Message="xdependsmessage note" ;;
+  esac
+
   [ "${1:-}" = "--tty" ] && return 0
   [ "$Lastcheckedxserver" = "${1:-}" ] && debugnote "Dependencies of ${1:-} already checked: $Lastcheckedxserverresult " && return "$Lastcheckedxserverresult"
 
@@ -2690,12 +2709,7 @@ check_xdepends() {              # check dependencies on host for X server option
       grep -q -w -- "${1:-}" <<< "$Xcontaineroptionsconsole"   && Xcopt="yes"
     ;;
   esac
-  #[ "$Xcontainer" = "auto" ] && [ "${1:-}" = "--xorg" ]        && Xcopt=""
 
-  case "$Autochooseserver" in
-    yes) Message="xdependsmessage debugnote" ;;
-    no)  Message="xdependsmessage note" ;;
-  esac
   # --desktop
   case "$Xserver" in
     --hostdisplay|--hostwayland)
@@ -2833,8 +2847,7 @@ check_xdepends() {              # check dependencies on host for X server option
         ;;
       esac
       command -v xwininfo >/dev/null || {
-        $Message "${1:-}: xwininfo not found.
-  Need 'xwininfo' package from Cygwin/X (X11 section)."
+        $Message "${1:-}: xwininfo not found. Need 'xwininfo' package from Cygwin/X (X11 section)."
         Return=1
       }
       [ "$Hostip" ] || {
@@ -2848,8 +2861,7 @@ check_xdepends() {              # check dependencies on host for X server option
         Return=1
       }
       command -v runx >/dev/null || {
-        $Message "${1:-}: runx not found.
-  Need runx from https://github.com/mviereck/runx"
+        $Message "${1:-}: runx not found. Need runx from https://github.com/mviereck/runx"
         Return=1
       }
     ;;
@@ -3082,7 +3094,12 @@ check_xdepends() {              # check dependencies on host for X server option
   # --vt
   [ "$Newxvt" ] && {
     case "${1:-}" in
-      --xorg|--weston|--weston-wayland|--kwin) ;;
+      --xorg|--weston|--weston-wayland|--kwin)
+        [ "$Xcrootless" = "yes" ] && {
+          $Message "${1:-} cannot claim a new virtual terminal (option --vt) with rootless X container (option --xc)."
+          Return=1
+        }
+      ;;
       *)
         $Message "${1:-} cannot claim a new virtual terminal (option --vt)."
         Return=1
@@ -4061,7 +4078,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   case "$Xcontainerbackend" in
     docker|podman)
       Xc_gpu="$Xc_gpu \\
-  --group-add $(getent group video | cut -d: -f3) \\
+  --group-add $(getent group video  | cut -d: -f3) \\
   --group-add $(getent group render | cut -d: -f3)"
     ;;
   esac
@@ -4105,7 +4122,9 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
 
 
   ## create command ##
+  ### FIXME --xc=nerdctl does not take combination --detach --rm
   Xcontainercommand="$Xcontainerbackend run --pull=never \\
+  --rm \\
   --detach \\
   --name $Xcontainername \\
   --mount type=bind,source=$Sharefolder,target=$Sharefolder \\
@@ -4965,7 +4984,7 @@ check_image() {                 # get some image information
 
   # Check if image $Imagename is available locally
   Imageinspect="$(unpriv_backend "$Backendbin inspect $Imagename" 2>> $Containerlogfile)" || error "Image $Imagename not found locally.
-  Please pull or build image first."
+  Please pull or build image first. (Backend $Backend, rootless $Rootlessbackend)"
 
   # Check architecture
   Imagearchitecture=$(parse_inspect "$Imageinspect" "Architecture")

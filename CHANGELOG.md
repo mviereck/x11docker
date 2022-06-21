@@ -6,13 +6,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [7.2.0](https://github.com/mviereck/x11docker/releases/tag/v7.2.0) - 2022-06-21 
 ### Added
  - `--rootless [=yes|no]`: New option to enable rootless backend.
- - `--xc`: Support Weston in container on console, too.
+ - `--xc`: Support of Weston in container on console, too.
    [(#40)](https://github.com/mviereck/x11docker/issues/40)
    [(#444)](https://github.com/mviereck/x11docker/issues/444)
- - `--xc --xorg`: Experimental support of Xorg container.
+ - `--xc --xorg`: Support of Xorg in container.
    [(#7)](https://github.com/mviereck/x11docker/issues/7)
    [(#40)](https://github.com/mviereck/x11docker/issues/40)
    [(#221)](https://github.com/mviereck/x11docker/issues/221)
@@ -23,19 +23,19 @@ Project website: https://github.com/mviereck/x11docker
    middle mouse click selection for `--xephyr` and the like.
    [(#428)](https://github.com/mviereck/x11docker/issues/428)
  - `--vt`: enforces start on console.
+ - `--xc`: No X tool dependencies on host.
 ### Fixed
  - `--gpu`: Support VA-API, VDPAU (video acceleration) and variable `DRI_PRIME`.
    [(#443)](https://github.com/mviereck/x11docker/issues/443)
  - `--xpra`: Fix for `--xoverip`.
    [(#428)](https://github.com/mviereck/x11docker/issues/428)
- - `--nxagent`: Fix for `--xc`.
  - `--nxagent`: Fixes for `--keymap`.
    [(#208)](https://github.com/mviereck/x11docker/issues/208)
  - `--update*`, `--install`, `--cleanup`: Fix error messages, exit once done.
    [(#435)](https://github.com/mviereck/x11docker/issues/435)
  - `--hostuser`: Fixes for `--backend=host|proot`
    [(#437)](https://github.com/mviereck/x11docker/issues/437)
- - `--xc`: No X tool dependencies on host.
+ - `--xc`: Lots of minor fixes.
 
 ## [7.1.4](https://github.com/mviereck/x11docker/releases/tag/v7.1.4) - 2022-03-27 
 ### Added

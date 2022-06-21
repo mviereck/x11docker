@@ -63,7 +63,7 @@ x11docker allows to run graphical desktop applications (and entire desktops) in 
    Containers need much less resources than [virtual machines](https://en.wikipedia.org/wiki/Virtual_machine) for similar tasks.
  - Docker, podman and nerdctl do not provide a [display server](https://en.wikipedia.org/wiki/Display_server) that would allow to run applications with a [graphical user interface](https://en.wikipedia.org/wiki/Graphical_user_interface).
  - x11docker fills the gap. It runs an [X display server](https://en.wikipedia.org/wiki/X_Window_System) and provides it to containers. 
-   Most supported X servers run on host or in a container of image [x11docker/xserver](https://github.com/mviereck/dockerfile-x11docker-xserver).
+   X servers can run from host or in a container of image [x11docker/xserver](https://github.com/mviereck/dockerfile-x11docker-xserver).
  - Additionally x11docker does some [security setup](https://github.com/mviereck/x11docker#security) to enhance container isolation and to avoid X security leaks. 
    This allows a [sandbox](#sandbox) environment that fairly well protects the host system from possibly malicious or buggy software.
 
@@ -148,7 +148,8 @@ Description of some commonly used feature [options](https://github.com/mviereck/
  - For often used option combinations you can make shortcuts with [option `--preset`](#option---preset).
    
 ### Choice of X servers and Wayland compositors
-If no X server option is specified, x11docker automatically chooses one depending on installed [dependencies](#dependencies) and on given or missing options `--desktop`, `--gpu` and `--wayland`. Most recommended are `nxagent` and `Xephyr`.
+If no X server option is specified, x11docker automatically chooses one depending on installed [dependencies](#dependencies)
+and on given or missing options `--desktop`, `--gpu` and `--wayland`. Most recommended are `nxagent` and `Xephyr`.
  - [Overview of all possible X server and Wayland options.](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options)
    - [Hints to use option `--xorg` within X.](https://github.com/mviereck/x11docker/wiki/Setup-for-option---xorg)
    - Use option `-t, --tty` to run without X at all.
@@ -190,7 +191,6 @@ Hardware acceleration for OpenGL is possible with option `-g, --gpu`.
  
 ### Clipboard
 Clipboard sharing is possible with option `-c, --clipboard`. 
- - Image clips are possible with `--xpra` and `--hostdisplay`. 
  - Some X server options need package `xclip` on host.
  
 ### Sound
@@ -257,10 +257,10 @@ Container runtimes known and supported by x11docker are:
      For `--gpu` only `--xorg` with indirect rendering is supported. 
  - [`sysbox-runtime`](https://github.com/nestybox/sysbox): Based on runc, aims to enhance container isolation. 
    Support is experimental yet. Needs Sybox>=0.5.0 and kernel version >=5.12.
- 
+
 Using different runtimes is well tested for rootful Docker, but not for other [backend setups](#backend-docker-podman-or-nerdctl).
- 
-Possible runtime configuration in `/etc/docker/daemon.json`:
+
+Example: possible runtime configuration in `/etc/docker/daemon.json`:
 ```json
 {
   "default-runtime": "runc",
@@ -298,6 +298,7 @@ Container backends:
  - Recommended for rootless container backend: `podman` 
    - Only `podman` allows option `--home` in rootless mode yet.
    - Only `podman` provides useful file ownerships with option `--share` in rootless mode yet.
+ - `--backend=nerdctl` is experimental yet. It supports rootful and rootless mode. `nerdctl` is in heavy development stage.
 
 Other supported backends that are in fact no containers:
  - `--backend=host` runs a host application on a new X server. No containerization is involved.
@@ -499,18 +500,17 @@ x11docker will **not** remove:
 
 ## Dependencies
 x11docker can run with standard system utilities without additional dependencies on host or in image. 
- - As a core it only needs `bash`, an `X` server and one of [`docker`](https://www.docker.com/), [`podman`](http://docs.podman.io/en/latest/) or [`nerdctl`](https://github.com/containerd/nerdctl) to run containers on X.
- - x11docker checks dependencies for chosen options on startup and shows terminal messages if some are missing. 
+ - As a core it only needs `bash` and one of [`docker`](https://www.docker.com/), [`podman`](http://docs.podman.io/en/latest/) or [`nerdctl`](https://github.com/containerd/nerdctl) to run containers on X.
+ - x11docker also needs an X server. x11docker can automatically use image [`x11docker/xserver`](https://github.com/mviereck/dockerfile-x11docker-xserver) that provides 
+most optional x11docker dependencies and several X servers and Wayland compositors so you won't need to install them on host.
+   - If you prefer to install dependencies on host:
+     - The recommended base commands are: `nxagent` `Xephyr` `weston` `Xwayland` `xdotool` `xauth` `xinit` `xclip` `xhost` `xrandr` `xdpyinfo`. 
+       Some of them are probably already installed.
+     - See [wiki: Dependencies - Recommended base](https://github.com/mviereck/x11docker/wiki/Dependencies#recommended-base) for a package list matching your distribution.
 
-For advanced usage of x11docker it is recommended to provide some additional packages.
-The recommended base commands are: `nxagent` `Xephyr` `weston` `Xwayland` `xdotool` `xauth` `xinit` `xclip` `xhost` `xrandr` `xdpyinfo`. Some of them are probably already installed.
- - You can provide image [`x11docker/xserver`](https://github.com/mviereck/dockerfile-x11docker-xserver) that contains all noted packages. 
-   This allows x11docker to run nested X servers in a container. (Recommended)
- - Or install the packages on host. See [wiki: Dependencies - Recommended base](https://github.com/mviereck/x11docker/wiki/Dependencies#recommended-base) for a package list matching your distribution.
-
-Some feature options have additional dependencies on host and/or in image. This affects especially options `--gpu`, `--printer` and `--pulseaudio`.
-Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
-
+Dependencies in image:
+ - Some feature options have additional dependencies on host and/or in image. This affects especially options `--gpu`, `--printer` and `--pulseaudio`.
+ - Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
 
 
 ## Troubleshooting
