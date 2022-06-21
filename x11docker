@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.2.0-beta-16"
+Version="7.2.0-beta-17"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -67,13 +67,13 @@ Dependencies on host:
   docker, podman or nerdctl.
   Depending on chosen options x11docker might need some additional tools.
   It checks for them on startup and shows messages if some are missing.
-  Core list of recommended tools:
-   * Most recommended: Provide image x11docker/xserver to run X in container.
+   * Most recommended: Provide image x11docker/xserver to run X or Wayland
+     in container. The image contains all X related dependencies.
   Otherwise provide on host:
    * Recommended to allow security and convenience:
-       X servers: xpra Xephyr nxagent
+       X servers: xpra Xephyr nxagent Xorg
        X tools:   xauth xclip xrandr xhost xinit
-   * Advanced GPU support: weston Xwayland xpra xdotool
+   * Additional for advanced GPU support: weston Xwayland xpra xdotool
   See also: https://github.com/mviereck/x11docker/wiki/Dependencies
 
 Dependencies in image:
@@ -107,8 +107,8 @@ Basic settings:
      --rootless [=yes|no]  Use (or disallow) rootless backend.
                        Default behaviour without option --rootless:
                        --backend=docker: rootful unless DOCKER_HOST is set.
-                       --backend=podman: rootless except for user root
-                       --backend=nerdctl: rootless except for user root
+                       --backend=podman: rootless except started as root.
+                       --backend=nerdctl: rootless except started as root
      --xc [=yes|no|BACKEND]  Run X server in container of x11docker/xserver.
                        BACKEND can specify one of docker|podman|nerdctl.
      --xonly           Only start empty X server.
@@ -889,6 +889,12 @@ check_parent_sshd() {           # check whether pid $1 runs in SSH session
   done
   return "${Return:-1}"
 }
+devicelist_gpu() {              # print list of GPU devices
+  find /dev/dri/* /dev/nvidia* /dev/vga_arbiter /dev/nvhost* /dev/nvmap -maxdepth 0 -type c 2>/dev/null ||:
+}
+devicelist_input() {            # print list of input devices
+  find /dev/input/* -maxdepth 0 -type c 2>/dev/null ||:
+}
 download() {                    # download file at URL $1 and store it in file $2
   # Uses wget or curl. If both are missing, returns 1.
   # With no arguments it checks for curl/wget without downloading.
@@ -985,7 +991,8 @@ def parse_inspect(*args):
 parse_inspect(*sys.argv)
 EOF
   )"
-  echo "$Parserscript" | $Pythonbin - "$@"
+  echo "$Parserscript" | $Pythonbin - "$@" || warning "parse_inspect(): Error while parsing json for
+  ${2:-} ${3:-} ${4:-} ${5:-} ${6:-} (Line $BASH_LINENO)"
 }
 storeinfo() {                   # store some information for later use
   # store and provide pieces of information
@@ -1368,6 +1375,7 @@ buildimage() {                  # --build: build image from x11docker repository
   note "Building $Imagename"
   unpriv_backend "$Backendbin build -t $Imagename $Buildpath" || error "Option --build: Building image '$Imagename' failed."
 
+  cd "${HOME:-/tmp}"
   rm -rf "$Buildpath"
   return 0
 }
@@ -1912,9 +1920,6 @@ clipexchange "$X2auth" "$X1auth" clipboard &
 clipexchange "$X2auth" "$X1auth" primary &
 '
 }
-setup_gpu_devicelist() {        # option --gpu: print list of GPU devices
-  find /dev/dri /dev/nvidia* /dev/vga_arbiter /dev/nvhost* /dev/nvmap -maxdepth 0 2>/dev/null ||:
-}
 setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia driver
   # Easiest case: share /dev/dri.
   # Works for open source MESA drivers on host and in image.
@@ -1957,7 +1962,7 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
   # share device files
   while read -r Gpudevice ; do
     store_runoption volume "$Gpudevice"
-  done < <(setup_gpu_devicelist)
+  done < <(devicelist_gpu)
 
   # support for prime-run / discrete NVIDIA card #394
   [ -n "$__NV_PRIME_RENDER_OFFLOAD" ] && DRI_PRIME="1" && store_runoption env "__NV_PRIME_RENDER_OFFLOAD=$__NV_PRIME_RENDER_OFFLOAD"
@@ -3404,6 +3409,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   }
 
   [ "$Xcontainer" = "yes" ] && [ "$Xcontainerbackend" = "$Backend" ] && Usemitshm="yes"
+  [ "$Xcontainer" = "yes" ] && [ "$Xcontainerbackend" = "nerdctl" ]  && Usemitshm="no"
   [ "$Shareipc" = "host" ]                                           && Usemitshm="yes"
   [ "$Xcontainer" = "yes" ] && [ -n "$Newxvt" ]                      && Usemitshm="no"
   [ "$Xcontainer" = "no" ] &&[ "$Shareipc" != "host" ]               && Usemitshm="no"
@@ -3983,7 +3989,7 @@ esac
 }
 create_xcontainercommand() {    # option --xc: create docker command for X in container
   local Xcontainerrc Gpudevice
-  local Xc_hostx= Xc_hostwayland= Xc_containerwayland Xc_gpu Xc_nomitshm
+  local Xc_hostx= Xc_hostwayland= Xc_containerwayland Xc_gpu= Xc_nomitshm
   local Xc_capdrop Xc_nopriv Xc_user Xc_console Xc_systemd
 
   Xcontainername="x11docker_X${Newdisplaynumber}_xserver_${Cachenumber}"
@@ -3994,6 +4000,11 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   echo "root:x:0:0:root:/root:/bin/bash" >> "$Cachefolder/etcpasswd.xcontainer"
   echo "$Containeruser:x:${Containeruseruid:-$Hostuseruid}:${Containerusergid:-$Hostusergid}:$Containeruser,,,:/tmp:/bin/bash" >> "$Cachefolder/etcpasswd.xcontainer"
 
+  mkfile "$Cachefolder/etcgroup.xcontainer"
+  echo "video:x:$(getent group video   | cut -d: -f3):$Containeruser" >> "$Cachefolder/etcgroup.xcontainer"
+  echo "render:x:$(getent group render | cut -d: -f3):$Containeruser" >> "$Cachefolder/etcgroup.xcontainer"
+  echo "weston-launch:x:104:$Containeruser"                           >> "$Cachefolder/etcgroup.xcontainer"
+
   ## code snippets:
 
   # drop privileges
@@ -4002,6 +4013,12 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   Xc_nopriv="\\
   --security-opt=no-new-privileges"
   #[ "$Xcrootless" = "yes" ] && Xc_capdrop="" && Xc_nopriv=""
+  case "$Backend" in
+    nerdctl)
+      Xc_capdrop=""
+      Xc_nopriv=""
+    ;;
+  esac
 
   # user
   [ "$Containeruser" = "$Hostuser" ] && {
@@ -4048,13 +4065,10 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   --env LD_PRELOAD=/lib/x86_64-linux-gnu/libdl.so.2:/XlibNoSHM.so"
 
   # GPU
-  Xc_gpu="\\
-  --group-add $(getent group video | cut -d: -f3) \\
-  --group-add $(getent group render | cut -d: -f3)"
   while read -r Gpudevice ; do
     Xc_gpu="$Xc_gpu \\
   --device $Gpudevice:$Gpudevice"
-  done < <(setup_gpu_devicelist)
+  done < <(devicelist_gpu)
   # nvidia driver
   [ "$Nvidiainstallerfile" ] && {
     Xc_gpu="$Xc_gpu \\
@@ -4062,25 +4076,40 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
     mkfile "$Sharefolder/nvidia_installer"
     rootrc_nvidia_installer >> "$Sharefolder/nvidia_installer"
   }
+  case "$Xcontainerbackend" in
+    docker|podman)
+      Xc_gpu="$Xc_gpu \\
+  --group-add $(getent group video | cut -d: -f3) \\
+  --group-add $(getent group render | cut -d: -f3)"
+    ;;
+  esac
 
   # console
   Xc_console="\\
   --cap-add SYS_TTY_CONFIG \\
   --cap-add DAC_OVERRIDE \\
   --cap-add KILL \\
-  --device=/dev/input \\
-  --device=/dev/tty${Newxvt} \\
-  --mount type=bind,source=/var/run/dbus,target=/var/run/dbus
-  --mount type=bind,source=/run/udev/data,target=/run/udev/data,readonly"
+  --mount type=bind,source=/var/run/dbus,target=/var/run/dbus \\
+  --mount type=bind,source=/run/udev/data,target=/run/udev/data,readonly \\
+  --device=/dev/tty${Newxvt}"
+  while read Line; do
+    Xc_console="$Xc_console \\
+  --device=$Line"
+  done < <(devicelist_input)
 
   # Weston
   Xc_weston="\\
   --cap-add SETUID \\
   --cap-add SETGID \\
   --cap-add CHOWN \\
-  --group-add 104 \\
   --env XDG_VTNR=$Newxvt \\
   --mount type=bind,source=$Compositorlogfile,target=/x11docker/compositor.log"
+  case "$Xcontainerbackend" in
+    docker|podman)
+      Xc_weston="$Xc_weston \\
+  --group-add 104"
+    ;;
+  esac
 
   # connect to systemd from host (not used yet)
   Xc_systemd="\\
@@ -4093,18 +4122,25 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   --mount type=bind,source=/sys/fs/cgroup,target=/sys/fs/cgroup"
 
 
-  ## create command
-  Xcontainercommand="$Xcontainerbackend run --rm --pull=never \\
+  ## create command ##
+  Xcontainercommand="$Xcontainerbackend run --pull=never \\
   --detach \\
-  --tty \\
   --name $Xcontainername \\
-  --security-opt label=type:container_runtime_t \\
   --mount type=bind,source=$Sharefolder,target=$Sharefolder \\
   --mount type=bind,source=$Cachefolder/etcpasswd.xcontainer,target=/etc/passwd,readonly \\
+  --mount type=bind,source=$Cachefolder/etcgroup.xcontainer,target=/etc/group,readonly \\
   --mount type=bind,source=$Xcontainerrc,target=/xcontainerrc,readonly"
 
+  case "$Backend" in
+    docker|podman)
+      Xcontainercommand="$Xcontainercommand \\
+  --security-opt label=type:container_runtime_t"
+    ;;
+    nerdctl) ;;
+  esac
+
   case "$Xoverip" in
-    no) Xcontainercommand="$Backendbin \\
+    no) Xcontainercommand="$Xcontainercommand \\
   --network=none" ;;
   esac
 
@@ -4866,13 +4902,11 @@ check_backend() {               # options --backend, --rootless
       store_runoption cap "CHOWN"
     ;;
     nerdctl)
-      note "Option --backend=nerdctl: nerdctl only supports a subset
-  of docker options. That limits support of x11docker features."
+      note "Option --backend=nerdctl: Support of nerdctl is experimental yet.
+  In production rather use docker or podman for now."
       Switchcontaineruser="yes"
-      [ "$Capdropall" = "yes" ] && warning "Option --backend=nerdctl: x11docker
-  will allow some user switching capabilities that would be dropped with
-  other backends. (Because 'nerdctl --exec' does not support option --user.)
-  Though, these are still within nerdctl default capabilities."
+      [ "$Capdropall" = "yes" ] && note "Option --backend=nerdctl: If you encounter issues,
+  please try with option --cap-default to remove some container restrictions."
     ;;
     proot)
       warning "Option --backend=$Backend: Your host system is NOT PROTECTED.
@@ -5526,7 +5560,7 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
   # --group-add
   [ "$Switchcontaineruser" = "no" ] && {
     case "$Backend" in
-      docker|podman|nerdctl)
+      docker|podman)
         for Line in $Containerusergroups; do
           getent group "${Line:-nonsense}" >/dev/null && Backendcommand="$Backendcommand \\
   --group-add $(getent group "$Line" | cut -d: -f3)"
@@ -5595,7 +5629,7 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
 
   # SELinux restrictions for containers must be disabled to allow access to X socket. Flags z or Z do not help. ### FIXME check for possible change meanwhile
   case "$Backend" in
-    docker|podman|nerdctl)
+    docker|podman)
       Backendcommand="$Backendcommand \\
   --security-opt label=type:container_runtime_t"
     ;;
@@ -5781,7 +5815,7 @@ $Nvidiainstallerfile|$Rootfs/$Nvidiacontainerfile"
     yes)
       [ "$Newxsocket" ] && {
         case "$Backend" in
-          docker|podman|nerdctl)
+          docker|podman)
             Backendcommand="$Backendcommand \\
   --mount $(convertpath mount "$Cachefolder/tmp/.X11-unix/X$Newdisplaynumber:ro" "$Newxsocket")"
             [ "$Shareipc" = "no" ] && [ "$Containeruser" = "$Hostuser" ] && [ "$Xcontainerbackend" = "$Backend" ] && {
@@ -7660,8 +7694,8 @@ start_container() {             # docker run
 
       # Wait for pid 1 in container
       for ((Count=1 ; Count<=40 ; Count++)); do
-        Containerinspect="$(unpriv_backend "$Backendbin inspect $Containername" 2>> $Containerlogfile | rmcr)"
-        [ "$Containerinspect" != "[]" ] && Pid1pid="$(parse_inspect "$Containerinspect" "State" "Pid")"
+        Containerinspect="$(unpriv_backend "$Backendbin inspect $Containername" 2>> $Containerlogfile | rmcr)" ||:
+        [ -n "$Containerinspect" ] && [ "$Containerinspect" != "[]" ] && Pid1pid="$(parse_inspect "$Containerinspect" "State" "Pid")"
         debugnote "start_container(): $Count. check for PID 1: $Pid1pid"
         case "$Mobyvm" in
           no)  checkpid "$Pid1pid" && break ;;
@@ -7785,7 +7819,7 @@ start_xcontainer() {            # --xc
   storeinfo "Xcontainerid=$Xcontainerid"
 
   Containerinspect="$(unpriv_xcbackend "$Xcontainerbackend inspect $Xcontainername" 2>> $Xinitlogfile | rmcr)"
-  [ "$Containerinspect" != "[]" ] && {
+  [ -n "$Containerinspect" ] && [ "$Containerinspect" != "[]" ] && {
     Xcontainerip="$(parse_inspect "$Containerinspect" "NetworkSettings" "IPAddress")"
     storeinfo "Xcontainerip=$Xcontainerip"
     Xpid1pid="$(parse_inspect "$Containerinspect" "State" "Pid")"
