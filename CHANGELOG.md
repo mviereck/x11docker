@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Added
+ - `--clipboard`: New arguments `oneway` and `superv`.
+   [(#440)](https://github.com/mviereck/x11docker/issues/440)
+   [(#379)](https://github.com/mviereck/x11docker/issues/379)
+   [(#152)](https://github.com/mviereck/x11docker/issues/152)
+
 ## [7.2.0](https://github.com/mviereck/x11docker/releases/tag/v7.2.0) - 2022-06-21 
 ### Added
  - `--rootless [=yes|no]`: New option to enable rootless backend.

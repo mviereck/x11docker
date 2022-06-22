@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.2.0"
+Version="7.2.1-beta-1"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -22,7 +22,9 @@ esac
 usage() {                       # --help: show usage information
   echo "
 x11docker: Run GUI applications and desktop environments in containers.
-           Supports docker, podman and nerdctl.
+           Supports docker, podman, nerdctl and proot.
+           Can run X servers from host or in containers of x11docker/xserver.
+           Can also provide X servers to host applications.
 
 Usage:
 To run a container on a new X server:
@@ -116,7 +118,14 @@ Basic settings:
 Host integration:
      --alsa [=ALSA_CARD]  Sound with ALSA. You can define a desired sound card
                        with ALSA_CARD. List of available sound cards: aplay -l
- -c, --clipboard       Share clipboard.
+ -c, --clipboard [=yes|no|oneway|superv] Share clipboard. Possible arguments:
+                         yes:    Share clipboard in both directions.
+                                 Includes middle-mouse-click selection.
+                         oneway: Copy clipboard from container to host only.
+                         superv: Keys [Super][V] copy clipboard from host to 
+                                 container. Does not copy middle-mouse-click
+                                 to container. Otherwise same as 'oneway'.
+                         no:     Do not share clipboard.
  -g, --gpu [=yes|no|iglx|virgl] GPU access for hardware accelerated OpenGL.
                        Works best with open source drivers on host and in image.
                        For closed source nvidia drivers regard terminal output.
@@ -1854,8 +1863,6 @@ clean_xhost() {                 # option --clean-xhost: disable xhost policies o
   DISPLAY="$Hostdisplay" XAUTHORITY="$Hostxauthority" disable_xhost >> "$Xinitlogfile" 2>&1
 }
 create_clipboardrc() {          # option --clipboard: create shareclipboard script
-  # prepared for upcoming xclip with a -waitforchange option
-
   echo "#! /usr/bin/env bash
 $(declare -f rocknroll)
 $(declare -f mysleep)
@@ -1872,7 +1879,7 @@ clipexchange() {
   # $3  selection to use (primary or clipboard)
   # X credentials look like "DISPLAY=:0 XAUTHORITY=~/.Xauthority"
 
-  local Selection
+  local Selection Targets Imagetarget Clip Clipold Clipold2
   Selection="${3:-}"
 
   while rocknroll; do
@@ -1899,13 +1906,56 @@ clipexchange() {
     # wait a bit to avoid high CPU usage
     mysleep 0.5
   done
-}
+}'
+  case "$Shareclipboard" in
+    yes) # bidirectional
+      echo '
 clipexchange "$X1auth" "$X2auth" clipboard &
 clipexchange "$X1auth" "$X2auth" primary &
 sleep 1 # copy from 1 to 2 will take precedence at startup
 clipexchange "$X2auth" "$X1auth" clipboard &
 clipexchange "$X2auth" "$X1auth" primary &
 '
+    ;;
+    oneway) # only container to host
+      echo '
+clipexchange "$X2auth" "$X1auth" clipboard &
+clipexchange "$X2auth" "$X1auth" primary &
+'
+    ;;
+    superv) # always container to host, only with super + v host to container
+      echo '
+sendclip() {
+  Targets="$(env ${1:-} xclip -out -selection clipboard -t TARGETS 2>/dev/null)"
+  [ -n "$Targets" ] && {
+    grep -q "image/png" <<< "$Targets" && Imagetarget="-t image/png" || Imagetarget=""
+    env ${1:-} xclip -out -selection clipboard $Imagetarget | env ${2:-} xclip -in -selection clipboard $Imagetarget
+  }
+}
+
+case "${1:-}" in
+  superv)
+    sendclip "$X1auth" "$X2auth"
+  ;;
+  "")
+    clipexchange "$X2auth" "$X1auth" clipboard &
+    clipexchange "$X2auth" "$X1auth" primary &
+
+    env $X2auth xbindkeys -n -f <(echo "
+\"bash '$Clipboardrc' superv\"
+  Mod4 + v ") & Xbindkeyspid=$!
+
+    # wait for the end
+    case "'$Usemkfifo'" in
+      yes) read Var <'$Timetosaygoodbyefifo' ;;
+      no)  while rocknroll; do sleep 1; done ;;
+    esac
+    kill $Xbindkeyspid
+  ;;
+esac
+'
+    ;;
+  esac
 }
 setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia driver
   # Easiest case: share /dev/dri.
@@ -2681,6 +2731,7 @@ check_xcontainer() {            # option --xc: check backend, rootless and image
       Xcontaineroptions="$(parse_inspect "$Xcontainerinspect" "Config" "Labels" "options")"
       Xcontaineroptions="${Xcontaineroptions:-"--nxagent --xpra --xpra2 --xpra2-xwayland --xephyr --weston-xwayland --xvfb --xwayland --weston"}"
       Xcontaineroptionsconsole="$(parse_inspect "$Xcontainerinspect" "Config" "Labels" "options_console")"
+      Xcontainertools="$(parse_inspect "$Xcontainerinspect" "Config" "Labels" "tools")"
     ;;
     no)
       debugnote "check_xcontainer(): --xc disabled"
@@ -3612,8 +3663,8 @@ create_xcommand() {             ### create command to start X server and/or Wayl
 #  $(check_xpraoption --compress=0) \\
 #  $(check_xpraoption --quality=100) \\
 #  $(check_xpraoption --video-decoders=none)"
+#  $(check_xpraoption --clipboard=$Shareclipboard) \\
       Xpraclientcommand="xpra attach :$Newdisplaynumber $Xpraoptions \\
-  $(check_xpraoption --clipboard=$Shareclipboard) \\
   $(check_xpraoption --modal-windows=no) \\
   $(check_xpraoption --opengl=noprobe) \\
   $(check_xpraoption --reconnect=no) \\
@@ -4695,10 +4746,10 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   echo               "storeinfo xinitrc=ready"
   echo               ""
 
-  [ "$Shareclipboard" = "yes" ] && {
+  [ "$Shareclipboard" != "no" ] && {
     case "$Xserver" in
 #      --xpra*|--nxagent|--xwin|--runx) ;;         # have their own clipboard management
-      --xpra*|--xwin|--runx) ;;                   # have their own clipboard management
+      --xwin|--runx) ;;                           # have their own clipboard management
       --hostdisplay) ;;                           # already same clipboard
       *)                                          # synchronizing between different X servers
         echo         "# option '-c, --clipboard': Run clipboard script "
@@ -8485,7 +8536,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,clean-xhost,composite::,display:,keymap:,no-auth,vt::,westonini:,xhost::,xoverip,xtest::"       # X/Wayland config
   Longoptions="$Longoptions,enforce-i,fallback::,preset:,pull::"                                                            # x11docker config
   Longoptions="$Longoptions,cachebasedir:,home::,homebasedir:,share:"                                                       # Host folders
-  Longoptions="$Longoptions,alsa::,clipboard,gpu::,lang::,printer::,pulseaudio::,webcam"                                    # Host integration features
+  Longoptions="$Longoptions,alsa::,clipboard::,gpu::,lang::,printer::,pulseaudio::,webcam"                                  # Host integration features
   Longoptions="$Longoptions,backend:,env:,mobyvm,name:,no-entrypoint,no-setup,rootless::,runtime:,snap,workdir:"            # Container config
   Longoptions="$Longoptions,cap-default,ipc::,limit::,newprivileges::,network::"                                            # Container capabilities
   Longoptions="$Longoptions,group-add:,hostuser:,password::,sudouser::,user:,shell:"                                        # Container user
@@ -8598,7 +8649,8 @@ ${1:-}"
      #### Host integration options
          --alsa)              Sharealsa="yes"                        # ALSA sound (shares /dev/snd)
                               Alsacard="${2:-$Alsacard}" ; shift ;;
-      -c|--clipboard)         Shareclipboard="yes"  ;;               # Clipboard sharing
+      -c)                     Shareclipboard="yes" ;;                # Clipboard sharing
+         --clipboard)         Shareclipboard="${2:-yes}" ; shift ;;  # Clipboard sharing
       -l)                     Langwunsch="$Langwunsch
 ${LANG:-}"                                                           # Locale/language setting
                               Langwunsch="${Langwunsch:-$LC_ALL}"
@@ -8871,6 +8923,17 @@ check_options_arguments() {     # check for [likely] valid arguments
     docker|podman|nerdctl|proot|host) ;;
     *) 
       error "Option --backend: Unknown argument '$Backend'."
+    ;;
+  esac
+
+  # --clipboard
+  case "$Shareclipboard" in
+    yes|no|oneway|superv) ;;
+    *)
+      note "Option --clipboard: Unknown argument '$Shareclipboard'.
+  Fallback: Disabling option --clipboard."
+      check_fallback
+      Shareclipboard="no"
     ;;
   esac
 
@@ -9164,6 +9227,78 @@ check_options_interferences() { # check multiple option interferences, change se
     ;;
   esac
 
+  # --clipboard
+  case "$Shareclipboard" in
+    yes|oneway|superv)
+      [ -z "$Hostdisplay" ] && {
+        note "Option --clipboard: Did not find a host display
+  to share the clipboard with. DISPLAY is empty.
+  Fallback: Disabling option --clipboard."
+        check_fallback
+        Shareclipboard="no"
+      }
+    ;;
+  esac
+  case "$Shareclipboard" in
+    oneway|superv)
+      case "$Xserver" in
+        --hostdisplay|--xwin|--runx)
+          note "Option --clipboard: Option $Xserver only supports arguments yes|no.
+  Fallback: Disabling option --clipboard"
+          check_fallback
+          Shareclipboard="no"
+        ;;
+      esac
+    ;;
+  esac
+  case "$Shareclipboard" in
+    yes|oneway|superv)
+      case "$Xserver" in
+        --tty|--weston|--hostwayland|--kwin)
+          note "Option --clipboard is not supported for $Xserver.
+  Fallback: Disabling option --clipboard."
+          check_fallback
+          Shareclipboard="no"
+        ;;
+        *)
+          [ "$Xcontainer" = "yes" ] || command -v xclip >/dev/null || {
+            note "Option --clipboard with $Xserver needs xclip,
+  but xclip is not installed on your system.
+  Fallback: Disabling option --clipboard.
+  $Wikipackages"
+            check_fallback
+            Shareclipboard="no"
+          }
+        ;;
+      esac
+    ;;
+  esac
+  case "$Shareclipboard" in
+    superv)
+      case "$Xcontainer" in
+        yes)
+          grep -q -w "xbindkeys" <<< "$Xcontainertools" || {
+            note "Option --clipboard=$Shareclipboard with $Xserver needs xbindkeys,
+  but xbindkeys is missing in your image version of x11docker/xserver.
+  Please update image x11docker/xserver.
+  Fallback: Setting --clipboard=oneway."
+            check_fallback
+            Shareclipboard="oneway"
+          }
+        ;;
+        no)
+          command -v xbindkeys >/dev/null || {
+            note "Option --clipboard=$Shareclipboard with $Xserver needs xbindkeys,
+  but xbindkeys is not installed on your system.
+  Fallback: Setting --clipboard=oneway."
+            check_fallback
+            Shareclipboard="oneway"
+          }
+        ;;
+      esac
+    ;;
+  esac
+
   # X server
   case "$Xserver" in
     --xorg) 
@@ -9211,7 +9346,7 @@ check_options_interferences() { # check multiple option interferences, change se
         check_fallback
         Xauthentication="no"
       }
-      [ "$Xauthentication" = "no" ] && Trusted="yes" 
+      [ "$Xauthentication" = "no" ] && Trusted="yes"
       [ "$Xauthentication" = "yes" ] && [ "$Shareclipboard" = "yes" ] && {
         [ "$Trusted" = "no" ] && warning "Option --clipboard: To allow clipboard sharing with
   option --hostdisplay, trusted cookies will be enabled.
@@ -9327,33 +9462,6 @@ check_options_interferences() { # check multiple option interferences, change se
   It is recommended to install xpra, weston, Xwayland and xdotool
   to allow a seamless mode without the need of a window manager." ;;
         esac
-      }
-    ;;
-  esac
-
-  # --clipboard
-  [ "$Shareclipboard" = "yes" ] && [ -z "$Hostdisplay" ] && {
-    note "Option --clipboard: Did not find a host display
-  to share the clipboard with. DISPLAY is empty.
-  Fallback: Disabling option --clipboard."
-    check_fallback
-    Shareclipboard="no"
-  }
-  [ "$Shareclipboard" = "yes" ] && case "$Xserver" in
-    --nxagent|--xpra*|--xwin|--runx) ;; # have their own clipboard management, look at create_xcommand().
-    --tty|--weston|--hostwayland|--kwin)
-      note "Option --clipboard is not supported for $Xserver.
-  Fallback: Disabling option --clipboard."
-      check_fallback
-      Shareclipboard="no"
-    ;;
-    --xephyr|--xorg|--xvfb|--xwayland|--weston-xwayland)
-      [ "$Xcontainer" = "yes" ] || command -v xclip >/dev/null || {
-        note "Option --clipboard with $Xserver needs xclip,
-  but xclip is not installed on your system.
-  Fallback: Disabling option --clipboard."
-        check_fallback
-        Shareclipboard="no"
       }
     ;;
   esac
@@ -10145,6 +10253,7 @@ declare_variables() {           # declare global variables
   Xcontainername=""
   Xcontaineroptions=""
   Xcontaineroptionsconsole=""
+  Xcontainertools=""
   Xcrootless=""
 
   # Window manager
@@ -10466,7 +10575,7 @@ main() {
     start_xcontainer
   }
   store_newxenv
-  [ "$Shareclipboard" = "yes" ]  && create_clipboardrc >> "$Clipboardrc"          # --clipboard
+  [ "$Shareclipboard" != "no" ]  && create_clipboardrc >> "$Clipboardrc"          # --clipboard
   check_screensize               # size of host X and of new X server             # --size
   create_xcommand                # set up start command for X server              # all X server and Wayland options
   [ "$Xcommand" ]                && debugnote "X server command:
