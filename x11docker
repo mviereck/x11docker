@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.2.1-beta-1"
+Version="7.2.1-beta-3"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -118,13 +118,16 @@ Basic settings:
 Host integration:
      --alsa [=ALSA_CARD]  Sound with ALSA. You can define a desired sound card
                        with ALSA_CARD. List of available sound cards: aplay -l
- -c, --clipboard [=yes|no|oneway|superv] Share clipboard. Possible arguments:
+ -c, --clipboard [=yes|no|oneway|superv|altv] Share clipboard with host. 
+                       Possible arguments:
                          yes:    Share clipboard in both directions.
                                  Includes middle-mouse-click selection.
                          oneway: Copy clipboard from container to host only.
-                         superv: Keys [Super][V] copy clipboard from host to 
+                                 Includes middle-mouse-click selection.
+                         superv: Keys [SUPER][v] copy clipboard from host to 
                                  container. Does not copy middle-mouse-click
                                  to container. Otherwise same as 'oneway'.
+                         altv:   Same as 'superv' but using keys [ALT][v].
                          no:     Do not share clipboard.
  -g, --gpu [=yes|no|iglx|virgl] GPU access for hardware accelerated OpenGL.
                        Works best with open source drivers on host and in image.
@@ -1923,9 +1926,11 @@ clipexchange "$X2auth" "$X1auth" clipboard &
 clipexchange "$X2auth" "$X1auth" primary &
 '
     ;;
-    superv) # always container to host, only with super + v host to container
+    superv|altv) # always container to host, only with super + v or alt +v host to container
       echo '
 sendclip() {
+  # send clipboard content (selection clipboard) from X server $1 to X server $2
+  # used for --clipboard=superv
   Targets="$(env ${1:-} xclip -out -selection clipboard -t TARGETS 2>/dev/null)"
   [ -n "$Targets" ] && {
     grep -q "image/png" <<< "$Targets" && Imagetarget="-t image/png" || Imagetarget=""
@@ -1934,16 +1939,29 @@ sendclip() {
 }
 
 case "${1:-}" in
-  superv)
+  superv|altv)
     sendclip "$X1auth" "$X2auth"
   ;;
   "")
     clipexchange "$X2auth" "$X1auth" clipboard &
     clipexchange "$X2auth" "$X1auth" primary &
 
-    env $X2auth xbindkeys -n -f <(echo "
+    case "'$Shareclipboard'" in
+      altv)
+        Xbindkeycodes="
+\"bash '$Clipboardrc' altv\"
+  Mod1 + v
+"
+        ;;
+      superv)
+        Xbindkeycodes="
 \"bash '$Clipboardrc' superv\"
-  Mod4 + v ") & Xbindkeyspid=$!
+  Mod4 + v
+"
+      ;;
+    esac
+
+    env $X2auth xbindkeys -n -f <(echo "$Xbindkeycodes") & Xbindkeyspid=$!
 
     # wait for the end
     case "'$Usemkfifo'" in
@@ -3527,10 +3545,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   esac
 
   # X extension XTEST
-  [ "$Xtest" ] || case "$Xserver" in
-    --xpra*|--xvfb) Xtest="yes" ;;
-    *) Xtest="no" ;;
-  esac
+  Xtest="${Xtest:-no}"
   case "$Xtest" in
     yes) Xserveroptions="$Xserveroptions \\
   +extension XTEST" ;;
@@ -3881,7 +3896,6 @@ mode=$Screensize" >> "$Westonini"
 
       # Some additional nxagent options are stored in a file
       Nxagentoptions="nx/nx"
-#      [ "$Shareclipboard" = "yes" ] && Nxagentoptions="$Nxagentoptions,clipboard=both" || Nxagentoptions="$Nxagentoptions,clipboard=none"
       Nxagentoptions="$Nxagentoptions,clipboard=none"
       case "$Fullscreen" in
         yes) Nxagentoptions="$Nxagentoptions,fullscreen=1" ;;
@@ -4564,7 +4578,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
         [ "$Xserver" = "--nxagent" ]     && echo "rm $Xclientcookie.bak"
       }
       echo           "export XAUTHORITY=$Xclientcookie"
-      echo           "[ '$Xauthentication' = 'no' ] || [ ! -s '$Xclientcookie' ] && unset XAUTHORITY && warning '$Xserver: X server $Newdisplay runs without cookie authentication.'"
+      echo           "[ '$Xauthentication' = 'no' ] || [ ! -s '$Xclientcookie' ] && unset XAUTHORITY && warning 'Option --no-auth: X server $Newdisplay runs without cookie authentication.'"
         echo         ""
 
       case "$Xserver" in
@@ -8928,7 +8942,7 @@ check_options_arguments() {     # check for [likely] valid arguments
 
   # --clipboard
   case "$Shareclipboard" in
-    yes|no|oneway|superv) ;;
+    yes|no|oneway|superv|altv) ;;
     *)
       note "Option --clipboard: Unknown argument '$Shareclipboard'.
   Fallback: Disabling option --clipboard."
@@ -9227,9 +9241,17 @@ check_options_interferences() { # check multiple option interferences, change se
     ;;
   esac
 
+  # --xtest
+  [ -z "$Xtest" ] && case "$Xserver" in
+    --xpra*|--xvfb) 
+      note "Option $Xserver: Enabling option --xtest."
+      Xtest="yes"
+    ;;
+  esac
+
   # --clipboard
   case "$Shareclipboard" in
-    yes|oneway|superv)
+    yes|oneway|superv|altv)
       [ -z "$Hostdisplay" ] && {
         note "Option --clipboard: Did not find a host display
   to share the clipboard with. DISPLAY is empty.
@@ -9240,7 +9262,7 @@ check_options_interferences() { # check multiple option interferences, change se
     ;;
   esac
   case "$Shareclipboard" in
-    oneway|superv)
+    oneway|superv|altv)
       case "$Xserver" in
         --hostdisplay|--xwin|--runx)
           note "Option --clipboard: Option $Xserver only supports arguments yes|no.
@@ -9252,7 +9274,7 @@ check_options_interferences() { # check multiple option interferences, change se
     ;;
   esac
   case "$Shareclipboard" in
-    yes|oneway|superv)
+    yes|oneway|superv|altv)
       case "$Xserver" in
         --tty|--weston|--hostwayland|--kwin)
           note "Option --clipboard is not supported for $Xserver.
@@ -9274,7 +9296,7 @@ check_options_interferences() { # check multiple option interferences, change se
     ;;
   esac
   case "$Shareclipboard" in
-    superv)
+    superv|altv)
       case "$Xcontainer" in
         yes)
           grep -q -w "xbindkeys" <<< "$Xcontainertools" || {
@@ -9296,6 +9318,10 @@ check_options_interferences() { # check multiple option interferences, change se
           }
         ;;
       esac
+      [ "$Xtest" = "yes" ] && warning "Options --xtest --clipboard=$Shareclipboard:
+  X extension XTEST is enabled that allows container applications
+  to fake key presses like SUPER+v and ALT+v so they could fool x11docker
+  to provide the host clipboard content without user interaction."
     ;;
   esac
 
