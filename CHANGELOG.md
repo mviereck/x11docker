@@ -8,10 +8,11 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
- - `--clipboard`: New arguments `oneway` and `superv`.
+ - `--clipboard`: New arguments `oneway`, `altv` and `superv`.
    [(#440)](https://github.com/mviereck/x11docker/issues/440)
    [(#379)](https://github.com/mviereck/x11docker/issues/379)
    [(#152)](https://github.com/mviereck/x11docker/issues/152)
+ - `--checkwindow`: New option to run container as long as X windows are open.
 
 ## [7.2.0](https://github.com/mviereck/x11docker/releases/tag/v7.2.0) - 2022-06-21 
 ### Added
