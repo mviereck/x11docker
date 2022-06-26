@@ -13,7 +13,9 @@ Project website: https://github.com/mviereck/x11docker
    [(#440)](https://github.com/mviereck/x11docker/issues/440)
    [(#379)](https://github.com/mviereck/x11docker/issues/379)
    [(#152)](https://github.com/mviereck/x11docker/issues/152)
- - `--checkwindow`: New option to run container as long as X windows are open.
+ - `--checkwindow [=ARG]`: New option to run container as long as X windows
+   are open or to stop them as soon as keyword ARG disappears from xwininfo.
+   [(#68)](https://github.com/mviereck/x11docker/issues/68)
 ### Fixed
  - `*-xwayland`: Startup fix for `--xc=no` / no X server image.
  - `--xpra*-xwayland`: Use `xdotool` from X container if available.
