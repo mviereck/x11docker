@@ -8,11 +8,15 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
- - `--clipboard`: New arguments `oneway`, `altv` and `superv`.
+ - `--clipboard`: New arguments `oneway`, `altv` and `superv`
+   to restrict container access to host clipboard content.
    [(#440)](https://github.com/mviereck/x11docker/issues/440)
    [(#379)](https://github.com/mviereck/x11docker/issues/379)
    [(#152)](https://github.com/mviereck/x11docker/issues/152)
  - `--checkwindow`: New option to run container as long as X windows are open.
+### Fixed
+ - `*-xwayland`: Startup fix for `--xc=no` / no X server image.
+ - `--xpra*-xwayland`: Use `xdotool` from X container if available.
 
 ## [7.2.0](https://github.com/mviereck/x11docker/releases/tag/v7.2.0) - 2022-06-21 
 ### Added
