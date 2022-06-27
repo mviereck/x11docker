@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.3.0"
+Version="7.3.1-beta-1"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -2449,6 +2449,9 @@ check_newxenv()  {              # find free display
           Network=""
         }
       ;;
+      --hostdisplay)
+        [ -n "$(cut -d: -f1 <<< "$Hostdisplay")" ] && Xoverip="yes"
+      ;;
     esac
   }
   case "$Xoverip" in
@@ -2745,11 +2748,6 @@ check_xcontainer() {            # option --xc: check backend, rootless and image
       case "$Runtime" in
         kata-runtime)                  Xcontainer="no" ;;
       esac
-      case "$Xserver" in
-        --hostdisplay)
-          Xcontainer="no"
-        ;;
-      esac
       case "$Auto" in
         yes)
           [ "$Xcontainer" = "yes" ] && note "Option --xc for X in container enabled automatically."
@@ -2757,7 +2755,6 @@ check_xcontainer() {            # option --xc: check backend, rootless and image
         no)
           [ "$Xcontainer" = "no" ] && {
             note "Option --xc not possible:
-  - with option --hostdisplay
   - without image x11docker/xserver.
   - with runtime kata-runtime
   - on MS Windows
@@ -2798,10 +2795,10 @@ check_xdepends() {              # check dependencies on host for X server option
 
   case "$Runsonconsole" in
     no)
-      grep -q -w -- "${1:-}" <<< "$Xcontaineroptions"          && Xcopt="yes"
+      grep -q -w -- "${1:-}" <<< "$Xcontaineroptions --hostdisplay" && Xcopt="yes"
     ;;
     yes)
-      grep -q -w -- "${1:-}" <<< "$Xcontaineroptionsconsole"   && Xcopt="yes"
+      grep -q -w -- "${1:-}" <<< "$Xcontaineroptionsconsole"        && Xcopt="yes"
     ;;
   esac
 
@@ -4144,9 +4141,19 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   [ -n "$Hostdisplay" ] && {
     Xc_hostx="\\
   --env DISPLAY=$Hostdisplay"
-    [ -S "/tmp/.X11-unix/X$Hostdisplaynumber" ] && Xc_hostx="$Xc_hostx \\
+    [ -S "/tmp/.X11-unix/X$Hostdisplaynumber" ] && {
+      case "$Xserver" in
+        --hostdisplay)
+          Xc_hostx="$Xc_hostx \\
+  --mount type=bind,source=/tmp/.X11-unix/X$Hostdisplaynumber,target=/tmp/.X11-unix/X$Hostdisplaynumber,readonly"
+        ;;
+        *)
+          Xc_hostx="$Xc_hostx \\
   --mount type=bind,source=/tmp/.X11-unix/X$Hostdisplaynumber,target=/X$Hostdisplaynumber,readonly"
-  [ -s "$Hostxauthority" ] && Xc_hostx="$Xc_hostx \\
+        ;;
+      esac
+    }
+    [ -s "$Hostxauthority" ] && Xc_hostx="$Xc_hostx \\
   --env XAUTHORITY=$Hostxauthority \\
   --mount type=bind,source=$Hostxauthority,target=$Hostxauthority"
   }
@@ -4165,7 +4172,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
 
   # container X should not use MIT-SHM
   Xc_nomitshm="\\
-  --env LD_PRELOAD=/lib/x86_64-linux-gnu/libdl.so.2:/XlibNoSHM.so"
+  --env LD_PRELOAD=/lib/x86_64-linux-gnu/libdl.so.2:$Sharefolder/XlibNoSHM.so"
 
   # GPU
   while read -r Gpudevice ; do
@@ -4287,6 +4294,14 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
 
   # add code snippets
   case "$Xserver" in
+    --hostdisplay)
+      Xcontainercommand="$Xcontainercommand $Xc_capdrop"
+      Xcontainercommand="$Xcontainercommand $Xc_nopriv"
+      Xcontainercommand="$Xcontainercommand $Xc_user"
+      Xcontainercommand="$Xcontainercommand $Xc_hostx"
+      Xcontainercommand="$Xcontainercommand $Xc_nomitshm"
+      Xcontainercommand="$Xcontainercommand $Xc_gpu"
+    ;;
     --xorg)
       Xcontainercommand="$Xcontainercommand $Xc_capdrop"
       Xcontainercommand="$Xcontainercommand $Xc_user"
@@ -4435,6 +4450,9 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
 mkdir -p -m 1777 /tmp/.X11-unix
 [ -S /X${Hostdisplaynumber} ] && ln -v -s /X$Hostdisplaynumber /tmp/.X11-unix/X$Hostdisplaynumber
 [ -S /${Hostwaylandsocket} ]  && ln -v -s /$Hostwaylandsocket \$XDG_RUNTIME_DIR/$Hostwaylandsocket
+ls -la /tmp/.X11-unix
+
+cp /XlibNoSHM.so $Sharefolder/XlibNoSHM.so
 " >> "$Xcontainerrc"
 
 echo '
@@ -4907,7 +4925,14 @@ XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
   return 0
 }
 xtool() {                      # run X tool command in X container if available, otherwise on host
-  local Tool Usexcontainer
+  local Tool Usexcontainer Check=
+
+  case "${1:-}" in
+    --check)
+      Check="yes"
+      shift
+    ;;
+  esac
 
   Tool="$(echo "${1:-}" | cut -d' ' -f1)"
   case "$Xcontainer" in
@@ -4935,6 +4960,9 @@ xtool() {                      # run X tool command in X container if available,
       }
     ;;
   esac
+
+  [ "$Check" = "yes" ] && return 0
+
   case "$Usexcontainer" in
     yes)
       unpriv_xcbackend "$Xcontainerbackend exec $Xcontainername $1"
@@ -5917,8 +5945,16 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
       [ "$Newxsocket" ] && {
         case "$Backend" in
           docker|podman)
-            Backendcommand="$Backendcommand \\
+            case "$Xserver" in
+              --hostdisplay)
+                Backendcommand="$Backendcommand \\
+  --mount $(convertpath mount "$Newxsocket:ro" "$Newxsocket")"
+              ;;
+              *)
+                Backendcommand="$Backendcommand \\
   --mount $(convertpath mount "$Cachefolder/tmp/.X11-unix/X$Newdisplaynumber:ro" "$Newxsocket")"
+              ;;
+            esac
             [ "$Shareipc" = "no" ] && [ "$Containeruser" = "$Hostuser" ] && [ "$Xcontainerbackend" = "$Backend" ] && {
               case "$Runtime" in
                 kata-runtime|sysbox-runc) ;;
@@ -5930,8 +5966,16 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
             }
           ;;
           proot)
-            Backendcommand="$Backendcommand \\
+            case "$Xserver" in
+              --hostdisplay)
+                Backendcommand="$Backendcommand \\
+  --bind=$Newxsocket:$Newxsocket"
+              ;;
+              *)
+                Backendcommand="$Backendcommand \\
   --bind=$Cachefolder/tmp/.X11-unix/X$Newdisplaynumber:$Newxsocket"
+              ;;
+            esac
           ;;
         esac
       }
@@ -8290,7 +8334,6 @@ check_hostuser() {              # check for unprivileged host user
 
   Localsharedir="$Hostuserhome/.local/share/x11docker"
   mkfolder "$Localsharedir"
-  Mitshmlib="$Localsharedir/XlibNoSHM.so"
 
   return 0
 }
@@ -9320,31 +9363,25 @@ check_options_interferences() { # check multiple option interferences, change se
   [ "$Xauthentication" = "yes" ] && case "$Xserver" in
     --tty|--weston|--kwin|--hostwayland) Xauthentication="no" ;;
     *)
-      [ "$Xcontainer" = "no" ] && {
-        command -v xauth >/dev/null || {
-          case "$Xoverip" in
-            yes)
-              [ -z "$Hostxauthority" ] && [ "$Xserver" = "--hostdisplay" ] && Message="warning" || Message="error"
-              $Message "Command 'xauth' not found.
+      xtool --check xauth || {
+        case "$Xoverip" in
+          yes)
+            [ -z "$Hostxauthority" ] && [ "$Xserver" = "--hostdisplay" ] && Message="warning" || Message="error"
+            $Message "Command 'xauth' not found.
       SECURITY RISK!
   Your X server would be accessible over network without authentication!
   That could be abused to take control over your system.
-  Please install 'xauth' to allow X cookie authentication,
-  or provide image x11docker/xserver.
   You can disable cookie authentication with discouraged option --no-auth."
-            ;;
-            no|"")
-              warning "Command 'xauth' not found.
-  Please install 'xauth' to allow X cookie authentication,
-  or provide image x11docker/xserver.
+          ;;
+          no|"")
+            warning "Command 'xauth' not found.
   Securing X access with cookie authentication is not possible.
   Fallback: Disabling X authentication protocol. (option --no-auth)
   $Wikipackagesimage"
-              check_fallback
-            ;;
-          esac
-          Xauthentication="no"
-        }
+            check_fallback
+          ;;
+        esac
+        Xauthentication="no"
       }
     ;;
   esac
@@ -9391,11 +9428,11 @@ check_options_interferences() { # check multiple option interferences, change se
           Shareclipboard="no"
         ;;
         *)
-          [ "$Xcontainer" = "yes" ] || command -v xclip >/dev/null || {
+          xtool --check xclip || {
             note "Option --clipboard with $Xserver needs xclip,
   but xclip is not installed on your system.
   Fallback: Disabling option --clipboard.
-  $Wikipackages"
+  $Wikipackagesimage"
             check_fallback
             Shareclipboard="no"
           }
@@ -9405,27 +9442,13 @@ check_options_interferences() { # check multiple option interferences, change se
   esac
   case "$Shareclipboard" in
     superv|altv)
-      case "$Xcontainer" in
-        yes)
-          grep -q -w "xbindkeys" <<< "$Xcontainertools" || {
-            note "Option --clipboard=$Shareclipboard with $Xserver needs xbindkeys,
-  but xbindkeys is missing in your image version of x11docker/xserver.
-  Please update image x11docker/xserver.
+      xtool --check xbindkeys || {
+        note "Option --clipboard=$Shareclipboard with $Xserver needs xbindkeys,
+  but xbindkeys is missing.
   Fallback: Setting --clipboard=oneway."
-            check_fallback
-            Shareclipboard="oneway"
-          }
-        ;;
-        no)
-          command -v xbindkeys >/dev/null || {
-            note "Option --clipboard=$Shareclipboard with $Xserver needs xbindkeys,
-  but xbindkeys is not installed on your system.
-  Fallback: Setting --clipboard=oneway."
-            check_fallback
-            Shareclipboard="oneway"
-          }
-        ;;
-      esac
+        check_fallback
+        Shareclipboard="oneway"
+      }
       [ "$Xtest" = "yes" ] && warning "Options --xtest --clipboard=$Shareclipboard:
   X extension XTEST is enabled that allows container applications
   to fake key presses like SUPER+v and ALT+v so they could fool x11docker
@@ -9443,7 +9466,7 @@ check_options_interferences() { # check multiple option interferences, change se
         Xlegacywrapper="no"
       }
       # xrandr: --scale --size --rotate
-      command -v xrandr >/dev/null || [ "$Xcontainer" = "yes" ] || {
+      xtool --check xrandr || {
         { [ "$Scaling" ] || [ -n "$Rotation" ] || [ -n "$Screensize" ] ; } && {
           note "Option --xorg needs 'xrandr' to support
   options --size, --scale and --rotate.
@@ -9470,92 +9493,73 @@ check_options_interferences() { # check multiple option interferences, change se
                                --xhost --xonly --xoverip --xtest" ||:
     ;;
     --hostdisplay)
-      [ -n "$(cut -d: -f1 <<< "$Hostdisplay")" ] && Xoverip="yes"
       check_optionset "$Xserver" "--xtest" || Xtest=""
-      [ "$Winsubsystem" ] && Trusted="yes" || Trusted="no"
+      case "$Xcontainer" in
+        yes)
+          Trusted="yes"
+        ;;
+        no)
+          Trusted="no"
+          [ "$Winsubsystem" ] && Trusted="yes"
+        ;;
+      esac
       [ "$Xauthentication" = "yes" ] && [ -z "$Hostxauthority" ] && {
-        note "Option --hostdisplay: You host X server seems to run
+        note "Option --hostdisplay: Your host X server seems to run
   without cookie authentication. Cannot set up a cookie for X access.
   Fallback: Enabling option --no-auth."
         check_fallback
         Xauthentication="no"
       }
-      [ "$Xauthentication" = "no" ] && Trusted="yes"
-      [ "$Xauthentication" = "yes" ] && [ "$Shareclipboard" = "yes" ] && {
-        [ "$Trusted" = "no" ] && warning "Option --clipboard: To allow clipboard sharing with
-  option --hostdisplay, trusted cookies will be enabled.
-  No protection against X security leaks is left!
-  Consider to use another X server option."
-        Trusted="yes"
-      }
-      [ "$Xauthentication" = "yes" ] && [ "$Sharegpu" = "yes" ] && [ "$Trusted" = "no" ] && {
-        note "Option --gpu: To allow GPU acceleration with --hostdisplay,
-  x11docker will allow trusted cookies."
-        Trusted="yes"
-      }
+      [ "$Xauthentication" = "no" ]  && Trusted="yes"
+      [ "$Xauthentication" = "yes" ] && [ "$Shareclipboard" = "yes" ] && Trusted="yes"
+      [ "$Xauthentication" = "yes" ] && [ "$Sharegpu" = "yes" ] && [ "$Trusted" = "no" ] && Trusted="yes"
       [ "$Runsoverssh" = "yes" ] && {
         [ "$Network" != "host" ]  && error "For SSH connection with option --hostdisplay
-  x11docker needs insecure option --network=host.
+  x11docker would need insecure option --network=host.
   It is recommended to use another X server option
   like --xpra, --xephyr or --nxagent."
-        [ "$Xauthentication" = "yes" ] && [ "$Trusted" = "no" ] && {
-          note "For SSH connection with option --hostdisplay
-  x11docker must allow trusted cookies.
-  It is recommended to use another X server option
-  like --xpra, --xephyr or --nxagent."
-          Trusted="yes"
-        }
+        [ "$Xauthentication" = "yes" ] && Trusted="yes"
       }
       [ "$Trusted" = "no" ] && {
-        command -v xdpyinfo >/dev/null && {
-          xdpyinfo | grep -q SECURITY || {
-            note "Your X server does not support untrusted cookies.
+        xtool "xdpyinfo | grep -q SECURITY" || {
+          note "Your X server does not support untrusted cookies.
   Have to allow trusted cookies.
   Consider to use options --xpra or --nxagent instead of --hostdisplay."
-            Trusted="yes"
-          }
-        } || {
-          note "Option --hostdisplay: Command 'xdpyinfo' not found.
-  Need it to check whether Xorg supports untrusted cookies
-  and whether extension MIT-SHM for shared memory is enabled.
-  Please install 'xdpyinfo'.
-  $Wikipackages"
+          Trusted="yes"
         }
       }
       [ "$Trusted" = "no" ] && warning "Option --hostdisplay: Clipboard isolation might fail."
       # MIT-SHM
       [ "$Trusted" = "yes" ] && [ "$Hostmitshm" = "yes" ] && [ "$Shareipc" != "host" ] && [ "$Runsoverssh" = "no" ] && {
-        # make XlibNoSHM.so available on host                    ### FIXME maybe not the best place here
-        [ "$Xcontainerimage" ] && [ ! -f "$Mitshmlib" ] && {
-          note "Copying XlibNoSHM.so from x11docker/xserver 
-  to $Mitshmlib
-  to make it available for --hostdisplay."
-          unpriv_xcbackend "$Xcontainerbackend run --rm --user '$Hostuseruid:$Hostusergid' --volume '$Localsharedir':'$Localsharedir' -- '$Xcontainerimage' cp /XlibNoSHM.so $Mitshmlib"
-        }
-        [ -f "$Mitshmlib" ] && {
-          ### FIXME check for possible existing LD_PRELOAD in container
-          store_runoption env "LD_PRELOAD=/lib/x86_64-linux-gnu/libdl.so.2:$Sharefoldercontainer/XlibNoSHM.so"
-          cp "$Mitshmlib" "$Sharefolder"
-        } || {
-          case "$Backend" in
-            docker|podman|nerdctl)
-              note "Option --hostdisplay: To allow --hostdisplay with trusted cookies,
+        case "$Xcontainer" in
+          yes)
+            [ -e "/lib/x86_64-linux-gnu/libdl.so.2" ] && {
+              store_runoption env "LD_PRELOAD=/lib/x86_64-linux-gnu/libdl.so.2:$Sharefoldercontainer/XlibNoSHM.so"
+            } || {
+              store_runoption env "LD_PRELOAD=$Sharefoldercontainer/XlibNoSHM.so"
+            }
+          ;;
+          no)
+            case "$Backend" in
+              docker|podman|nerdctl)
+                note "Option --hostdisplay: To allow --hostdisplay with trusted cookies,
   x11docker must share host IPC namespace with container (option --ipc=host)
   to allow shared memory for X extension MIT-SHM.
   You can avoid this if you provide image x11docker/xserver
-  that contains an X library XlibNoSHM.so to avoid MIT-SHM issues."
-              case $Shareipc in
-                no|host) 
-                  Shareipc="host"
-                ;;
-                *) 
-                  note "Option --ipc: Did not change IPC settings due to 
+  that provides an X library XlibNoSHM.so to avoid MIT-SHM issues."
+                case $Shareipc in
+                  no|host) 
+                    Shareipc="host"
+                  ;;
+                  *) 
+                    note "Option --ipc: Did not change IPC settings due to 
   custom setup (--ipc='$Shareipc'). Issues noted above might occure."
-                ;;
-              esac
-            ;;
-          esac
-        }
+                  ;;
+                esac
+              ;;
+            esac
+          ;;
+        esac
       }
     ;;
   esac
@@ -10308,7 +10312,6 @@ declare_variables() {           # declare global variables
   Hostxauthority="Xauthority.host.$(unspecialstring "${DISPLAY:-unknown}")"   # File to store copy of $XAUTHORITY
   Hostxenv=""                                     # Collection of host X environment variables
   Hostxsocket=""                                  # Socket of DISPLAY in /tmp/.X11-unix
-  Mitshmlib=""                                    # local copy of XlibNoSHM.so
   Nvidiacontainerfile="/usr/local/bin/NVIDIA-installer.run"  # --gpu: Path to nvidia installer in container
   Nvidiaversion=""                                # --gpu: Proprietary nvidia driver version on host
   Nvidiainstallerfile=""                          # --gpu: Proprietary nvidia driver installer for container in [...]local/share/x11docker
@@ -10701,24 +10704,13 @@ main() {
   }
   rocknroll || return 0
 
+  setup_fifo                     # open message channels for container, xinitrc and watchpidlist()
+  check_xdg_runtime_dir
   check_hostxenv                 # check X environment from host
   check_snap                     # check if docker is installed in snap; causes restrictions
   check_xcontainer               # check if x11docker/xserver can/will be used    # --xc
   check_xserver                  # check chosen X server or auto-choose one
-  check_options_interferences    # check options, change settings if needed
-  check_containerhome            # create persistent container home               # --home
-  check_xdg_runtime_dir
-  check_options_messages         # some messages depending on options, but not changing anything
-  setup_fifo                     # open message channels for container, xinitrc and watchpidlist()
-  [ "$Windowmanagermode" ]       && check_windowmanager                           # --wm
-  [ "$Sharegpu" = "yes" ]        && setup_gpu ||:                                 # --gpu
-  [ "$Sharewebcam" = "yes" ]     && setup_webcam                                  # --webcam
-  [ "$Sharecupsmode" ]           && setup_printer                                 # --printer
-  [ "$Pulseaudiomode" ]          && setup_sound_pulseaudio                        # --pulseaudio
-  [ "$Sharealsa" = "yes" ]       && setup_sound_alsa                              # --alsa
-  [ "$Sharehostdbus" = "yes" ]   && setup_hostdbus                                # --hostdbus
 
-  #### Create command to run X server [and/or Wayland compositor]
   check_newxenv                  # find free display
   #[ "$Xserver" != "--xorg" ]     && [ -n "$Newxvt" ] && note "Option --vt only takes effect with option --xorg." && Newxvt=""
   [ "$Xserver" = "--xorg" ] || [ -n "$Newxvt" ] || [ "$Runsonconsole" = "yes" ] && check_vt   # --vt: find free tty/virtual terminal for Xorg or weston
@@ -10729,6 +10721,19 @@ main() {
     start_xcontainer
   }
   store_newxenv
+
+  check_options_interferences    # check options, change settings if needed
+  check_containerhome            # create persistent container home               # --home
+  check_options_messages         # some messages depending on options, but not changing anything
+  [ "$Windowmanagermode" ]       && check_windowmanager                           # --wm
+  [ "$Sharegpu" = "yes" ]        && setup_gpu ||:                                 # --gpu
+  [ "$Sharewebcam" = "yes" ]     && setup_webcam                                  # --webcam
+  [ "$Sharecupsmode" ]           && setup_printer                                 # --printer
+  [ "$Pulseaudiomode" ]          && setup_sound_pulseaudio                        # --pulseaudio
+  [ "$Sharealsa" = "yes" ]       && setup_sound_alsa                              # --alsa
+  [ "$Sharehostdbus" = "yes" ]   && setup_hostdbus                                # --hostdbus
+
+  #### Create command to run X server [and/or Wayland compositor]
   [ "$Cleanxhost" = "yes" ]      && clean_xhost                                   # --clean-xhost
   [ "$Shareclipboard" != "no" ]  && create_clipboardrc >> "$Clipboardrc"          # --clipboard
   check_screensize               # size of host X and of new X server             # --size
@@ -10806,8 +10811,8 @@ $(nl -ba <$Cmdrc)"
     # softlink to X or Wayland unix socket in container                           # --xc
     case "$Xcontainer" in
       yes)
-        [ "$Newdisplay" ]       && ln -s "$Cachefolder/tmp/.X11-unix/X$Newdisplaynumber"  "/tmp/.X11-unix/X$Newdisplaynumber"
-        [ "$Newwaylandsocket" ] && ln -s "$Cachefolder/XDG_RUNTIME_DIR/$Newwaylandsocket" "$XDG_RUNTIME_DIR/$Newwaylandsocket"
+        [ "$Newdisplay" ]       && ln -s "$Cachefolder/tmp/.X11-unix/X$Newdisplaynumber"  "/tmp/.X11-unix/X$Newdisplaynumber"  2>>$Xinitlogfile ||:
+        [ "$Newwaylandsocket" ] && ln -s "$Cachefolder/XDG_RUNTIME_DIR/$Newwaylandsocket" "$XDG_RUNTIME_DIR/$Newwaylandsocket" 2>>$Xinitlogfile ||:
       ;;
     esac
 
