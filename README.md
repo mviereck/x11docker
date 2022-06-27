@@ -190,9 +190,10 @@ Hardware acceleration for OpenGL is possible with option `-g, --gpu`.
    for driver version < v470.x and Xwayland < v22.1.2.
  
 ### Clipboard
-Clipboard sharing is possible with option `-c, --clipboard`. 
- - Some X server options need package `xclip` on host.
- 
+Clipboard sharing is possible with option `-c, --clipboard`.
+ - Optional arguments `superv` and `altv` only provide host clipboard content to container if keys `[SUPER][v]` or `[ALT][v]` are pressed.
+ - Optional argument `oneway` only transfers clipboard content from container to host.
+
 ### Sound
 Sound is possible with options `-p, --pulseaudio` and `--alsa`. 
  - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and `pulseaudio` (at least the `pulseaudio` client libraries) in image. 
@@ -451,7 +452,7 @@ Much thanks to the maintainers that decided to provide these packages!
 ### Manual installation
 #### Installation options
 As root you can install, update and remove x11docker in system directories to be available system-wide:
- - `x11docker --install` : install x11docker and x11docker-gui from current directory. (Useful to install from an extracted `zip` file or a cloned `git` repository.)
+ - `x11docker --install` : install x11docker from current directory. (Useful to install from an extracted `zip` file or a cloned `git` repository.)
  - `x11docker --update` : download and install latest [release](https://github.com/mviereck/x11docker/releases) from github.
  - `x11docker --update-master` : download and install latest master version from github.
  - `x11docker --remove` : remove all files installed by x11docker.
@@ -514,7 +515,7 @@ Dependencies in image:
 
 
 ## Troubleshooting
-For troubleshooting run `x11docker` or `x11docker-gui` in a terminal. 
+For troubleshooting run `x11docker` in a terminal. 
 x11docker shows warnings if something is insecure, missing or going wrong.
 Also it shows notes if options don't work and fallbacks are used.
 It might give hints to fix some issues.
@@ -639,7 +640,7 @@ x11docker --build x11docker/fvwm
 ### Desktop environments
 | Desktop environment <br> (most based on Debian)| x11docker command |
 | --- | --- |
-| [Cinnamon](https://github.com/mviereck/dockerfile-x11docker-cinnamon) | `x11docker --desktop --gpu --init=systemd x11docker/cinnamon` |
+| [Cinnamon](https://github.com/mviereck/dockerfile-x11docker-cinnamon) | `x11docker --desktop --gpu --init=systemd --cap-default x11docker/cinnamon` |
 | [deepin](https://github.com/mviereck/dockerfile-x11docker-deepin) ([website](https://www.deepin.org/en/dde/)) (3D desktop from China) | `x11docker --desktop --gpu --init=systemd -- --cap-add=IPC_LOCK -- x11docker/deepin` |
 | [Enlightenment](https://github.com/mviereck/dockerfile-x11docker-enlightenment) (based on [Void Linux](https://www.voidlinux.org/)) | `x11docker --desktop --gpu --runit x11docker/enlightenment` |
 | [Fluxbox](https://github.com/mviereck/dockerfile-x11docker-fluxbox) (based on Debian, 87 MB) | `x11docker --desktop x11docker/fluxbox` |

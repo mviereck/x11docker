@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [7.3.0](https://github.com/mviereck/x11docker/releases/tag/v7.3.0) - 2022-06-27 
 ### Added
  - `--clipboard`: New arguments `oneway`, `altv` and `superv`
    to restrict container access to host clipboard content.
@@ -17,7 +17,7 @@ Project website: https://github.com/mviereck/x11docker
    are open or to stop them as soon as keyword ARG disappears from xwininfo.
    [(#68)](https://github.com/mviereck/x11docker/issues/68)
 ### Fixed
- - `*-xwayland`: Startup fix for `--xc=no` / no X server image.
+ - `*-xwayland`: Startup fix for `--xc=no` / running on host.
  - `--xpra*-xwayland`: Use `xdotool` from X container if available.
 
 ## [7.2.0](https://github.com/mviereck/x11docker/releases/tag/v7.2.0) - 2022-06-21 
