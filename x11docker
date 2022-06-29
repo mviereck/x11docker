@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.3.1-beta-2"
+Version="7.3.1-beta-3"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -2077,7 +2077,7 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
   It is recommended to use free open source nouveau driver on host instead.
   Ask NVIDIA corporation to at least publish their closed source API,
   or even better to actively support open source driver nouveau.
-  
+
   To use the GPU without NVIDIA driver in container, you can use 
   less performant options --gpu=iglx (--xorg only) or --gpu=virgl (needs --xc)."
 
@@ -2548,7 +2548,7 @@ check_screensize() {            # check physical and virtual screen size (also o
   case "$Xserver" in
     --xpra*) [ "$Desktopmode" = "yes" ] && Xserver="${Xserver}-desktop" ;;
   esac
-  [ -z "$Screensize" ] && [ "$Runsonconsole" = "no" ] && case "$Xserver" in
+  [ -z "$Screensize" ] && [ -z "$Newxvt" ] && case "$Xserver" in
     --xephyr|--weston-xwayland|--weston|--kwin|--kwin-xwayland|--nxagent|--xpra*-desktop)
       Xaxis="$((Maxxaxis-96))"
       Yaxis="$((Maxyaxis-96))"
@@ -2557,7 +2557,7 @@ check_screensize() {            # check physical and virtual screen size (also o
   esac
   Xserver="${Xserver%-desktop}"
 
-  [ "$Fullscreen" = "yes" ] && [ "$Runsonconsole" = "no" ] && Screensize="${Maxxaxis}x${Maxyaxis}"
+  [ "$Fullscreen" = "yes" ] && [ -z "$Newxvt" ] && Screensize="${Maxxaxis}x${Maxyaxis}"
 
   [ -z "$Xaxis" ] && {
     Xaxis="$Maxxaxis"
@@ -2575,13 +2575,13 @@ check_screensize() {            # check physical and virtual screen size (also o
   [ -z "$Screensize" ] && case "$Xserver" in
     --xorg) ;;  # Xorg autodetects screen size, preset only with option --size
     --weston-xwayland|--weston|--kwin|--kwin-xwayland)
-      [ "$Runsonconsole" = "no" ] && [ -z "$Newxvt" ] && Screensize="${Xaxis}x${Yaxis}"
+      [ -z "$Newxvt" ] && Screensize="${Xaxis}x${Yaxis}"
     ;;
     *) Screensize="${Xaxis}x${Yaxis}" ;;
   esac
 
-  command -v cvt >/dev/null && {
-    Modeline="$(cvt "$Xaxis" "$Yaxis" | tail -n1 | cut -d' ' -f2-)"
+  xtool --check --quiet cvt && {
+    Modeline="$(xtool "cvt '$Xaxis' '$Yaxis'" | tail -n1 | cut -d' ' -f2-)"
     Modeline="$(echo $Modeline | cut -d_ -f1)\" $(echo $Modeline | cut -d_ -f2- | cut -d' ' -f2-)"
   } || {
     debugnote "check_screensize(): command cvt not found."
@@ -2592,7 +2592,7 @@ check_screensize() {            # check physical and virtual screen size (also o
 
   # create set of Modelines if needed
   case "$Xserver" in
-    --xpra|--xpra2|--xvfb) command -v cvt >/dev/null && Modelinefile="$(create_modelinefile "${Maxxaxis}x${Maxyaxis}")" ;;
+    --xpra|--xpra2|--xvfb) xtool --check --quiet cvt && Modelinefile="$(create_modelinefile "${Maxxaxis}x${Maxyaxis}")" ;;
   esac
 
   return 0
@@ -2604,8 +2604,7 @@ check_vt() {                    # option --xorg: find free vt / tty
   case "$Newxvt" in
     "")
       tty -s && [ "$Runsonconsole" = "yes" ] && {
-        Newxvt="$(tty | rev | cut -d/ -f1 | rev)"
-        Newxvt="${Newxvt#tty}"
+        Newxvt="${Newxvt#/dev/tty}"
       }
     ;;
     auto) Newxvt="" ;;
@@ -2636,7 +2635,7 @@ check_vt() {                    # option --xorg: find free vt / tty
     done
   }
 
-  # try to find free tty with fgconsole. Fails in some cases within X.
+  # try to find free tty with fgconsole. Fails without privileges within X.
   [ "$Newxvt" ] || Newxvt="$(fgconsole --next-available 2>/dev/null)"
   [ "$Newxvt" ] || Newxvt="$(fgconsole --next-available 2>/dev/null < "/dev/tty${XDG_VTNR:-}")"
 
@@ -2647,7 +2646,8 @@ check_vt() {                    # option --xorg: find free vt / tty
     done
   }
 
-  [ "$Newxvt" ] || error "Could not identify a free tty for --xorg."
+  [ "$Newxvt" ] || error "Could not identify a free tty for --xorg.
+  You can specify a desired tty number N with option --vt=N."
 
   [ "${XDG_VTNR:-}" ] && [ "$Hostdisplay$Hostwaylandsocket" ] && note "Current X server $Hostdisplay runs on tty ${XDG_VTNR:-}.
   Access it with [CTRL][ALT][F${XDG_VTNR:-}]."
@@ -3271,12 +3271,15 @@ check_xserver() {               # check chosen X server, auto-choose X server
     [ "$Outputcount" != "1" ]                                    && Xserver="--weston-xwayland"
     [ -n "$Rotation" ]                                           && Xserver="--weston-xwayland"
     [ "$Runsonconsole" = "yes" ]                                 && Xserver="--xorg"
+    [ -n "$Newxvt" ]                                             && Xserver="--xorg"
     [ -z "$Hostdisplay" ]       && [ -n "$Hostwaylandsocket" ]   && Xserver="--xpra2"
     [ -z "$Hostdisplay" ]       && [ -n "$Hostwaylandsocket" ]   && [ "$Desktopmode" = "yes"  ]  && Xserver="--weston-xwayland"
     [ "$Winsubsystem" ]                                          && Xserver="--runx"
     [ "$Winsubsystem" = "CYGWIN" ]                               && Xserver="--xwin"
     [ "$Setupwayland" = "yes" ] && { [ -n "$Hostwaylandsocket" ] && [ "$Desktopmode" = "no" ] && Xserver="--hostwayland" || Xserver="--weston" ; }
   }
+
+  [ "$Autochooseserver" = "no" ] && [ "$Xserver" = "--xorg" ] && Newxvt="${Newxvt:-auto}"
 
   [ "$Sharegpu" = "yes" ] && {
     case "$Xserver" in
@@ -3355,7 +3358,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
 
   [ "$Runsonconsole" = "no" ] && [ "$Runsoverssh" = "no" ] && [ -z "$Hostdisplay$Hostwaylandsocket" ] && [ "$Xserver" != "--tty" ] && [ -z "$Winsubsystem" ] && {
     warning "Environment variables DISPLAY and WAYLAND_DISPLAY are empty,
-  but it seems x11docker was started within X, not from console.
+  but it looks like x11docker was started within X, not from console.
   Please set DISPLAY and XAUTHORITY.
   If you have started x11docker with su or sudo, su/sudo may be configured to
   unset X environment variables. It may work if you run x11docker with
@@ -3469,7 +3472,7 @@ $Xdependsmessages"
     esac
   }
 
-  [ "$Xorgautochoice" = "yes" ] && [ "$Runsonconsole" = "no" ] && error "Option --xorg was chosen automatically
+  [ "$Xorgautochoice" = "yes" ] && [ "$Runsonconsole" = "no" ] && [ -z "$Newxvt" ] && error "Option --xorg was chosen automatically
   as the best one fitting your specified options and installed dependencies.
   However, x11docker does not run another Xorg without being specified.
   Please run with option --xorg.
@@ -3747,7 +3750,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   #### Prepare weston.ini: config file for Weston
   case "$Xserver" in
     --weston|--weston-xwayland|--xpra-xwayland|--xpra2-xwayland)
-      command -v weston-launch >/dev/null && [ "$Runsonconsole" = "yes" ] && [ "$Runsinteractive" = "yes" ] && Weston="weston-launch -v --" || Weston="weston"
+      command -v weston-launch >/dev/null && [ -n "$Newxvt" ] && [ "$Runsinteractive" = "yes" ] && Weston="weston-launch -v --" || Weston="weston"
       echo "[core]
 shell=desktop-shell.so
 idle-time=0
@@ -3900,17 +3903,20 @@ mode=$Screensize" >> "$Westonini"
   --output-count=$Outputcount"
       [ "$Xkblayout" ] && Compositorcommand="KWIN_XKB_DEFAULT_KEYMAP=$Xkblayout $Compositorcommand"
       Compositorcommand="env QT_XKB_CONFIG_ROOT=/usr/share/X11/xkb $Compositorcommand"
-      case "$Runsonconsole" in
-        yes) Compositorcommand="$Compositorcommand \\
-  --drm" ;;
-        no)
+      case "$Newxvt" in
+        "")
           kwin_wayland --help | grep -q -- '--windowed' && {
            Compositorcommand="$Compositorcommand \\
   --windowed"
           } || {
             kwin_wayland --help | grep -q -- '--x11-display' && [ "$Hostdisplay" ] && Compositorcommand="$Compositorcommand \\
   --x11-display=$Hostdisplay"
-          };;
+          }
+        ;;
+        *) 
+          Compositorcommand="$Compositorcommand \\
+  --drm" 
+        ;;
       esac
     ;;
 
@@ -8207,19 +8213,9 @@ check_host() {                  # check host environment
   }
 
   # Check whether x11docker runs on console
-  Runsonconsole="$(env LANG=C tty 2>&1 ||:)"
-  case "$Runsonconsole" in
-    "not a tty") Runsonconsole="" ;;
-    *)
-      grep -q tty <<< "$Runsonconsole"        && Runsonconsole="yes" || Runsonconsole="no"
-    ;;
-  esac
-
-  [ "$Winsubsystem"   ]                       && Runsonconsole="no"
-  [ -z "$Runsonconsole" ] && {
-    [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && Runsonconsole="no"  || Runsonconsole="yes"
-    debugnote "check_host(): Command tty failed. Guess if running on console: $Runsonconsole"
-  }
+  env LANG=C tty 2>&1 | grep -q '/dev/tty' <<< "$Runsonconsole" && Runsonconsole="yes" || Runsonconsole="no"
+  [ -n "$Newxvt" ] && [ "$Newxvt" != "auto" ] && Runsonconsole="yes"
+  debugnote "check_host(): Guess if running on console: $Runsonconsole"
 
   # Check whether x11docker runs in a terminal
   tty -s && Runsinterminal="yes" || Runsinterminal="no"
@@ -9622,7 +9618,7 @@ check_options_interferences() { # check multiple option interferences, change se
   }
 
   # --fullscreen is nonsense on tty at all. Avoids weston error on tty.
-  [ "$Runsonconsole" = "yes" ] && Fullscreen="no"
+  [ "$Runsonconsole" = "yes" ] || [ "$Newxvt" ] && Fullscreen="no"
 
   # --gpu=virgl
   case "$Virgl" in
@@ -9703,7 +9699,7 @@ check_options_interferences() { # check multiple option interferences, change se
   [ -n "$Xkblayout" ] && {
     case "$Xserver" in
       --kwin|--kwin-xwayland)
-        [ "$Runsonconsole" = "yes" ] && {
+        [ "$Runsonconsole" = "yes" ] || [ "$Newxvt" ] && {
           check_optionset "$Xserver" "--keymap" || {
             note "Option --keymap does not work with option $Xserver
   if running from console.
@@ -9925,7 +9921,7 @@ check_options_messages() {      # some messages depending on options, but not ch
               warning "x11docker will run Xorg as root."
             ;;
             *)
-              [ "$Xcontainer" = "no" ] && [ "$Runsonconsole" != "yes" ] && warning "Your configuration seems not to allow to start
+              [ "$Xcontainer" = "no" ] && [ "$Runsonconsole" = "no" ] && [ -z "$Newxvt" ] && warning "Your configuration seems not to allow to start
   a second core Xorg server from within X. Option --xorg may fail.
   (Per default, only root or console users are allowed to run an Xorg server).
 
@@ -10003,7 +9999,7 @@ check_options_messages() {      # some messages depending on options, but not ch
   esac
   case "$Xserver" in
     --weston|--weston-xwayland)
-      [ "$Xcontainer" = "yes" ] && [ "$Runsonconsole" = "yes" ] && note "Option --xc: Running $Xserver in container on console
+      [ "$Xcontainer" = "yes" ] && { [ "$Runsonconsole" = "yes" ] || [ -n "$Newxvt" ] ; } && note "Option --xc: Running $Xserver in container on console
   is experimental and might misbehave, fail or crash.
   Please report issues at https://github.com/mviereck/x11docker"
     ;;
@@ -10715,7 +10711,6 @@ main() {
   check_xserver                  # check chosen X server or auto-choose one
 
   check_newxenv                  # find free display
-  #[ "$Xserver" != "--xorg" ]     && [ -n "$Newxvt" ] && note "Option --vt only takes effect with option --xorg." && Newxvt=""
   [ "$Xserver" = "--xorg" ] || [ -n "$Newxvt" ] || [ "$Runsonconsole" = "yes" ] && check_vt   # --vt: find free tty/virtual terminal for Xorg or weston
   [ "$Xcontainer" = "yes" ] && {                                                  # --xc
     create_xcontainercommand
@@ -10749,6 +10744,7 @@ main() {
   storeinfo "x11dockerpid=$$"    # store pid of x11docker
   debugnote "x11docker version:  $Version
   Backend version:               $(${Backendbin:-:} --version 2>&1)
+  Running rootless:              $Rootlessbackend
   OCI Runtime:                   $Runtime
   Host system:                   $(grep '^PRETTY_NAME' /etc/os-release 2>/dev/null | cut -d= -f2 || echo "$Hostsystem")
   Host architecture:             $Hostarchitecture
