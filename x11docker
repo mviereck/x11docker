@@ -3132,7 +3132,13 @@ check_xdepends() {              # check dependencies on host for X server option
   # --vt
   [ "$Newxvt" ] && {
     case "${1:-}" in
-      --xorg|--weston|--weston-wayland|--kwin)
+      --kwin)
+        [ "$Newxvt" != "auto" ] && {
+          $Message "${1:-} cannot claim a different console (option --vt)."
+          Return=1
+        }
+      ;;
+      --xorg|--weston|--weston-wayland)
         [ "$Xcrootless" = "yes" ] && {
           $Message "${1:-} cannot claim a new virtual terminal (option --vt) with rootless X container (option --xc)."
           Return=1
@@ -3151,25 +3157,13 @@ check_xdepends() {              # check dependencies on host for X server option
       case "$Xcopt" in
         "")
           case "${1:-}" in
-            --xorg)
+            --xorg|--kwin)
               $Message "${1:-} is not supported by installed version of x11docker/xserver (option --xc). Please update image."
               Return=1
             ;;
             --weston|--weston-xwayland)
               $Message "${1:-} on console is not supported by installed version of x11docker/xserver (option --xc). Please update image."
               Return=1
-            ;;
-            *)
-              case "$Runsonconsole" in
-                yes)
-                  $Message "${1:-} on console is not possible."
-                  Return=1
-                ;;
-                no)
-                  $Message "${1:-} is not supported with option --xc yet."
-                  Return=1
-                ;;
-              esac
             ;;
          esac
         ;;
@@ -3903,21 +3897,8 @@ mode=$Screensize" >> "$Westonini"
   --output-count=$Outputcount"
       [ "$Xkblayout" ] && Compositorcommand="KWIN_XKB_DEFAULT_KEYMAP=$Xkblayout $Compositorcommand"
       Compositorcommand="env QT_XKB_CONFIG_ROOT=/usr/share/X11/xkb $Compositorcommand"
-      case "$Newxvt" in
-        "")
-          kwin_wayland --help | grep -q -- '--windowed' && {
-           Compositorcommand="$Compositorcommand \\
-  --windowed"
-          } || {
-            kwin_wayland --help | grep -q -- '--x11-display' && [ "$Hostdisplay" ] && Compositorcommand="$Compositorcommand \\
-  --x11-display=$Hostdisplay"
-          }
-        ;;
-        *) 
-          Compositorcommand="$Compositorcommand \\
-  --drm" 
-        ;;
-      esac
+      [ -n "$Newxvt" ] && Compositorcommand="$Compositorcommand \\
+  --drm"
     ;;
 
     --nxagent)
@@ -4228,7 +4209,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
     ;;
   esac
 
-  # connect to systemd from host (not used yet)
+  # connect to systemd from host
   Xc_systemd="\\
   --pid=host \\
   --env XDG_SEAT=$XDG_SEAT \\
@@ -4237,7 +4218,6 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   --mount type=bind,source=/run/user,target=/run/user \\
   --mount type=bind,source=/run/dbus,target=/run/dbus \\
   --mount type=bind,source=/sys/fs/cgroup,target=/sys/fs/cgroup"
-
 
   ## create command ##
   ### FIXME --xc=nerdctl does not take combination --detach --rm
@@ -4432,16 +4412,32 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
       esac
     ;;
     --kwin)
-      Xcontainercommand="$Xcontainercommand $Xc_nopriv"
-      Xcontainercommand="$Xcontainercommand $Xc_capdrop"
-      Xcontainercommand="$Xcontainercommand $Xc_user"
-      Xcontainercommand="$Xcontainercommand $Xc_hostx"
-      Xcontainercommand="$Xcontainercommand $Xc_hostwayland"
-      Xcontainercommand="$Xcontainercommand $Xc_containerwayland"
-      Xcontainercommand="$Xcontainercommand $Xc_nomitshm"
-      Xcontainercommand="$Xcontainercommand $Xc_gpu"
-      Xcontainercommand="$Xcontainercommand \\
+      case "$Newxvt" in
+        "")
+          Xcontainercommand="$Xcontainercommand $Xc_nopriv"
+          Xcontainercommand="$Xcontainercommand $Xc_capdrop"
+          Xcontainercommand="$Xcontainercommand \\
   --cap-add SYS_RESOURCE"
+          Xcontainercommand="$Xcontainercommand $Xc_user"
+          Xcontainercommand="$Xcontainercommand $Xc_hostx"
+          Xcontainercommand="$Xcontainercommand $Xc_hostwayland"
+          Xcontainercommand="$Xcontainercommand $Xc_containerwayland"
+          Xcontainercommand="$Xcontainercommand $Xc_nomitshm"
+          Xcontainercommand="$Xcontainercommand $Xc_gpu"
+        ;;
+        *)
+          Xcontainercommand="$Xcontainercommand $Xc_capdrop"
+          Xcontainercommand="$Xcontainercommand \\
+  --cap-add SYS_RESOURCE"
+          Xcontainercommand="$Xcontainercommand \\
+  --env XDG_SESSION_ID=$XDG_SESSION_ID"
+          Xcontainercommand="$Xcontainercommand $Xc_user"
+          Xcontainercommand="$Xcontainercommand $Xc_containerwayland"
+          Xcontainercommand="$Xcontainercommand $Xc_gpu"
+          Xcontainercommand="$Xcontainercommand $Xc_console"
+          Xcontainercommand="$Xcontainercommand $Xc_systemd"
+        ;;
+      esac
     ;;
   esac
   Xcontainercommand="$Xcontainercommand \\
@@ -8100,6 +8096,14 @@ start_pulseaudiotcp() {         # option --pulseaudio=tcp: load Pulseaudio TCP m
 }
 
 #### main init routines
+check_console() {               # check whether x11docker runs on console
+  ### FIXME not reliable. If in doubt, sets "no"
+  env LANG=C tty 2>&1 | grep -q '/dev/tty' && Runsonconsole="yes" || Runsonconsole="no"
+  id "$Hostuser" | grep -q -e "(tty)" -e "(root)" || {
+    unpriv "fgconsole" >/dev/null 2>&1 && Runsonconsole="yes"
+  }
+  debugnote "check_host(): Guess if running on console: $Runsonconsole"
+}
 check_fallback() {              # --fallback
   # Option --fallback
   case "$Fallback" in
@@ -8211,13 +8215,6 @@ check_host() {                  # check host environment
   } || {
     check_parent_sshd "$$"       && Runsoverssh="yes" || Runsoverssh="no"
   }
-
-  # Check whether x11docker runs on console
-  env LANG=C tty 2>&1 | grep -q '/dev/tty' <<< "$Runsonconsole" && Runsonconsole="yes" || Runsonconsole="no"
-  id "$Hostuser" | grep -q "(tty)" || {
-    unpriv "fgconsole" >/dev/null && Runsonconsole="yes"
-  }
-  debugnote "check_host(): Guess if running on console: $Runsonconsole"
 
   # Check whether x11docker runs in a terminal
   tty -s && Runsinterminal="yes" || Runsinterminal="no"
@@ -9948,8 +9945,8 @@ check_options_messages() {      # some messages depending on options, but not ch
         ;;
       esac
 
-      [ "$Runsoverssh" = "yes" ] && warning "x11docker can run Xorg on another tty (option --xorg),
-  but you won't see it in your SSH session.
+      [ "$Runsoverssh" = "yes" ] && note "Option --xorg: x11docker can run Xorg,
+  but you won't see it in an 'ssh -X' session.
   Rather install e.g. Xephyr on ssh server and use option --xephyr."
 
       # --gpu=iglx
@@ -9968,6 +9965,10 @@ check_options_messages() {      # some messages depending on options, but not ch
       note "Option $Xserver: If you encounter issues with xpra,
   you can try --nxagent instead.
   Rather use xpra from www.xpra.org than from distribution repositories."
+    ;;
+
+    --kwin)
+      [ "$Newxvt" ] && note "Option --kwin: Switching console with STRG+ALT+Fn fails."
     ;;
 
     --nxagent)
@@ -10677,6 +10678,7 @@ main() {
   check_host                     # get some infos about host system
   check_options_arguments        # check for valid arguments
   check_hostuser                 # find unprivileged host user                    # --hostuser
+  check_console                  # check if running on console
   create_cachefiles              # create cache files owned by unprivileged user  # --cachebasedir
   setup_verbosity                # create [and show] summary logfile              # --verbose
   check_containeruser            # unprivileged user in container                 # --user

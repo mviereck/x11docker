@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+### [Unreleased]
+### Added
+ - `--xc`: Support `--hostdisplay` and `--kwin`.
+
 ## [7.3.0](https://github.com/mviereck/x11docker/releases/tag/v7.3.0) - 2022-06-27 
 ### Added
  - `--clipboard`: New arguments `oneway`, `altv` and `superv`
