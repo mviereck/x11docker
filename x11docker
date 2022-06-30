@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.3.1-beta-3"
+Version="7.3.1-beta-4"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -941,6 +941,9 @@ makecookie() {                  # bake a cookie
 }
 mysleep() {                     # catch cases where sleep only supports integer
   sleep "${1:-1}" 2>/dev/null || sleep 1
+}
+oneline() {                     # remove \\ and newline from string
+  tr -d '\\\n' <<< "${1:-}"
 }
 parse_inspect() {               # parse json of inspect output using python
   # parse for keys in output of docker|podman|nerdctl inspect.
@@ -2961,7 +2964,7 @@ check_xdepends() {              # check dependencies on host for X server option
     --kwin|--kwin-xwayland)
       command -v "kwin_wayland" >/dev/null || {
         $Message "${1:-}: kwin_wayland not found.
-  $Wikipackages"
+  $Wikipackagesimage"
         Return=1
       } ;;
   esac
@@ -4337,6 +4340,16 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
       Xcontainercommand="$Xcontainercommand $Xc_user"
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
       Xcontainercommand="$Xcontainercommand $Xc_gpu"
+
+      Xpracontainername="x11docker_X${Newdisplaynumber}_xpraclient_${Cachenumber}"
+      Xpracontainercommand="$(sed '/--ipc/d ; /--name/d' <<< "$Xcontainercommand")"
+      Xpracontainercommand="$Xpracontainercommand $Xc_hostx"
+      Xpracontainercommand="$Xpracontainercommand $Xc_hostwayland"
+      Xpracontainercommand="$Xpracontainercommand \\
+  --name $Xpracontainername \\
+  --ipc=host \\
+  --uts=host \\
+  x11docker/xserver"
     ;;
     --xpra-xwayland)
       Xcontainercommand="$Xcontainercommand $Xc_capdrop"
@@ -4414,8 +4427,8 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
     --kwin)
       case "$Newxvt" in
         "")
-          Xcontainercommand="$Xcontainercommand $Xc_nopriv"
           Xcontainercommand="$Xcontainercommand $Xc_capdrop"
+          Xcontainercommand="$Xcontainercommand $Xc_nopriv"
           Xcontainercommand="$Xcontainercommand \\
   --cap-add SYS_RESOURCE"
           Xcontainercommand="$Xcontainercommand $Xc_user"
@@ -4435,7 +4448,6 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
           Xcontainercommand="$Xcontainercommand $Xc_containerwayland"
           Xcontainercommand="$Xcontainercommand $Xc_gpu"
           Xcontainercommand="$Xcontainercommand $Xc_console"
-          Xcontainercommand="$Xcontainercommand $Xc_systemd"
         ;;
       esac
     ;;
@@ -4448,6 +4460,8 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
 # script running in X server container (option --xc)
 
 exec >> $Xinitlogfile 2>&1
+cp /XlibNoSHM.so $Sharefolder/XlibNoSHM.so
+
 $(declare -f rocknroll)
 Timetosaygoodbyefile=$Timetosaygoodbyefile
 
@@ -4455,8 +4469,6 @@ mkdir -p -m 1777 /tmp/.X11-unix
 [ -S /X${Hostdisplaynumber} ] && ln -v -s /X$Hostdisplaynumber /tmp/.X11-unix/X$Hostdisplaynumber
 [ -S /${Hostwaylandsocket} ]  && ln -v -s /$Hostwaylandsocket \$XDG_RUNTIME_DIR/$Hostwaylandsocket
 ls -la /tmp/.X11-unix
-
-cp /XlibNoSHM.so $Sharefolder/XlibNoSHM.so
 " >> "$Xcontainerrc"
 
 echo '
@@ -7776,7 +7788,6 @@ start_container() {             # docker run
 #    export MSYS2_ARG_CONV_EXCL='*'
 #  }
 
-  Backendcommand="$(tr -d '\\\n' <<< "$Backendcommand")"
   debugnote "start_container(): Running image"
 
   case "$Interactive" in
@@ -7795,7 +7806,7 @@ start_container() {             # docker run
         proot) unpriv "$Backendcommand"     <&0 & Pid1pid=$! ;;
         docker|podman|nerdctl)
           [ "$Winpty" ] && {
-            $Winpty bash "$Backendcommandfile" <&0 &
+            $Winpty bash "$(oneline "$Backendcommand")" <&0 &
           } || {
             unpriv_backend "$Backendcommand" <&0 &
           }
@@ -7915,22 +7926,20 @@ $(tail "$Containerlogfile")"
   return 0
 }
 start_compositor() {            # start Wayland compositor Weston or KWin
-  local Compositorkeyword Command
-  Command="$(tr -d '\\\n' <<< "$Compositorcommand")"
+  local Compositorkeyword
+
   case "$Xserver" in
     --weston|--weston-xwayland|--xpra-xwayland|--xpra2-xwayland) Compositorkeyword="weston-desktop-shell" ;;
-#    --kwin|--kwin-xwayland)                                      Compositorkeyword="CreateListener" ;;
     --kwin|--kwin-xwayland)                                      Compositorkeyword="XKEYBOARD" ;;
   esac
 
   case "$Xcontainer" in
     yes)
-      unpriv_xcbackend "$Xcontainerbackend exec --detach $Xcontainername sh -c '$Command >> $Compositorlogfile  2>&1'" 2>> $Compositorlogfile
-#      Compositorpid="$(ps aux | tr -d' ' | grep "$(cut -c1-50 <<< $(tr -d' ' <<< "$Command"))" | grep -v grep | awk '{print $2}')"
+      unpriv_xcbackend "$Xcontainerbackend exec --detach $Xcontainername sh -c '$Compositorcommand >> $Compositorlogfile  2>&1'" 2>> $Compositorlogfile
       Compositorpid="$(ps aux | grep weston | grep "$Newwaylandsocket" | head -n1 | awk '{print $2}')"
     ;;
     no)
-      unpriv "$Command  >> '$Compositorlogfile'  2>&1 & echo compositorpid=\$! >> '$Storeinfofile'"
+      unpriv "$Compositorcommand  >> '$Compositorlogfile'  2>&1 & echo compositorpid=\$! >> '$Storeinfofile'"
       Compositorpid="$(storeinfo dump compositorpid)"
     ;;
   esac
@@ -7947,8 +7956,6 @@ start_compositor() {            # start Wayland compositor Weston or KWin
 start_xcontainer() {            # --xc
   local Containerinspect Xpid1pid
 
-  Xcontainercommand="$(tr -d '\\\n' <<< "$Xcontainercommand")"
-  #read Xcontainerid< <($Xcontainercommand 2>> "$Xinitlogfile")
   read Xcontainerid< <(unpriv_xcbackend "$Xcontainercommand" 2>> $Xinitlogfile)
   storeinfo "Xcontainerid=$Xcontainerid"
 
@@ -7976,7 +7983,7 @@ $(tail "$Xinitlogfile")"
 }
 start_xserver() {               # start X server
   local Exitcode= Xcontainerexitcode=
-  Xcommand="$(tr -d '\\\n' <<< "$Xcommand")"
+
   case "$Xserver" in
     --xpra*|--xephyr|--xvfb|--nxagent|--xwayland|--weston-xwayland|--kwin-xwayland|--xwin|--xorg)
       case "$Xcontainer" in
@@ -7987,7 +7994,7 @@ start_xserver() {               # start X server
           esac
         ;;
         yes)
-          unpriv_xcbackend "$Xcontainerbackend exec $Xcontainername env WAYLAND_DISPLAY=$Newwaylandsocket xinit $Xinitrc -- $Xcommand"  >> "$Xinitlogfile"  2>&1
+          unpriv_xcbackend "$Xcontainerbackend exec $Xcontainername env WAYLAND_DISPLAY=$Newwaylandsocket xinit  $Xinitrc  -- $Xcommand"  >> "$Xinitlogfile"  2>&1
           Xcontainerexitcode=$?
           case "$Xcontainerexitcode" in
             137) Exitcode="0" ;; # docker error indicating that xinit did not shut down fast enough on SIGTERM. Ignore it.
@@ -8036,7 +8043,7 @@ $Xpraservercommand"
       #Xpraserverpid=$!
     ;;
     yes)
-      unpriv_xcbackend "$Xcontainerbackend exec --detach $Xcontainername sh -c '$(tr -d '\\\n' <<< "$Xpraservercommand")'" >> "$Xpraserverlogfile" 2>&1
+      unpriv_xcbackend "$Xcontainerbackend exec --detach $Xcontainername sh -c '$Xpraservercommand'" >> "$Xpraserverlogfile" 2>&1
       #Xpraserverpid="$(ps aux | grep "/usr/bin/xpra start $Newdisplay" | grep -v grep | awk '{print $2}')"
     ;;
   esac
@@ -8053,14 +8060,24 @@ $Xpraenv $Xpraclientcommand"
 $Xpraclientcommand"
   echo "x11docker [$(timestamp)]: Starting Xpra client" >> "$Xpraclientlogfile"
   [ "$Xcontainer" = "yes" ] && [ "$Xserver" != "--xpra2" ] && [ "$Xserver" != "--xpra2-xwayland" ] && {
-    unpriv_xcbackend "$Xcontainerbackend exec --detach $Xcontainername sh -c '$(tr -d '\\\n' <<< "$Xpraclientcommand")'" >> "$Xpraclientlogfile" 2>&1
+    unpriv_xcbackend "$Xcontainerbackend exec --detach $Xcontainername sh -c '$Xpraclientcommand'" >> "$Xpraclientlogfile" 2>&1
     :
   } || {
-    unpriv "$Xpraclientcommand ||:" >> "$Xpraclientlogfile" 2>&1 &
+    case "$Xserver" in
+      --XXXxpra2*)
+        Xpracontainercommand="$Xpracontainercommand
+$Xpraclientcommand"
+        echo "$Xpracontainercommand"
+        unpriv_xcbackend "$Xpracontainercommand"
+      ;;
+      *)
+        unpriv "$Xpraclientcommand ||:" >> "$Xpraclientlogfile" 2>&1 &
+      ;;
+    esac
   }
 
   # get pids
-  sleep 1   # avoid race condition not finding the process
+  sleep 3   # avoid race condition not finding the process
   Xpraserverpid="$(ps aux | grep -E "/usr/bin/xpra start :$Newdisplaynumber|/usr/bin/xpra start-desktop :$Newdisplaynumber" | grep -v grep | awk '{print $2}')"
   storepid "$Xpraserverpid" xpraserver
   Xpraclientpid="$(ps aux | grep "/usr/bin/xpra attach :$Newdisplaynumber" | grep -v grep | awk '{print $2}')"
@@ -10638,20 +10655,26 @@ stdout() {
 }
 unpriv() {                      # run a command as unprivileged user. Needed if x11docker was started by root or with sudo.
   # $Unpriv is declared in check_hostuser: 'eval' or 'su $Hostuser -c'
-  $Unpriv "${1:-}"
+  local Command
+  Command="$(oneline "${1:-}")"
+  $Unpriv "$Command"
   return $?
 }
 unpriv_backend(){               # run container backend rootful or rootless
+  local Command
+  Command="$(oneline "${1:-}")"
   case "$Rootlessbackend" in
-    yes)   unpriv                  "${1:-}" ;;
-    no|"") eval   "env DOCKER_HOST= ${1:-}" ;;
+    yes)   unpriv                  "$Command" ;;
+    no|"") eval   "env DOCKER_HOST= $Command" ;;
   esac
   return $?
 }
 unpriv_xcbackend(){             # run X container backend rootful or rootless
+  local Command
+  Command="$(oneline "${1:-}")"
   case "$Xcrootless" in
-    yes) unpriv                  "${1:-}" ;;
-    no)  eval   "env DOCKER_HOST= ${1:-}" ;;
+    yes) unpriv                  "$Command" ;;
+    no)  eval   "env DOCKER_HOST= $Command" ;;
   esac
   return $?
 }
