@@ -9,6 +9,9 @@ Project website: https://github.com/mviereck/x11docker
 ### [Unreleased]
 ### Added
  - `--xc`: Support `--hostdisplay` and `--kwin`.
+### Fixed
+ - `--xc`: Add support for `--xvfb`.
+   [(452)](https://github.com/mviereck/x11docker/issues/452)
 
 ## [7.3.0](https://github.com/mviereck/x11docker/releases/tag/v7.3.0) - 2022-06-27 
 ### Added
