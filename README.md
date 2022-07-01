@@ -190,7 +190,7 @@ Hardware acceleration for OpenGL is possible with option `-g, --gpu`.
    for driver version < v470.x and Xwayland < v22.1.2.
  
 ### Clipboard
-Clipboard sharing is possible with option `-c, --clipboard`.
+Clipboard sharing is possible with option `-c, --clipboard [=ARG]`.
  - Optional arguments `superv` and `altv` only provide host clipboard content to container if keys `[SUPER][v]` or `[ALT][v]` are pressed.
  - Optional argument `oneway` only transfers clipboard content from container to host.
 

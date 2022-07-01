@@ -6,12 +6,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-### [Unreleased]
+## [7.3.1](https://github.com/mviereck/x11docker/releases/tag/v7.3.1) - 2022-07-01 
 ### Added
- - `--xc`: Support `--hostdisplay` and `--kwin`.
+ - `--xc`: Support `--kwin`, nested and on console.
+ - `--xc`: Support `--xpra-xwayland`.
 ### Fixed
- - `--xc`: Add support for `--xvfb`.
+ - `--xc`: Add missing code for `--xvfb`.
    [(452)](https://github.com/mviereck/x11docker/issues/452)
+ - `--xc`: Provide `--hostdisplay` dependencies.
 
 ## [7.3.0](https://github.com/mviereck/x11docker/releases/tag/v7.3.0) - 2022-06-27 
 ### Added

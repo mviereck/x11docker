@@ -2,10 +2,10 @@
 x11docker ToDo notes
 
 ## Work in progress
- - 
+ - --kwin in weston segfaults
  - --xc --xorg: MIT-SHM fails
  - --xc --xorg rootless fails
- - --xc --weston on console: tty switch fails with unprivileged user
+ - --xc --kwin on console: tty switch fails with unprivileged user
 
  - --backend=host: check X container
  - centralize argument checks
@@ -29,11 +29,6 @@ x11docker ToDo notes
    - how to disable old binds? issue e.g. with/without --home, --share
  
  - kata: add new runtime for nerdctl io.containerd.kata.v2
-
- - X in container:
-   - use xauth and others from image if not available on host
-   - missing: Xorg, Weston/Kwin on console, xpra-xwayland
-   - --xpra-xwayland --xc: xpra client fails with keyboard error 
 
 ## Issues to fix
  - --build: download files for COPY/ADD (x11docker/check, x11docker/xserver)
