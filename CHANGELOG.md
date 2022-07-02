@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+### [Unreleased]
+### Added
+ - `--clipboard=yes`: Limited support for Wayland clients.
+   (Host X to Wayland container only.)
+
 ## [7.3.1](https://github.com/mviereck/x11docker/releases/tag/v7.3.1) - 2022-07-01 
 ### Added
  - `--xc`: Support `--kwin`, nested and on console.

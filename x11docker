@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.3.1"
+Version="7.3.2-beta-1"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -1888,8 +1888,8 @@ create_clipboardrc() {          # option --clipboard: create shareclipboard scri
 $(declare -f rocknroll)
 $(declare -f mysleep)
 Timetosaygoodbyefile='$Timetosaygoodbyefile'
-X1auth='DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority'
-X2auth='DISPLAY=$Newdisplay XAUTHORITY=$Xclientcookie'
+X1auth='DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority WAYLAND_DISPLAY=$Hostwaylandsocket XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR'
+X2auth='DISPLAY=$Newdisplay  XAUTHORITY=$Xclientcookie  WAYLAND_DISPLAY=$Newwaylandsocket  XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR'
 "
   echo '
 clipexchange() {
@@ -1904,22 +1904,58 @@ clipexchange() {
   Selection="${3:-}"
 
   while rocknroll; do
-    Targets="$(env ${1:-} xclip -out -selection $Selection -t TARGETS 2>/dev/null)"
+    export ${1:-}
+    case "$DISPLAY" in
+      "") 
+        case "$Selection" in
+          primary)   Targets="$(wl-paste --list-types --primary)" ;;
+          clipboard) Targets="$(wl-paste --list-types)" ;;
+        esac
+      ;;
+      *)             Targets="$(xclip -out -selection $Selection -t TARGETS 2>/dev/null)" ;;
+    esac
 
     [ -n "$Targets" ] && {
       # check for image clip
       grep -q "image/png" <<< "$Targets" && Imagetarget="-t image/png" || Imagetarget=""
 
       # read content of $Selection of X server $1
-      Clip="$(env ${1:-} xclip -out -selection $Selection $Imagetarget | base64)"
+      export ${1:-}
+      case "$DISPLAY" in
+        "") 
+          case "$Selection" in
+            primary)   Clip="$(wl-paste --primary               $Imagetarget | base64)" ;;
+            clipboard) Clip="$(wl-paste                         $Imagetarget | base64)" ;;
+          esac
+        ;;
+        *)             Clip="$(xclip -out -selection $Selection $Imagetarget | base64)" ;;
+      esac
 
       [ -n "$Clip" ] && [ "$Clip" != "$Clipold" ] && {
         Clipold="$Clip"
 
         # send only to clipboard of other X server if it has different content. Important to keep highlighting of text for primary/middle mouse click.
-        Clipold2="$(env ${2:-} xclip -out -selection $Selection $Imagetarget | base64)"
+        export ${2:-}
+        case "$DISPLAY" in
+          "") 
+            case "$Selection" in
+              primary)   Clipold2="$(wl-paste --primary               $Imagetarget | base64)" ;;
+              clipboard) Clipold2="$(wl-paste                         $Imagetarget | base64)" ;;
+            esac
+          ;;
+          *)             Clipold2="$(xclip -out -selection $Selection $Imagetarget | base64)" ;;
+        esac
         [ "$Clipold2" != "$Clip" ] && {
-          base64 -d <<< "$Clip" | env ${2:-} xclip -in -selection $Selection $Imagetarget
+          export ${2:-}
+          case "$DISPLAY" in
+            "") 
+              case "$Selection" in
+                primary)   base64 -d <<< "$Clip" | wl-copy --primary               $Imagetarget ;;
+                clipboard) base64 -d <<< "$Clip" | wl-copy                         $Imagetarget ;;
+              esac
+            ;;
+            *)             base64 -d <<< "$Clip" | xclip -in -selection $Selection $Imagetarget ;;
+          esac
           #echo "SEND $Selection to ${2:-} : $(base64 -d <<< "$Clip")"
         }
       }
@@ -1944,6 +1980,11 @@ clipexchange "$X2auth" "$X1auth" clipboard &
 clipexchange "$X2auth" "$X1auth" primary &
 '
     ;;
+    wayland) # limited fallback for wayland clients with --clipboard=yes. host to container only, selection clipboard only.
+      echo '
+clipexchange "$X1auth" "$X2auth" clipboard &
+'
+    ;;
     superv|altv) # always container to host, only with super + v or alt +v host to container
       echo '
 sendclip() {
@@ -1955,7 +1996,6 @@ sendclip() {
     env ${1:-} xclip -out -selection clipboard $Imagetarget | env ${2:-} xclip -in -selection clipboard $Imagetarget
   }
 }
-
 case "${1:-}" in
   superv|altv)
     sendclip "$X1auth" "$X2auth"
@@ -4150,8 +4190,8 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
 
   # Wayland in container
   Xc_containerwayland="\\
-  --env XDG_RUNTIME_DIR=/run/user/$Containeruseruid \\
-  --mount type=bind,source=$Cachefolder/XDG_RUNTIME_DIR,target=/run/user/$Containeruseruid"
+  --env XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR \\
+  --mount type=bind,source=$Cachefolder/XDG_RUNTIME_DIR,target=$XDG_RUNTIME_DIR"
 
   # container X should not use MIT-SHM
   Xc_nomitshm="\\
@@ -4955,6 +4995,7 @@ xtool() {                      # run X tool command in X container if available,
     setxkbmap|xkbcomp) Toolinfo="x11docker uses setxkbmap and xkbcomp to set the keyboard
   in new X server to same as on host or specified with --keymap." ;;
     vainfo)    Toolinfo="vainfo helps to configure VAAPI video decoding support." ;;
+    wl-copy|wl-paste) Toolinfo="x11docker uses wl-copy and wl-paste for Wayland clipboard support." ;;
     wmctrl)    Toolinfo="x11docker uses wmctrl to configure window managers
   to provide one virtual desktop only." ;;
     xauth)     Toolinfo="xauth creates and adjusts X authentication cookies." ;;
@@ -9433,44 +9474,12 @@ check_options_interferences() { # check multiple option interferences, change se
   case "$Shareclipboard" in
     yes|oneway|superv|altv)
       [ -z "$Hostdisplay" ] && {
-        note "Option --clipboard: Did not find a host display
+        note "Option --clipboard: Did not find a host X display
   to share the clipboard with. DISPLAY is empty.
   Fallback: Disabling option --clipboard."
         check_fallback
         Shareclipboard="no"
       }
-    ;;
-  esac
-  case "$Shareclipboard" in
-    oneway|superv|altv)
-      case "$Xserver" in
-        --hostdisplay|--xwin|--runx)
-          note "Option --clipboard: Option $Xserver only supports arguments yes|no.
-  Fallback: Disabling option --clipboard"
-          check_fallback
-          Shareclipboard="no"
-        ;;
-      esac
-    ;;
-  esac
-  case "$Shareclipboard" in
-    yes|oneway|superv|altv)
-      case "$Xserver" in
-        --tty|--weston|--hostwayland|--kwin)
-          note "Option --clipboard is not supported for $Xserver.
-  Fallback: Disabling option --clipboard."
-          check_fallback
-          Shareclipboard="no"
-        ;;
-        *)
-          xtool --check xclip || {
-            note "Option --clipboard with $Xserver needs xclip.
-  Fallback: Disabling option --clipboard."
-            check_fallback
-            Shareclipboard="no"
-          }
-        ;;
-      esac
     ;;
   esac
   case "$Shareclipboard" in
@@ -9485,6 +9494,93 @@ check_options_interferences() { # check multiple option interferences, change se
   X extension XTEST is enabled that allows container applications
   to fake key presses like SUPER+v and ALT+v so they could fool x11docker
   to provide the host clipboard content without user interaction."
+    ;;
+  esac
+  case "$Shareclipboard" in
+    oneway|superv|altv)
+      case "$Xserver" in
+        --hostdisplay|--xwin|--runx)
+          note "Option --clipboard: Option $Xserver only supports arguments yes|no.
+  Fallback: Disabling option --clipboard"
+          check_fallback
+          Shareclipboard="no"
+        ;;
+        --weston|--kwin)
+          note "Option --clipboard=$Shareclipboard is not supported for $Xserver.
+  $Xserver only supports a limited --clipboard=yes.
+  Fallback: Disabling option --clipboard."
+          check_fallback
+          Shareclipboard="no"
+        ;;
+      esac
+    ;;
+  esac
+  case "$Shareclipboard" in
+    yes|oneway|superv|altv)
+      case "$Xserver" in
+        --tty|--hostwayland)
+          note "Option --clipboard is not supported for $Xserver.
+  Fallback: Disabling option --clipboard."
+          check_fallback
+          Shareclipboard="no"
+        ;;
+        *)
+          xtool --check xclip || {
+            note "Option --clipboard with $Xserver needs xclip.
+  Fallback: Disabling option --clipboard."
+            check_fallback
+            Shareclipboard="no"
+          }
+          case "$Xserver" in
+            --weston|--kwin)
+              xtool --check wl-copy || {
+                note "Option --clipboard with $Xserver needs wl-copy and wl-paste.
+  Fallback: Disabling option --clipboard."
+                check_fallback
+                Shareclipboard="no"
+              }
+            ;;
+          esac
+        ;;
+      esac
+    ;;
+  esac
+  case "$Shareclipboard" in
+    oneway|superv|altv)
+      case "$Xserver" in
+        --hostdisplay|--xwin|--runx)
+          note "Option --clipboard: Option $Xserver only supports arguments yes|no.
+  Fallback: Disabling option --clipboard"
+          check_fallback
+          Shareclipboard="no"
+        ;;
+        --weston|--kwin)
+          note "Option --clipboard=$Shareclipboard is not supported for $Xserver.
+  $Xserver only supports a limited variation of --clipboard=yes.
+  Fallback: Disabling option --clipboard."
+          check_fallback
+          Shareclipboard="no"
+        ;;
+      esac
+    ;;
+  esac
+  case "$Shareclipboard" in
+    yes)
+      case "$Xserver" in
+        --weston|--kwin)
+          note "Option --clipboard=$Shareclipboard with $Xserver
+  is limited yet to copy from host to container.
+  Middle-mouse-click selection is not supported at all."
+          Shareclipboard="wayland"
+          [ -z "$Hostdisplay" ] && {
+            note "Option --clipboard with $Xserver is only supported
+  along with an X server running on host.
+  Fallback: Disabling option --clipboard."
+            check_fallback
+            Shareclipboard="no"
+          }
+        ;;
+      esac
     ;;
   esac
 
