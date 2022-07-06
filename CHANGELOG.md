@@ -10,6 +10,9 @@ Project website: https://github.com/mviereck/x11docker
 ### Added
  - `--clipboard=yes`: Limited support for Wayland clients.
    (Host X to Wayland container only.)
+### Fixed
+ - `--gpu`: `--xc`: Don't add group `render` if it does not exist.
+   [(454)](https://github.com/mviereck/x11docker/issues/454)
 
 ## [7.3.1](https://github.com/mviereck/x11docker/releases/tag/v7.3.1) - 2022-07-01 
 ### Added
