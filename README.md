@@ -443,9 +443,15 @@ Basically it is just a wrapper for X servers and container backends docker, podm
 To allow advanced usage of x11docker abilities have a look at chapter [Dependencies](#dependencies).
 
 ### Installation from distribution repositories
-x11docker is available as a package in some distributions:
+x11docker is available as a package in some distributions.
+
+Stable releases:
 
 [![Packaging status](https://repology.org/badge/vertical-allrepos/x11docker.svg)](https://repology.org/project/x11docker/versions)
+
+Latest git master/beta version:
+
+[![AUR latest git](https://repology.org/badge/version-for-repo/aur/x11docker.svg?allow_ignored=1)](https://repology.org/project/x11docker/versions)
 
 Much thanks to the maintainers that decided to provide these packages! 
 
@@ -678,7 +684,3 @@ More screenshots are stored in [screenshot branch](https://github.com/mviereck/x
 `x11docker --desktop --gpu --init=systemd -- --cap-add=IPC_LOCK --security-opt seccomp=unconfined -- x11docker/deepin`
 ![screenshot](https://raw.githubusercontent.com/mviereck/x11docker/screenshots/screenshot-deepin.png "deepin desktop in docker")
 
----------------
-Additionally a technical link for search engine crawlers to [x11docker wiki](https://github-wiki-see.page/m/mviereck/x11docker/wiki_index)
-at [github-wiki-see](https://github.com/nelsonjchen/github-wiki-see-rs) because github does not allow search engines to access github wiki pages directly. 
-Compare ticket [#412](https://github.com/mviereck/x11docker/issues/412).
