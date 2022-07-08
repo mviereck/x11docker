@@ -2,12 +2,19 @@
 x11docker ToDo notes
 
 ## Work in progress
+
  - --kwin in weston segfaults
  - --xc --xorg: MIT-SHM fails
  - --xc --xorg rootless fails
  - --xc --kwin on console: tty switch fails with unprivileged user
+ 
+ - --runtime=sysbox --gpu=virgl fails.
+ 
+ - --build=nvidia?
+ - x11docker/nvidia-base: use tags with version number?
 
- - --backend=host: check X container
+ - --clipboard: improve Wayland clipboard
+
  - centralize argument checks
  - change global "no" to ""
  - --pulseaudio=host: check possible tcp setup
