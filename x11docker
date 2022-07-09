@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.3.2"
+Version="7.3.3-beta-1"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -4503,7 +4503,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
 # script running in X server container (option --xc)
 
 exec >> $Xinitlogfile 2>&1
-cp /XlibNoSHM.so $Sharefolder/XlibNoSHM.so
+env LD_PRELOAD= cp /XlibNoSHM.so $Sharefolder/XlibNoSHM.so
 
 $(declare -f rocknroll)
 Timetosaygoodbyefile=$Timetosaygoodbyefile
@@ -4676,6 +4676,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
         echo         ""
         echo         "# Prepare cookie with localhost identification disabled by ffff, needed if X socket is shared. ffff means 'familiy wild'"
         echo         "Cookie=\"\$(xauth -i -f $Xclientcookie nlist | sed -e 's/^..../ffff/')\""
+        echo         "truncate -s0 $Xclientcookie"
         echo         "echo \"\$Cookie\" | xauth -v -i -f $Xclientcookie nmerge -"
         echo         ""
         echo         "debugnote \"xinitrc: Created cookie: \$(xauth -i -f $Xclientcookie list 2>&1)\""
@@ -10956,16 +10957,24 @@ $(nl -ba <$Cmdrc)"
     #   Otherwise, Xwrapper.config must be edited to 'allowed_users=anybody' even on console.
     # Thus docker runs in this subshell after X server is ready to accept connections.
 
+    # wait for X to be ready
+    waitforlogentry 'start_container()' $Xinitlogfile 'xinitrc is ready' "$Xiniterrorcodes"
+
     # softlink to X or Wayland unix socket in container                           # --xc
     case "$Xcontainer" in
       yes)
-        [ "$Newdisplay" ]       && ln -s "$Cachefolder/tmp/.X11-unix/X$Newdisplaynumber"  "/tmp/.X11-unix/X$Newdisplaynumber"  2>>$Xinitlogfile ||:
+        #[ "$Newdisplay" ]       && ln -s "$Cachefolder/tmp/.X11-unix/X$Newdisplaynumber"  "/tmp/.X11-unix/X$Newdisplaynumber"  2>>$Xinitlogfile ||:
+        command -v socat >/dev/null && {
+          [ "$Newdisplay" ]     && socat -lf $Xinitlogfile -d UNIX-LISTEN:/tmp/.X11-unix/X$Newdisplaynumber,ignoreeof,fork UNIX:$Cachefolder/tmp/.X11-unix/X$Newdisplaynumber &
+          storepid "$!" socat-X
+        } || {
+          debugnote "Command socat not found. Using 'ln -s' to provide X unix socket on host. GTK3 application might fail to access X."
+          [ "$Newdisplay" ]     && ln -s "$Cachefolder/tmp/.X11-unix/X$Newdisplaynumber"  "/tmp/.X11-unix/X$Newdisplaynumber"  2>>$Xinitlogfile ||:
+        }
         [ "$Newwaylandsocket" ] && ln -s "$Cachefolder/XDG_RUNTIME_DIR/$Newwaylandsocket" "$XDG_RUNTIME_DIR/$Newwaylandsocket" 2>>$Xinitlogfile ||:
       ;;
     esac
 
-    # wait for X to be ready
-    waitforlogentry 'start_container()' $Xinitlogfile 'xinitrc is ready' "$Xiniterrorcodes"
     rocknroll || timetosaygoodbye main
     # xinit(?) sets variables to new display for host applications, too. This undoes it.
     unpriv "dbus-update-activation-environment --systemd DISPLAY='$DISPLAY' XAUTHORITY='$XAUTHORITY'" >> "$Xinitlogfile" 2>&1 ||:
