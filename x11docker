@@ -944,7 +944,7 @@ mysleep() {                     # catch cases where sleep only supports integer
   sleep "${1:-1}" 2>/dev/null || sleep 1
 }
 oneline() {                     # remove \\ and newline from string
-  tr -d '\\\n' <<< "${1:-}"
+  echo "${1:-}" | tr -d '\\\n'
 }
 parse_inspect() {               # parse json of inspect output using python
   # parse for keys in output of docker|podman|nerdctl inspect.
@@ -2491,12 +2491,12 @@ check_newxenv()  {              # find free display
         }
       ;;
       --hostdisplay)
-        [ -n "$(cut -d: -f1 <<< "$Hostdisplay")" ] && Xoverip="yes"
+        [ -n "$(cut -d: -f1 <<< "$Hostdisplay")" ] && Xoverip="yes" || Xoverip="no"
       ;;
     esac
   }
   case "$Xoverip" in
-    yes)
+    yes|socat)
       case "$Backend" in
         docker|podman|nerdctl)
           [ "$Network" = "none" ] && error "Option --xoverip needs network access.
@@ -2527,7 +2527,7 @@ check_newxenv()  {              # find free display
     ;;
     *)
       case "$Xoverip" in
-        yes)
+        yes|socat)
           case "$Xcontainer" in
             yes) Newdisplay="XCONTAINERIP:$Newdisplaynumber" ;;
             no)  Newdisplay="$Hostip:$Newdisplaynumber" ;;
@@ -2535,11 +2535,11 @@ check_newxenv()  {              # find free display
         ;;
         no|"")
           Newdisplay=":$Newdisplaynumber"
-          Newxsocket="/tmp/.X11-unix/X$Newdisplaynumber"
           Newxlock="/tmp/.X$Newdisplaynumber-lock"
           [ -n "$(find "$Newxsocket" "$Newxlock" 2>/dev/null)" ] && error "Display $Newdisplay is already in use."
         ;;
       esac
+      Newxsocket="/tmp/.X11-unix/X$Newdisplaynumber"
     ;;
   esac
 
@@ -3232,25 +3232,40 @@ check_xdepends() {              # check dependencies on host for X server option
   }
 
   # --xoverip
-  [ "$Xoverip" = "yes" ] && {
-    case "${1:-}" in
-      --xephyr|--xorg|--nxagent|--xpra|--xpra2|--xvfb|--xwin|--runx) ;;
-      --hostdisplay)
-        [ -n "$(cut -d: -f1 <<< "$Hostdisplay")" ] || {
-          $Message "${1:-} does not support X over TCP
+  case "$Xoverip" in
+    yes|socat)
+      case "${1:-}" in
+        --xephyr|--xorg|--nxagent|--xpra|--xpra2|--xvfb|--xwin|--runx) ;;
+        --hostdisplay)
+          [ -n "$(cut -d: -f1 <<< "$Hostdisplay")" ] || {
+            $Message "${1:-} does not support X over TCP
   except if started remotely with 'ssh -X'."
-          Return=1
-        }
-      ;;
-      --xwayland|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xpra2-xwayland)
-        $Message "${1:-} does not support X over TCP (--xoverip)."
-        Return=1
-      ;;
-      --weston|--kwin|--hostwayland)
-        $Message "${1:-} does not support X over TCP (--xoverip)."
-      ;;
-    esac
-  }
+            Return=1
+          }
+        ;;
+        --xwayland|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xpra2-xwayland)
+          case "$Xcontainer" in
+            yes)
+              grep -q socat <<< "$Xcontainertools" || {
+                $Message "${1:-} --xoverip needs socat. Please update image x11docker/xserver."
+                Return=1
+              }
+            ;;
+            no)
+              command -v socat >/dev/null || {
+                $Message "${1:-} --xoverip needs socat. socat is not installed.
+  $Wikipackagesimage"
+                Return=1
+              }
+            ;;
+          esac
+        ;;
+        --weston|--kwin|--hostwayland)
+          $Message "${1:-} does not support X over TCP (--xoverip)."
+        ;;
+      esac
+    ;;
+  esac
 
   Return="${Return:-"0"}"
   debugnote "Dependency check for ${1:-}: $Return"
@@ -3358,23 +3373,29 @@ check_xserver() {               # check chosen X server, auto-choose X server
   }
 
   # X over TCP
-  [ -z "$Xoverip" ] && {
-    case "$Xserver" in
-      --weston|--kwin|--hostwayland) ;;
-      *)
-        case "$Runtime" in
-          kata-runtime)
-            Xoverip="yes"
-            [ "$Network" = "none" ] && {
+  case "$Xoverip" in
+    yes)
+      case "$Xserver" in
+        --xwayland|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xpra2-xwayland)
+          Xoverip="socat"
+        ;;
+      esac
+    ;;
+    "")
+      case "$Xserver" in
+        --weston|--kwin|--hostwayland) ;;
+        *)
+          case "$Runtime" in
+            kata-runtime)
               note "Option --runtime=$Runtime works only with X over IP.
   Enabling option --xoverip."
-            }
-          ;;
-        esac
-      ;;
-    esac
-    [ "$Xoverip" = "yes" ] && [ "$Autochooseserver" = "no" ] && debugnote "Enabled X over TCP instead of sharing unix socket."
-  }
+              Xoverip="yes"
+            ;;
+          esac
+        ;;
+      esac
+    ;;
+  esac
 
   [ "$Nvidiaversion" ] && [ "$Sharegpu" = "yes" ] && case "$Xserver" in
     --xpra-xwayland|--xpra2-xwayland|--weston-xwayland|--xwayland|--weston|--kwin|--kwin-xwayland|--hostwayland)
@@ -3552,7 +3573,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   [ "$Xcontainer" = "yes" ] && [ -n "$Newxvt" ]                      && Usemitshm="no"
   [ "$Xcontainer" = "no" ] &&[ "$Shareipc" != "host" ]               && Usemitshm="no"
   [ "$Containeruser" != "$Hostuser" ]                                && Usemitshm="no"
-  [ "$Xoverip" = "yes" ]                                             && Usemitshm="no"
+  [ "$Xoverip" != "no" ]                                             && Usemitshm="no"
   case "$Runtime" in
     kata-runtime|sysbox-runc)                                           Usemitshm="no" ;;
   esac
@@ -3661,7 +3682,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   -listen tcp" ;;
       esac
     ;;
-    no|"") Xserveroptions="$Xserveroptions \\
+    no|""|socat) Xserveroptions="$Xserveroptions \\
   -nolisten tcp" ;;
   esac
 
@@ -4503,7 +4524,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
 # script running in X server container (option --xc)
 
 exec >> $Xinitlogfile 2>&1
-env LD_PRELOAD= cp /XlibNoSHM.so $Sharefolder/XlibNoSHM.so
+LD_PRELOAD= cp /XlibNoSHM.so $Sharefolder/XlibNoSHM.so
 
 $(declare -f rocknroll)
 Timetosaygoodbyefile=$Timetosaygoodbyefile
@@ -4622,6 +4643,12 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
     ;;
     *) # here something for real X servers
       echo           "export $Newxenv"
+      case "$Xoverip" in
+        socat)
+          echo       "socat -d TCP-LISTEN:$((6000+Newdisplaynumber)),fork,bind=${Xcontainerip:-$Hostip} UNIX:$Newxsocket &"
+          echo       "storepid \$! socat-tcp"
+        ;;
+      esac
       echo           "# background color"
       case "$Xserver" in
         --hostdisplay) ;;
@@ -8782,7 +8809,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,weston-xwayland,xpra-xwayland,xpra2-xwayland,xwayland"                                          # X servers depending on a Wayland compositor
   Longoptions="$Longoptions,hostwayland,kwin,weston"                                                                        # Wayland compositors without X
   Longoptions="$Longoptions,border::,dpi:,fullscreen,output-count:,rotate:,scale:,size:,xfishtank"                          # X/Wayland appearance options
-  Longoptions="$Longoptions,clean-xhost,composite::,display:,keymap:,no-auth,vt::,westonini:,xhost::,xoverip,xtest::"       # X/Wayland config
+  Longoptions="$Longoptions,clean-xhost,composite::,display:,keymap:,no-auth,vt::,westonini:,xhost::,xoverip::,xtest::"     # X/Wayland config
   Longoptions="$Longoptions,checkwindow::,enforce-i,fallback::,preset:,pull::"                                              # x11docker config
   Longoptions="$Longoptions,cachebasedir:,home::,homebasedir:,share:"                                                       # Host folders
   Longoptions="$Longoptions,alsa::,clipboard::,gpu::,lang::,printer::,pulseaudio::,webcam"                                  # Host integration features
@@ -8884,7 +8911,7 @@ ${1:-}"
                               shift ;;
          --keymap)            Xkblayout="${2:-}" ; shift ;;          # Keymap layout for xkbcomp. Compare /usr/share/X11/xkb/symbols
          --vt)                Newxvt="${2:-auto}" ; shift ;;         # Virtual console to use for --xorg
-         --xoverip)           Xoverip="yes" ;;                       # Use X over TCP/IP instead of sharing X socket
+         --xoverip)           Xoverip="${2:-yes}" ; shift ;;         # Use X over TCP/IP instead of sharing X socket
          --xtest)             Xtest="${2:-yes}" ; shift ;;           # X extension XTEST
          --westonini)         Customwestonini="${2:-}" ; shift ;;    # Custom weston.ini
 
@@ -9385,6 +9412,17 @@ check_options_arguments() {     # check for [likely] valid arguments
       Newxvt=""
     }
   }
+
+  # --xoverip
+  case "$Xoverip" in
+    yes|no|socat|"") ;;
+    *)
+      note "Option --xoverip: Unknown argument: $Xoverip
+  Fallback: Disabling option --xoverip"
+      check_fallback
+      Xoverip=""
+    ;;
+  esac
 
   # --xtest
   case "$Xtest" in
@@ -10968,7 +11006,10 @@ $(nl -ba <$Cmdrc)"
           [ "$Newdisplay" ]     && socat -lf $Xinitlogfile -d UNIX-LISTEN:/tmp/.X11-unix/X$Newdisplaynumber,ignoreeof,fork UNIX:$Cachefolder/tmp/.X11-unix/X$Newdisplaynumber &
           storepid "$!" socat-X
         } || {
-          debugnote "Command socat not found. Using 'ln -s' to provide X unix socket on host. GTK3 application might fail to access X."
+          [ -n "$Showdisplayenvironment" ] && Message="note" || Message="debugnote"
+          $Message "Option --xc --printenv: Command 'socat' not found. 
+  Using 'ln -s' to provide X unix socket on host.
+  GTK3 application might fail to access X."
           [ "$Newdisplay" ]     && ln -s "$Cachefolder/tmp/.X11-unix/X$Newdisplaynumber"  "/tmp/.X11-unix/X$Newdisplaynumber"  2>>$Xinitlogfile ||:
         }
         [ "$Newwaylandsocket" ] && ln -s "$Cachefolder/XDG_RUNTIME_DIR/$Newwaylandsocket" "$XDG_RUNTIME_DIR/$Newwaylandsocket" 2>>$Xinitlogfile ||:
