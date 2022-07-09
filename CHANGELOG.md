@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+### [Unreleased]
+### Changed
+ - `--xoverip`: New optional arguments `yes|no|socat`.
+### Fixed
+ - `--user`: Fix in setup of `/etc/gshadow`.
+
 ## [7.3.2](https://github.com/mviereck/x11docker/releases/tag/v7.3.2) - 2022-07-08
 ### Added
  - `--clipboard=yes`: Limited support for Wayland clients.
