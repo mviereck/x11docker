@@ -6,7 +6,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-### [Unreleased]
+## [Unreleased]
+### Added
+ - `--xauth [=yes|trusted|untrusted|no]`: New option to configure X cookie.
 ### Changed
  - `--xoverip`: New optional arguments `yes|no|socat`.
    Using `socat` allows X over TCP with Xwayland related options.
@@ -15,6 +17,8 @@ Project website: https://github.com/mviereck/x11docker
  - `--user`: Fix in setup of `/etc/gshadow`.
  - `--xc`: Provide X unix socket to host with `socat` instead of `ln`.
    GTK3 application failed to access X through a soft link.
+### Deprecated
+ - `--no-auth`: Use `--xauth=no` instead.
 
 ## [7.3.2](https://github.com/mviereck/x11docker/releases/tag/v7.3.2) - 2022-07-08
 ### Added
