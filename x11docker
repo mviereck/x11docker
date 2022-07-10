@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.3.3-beta-2"
+Version="7.3.3-beta-3"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -615,6 +615,9 @@ finish() {                      # trap EXIT routine to clean up background proce
   # --pulseaudio: unload module
   Pulseaudiomoduleid="$(storeinfo dump pulseaudiomoduleid)"
   [ "$Pulseaudiomoduleid" ] && unpriv "pactl unload-module '$Pulseaudiomoduleid'"
+
+  # --xc --xoverip: remove possible internal network
+  [ -n "$Internalnetwork" ] && unpriv_backend "$Backendbin network remove $Internalnetwork)" >>$Xinitlogfile 2>&1
 
   # Check if container is still running -> docker stop
   case "$Backend" in
@@ -2395,7 +2398,7 @@ setup_vaapi() {                 # option --gpu: setup for VAAPI and VDPAU video 
 
   # check VA-API driver on host
   [ -z "${LIBVA_DRIVER_NAME:-}" ] && {
-    LIBVA_DRIVER_NAME="$(xtool "vainfo 2>&1 | grep drv_video.so | rev | cut -d/ -f1 | rev")"
+    LIBVA_DRIVER_NAME="$(xtool "vainfo 2>&1 | grep drv_video.so | rev | cut -d/ -f1 | rev" ||:)"
     LIBVA_DRIVER_NAME="${LIBVA_DRIVER_NAME%"_drv_video.so"}"
   }
   # Guess driver based on kernel modules if vainfo is not available
@@ -2492,7 +2495,16 @@ check_newxenv()  {              # find free display
         }
       ;;
       --hostdisplay)
-        [ -n "$(cut -d: -f1 <<< "$Hostdisplay")" ] && Xoverip="yes" || Xoverip="no"
+        xtool --check "socat" && [ "$Sharegpu" = "no" ] && {
+          [ "$Xcontainer" = "yes" ] || [ "$Network" = "" ] && {
+            case "$Xoverip" in
+              ""|socat)
+                Xoverip="socat"
+              ;;
+            esac
+          }
+        }
+        [ -n "$(cut -d: -f1 <<< "$Hostdisplay")" ] && Xoverip="yes" || Xoverip="${Xoverip:-no}"
       ;;
     esac
   }
@@ -2500,12 +2512,23 @@ check_newxenv()  {              # find free display
     yes|socat)
       case "$Backend" in
         docker|podman|nerdctl)
-          [ "$Network" = "none" ] && error "Option --xoverip needs network access.
-  Please enable option -I, --network."
+          case "$Xcontainer" in
+            yes)
+            ;;
+            no)
+              [ "$Network" = "none" ] && error "Option --xoverip needs network access.
+  Please enable option -I, --network.
+  Alternatively provide image x11docker/xserver (option --xc)
+  to allow an isolated internal network."
+            ;;
+          esac
         ;;
       esac
     ;;
   esac
+
+  ###
+  Xoverip="${Xoverip:-no}"
 
   # set $Newdisplay (DISPLAY of container) and $Newxsocket
   case "$Xserver" in
@@ -2513,12 +2536,18 @@ check_newxenv()  {              # find free display
       case "$Xoverip" in
         yes)
           [ "$(cut -c1 <<< "$Hostdisplay")" = ":" ] && Newdisplay="${Hostip}${Hostdisplay}" || Newdisplay="$Hostdisplay"  ;;
-        no|"")
+        no)
           Newdisplay="$Hostdisplay"
           Newdisplaynumber="$(echo "$Newdisplay" | cut -d: -f2 | cut -d. -f1)"
-          Newxsocket="$Hostxsocket"
+        ;;
+        socat)
+          case "$Xcontainer" in
+            yes) Newdisplay="XCONTAINERIP:$Newdisplaynumber" ;;
+            no)  Newdisplay="$Hostip:$Newdisplaynumber" ;;
+          esac
         ;;
       esac
+      Newxsocket="$Hostxsocket"
     ;;
     --weston|--kwin|--hostwayland|--tty)
       Newdisplay=""
@@ -2534,7 +2563,7 @@ check_newxenv()  {              # find free display
             no)  Newdisplay="$Hostip:$Newdisplaynumber" ;;
           esac
         ;;
-        no|"")
+        no)
           Newdisplay=":$Newdisplaynumber"
           Newxlock="/tmp/.X$Newdisplaynumber-lock"
           [ -n "$(find "$Newxsocket" "$Newxlock" 2>/dev/null)" ] && error "Display $Newdisplay is already in use."
@@ -2559,7 +2588,7 @@ check_screensize() {            # check physical and virtual screen size (also o
 
   # check whole display size, can include multiple monitors
   [ -n "$Hostdisplay" ] && [ -z "$Newxvt" ] && {
-    Xrandroutput="$(xtool "xrandr 2>>$Xinitlogfile")"
+    Xrandroutput="$(xtool "xrandr 2>>$Xinitlogfile" ||:)"
     [ -n "$Xrandroutput" ] && {
       Line="$(grep current <<< "$Xrandroutput" | head -n1 | cut -d, -f2)"
       Maxxaxis="$(echo "$Line" | cut -d' ' -f3)"
@@ -2875,6 +2904,29 @@ check_xdepends() {              # check dependencies on host for X server option
     *) 
       $Message "${1:-} does not support a Wayland environment." 
       Return=1
+    ;;
+  esac
+
+  # --hostdisplay
+  case "${1:-}" in
+    --hostdisplay)
+      case "$Sharegpu" in
+        yes)
+          [ "$Xcontainer" = "no" ] && [ "$Shareipc" != "host" ] && {
+            $Message "${1:-}: --gpu would need insecure and discouraged
+  option --ipc=host to avoid MIT-SHM errors. Alternatively you can provide
+  image x11docker/xserver (option --xc) that contains a fake MIT-SHM library."
+            Return=1
+          }
+        ;;
+        no)
+          xtool --check --quiet "socat" || {
+            $Message "${1:-}: socat not found.
+  $Wikipackagesimage"
+            Return=1
+          }
+        ;;
+      esac
     ;;
   esac
 
@@ -3241,10 +3293,10 @@ check_xdepends() {              # check dependencies on host for X server option
           [ -n "$(cut -d: -f1 <<< "$Hostdisplay")" ] || {
             $Message "${1:-} does not support X over TCP
   except if started remotely with 'ssh -X'."
-            Return=1
+            #Return=1
           }
         ;;
-        --xwayland|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xpra2-xwayland)
+        --hostdisplay|--xwayland|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xpra2-xwayland)
           case "$Xcontainer" in
             yes)
               grep -q socat <<< "$Xcontainertools" || {
@@ -3260,6 +3312,15 @@ check_xdepends() {              # check dependencies on host for X server option
               }
             ;;
           esac
+          [ "$Xserver" = "--hostdisplay" ] && {
+            [ -n "$(cut -d: -f1 <<< "$Hostdisplay")" ] && {
+              [ "$Xoverip" = "socat" ] && {
+                $Message "${1:-} --xoverip: host already runs with X over IP.
+  Setting up an additional socat connection is not supported."
+                Return=1
+              }
+            }
+          }
         ;;
         --weston|--kwin|--hostwayland)
           $Message "${1:-} does not support X over TCP (--xoverip)."
@@ -3274,6 +3335,9 @@ check_xdepends() {              # check dependencies on host for X server option
   [ "$Return" = "1" ] && {
     check_fallback
     Autochooseserver="yes"
+    grep -q -w "note" <<< "$Message" && note "check_xdepends(): ${1:-} is not possible,
+  see message(s) above. Will search for another X server option.
+  You can disable the search with option --fallback=no."
   }
 
   Lastcheckedxserver="${1:-}"
@@ -3377,7 +3441,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
   case "$Xoverip" in
     yes)
       case "$Xserver" in
-        --xwayland|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xpra2-xwayland)
+        --hostdisplay|--xwayland|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xpra2-xwayland)
           Xoverip="socat"
         ;;
       esac
@@ -3390,7 +3454,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
             kata-runtime)
               note "Option --runtime=$Runtime works only with X over IP.
   Enabling option --xoverip."
-              Xoverip="yes"
+              Xoverip="${Xoverip:-yes}"
             ;;
           esac
         ;;
@@ -3450,11 +3514,11 @@ check_xserver() {               # check chosen X server, auto-choose X server
   ## check if dependencies for chosen X server are installed, fall back to best alternatives if not
   [ "$Xserver" = "--xwin" ]            && { check_xdepends --xwin            || Xserver="--runx" ; }
   [ "$Xserver" = "--runx" ]            && { check_xdepends --runx            || Xserver="--hostdisplay" ; }
-  [ "$Xserver" = "--hostdisplay" ]     && { check_xdepends --hostdisplay     || Xserver="--xpra2" ; }
+  [ "$Xserver" = "--hostdisplay" ]     && { check_xdepends --hostdisplay     || { [ "$Sharegpu" = "yes" ]    && Xserver="--xpra2-xwayland" || Xserver="--xpra2" ; } ; }
   [ "$Xserver" = "--xephyr" ]          && { check_xdepends --xephyr          || Xserver="--nxagent" ; }
-  [ "$Xserver" = "--nxagent" ]         && { check_xdepends --nxagent         || { [ "$Desktopmode" = "yes" ] && Xserver="--xephyr"        || Xserver="--xpra2" ; } ; }
+  [ "$Xserver" = "--nxagent" ]         && { check_xdepends --nxagent         || { [ "$Desktopmode" = "yes" ] && Xserver="--xephyr"         || Xserver="--xpra2" ; } ; }
   [ "$Xserver" = "--xpra2" ]           && { check_xdepends --xpra2           || Xserver="--xpra" ; }
-  [ "$Xserver" = "--xpra" ]            && { check_xdepends --xpra            || { check_xdepends --nxagent   && Xserver="--nxagent"       || Xserver="--xephyr" ; } ; }
+  [ "$Xserver" = "--xpra" ]            && { check_xdepends --xpra            || { check_xdepends --nxagent   && Xserver="--nxagent"        || Xserver="--xephyr" ; } ; }
   [ "$Xserver" = "--xorg" ]            && { check_xdepends --xorg            || Xserver="--weston-xwayland" ; }
   [ "$Xserver" = "--xpra2-xwayland" ]  && { check_xdepends --xpra2-xwayland  || Xserver="--xpra-xwayland" ; }
   [ "$Xserver" = "--xpra-xwayland" ]   && { check_xdepends --xpra-xwayland   || Xserver="--weston-xwayland" ; }
@@ -3566,7 +3630,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   Xserveroptions_custom="$Xserveroptions"
   Xserveroptions=""
 
-  Xdpyinfooutput="$(xtool "xdpyinfo 2>> $Xinitlogfile")"
+  Xdpyinfooutput="$(xtool "xdpyinfo 2>> $Xinitlogfile" ||:)"
 
   [ "$Xcontainer" = "yes" ] && [ "$Xcontainerbackend" = "$Backend" ] && Usemitshm="yes"
   [ "$Xcontainer" = "yes" ] && [ "$Xcontainerbackend" = "nerdctl" ]  && Usemitshm="no"
@@ -3659,11 +3723,12 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   Xserveroptions="$Xserveroptions \\
   -ac"
       case "$Xoverip" in
+        socat) ;; ### FIXME
         yes) warning "Option --no-auth: SECURITY RISK!
   Allowing access to new X server for everyone.
   Your X server is accessible over TCP network without any restriction.
   That can be abused to take control over your system." ;;
-        no|"")
+        no)
           case "$Xserver" in
             --hostdisplay|--hostwayland|--weston|--kwin|--tty) ;;
             *) warning "Option --no-auth: SECURITY RISK!
@@ -3683,7 +3748,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   -listen tcp" ;;
       esac
     ;;
-    no|""|socat) Xserveroptions="$Xserveroptions \\
+    no|socat) Xserveroptions="$Xserveroptions \\
   -nolisten tcp" ;;
   esac
 
@@ -4298,8 +4363,16 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   esac
 
   case "$Xoverip" in
-    no) Xcontainercommand="$Xcontainercommand \\
-  --network=none" ;;
+    no)
+      Xcontainercommand="$Xcontainercommand \\
+  --network=none"
+    ;;
+    socat)
+      [ "$Network" = "none" ] && {
+        Xcontainercommand="$Xcontainercommand \\
+  --network=$Internalnetworkname"
+      }
+    ;;
   esac
 
   case "$Shareipc" in
@@ -4647,38 +4720,32 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
       echo           "export $Newxenv"
       case "$Xoverip" in
         socat)
-          echo       "socat -d TCP-LISTEN:$((6000+Newdisplaynumber)),fork,bind=${Xcontainerip:-$Hostip} UNIX:$Newxsocket &"
+          echo "echo \"socat -d TCP-LISTEN:$((6000+Newdisplaynumber)),fork,bind=${Xcontainerip:-$Hostip} UNIX-CONNECT:$Newxsocket\""
+          echo        "socat -d TCP-LISTEN:$((6000+Newdisplaynumber)),fork,bind=${Xcontainerip:-$Hostip} UNIX-CONNECT:$Newxsocket &"
           echo       "storepid \$! socat-tcp"
         ;;
       esac
-      echo           "# background color"
+      echo           ""
       case "$Xserver" in
-        --hostdisplay) ;;
+        --hostdisplay)
+          echo       "# --hostdisplay: need cookie from host" ### FIXME rather get a trusted one
+          echo       "Hostcookie=\"\$(xauth -i -f $Hostxauthority list | grep :$Hostdisplaynumber | awk '{print \$3}')\""
+          echo       "xauth -i -f $Xclientcookie add $Newdisplay MIT-MAGIC-COOKIE-1 \$Hostcookie"
+          echo       ""
+        ;;
         --nxagent)
-          echo       "sleep 2 && xsetroot -solid '#7F7F7F' 2>/dev/null &" ;;
+          echo       "sleep 1 && xsetroot -solid '#7F7F7F' 2>/dev/null &" ;;
         *) echo      "xsetroot -solid '#7F7F7F' 2>/dev/null" ;;
       esac
       echo ""
 
       [ "$Xauthentication" = "yes" ] && {
         echo         "# create new XAUTHORITY cookies"
-        echo         ":> $Xclientcookie"
-        echo         ""
-        [ "$Xserver" = "--nxagent" ] && {
-          echo       "cp $Xclientcookie $Xclientcookie.bak   # nxagent workaround cookie was created before starting xinit"
-          echo       "export XAUTHORITY=$Xclientcookie.bak"
-          echo       ""
-        }
-        [ "$Trusted" = "yes" ] && Trusted="trusted" || Trusted="untrusted"
-        [ "$Xserver" = "--hostdisplay" ] && {
-          [ -s "$Hostxauthority" ] && echo "export XAUTHORITY=$Hostxauthority"
-          echo       "xhost | grep -q 'SI:localuser:$Hostuser' || { xhost +SI:localuser:$Hostuser ; Xhostentry='yes' ; }"
-          echo       ""
-        }
+        echo         "Trusted=trusted"
         case "$Runsoverssh" in
           no)
-            echo     "echo 'Requesting $Trusted cookie from X server'"
-            echo     "xauth -v -i -f $Xclientcookie generate $Newdisplay . $Trusted timeout 3600"
+            echo     "echo 'Requesting \$Trusted cookie from X server'"
+            echo     "xauth -v -i -f $Xclientcookie generate $Newdisplay . \$Trusted timeout 3600 && sed -i /\$Hostcookie/d $Xclientcookie"
           ;;
           yes)
             echo     "verbose 'Can not use cookies created over SSH. Will bake one myself.'"
@@ -4686,14 +4753,8 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
         esac
         echo         ""
         echo         "[ -s '$Xclientcookie' ] || { "
-        echo         "  [ '$Trusted' = 'untrusted' ] && note 'Could not create untrusted cookie.
+        echo         "  [ '\$Trusted' = 'untrusted' ] && note 'Failed to create untrusted cookie.
   Maybe your X server misses extension SECURITY.'"
-        [ "$Xserver" = "--hostdisplay" ] && {
-          echo       "  [ '$Trusted' = 'untrusted' ] && warning 'SECURITY RISK! Keylogging and remote host control "
-          echo       "  may be possible! Better avoid using option --hostdisplay,"
-          echo       "  rather use --nxagent or --xpra.'"
-          echo       "  cp $Hostxauthority $Xclientcookie"
-        }
         echo         "}"
         echo         "[ -s '$Xclientcookie' ] || { "
         echo         "  # still no cookie? try to create one without extension security"
@@ -4705,19 +4766,16 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
         echo         ""
         echo         "# Prepare cookie with localhost identification disabled by ffff, needed if X socket is shared. ffff means 'familiy wild'"
         echo         "Cookie=\"\$(xauth -i -f $Xclientcookie nlist | sed -e 's/^..../ffff/')\""
-        echo         "truncate -s0 $Xclientcookie"
+        #echo         "truncate -s0 $Xclientcookie"
         echo         "echo \"\$Cookie\" | xauth -v -i -f $Xclientcookie nmerge -"
         echo         ""
         echo         "debugnote \"xinitrc: Created cookie: \$(xauth -i -f $Xclientcookie list 2>&1)\""
         echo         "ls -l $Xclientcookie"
         echo         "truncate -s0 $Xservercookie"
         echo         "cat $Xclientcookie >> $Xservercookie"
-#        echo         "cp $Xclientcookie $Xservercookie"
         echo         "chmod 644 $Xclientcookie"
         echo         ""
         echo         "[ -s '$Xclientcookie' ] || warning 'Cookie creation failed!'"
-        [ "$Xserver" = "--hostdisplay" ] && echo "[ '\$Xhostentry' = 'yes' ] && env XAUTHORITY=$Hostxauthority xhost -SI:localuser:$Hostuser"
-        [ "$Xserver" = "--nxagent" ]     && echo "rm $Xclientcookie.bak"
       }
       echo           "export XAUTHORITY=$Xclientcookie"
       echo           "[ '$Xauthentication' = 'no' ] || [ ! -s '$Xclientcookie' ] && unset XAUTHORITY && warning 'Option --no-auth: X server $Newdisplay runs without cookie authentication.'"
@@ -5856,14 +5914,30 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
   }
 
   # --network
-  [ -n "$Network" ] && {
-    case "$Backend" in
-      docker|podman|nerdctl)
-        Backendcommand="$Backendcommand \\
+  case "$Backend" in
+    docker|podman|nerdctl)
+      case "$Network" in
+        "")
+        ;;
+        none)
+          case "$Xoverip" in
+            no)
+              Backendcommand="$Backendcommand \\
+  --network=none"
+            ;;
+            socat)
+              Backendcommand="$Backendcommand \\
+  --network=$Internalnetworkname"
+            ;;
+          esac
+        ;;
+        *)
+          Backendcommand="$Backendcommand \\
   --network $Network"
-      ;;
-    esac
-  }
+        ;;
+      esac
+    ;;
+  esac
 
   # capabilities
   case "$Backend" in
@@ -8060,6 +8134,17 @@ start_compositor() {            # start Wayland compositor Weston or KWin
   esac
   return 0
 }
+start_internalnetwork() {       # --xoverip --xc: start internal network between X container and command container
+  [ "$Xcontainer" = "yes" ] && [ "$Network" = "none" ] && {
+    case "$Xoverip" in
+      yes|socat)
+        Internalnetworkname="x11docker_X${Newdisplaynumber}_network_${Cachenumber}"
+        Internalnetwork="$(unpriv_backend "$Backendbin network create --internal $Internalnetworkname")" 2>>$Xinitlogfile || return 1
+      ;;
+    esac
+  }
+  return 0
+}
 start_xcontainer() {            # --xc
   local Containerinspect Xpid1pid
 
@@ -8069,6 +8154,7 @@ start_xcontainer() {            # --xc
   Containerinspect="$(unpriv_xcbackend "$Xcontainerbackend inspect $Xcontainername" 2>> $Xinitlogfile | rmcr)"
   [ -n "$Containerinspect" ] && [ "$Containerinspect" != "[]" ] && {
     Xcontainerip="$(parse_inspect "$Containerinspect" "NetworkSettings" "IPAddress")"
+    Xcontainerip="${Xcontainerip:-$Xcontainername}"
     storeinfo "Xcontainerip=$Xcontainerip"
     Xpid1pid="$(parse_inspect "$Containerinspect" "State" "Pid")"
     setonwatchpidlist "$Xpid1pid" "Xcontainerpid1"
@@ -8089,38 +8175,45 @@ $(tail "$Xinitlogfile")"
   return 0
 }
 start_xserver() {               # start X server
-  local Exitcode= Xcontainerexitcode=
+  local Exitcode= Xcontainerexitcode= Command
 
   case "$Xserver" in
     --xpra*|--xephyr|--xvfb|--nxagent|--xwayland|--weston-xwayland|--kwin-xwayland|--xwin|--xorg)
-      case "$Xcontainer" in
-        no)
-          case "$Xlegacywrapper" in
-            yes|"") unpriv                                         "env WAYLAND_DISPLAY=$Newwaylandsocket xinit '$Xinitrc' -- $Xcommand  >> '$Xinitlogfile'  2>&1 " ;;
-            no)     eval                                           "env WAYLAND_DISPLAY=$Newwaylandsocket xinit '$Xinitrc' -- $Xcommand  >> '$Xinitlogfile'  2>&1 " ;;
-          esac
-        ;;
-        yes)
-          unpriv_xcbackend "$Xcontainerbackend exec $Xcontainername env WAYLAND_DISPLAY=$Newwaylandsocket xinit  $Xinitrc  -- $Xcommand"  >> "$Xinitlogfile"  2>&1
-          Xcontainerexitcode=$?
-          case "$Xcontainerexitcode" in
-            137) Exitcode="0" ;; # docker error indicating that xinit did not shut down fast enough on SIGTERM. Ignore it.
-            *)   Exitcode="$Xcontainerexitcode" ;;
-          esac
-        ;;
-      esac
+      Command="env WAYLAND_DISPLAY=$Newwaylandsocket xinit $Xinitrc -- $Xcommand"
     ;;
     --hostdisplay|--hostwayland|--weston|--kwin|--tty)
-      unpriv                                                                         "bash  '$Xinitrc'               >> '$Xinitlogfile'  2>&1 " ;;
-    --runx) unpriv                                                      "$Xcommand -- bash  '$Xinitrc'               >> '$Xinitlogfile'  2>&1 " ;;
+      Command="sh $Xinitrc"
+    ;;
+    --runx)
+      Command="$Xcommand -- sh $Xinitrc"
+    ;;
+  esac
+
+  case "$Xcontainer" in
+    yes)
+      unpriv_xcbackend "$Xcontainerbackend exec $Xcontainername $Command" >> $Xinitlogfile 2>&1
+      Xcontainerexitcode=$?
+      case "$Xcontainerexitcode" in
+        137) Exitcode="0" ;; # docker error indicating that xinit did not shut down fast enough on SIGTERM. Ignore it.
+        *)   Exitcode="$Xcontainerexitcode" ;;
+      esac
+    ;;
+    no)
+      case "$Xlegacywrapper" in
+        yes|"") unpriv "$Command" >> $Xinitlogfile 2>&1 ;;
+        no)     eval   "$Command" >> $Xinitlogfile 2>&1 ;;
+      esac
+    ;;
   esac
   Exitcode="${Exitcode:-$?}"
+  
   [ "$Exitcode" != 0 ] && rocknroll && note "X server $Xserver returned error code $Exitcode.
   Last lines of xinit logfile:
 $(tail -n15 "$Xinitlogfile")
-
-  $( [ -s "$Compositorlogfile" ] && echo "Last lines of compositor log:
+$( [ -s "$Compositorlogfile" ] && echo "
+  Last lines of compositor log:
 $(tail "$Compositorlogfile")")"
+
   return "${Exitcode:-0}"
 }
 start_xpra() {                  # options --xpra / --xpra-xwayland: start and watch xpra server and xpra client
@@ -8537,7 +8630,7 @@ check_snap() {                  # check if docker is installed in snap. Causes r
   Option --xc to run X servers in container with x11docker/xserver is not possible.
   Recommendation: Purge the Docker snap installation and install Docker natively."
     [ "$Allownewprivileges" = "auto" ] && Allownewprivileges="yes"
-    Xoverip="yes"
+    Xoverip="${Xoverip:-yes}"
     Xcontainer="no"
     [ "$Network" = "none" ] && Network=""
     case "$Sharegpu" in
@@ -9521,7 +9614,7 @@ check_options_interferences() { # check multiple option interferences, change se
 
   # Check whether host X server has MIT-SHM enabled.
   [ "$Winsubsystem" ] && Hostmitshm="no" || {
-    xtool "xdpyinfo 2>>$Xinitlogfile | grep -q 'MIT-SHM'" && Hostmitshm="yes" || Hostmitshm="no"
+    xtool "xdpyinfo >/dev/null ; env LD_PRELOAD= xdpyinfo 2>>$Xinitlogfile | grep -q 'MIT-SHM'" && Hostmitshm="yes" || Hostmitshm="no"
     xtool --check --quiet xdpyinfo || Hostmitshm="yes" # if unknown, assume yes
   }
 
@@ -9674,43 +9767,14 @@ check_options_interferences() { # check multiple option interferences, change se
     ;;
     --hostdisplay)
       check_optionset "$Xserver" "--xtest" || Xtest=""
-      case "$Xcontainer" in
-        yes)
-          Trusted="yes"
-        ;;
-        no)
-          Trusted="no"
-          [ "$Winsubsystem" ] && Trusted="yes"
-        ;;
-      esac
-      [ "$Xauthentication" = "yes" ] && [ -z "$Hostxauthority" ] && {
-        note "Option --hostdisplay: Your host X server seems to run
-  without cookie authentication. Cannot set up a cookie for X access.
-  Fallback: Enabling option --no-auth."
-        check_fallback
-        Xauthentication="no"
-      }
-      [ "$Xauthentication" = "no" ]  && Trusted="yes"
-      [ "$Xauthentication" = "yes" ] && [ "$Shareclipboard" = "yes" ] && Trusted="yes"
-      [ "$Xauthentication" = "yes" ] && [ "$Sharegpu" = "yes" ] && [ "$Trusted" = "no" ] && Trusted="yes"
-      [ "$Runsoverssh" = "yes" ] && {
+      [ "$Runsoverssh" = "yes" ] && { ### FIXME
         [ "$Network" != "host" ]  && error "For SSH connection with option --hostdisplay
   x11docker would need insecure option --network=host.
   It is recommended to use another X server option
   like --xpra, --xephyr or --nxagent."
-        [ "$Xauthentication" = "yes" ] && Trusted="yes"
       }
-      [ "$Trusted" = "no" ] && {
-        xtool "xdpyinfo | grep -q SECURITY" || {
-          note "Your X server does not support untrusted cookies.
-  Have to allow trusted cookies.
-  Consider to use options --xpra or --nxagent instead of --hostdisplay."
-          Trusted="yes"
-        }
-      }
-      [ "$Trusted" = "no" ] && warning "Option --hostdisplay: Clipboard isolation might fail."
       # MIT-SHM
-      [ "$Trusted" = "yes" ] && [ "$Hostmitshm" = "yes" ] && [ "$Shareipc" != "host" ] && [ "$Runsoverssh" = "no" ] && {
+      [ "$Hostmitshm" = "yes" ] && [ "$Shareipc" != "host" ] && [ "$Xoverip" = "no" ] && {
         case "$Xcontainer" in
           yes)
             [ -e "/lib/x86_64-linux-gnu/libdl.so.2" ] && {
@@ -9718,26 +9782,6 @@ check_options_interferences() { # check multiple option interferences, change se
             } || {
               store_runoption env "LD_PRELOAD=$Sharefoldercontainer/XlibNoSHM.so"
             }
-          ;;
-          no)
-            case "$Backend" in
-              docker|podman|nerdctl)
-                note "Option --hostdisplay: To allow --hostdisplay with trusted cookies,
-  x11docker must share host IPC namespace with container (option --ipc=host)
-  to allow shared memory for X extension MIT-SHM.
-  You can avoid this if you provide image x11docker/xserver
-  that provides an X library XlibNoSHM.so to avoid MIT-SHM issues."
-                case $Shareipc in
-                  no|host) 
-                    Shareipc="host"
-                  ;;
-                  *) 
-                    note "Option --ipc: Did not change IPC settings due to 
-  custom setup (--ipc='$Shareipc'). Issues noted above might occure."
-                  ;;
-                esac
-              ;;
-            esac
           ;;
         esac
       }
@@ -9873,6 +9917,13 @@ check_options_interferences() { # check multiple option interferences, change se
       ;;
     esac
   }
+
+  # --xoverip
+  case "$Xoverip" in
+    socat)
+      store_runoption env "LIBGL_ALWAYS_SOFTWARE=1"
+    ;;
+  esac
 
   # --keymap: XKB keyboard layout
   [ -n "$Xkblayout" ] && {
@@ -10024,50 +10075,16 @@ check_options_messages() {      # some messages depending on options, but not ch
   # X server specific messages
   case "$Xserver" in
     --hostdisplay)
-      [ "$Autochooseserver" = "yes" ] && [ -z "$Winsubsystem" ] && case "$Sharegpu" in
-        yes)
-          note "To allow protection against X security leaks,
+      [ "$Autochooseserver" = "yes" ] && [ -z "$Winsubsystem" ] && note "To allow protection against X security leaks,
   please install 'xinit' and one or more of:
-    xpra, weston+Xwayland or kwin_wayland+Xwayland,
+    xpra, Xephyr, nxagent, weston+Xwayland, kwin_wayland+Xwayland,
   or run a second Xorg server with option --xorg."
-        ;;
-        no) 
-          note "To allow protection against X security leaks,
-  please install 'xinit' and one or more of:
-    xpra, Xephyr, nxagent, weston+Xwayland, kwin_wayland+Xwayland or Xnest,
-  or run a second Xorg server with option --xorg."
-        ;;
-      esac
-      case "$Trusted" in
-        no)
-          warning "Option --hostdisplay provides only low container isolation!
+
+      warning "Option --hostdisplay provides QUITE BAD container isolation!
+  Abuse of X11 protocol for keylogging and remote host control is possible.
+  The clipboard is not isolated.
   It is recommended to use another X server option like --nxagent or --xpra."
-          note "Option --hostdisplay: To improve security untrusted cookies
-  are used. This can lead to strange behaviour of some applications.
-  If you encounter application errors, enable option --clipboard
-  that disables security restrictions for --hostdisplay as a side effect."
-        ;;
-        yes)
-          case "$Winsubsystem" in
-            "") 
-              warning "Option --hostdisplay with trusted cookies provides
-      QUITE BAD CONTAINER ISOLATION !
-  Keylogging and controlling host applications is possible!
-  Clipboard sharing is enabled (option --clipboard).
-  It is recommended to use another X server option like --nxagent or --xpra."
-            ;;
-            MSYS2) ;;
-            CYGWIN)
-              warning "Option --hostdisplay allows less security hardening.
-  It is recommended to use option --xwin instead."
-            ;;
-            WSL1|WSL2)
-              warning "Option --hostdisplay allows less security hardening.
-  It is recommended to use another X server option like --nxagent or --xephyr."
-            ;;
-          esac
-        ;;
-      esac
+
       # --checkwindow
       [ "$Checkforopenwindow" = "yes" ] && note "Option --checkwindow along with --hostdisplay
   should only be used with a keyword as a check argument.
@@ -10552,7 +10569,6 @@ declare_variables() {           # declare global variables
   Scaling=""                                      # --scale: Scaling factor for xpra and weston
   Screensize=""                                   # --size XxY: Display size
   Setupwayland="no"                               # --wayland, --kwin, --weston --hostwayland: Provide a Wayland environment
-  Trusted="yes"                                   # Create trusted or untrusted cookies,  --hostdisplay uses untrusted cookies by default
   Waylandtoolkitenv="XDG_SESSION_TYPE=wayland GDK_BACKEND=wayland QT_QPA_PLATFORM=wayland CLUTTER_BACKEND=wayland SDL_VIDEODRIVER=wayland ELM_DISPLAY=wl ELM_ACCEL=opengl ECORE_EVAS_ENGINE=wayland_egl"
   Xauthentication="yes"                           # --no-auth: use cookie authentication and disable xhost yes/no
   Xaxis=""                                        # Virtual screen width
@@ -10582,6 +10598,8 @@ declare_variables() {           # declare global variables
   Xservercookie="Xauthority.server"               # Generated X server cookie
 
   # X in container
+  Internalnetwork=""
+  Internalnetworkname=""
   Xcontainer="auto"
   Xcontainerbackend=""
   Xcontainercommand=""
@@ -10680,7 +10698,7 @@ declare_variables() {           # declare global variables
 
   # Miscellaneous
   Buildimage=""                                   # --build: x11docker image to build from repo Dockerfile
-  Cachenumber="$(date +%s%N | cut -c6-16)"        # Number to use for cache folder
+  Cachenumber="$(date +%s%N | cut -c6-17)"        # Number to use for cache folder
   [ -z "$Cachenumber" ] && Cachenumber="$(makecookie)"
   Codename=""                                     # created from image name and command without special chars for use with container name and cache folder
   Fallback="yes"                                  # --fallback: Allow or deny fallbacks for failing options.
@@ -10902,6 +10920,7 @@ main() {
   check_xserver                  # check chosen X server or auto-choose one
 
   check_newxenv                  # find free display
+  start_internalnetwork          # internal network for --xc --xoverip=socat
   [ "$Xserver" = "--xorg" ] || [ -n "$Newxvt" ] || [ "$Runsonconsole" = "yes" ] && check_vt   # --vt: find free tty/virtual terminal for Xorg or weston
   [ "$Xcontainer" = "yes" ] && {                                                  # --xc
     create_xcontainercommand

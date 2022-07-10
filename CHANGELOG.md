@@ -9,8 +9,12 @@ Project website: https://github.com/mviereck/x11docker
 ### [Unreleased]
 ### Changed
  - `--xoverip`: New optional arguments `yes|no|socat`.
+   Using `socat` allows X over TCP with Xwayland related options.
+ - `--hostdisplay`: Allow `--xoverip=socat`.
 ### Fixed
  - `--user`: Fix in setup of `/etc/gshadow`.
+ - `--xc`: Provide X unix socket to host with `socat` instead of `ln`.
+   GTK3 application failed to access X through a soft link.
 
 ## [7.3.2](https://github.com/mviereck/x11docker/releases/tag/v7.3.2) - 2022-07-08
 ### Added
