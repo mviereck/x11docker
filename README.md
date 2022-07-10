@@ -447,13 +447,15 @@ x11docker is available as a package in some distributions.
 
 Stable releases:
 
+![GitHub release (latest by date)](https://img.shields.io/github/v/release/mviereck/x11docker?label=x11docker%20latest%20release)
+
 [![Packaging status](https://repology.org/badge/vertical-allrepos/x11docker.svg)](https://repology.org/project/x11docker/versions)
 
 Latest git master/beta version:
 
 [![AUR latest git](https://repology.org/badge/version-for-repo/aur/x11docker.svg?allow_ignored=1)](https://repology.org/project/x11docker/versions)
 
-Much thanks to the maintainers that decided to provide these packages! 
+Much thanks to the maintainers who decided to provide these packages! 
 
 ### Manual installation
 #### Installation options
