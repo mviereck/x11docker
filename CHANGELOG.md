@@ -13,6 +13,8 @@ Project website: https://github.com/mviereck/x11docker
  - `--xoverip`: New optional arguments `yes|no|socat`.
    Using `socat` allows X over TCP with Xwayland related options.
  - `--hostdisplay`: Allow `--xoverip=socat`.
+ - `--gpu`: changed availability checks.
+ - `--hostdisplay --gpu --xc=no`: Do not enable `--ipc=host` automatically.
 ### Fixed
  - `--user`: Fix in setup of `/etc/gshadow`.
  - `--xc`: Provide X unix socket to host with `socat` instead of `ln`.

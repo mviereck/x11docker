@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.3.3-beta-5"
+Version="7.4.0-beta-1"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -2059,26 +2059,6 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
 
   local Gpudevice Drivername
 
-  # --xoverip
-  case "$Xoverip" in
-    yes)
-      note "Option --gpu with X over IP: Enabling indirect rendering with --gpu=iglx."
-      Iglx="yes"
-      Sharegpu="no"
-      case "$Xserver" in
-        --xorg) ;;
-        *) note "Option --gpu=iglx is known to accelerate with option --xorg only." ;;
-      esac
-      return 0
-    ;;
-  esac
-
-  warning "Option --gpu degrades container isolation.
-  Container gains access to GPU hardware.
-  This allows reading host window content (palinopsia leak)
-  and GPU rootkits (compare proof of concept: jellyfish).
-  An alternative is --gpu=iglx that works with --xorg only." ### FIXME warning for virgl, too
-
   Containerusergroups="$Containerusergroups video render"
 
   # share device files
@@ -3147,25 +3127,57 @@ check_xdepends() {              # check dependencies on host for X server option
   esac
 
   # --gpu
-  [ "$Sharegpu" = "yes" ] && {
-    case "${1:-}" in
-      --xorg|--xpra-xwayland|--xpra2-xwayland|--weston-xwayland|--kwin-xwayland|--xwayland|--xwin|--runx) ;;
-      --weston|--kwin|--hostwayland) ;;
-      --hostdisplay)
-        [ "$Xcontainer" = "no" ] && [ "$Shareipc" != "host" ] && {
-          $Message "${1:-}: --gpu would need insecure and discouraged
+  case "$Sharegpu" in
+    no) ;;
+    yes)
+      case "${1:-}" in
+        --hostdisplay)
+          [ "$Xcontainer" = "no" ] && [ "$Shareipc" != "host" ] && {
+            $Message "${1:-}: --gpu=$Sharegpu would need insecure and discouraged
   option --ipc=host to avoid MIT-SHM errors. Alternatively you can provide
   image x11docker/xserver (option --xc) that contains a fake MIT-SHM library."
+            Return=1
+          }
+        ;;
+       esac
+    ;;
+    direct)
+      case "${1:-}" in
+        --xorg) ;;
+        --weston|--kwin|--hostwayland) ;;
+        --xpra-xwayland|--xpra2-xwayland|--weston-xwayland|--kwin-xwayland|--xwayland) ;;
+        --hostdisplay)
+          [ "$Xcontainer" = "no" ] && [ "$Shareipc" != "host" ] && {
+            $Message "${1:-}: --gpu=$Sharegpu would need insecure and discouraged
+  option --ipc=host to avoid MIT-SHM errors. Alternatively you can provide
+  image x11docker/xserver (option --xc) that contains a fake MIT-SHM library."
+            Return=1
+          }
+        ;;
+        *)
+          $Message "${1:-}: --gpu=$Sharegpu not possible. You can try --gpu=virgl."
           Return=1
-        }
-      ;;
-      *)
-        $Message "${1:-} does not support direct hardware rendering
-  (option --gpu=yes). You can try --gpu=virgl."
-        Return=1
-      ;;
-    esac
-  }
+        ;;
+      esac
+    ;;
+    iglx)
+      case "${1:-}" in
+        --xorg) ;;
+        *)
+          $Message "${1:-}: --gpu=$Sharegpu not possible. You can try --gpu=virgl."
+          Return=1
+        ;;
+      esac
+    ;;
+    virgl)
+      case "${1:-}" in
+        --weston|--kwin|--hostwayland)
+          $Message "${1:-}: --gpu=$Sharegpu not possible. You can try --gpu=direct."
+          Return=1
+        ;;
+      esac
+    ;;
+  esac
 
   # --rotate
   [ -n "$Rotation" ] && {
@@ -3280,13 +3292,6 @@ check_xdepends() {              # check dependencies on host for X server option
     yes|socat)
       case "${1:-}" in
         --xephyr|--xorg|--nxagent|--xpra|--xpra2|--xvfb|--xwin|--runx) ;;
-        --hostdisplay)
-          [ -n "$(cut -d: -f1 <<< "$Hostdisplay")" ] || {
-            $Message "${1:-} does not support X over TCP
-  except if started remotely with 'ssh -X'."
-            #Return=1
-          }
-        ;;
         --hostdisplay|--xwayland|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xpra2-xwayland)
           case "$Xcontainer" in
             yes)
@@ -3364,11 +3369,13 @@ check_xserver() {               # check chosen X server, auto-choose X server
   ## default option '--auto': Try to automatically choose best matching and available X server
   [ "$Autochooseserver" = "yes" ] && {                              Xserver="--nxagent"
     [ "$Sharegpu" = "yes" ]                                      && Xserver="--xpra2-xwayland"
+    [ "$Sharegpu" = "direct" ]                                   && Xserver="--xpra2-xwayland"
     [ "$Xfishtank" = "yes" ]                                     && Xserver="--xephyr"
     [ "$Desktopmode" = "yes"  ]                                  && Xserver="--xephyr"
     [ "$Xpraborder" ]                                            && Xserver="--xpra2"
     [ "$Xserver" = "--xephyr" ] && { check_xdepends --xephyr     || Xserver="--weston-xwayland" ; }  ### FIXME: don't use check_xdepends() here
     [ "$Sharegpu" = "yes" ]     && [ "$Xserver" = "--xephyr" ]   && Xserver="--weston-xwayland"
+    [ "$Sharegpu" = "direct" ]  && [ "$Xserver" = "--xephyr" ]   && Xserver="--weston-xwayland"
     [ "$Outputcount" != "1" ]                                    && Xserver="--weston-xwayland"
     [ -n "$Rotation" ]                                           && Xserver="--weston-xwayland"
     [ "$Runsonconsole" = "yes" ]                                 && Xserver="--xorg"
@@ -3382,7 +3389,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
 
   [ "$Autochooseserver" = "no" ] && [ "$Xserver" = "--xorg" ] && Newxvt="${Newxvt:-auto}"
 
-  [ "$Sharegpu" = "yes" ] && {
+  [ "XXX$Sharegpu" = "yes" ] && {
     case "$Xserver" in
       --xpra|--xpra2)
         note "Option --xpra does not support GPU access.
@@ -3453,13 +3460,17 @@ check_xserver() {               # check chosen X server, auto-choose X server
     ;;
   esac
 
-  [ "$Nvidiaversion" ] && [ "$Sharegpu" = "yes" ] && case "$Xserver" in
-    --xpra-xwayland|--xpra2-xwayland|--weston-xwayland|--xwayland|--weston|--kwin|--kwin-xwayland|--hostwayland)
-      verlt "$Nvidiaversion" "470" && note "Option $Xserver --gpu: Your system uses closed source NVIDIA
+  case "$Sharegpu" in
+    yes|direct)
+      [ "$Nvidiaversion" ] && case "$Xserver" in
+        --xpra-xwayland|--xpra2-xwayland|--weston-xwayland|--xwayland|--weston|--kwin|--kwin-xwayland|--hostwayland)
+          verlt "$Nvidiaversion" "470" && note "Option $Xserver --gpu: Your system uses closed source NVIDIA
   driver version $Nvidiaversion.
   GPU support will work only with options --hostdisplay and --xorg.
   Consider to use free open source driver nouveau instead.
   Using NVIDIA driver>=v470.x  and Xwayland>=v21.1.2 might work for $Xserver --gpu."
+        ;;
+      esac
     ;;
   esac
 
@@ -3506,6 +3517,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
   [ "$Xserver" = "--xwin" ]            && { check_xdepends --xwin            || Xserver="--runx" ; }
   [ "$Xserver" = "--runx" ]            && { check_xdepends --runx            || Xserver="--hostdisplay" ; }
   [ "$Xserver" = "--hostdisplay" ]     && { check_xdepends --hostdisplay     || { [ "$Sharegpu" = "yes" ]    && Xserver="--xpra2-xwayland" || Xserver="--xpra2" ; } ; }
+  [ "$Xserver" = "--hostdisplay" ]     && { check_xdepends --hostdisplay     || { [ "$Sharegpu" = "direct" ] && Xserver="--xpra2-xwayland" || Xserver="--xpra2" ; } ; }
   [ "$Xserver" = "--xephyr" ]          && { check_xdepends --xephyr          || Xserver="--nxagent" ; }
   [ "$Xserver" = "--nxagent" ]         && { check_xdepends --nxagent         || { [ "$Desktopmode" = "yes" ] && Xserver="--xephyr"         || Xserver="--xpra2" ; } ; }
   [ "$Xserver" = "--xpra2" ]           && { check_xdepends --xpra2           || Xserver="--xpra" ; }
@@ -3530,9 +3542,13 @@ check_xserver() {               # check chosen X server, auto-choose X server
                                               check_xdepends --xpra            && Xserver="--xpra"
                                               check_xdepends --xpra2           && Xserver="--xpra2"
                                             }
-    [ "$Sharegpu" = "yes" ] && case "$Desktopmode" in
-      yes)                                  check_xdepends --weston-xwayland && Xserver="--weston-xwayland" ;;
-      no)                                   check_xdepends --hostdisplay     && Xserver="--hostdisplay" ;;
+    case "$Sharegpu" in
+      yes|direct)
+        case "$Desktopmode" in
+          yes)                                  check_xdepends --weston-xwayland && Xserver="--weston-xwayland" ;;
+          no)                                   check_xdepends --hostdisplay     && Xserver="--hostdisplay" ;;
+        esac
+      ;;
     esac
     [ "$Runsonconsole" = "yes" ] && {
                                             #check_xdepends --kwin-xwayland   && Xserver="--kwin-xwayland"
@@ -4099,11 +4115,9 @@ esac
     --xwin)
       case "$Sharegpu" in
         no)
-          Iglx="no"
           Xserveroptions="$Xserveroptions \\
   -nowgl" ;;
-        yes)
-          Iglx="yes"
+        *)
           Xserveroptions="$Xserveroptions \\
   -wgl" ;;
       esac
@@ -4149,10 +4163,9 @@ esac
   --clipboard"
       [ "$Screensize" ]             && Xserveroptions="$Xserveroptions \
   --size=$Screensize"
-      [ "$Sharegpu" = "yes" ]       && {
+      [ "$Sharegpu" = "iglx" ]      && {
         Xserveroptions="$Xserveroptions \
   --gpu"
-        store_runoption env "LIBGL_ALWAYS_INDIRECT=1"
       }
       Xcommand="$(command -v runx) $Xserveroptions"
     ;;
@@ -4163,12 +4176,12 @@ esac
   case "$Xserver" in
     --tty|--hostdisplay|--runx) ;;
     --weston|--kwin|--hostwayland) ;;
+    --nxagent) ;;
     *)
-      case "$Iglx" in
-        yes) Xcommand="$Xcommand \\
-  +iglx"
-          store_runoption env "LIBGL_ALWAYS_INDIRECT=1" ;;
-        no)
+      case "$Sharegpu" in
+        iglx) Xcommand="$Xcommand \\
+  +iglx" ;;
+        *)
           Xcommand="$Xcommand \\
   -iglx" ;;
       esac
@@ -4610,7 +4623,7 @@ echo '
 }
 ' >> "$Xcontainerrc"
 
-  [ "$Virgl" = "yes" ] && echo "
+  [ "$Sharegpu" = "virgl" ] && echo "
 virgl_test_server &
 " >> "$Xcontainerrc"
 
@@ -6163,7 +6176,7 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
           ;;
         esac
       }
-      [ "$Virgl" = "yes" ] && Backendcommand="$Backendcommand \\
+      [ "$Sharegpu" = "virgl" ] && Backendcommand="$Backendcommand \\
   --mount $(convertpath mount "$Cachefolder/tmp/.virgl_test" "/tmp/.virgl_test")"
     ;;
     no)
@@ -6443,7 +6456,7 @@ setup_capabilities() {          # check linux capabilities needed by container
   [ "$Switchcontainerusercaps" = "yes" ] && store_runoption cap "SETUID SETGID DAC_OVERRIDE AUDIT_WRITE"
 
   # Automated NVIDIA driver installation
-  [ "$Sharegpu" = "yes" ] && [ "$Nvidiainstallerfile" ] && [ "$Switchcontaineruser" = "yes" ] && store_runoption cap "CHOWN FOWNER"
+  [ "$Sharegpu" = "direct" ] && [ "$Nvidiainstallerfile" ] && [ "$Switchcontaineruser" = "yes" ] && store_runoption cap "CHOWN FOWNER"
 
   [ "$Allownewprivileges" = "auto" ] && Allownewprivileges="no"
 
@@ -8634,10 +8647,8 @@ check_snap() {                  # check if docker is installed in snap. Causes r
     Xcontainer="no"
     [ "$Network" = "none" ] && Network=""
     case "$Sharegpu" in
-      yes|virgl|iglx)
-        Sharegpu="no"
-        Virgl=""
-        Iglx="yes"
+      yes|virgl|iglx|direct)
+        Sharegpu="iglx"
       ;;
     esac
   }
@@ -9340,16 +9351,7 @@ check_options_arguments() {     # check for [likely] valid arguments
 
   # --gpu
   case "$Sharegpu" in
-    yes|no) ;;
-    iglx)
-      Iglx="yes"
-      Sharegpu="no"
-    ;;
-    virgl)
-      Virgl="yes"
-      Sharegpu="no"
-      [ "$Xcontainer" = "auto" ] && Xcontainer="yes"
-    ;;
+    yes|no|direct|iglx|virgl) ;;
     *)
       note "Option --gpu: Unknown argument '$Sharegpu'.
   Fallback: Disabling option --gpu."
@@ -9571,13 +9573,13 @@ check_options_interferences() { # check multiple option interferences, change se
 
   # --runtime
   case "$Runtime" in
-    nvidia)
-      [ "$Sharegpu" = "no" ] && {
-        note "Option --runtime=nvidia: Enabling option --gpu"
-        check_fallback
-        Sharegpu="yes"
-      }
-    ;;
+    #nvidia)
+    #  [ "$Sharegpu" = "no" ] && {
+    #    note "Option --runtime=nvidia: Enabling option --gpu"
+    #    check_fallback
+    #    Sharegpu="${Sharegpu:-yes}"
+    #  }
+    #;;
     kata-runtime)
       [ "$Network" = "host" ] && {
         note "Option --network=host: Sharing host network stack does not work
@@ -9797,15 +9799,34 @@ check_options_interferences() { # check multiple option interferences, change se
             }
           ;;
           no)
-            case "$Xauthentication" in
-              yes|trusted)
-                note "Option --hostdisplay: To avoid MIT-SHM errors,
+            case "$Sharegpu" in
+              yes|direct)
+                note "Option --hostdisplay --gpu=direct without image x11docker/xserver
+  (option --xc) would require insecure option --ipc=host to avoid MIT-SHM
+  errors. Fallback: Disabling option --gpu."
+                check_fallback
+                Sharegpu="no"
+              ;;
+            esac
+            case "$Sharegpu" in
+              no)
+                case "$Xauthentication" in
+                  yes)
+                    note "Option --hostdisplay: To avoid MIT-SHM errors,
   x11docker sets option --xauth=untrusted to limit X access.
   A more comfortable solution is possible with --xoverip=socat
-  that is enabled automatically if socat is installed
+  that is enabled automatically if 'socat' is installed
   and network access is granted with option -I, --network.
   $Wikipackagesimage"
-                Xauthentication="untrusted"
+                    Xauthentication="untrusted"
+                  ;;
+                  trusted)
+                    note "Option --hostdisplay --xauth=trusted: MIT-SHM errors might occur."
+                    store_runoption env "QT_X11_NO_MITSHM=1"
+                    store_runoption env "_X11_NO_MITSHM=1"
+                    store_runoption env "_MITSHM=0"
+                  ;;
+                esac
               ;;
             esac
           ;;
@@ -9869,30 +9890,82 @@ check_options_interferences() { # check multiple option interferences, change se
   # --fullscreen is nonsense on tty at all. Avoids weston error on tty.
   [ "$Runsonconsole" = "yes" ] || [ "$Newxvt" ] && Fullscreen="no"
 
-  # --gpu=virgl
-  case "$Virgl" in
+  # --xoverip
+  case "$Xoverip" in
+    socat)
+      store_runoption env "LIBGL_ALWAYS_SOFTWARE=1"
+      case "$Sharegpu" in
+        virgl|no) ;;
+        yes)
+          note "Options --gpu=yes --xoverip=socat: Enabling --gpu=virgl."
+          Sharegpu="virgl"
+        ;;
+        direct|iglx)
+          note "Option --gpu=$Sharegpu is not possible with --xoverip=socat.
+  You can try --gpu=virgl instead. (Needs image x11docker/xserver, option --xc).
+  Fallback: Setting option --gpu=virgl."
+          check_fallback
+          Sharegpu="virgl"
+        ;;
+      esac
+    ;;
+  esac
+
+  # --gpu
+  case "$Xoverip" in
     yes)
+      case "$Sharegpu" in
+        virgl|iglx) ;;
+        yes)
+          case "$Xcontainer" in
+            yes) Sharegpu="virgl" ;;
+            no)  Sharegpu="iglx" ;;
+          esac
+          note "Option --gpu with X over IP: Enabling indirect rendering with --gpu=$Sharegpu."
+        ;;
+        direct)
+          note "Option --gpu=$Sharegpu with --xoverip is not supported.
+  Try --gpu=virgl or --gpu=iglx instead.
+  Fallback: Disabling option --gpu."
+          check_fallback
+          Sharegpu="no"
+        ;;
+      esac
+    ;;
+  esac
+  case "$Xserver" in
+    --xwin|--runx)
+      [ "$Sharegpu" != "no" ] && Sharegpu="iglx"
+    ;;
+  esac
+  [ "$Sharegpu" = "yes" ] && Sharegpu="direct"
+  case "$Sharegpu" in
+    iglx)
+      store_runoption env "LIBGL_ALWAYS_INDIRECT=1"
+    ;;
+  esac
+  case "$Sharegpu" in
+    virgl)
       case "$Xcontainer" in
         yes)
           case "$Backend" in
             docker|podman|nerdctl) 
               store_runoption env "LIBGL_ALWAYS_SOFTWARE=1"   ### FIXME rather belongs to setup_gpu()
-              store_runoption env "GALLIUM_DRIVER=virpipe"
-            ;;
+              store_runoption env "GALLIUM_DRIVER=virpipe"           ;;
             *) 
               note "Option --gpu=virgl is supported with
   backends docker|podman|nerdctl only.
   Fallback: Disabling option --gpu=virgl."
               check_fallback
-              Virgl=""
+              Sharegpu="no"
             ;;
           esac
         ;;
         no)
-          note "Option --gpu=virgl is supported only with option --xc yet.
+          note "Option --gpu=virgl needs image x11docker/xserver (option --xc).
   Fallback: Disabling option --gpu=virgl."
           check_fallback
-          Virgl=""
+          Sharegpu="no"
         ;;
       esac
     ;;
@@ -9943,13 +10016,6 @@ check_options_interferences() { # check multiple option interferences, change se
       ;;
     esac
   }
-
-  # --xoverip
-  case "$Xoverip" in
-    socat)
-      store_runoption env "LIBGL_ALWAYS_SOFTWARE=1"
-    ;;
-  esac
 
   # --keymap: XKB keyboard layout
   [ -n "$Xkblayout" ] && {
@@ -10173,7 +10239,7 @@ check_options_messages() {      # some messages depending on options, but not ch
   Rather install e.g. Xephyr on ssh server and use option --xephyr."
 
       # --gpu=iglx
-      [ "$Iglx" = "yes" ] && [ "$Xcontainer" = "no" ] && [ -e "/var/log/Xorg.0.log" ] && {
+      [ "$Sharegpu" = "iglx" ] && [ "$Xcontainer" = "no" ] && [ -e "/var/log/Xorg.0.log" ] && {
         Xorgversion="$(grep -m1 xorg-server </var/log/Xorg.0.log | cut -d: -f2 | cut -d' ' -f1)"
         [ -z "$Nvidiaversion" ] && [ -n "$Xorgversion" ] && verlt "$Xorgversion" "1.20.8" && note "Options --xorg --gpu=iglx: It seems you have Xorg v$Xorgversion.
   iGLX is known to have a bug in Xorg<v1.20.8.
@@ -10252,15 +10318,24 @@ check_options_messages() {      # some messages depending on options, but not ch
     esac
   }
 
-  # --gpu=iglx
-  [ "$Iglx" = "yes" ] && {
-    [ -z "$Nvidiaversion" ] && note "Option --gpu=iglx: iGLX is known to work only with new
+  # --gpu
+  case "$Sharegpu" in
+    iglx)
+      [ -z "$Nvidiaversion" ] && note "Option --gpu=iglx: iGLX is known to work only with new
   MESA drivers and new X servers. Otherwise you might get black content only."
-    case "$Xserver" in
-      --xorg) ;;
-      *) note "Option --gpu=iglx is useful with option --xorg only." ;;
-    esac
-  }
+      case "$Xserver" in
+        --xorg) ;;
+        *) note "Option --gpu=iglx is useful with option --xorg only." ;;
+      esac
+    ;;
+    direct|virgl)
+      warning "Option --gpu=$Sharegpu degrades container isolation.
+  Container gains access to GPU hardware.
+  This allows reading host window content (palinopsia leak)
+  and GPU rootkits (compare proof of concept: jellyfish).
+  An alternative is --gpu=iglx that works with --xorg only." ### FIXME warning for virgl, too
+    ;;
+  esac
 
   # --interactive
   [ "$Interactive" = "yes" ] && {
@@ -10571,7 +10646,6 @@ declare_variables() {           # declare global variables
   Desktopmode="no"                                # --desktop: image contains a desktop environment.
   Dpi=""                                          # --dpi: dots per inch. Influences font size
   Fullscreen="no"                                 # --fullscreen: Fullscreen mode
-  Iglx=""                                         # --gpu=iglx: Enable indirect rendering yes/no/""
   Lastcheckedxserver=""                           # check_xdepends(): Last X server option that was checked
   Lastcheckedxserverresult=""                     # check_xdepends(): Result of last check. Avoids double-checking.
   Maxxaxis=""                                     # Maximal X screen size of display
@@ -10659,7 +10733,6 @@ declare_variables() {           # declare global variables
   Sharevolumes=""                                 # --share: Host files or folders or devices to share, array
   Sharevolumescount="0"                           # --share: Counts shared folders in array
   Sharewebcam="no"                                # --webcam: Share webcam device /dev/video*
-  Virgl=""                                        # --gpu=virgl: GPU access through virgl gallium driver
 
   # Image information
   Imagearchitecture=""
@@ -10960,7 +11033,7 @@ main() {
   check_containerhome            # create persistent container home               # --home
   check_options_messages         # some messages depending on options, but not changing anything
   [ "$Windowmanagermode" ]       && check_windowmanager                           # --wm
-  [ "$Sharegpu" = "yes" ]        && setup_gpu ||:                                 # --gpu
+  [ "$Sharegpu" = "direct" ]     && setup_gpu ||:                                 # --gpu
   [ "$Sharewebcam" = "yes" ]     && setup_webcam                                  # --webcam
   [ "$Sharecupsmode" ]           && setup_printer                                 # --printer
   [ "$Pulseaudiomode" ]          && setup_sound_pulseaudio                        # --pulseaudio
