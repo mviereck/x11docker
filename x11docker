@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.4.0-beta-1"
+Version="7.4.0-beta-2"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -3128,19 +3128,7 @@ check_xdepends() {              # check dependencies on host for X server option
 
   # --gpu
   case "$Sharegpu" in
-    no) ;;
-    yes)
-      case "${1:-}" in
-        --hostdisplay)
-          [ "$Xcontainer" = "no" ] && [ "$Shareipc" != "host" ] && {
-            $Message "${1:-}: --gpu=$Sharegpu would need insecure and discouraged
-  option --ipc=host to avoid MIT-SHM errors. Alternatively you can provide
-  image x11docker/xserver (option --xc) that contains a fake MIT-SHM library."
-            Return=1
-          }
-        ;;
-       esac
-    ;;
+    yes|no) ;;
     direct)
       case "${1:-}" in
         --xorg) ;;
@@ -3388,32 +3376,6 @@ check_xserver() {               # check chosen X server, auto-choose X server
   }
 
   [ "$Autochooseserver" = "no" ] && [ "$Xserver" = "--xorg" ] && Newxvt="${Newxvt:-auto}"
-
-  [ "XXX$Sharegpu" = "yes" ] && {
-    case "$Xserver" in
-      --xpra|--xpra2)
-        note "Option --xpra does not support GPU access.
-  Fallback: Will try to use option --xpra2-xwayland."
-        check_fallback
-        Xserver="--xpra2-xwayland"
-      ;;
-      --xephyr)
-        note "Option --xephyr does not support GPU access.
-  Fallback: Will try to use option --weston-xwayland."
-        check_fallback
-        Xserver="--weston-xwayland"
-      ;;
-      --nxagent)
-        case "$Desktopmode" in
-          yes) Xserver="--weston-xwayland" ;;
-          no)  Xserver="--xpra2-xwayland" ;;
-        esac
-        note "Option --nxagent does not support GPU access.
-  Fallback: Will try to use option $Xserver."
-        check_fallback
-      ;;
-    esac
-  }
 
   grep -q -i "GNOME" <<< "$XDG_CURRENT_DESKTOP" && {
     Gnomeversion="$(gnome-shell --version)"
@@ -8261,11 +8223,6 @@ $Xpraservercommand"
     ;;
   esac
 
-  ### FIXME needs version check. release number is not reliable.
-  # https://github.com/Xpra-org/xpra/issues/2346
-  #verlt "$Xprarelease" "r23060" && waitforlogentry "xpra server" $Xpraserverlogfile 'xpra is ready'
-  #rocknroll || return 64
-
   # xpra client
   Xpraclientcommand="env $Hostxenv \\
 $Xpraenv $Xpraclientcommand"
@@ -8277,17 +8234,6 @@ $Xpraclientcommand"
     :
   } || {
     unpriv "$Xpraclientcommand ||:" >> "$Xpraclientlogfile" 2>&1 &
-#    case "$Xserver" in
-#      --XXXxpra2*)
-#        Xpracontainercommand="$Xpracontainercommand
-#$Xpraclientcommand"
-#        echo "$Xpracontainercommand"
-#        unpriv_xcbackend "$Xpracontainercommand"
-#      ;;
-#      *)
-#        unpriv "$Xpraclientcommand ||:" >> "$Xpraclientlogfile" 2>&1 &
-#      ;;
-#    esac
   }
 
   # get pids
@@ -9801,11 +9747,14 @@ check_options_interferences() { # check multiple option interferences, change se
           no)
             case "$Sharegpu" in
               yes|direct)
-                note "Option --hostdisplay --gpu=direct without image x11docker/xserver
+                [ "$Xauthentication" != "trusted" ] && {
+                  note "Option --hostdisplay --gpu=direct without image x11docker/xserver
   (option --xc) would require insecure option --ipc=host to avoid MIT-SHM
-  errors. Fallback: Disabling option --gpu."
-                check_fallback
-                Sharegpu="no"
+  errors. (If you don't care for MIT-SHM errors, use --xauth=trusted.)
+  Fallback: Disabling option --gpu."
+                  check_fallback
+                  Sharegpu="no"
+                } 
               ;;
             esac
             case "$Sharegpu" in
@@ -9820,13 +9769,15 @@ check_options_interferences() { # check multiple option interferences, change se
   $Wikipackagesimage"
                     Xauthentication="untrusted"
                   ;;
-                  trusted)
-                    note "Option --hostdisplay --xauth=trusted: MIT-SHM errors might occur."
-                    store_runoption env "QT_X11_NO_MITSHM=1"
-                    store_runoption env "_X11_NO_MITSHM=1"
-                    store_runoption env "_MITSHM=0"
-                  ;;
                 esac
+              ;;
+            esac
+            case "$Xauthentication" in
+              trusted)
+                note "Option --hostdisplay --xauth=trusted: MIT-SHM errors might occur."
+                store_runoption env "QT_X11_NO_MITSHM=1"
+                store_runoption env "_X11_NO_MITSHM=1"
+                store_runoption env "_MITSHM=0"
               ;;
             esac
           ;;
@@ -9933,18 +9884,47 @@ check_options_interferences() { # check multiple option interferences, change se
       esac
     ;;
   esac
-  case "$Xserver" in
-    --xwin|--runx)
-      [ "$Sharegpu" != "no" ] && Sharegpu="iglx"
+  case "$Sharegpu" in 
+    yes)
+      case "$Xserver" in
+        --weston|--kwin|--hostwayland)
+          Sharegpu="direct"
+        ;;
+        --xorg|*xwayland|--hostdisplay)
+          Sharegpu="direct"
+        ;;
+        --xwin|--runx)
+          Sharegpu="iglx"
+        ;;
+        --tty)
+          Sharegpu="direct"
+        ;;
+        *)
+          case "$Xcontainer" in
+            yes)
+              Sharegpu="virgl"
+              note "Option --gpu: Enabling option --gpu=virgl.
+  Option --gpu=direct might be more performant, supported by:
+  --xpra-xwayland, --weston-xwayland, --xwayland, --xorg, --hostdisplay"
+            ;;
+            no)
+              note "Option --gpu=direct is not supported by $Xserver.
+  Only --gpu=virgl would work, but needs image x11docker/xserver (option --xc).
+  Options supporting direct rendering:
+  --xpra-xwayland, --weston-xwayland, --xwayland, --xorg, --hostdisplay
+  Fallback: Disabling option --gpu"
+              check_fallback
+              Sharegpu="no"
+            ;;
+          esac
+        ;;
+      esac
     ;;
   esac
-  [ "$Sharegpu" = "yes" ] && Sharegpu="direct"
   case "$Sharegpu" in
     iglx)
       store_runoption env "LIBGL_ALWAYS_INDIRECT=1"
     ;;
-  esac
-  case "$Sharegpu" in
     virgl)
       case "$Xcontainer" in
         yes)
