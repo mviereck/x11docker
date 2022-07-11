@@ -9,11 +9,12 @@ Project website: https://github.com/mviereck/x11docker
 ## [Unreleased]
 ### Added
  - `--xauth [=yes|trusted|untrusted|no]`: New option to configure X cookie.
+ - `--printcheck`: New option to show X server dependency check messages.
 ### Changed
  - `--xoverip`: New optional arguments `yes|no|socat`.
    Using `socat` allows X over TCP with Xwayland related options.
  - `--hostdisplay`: Allow `--xoverip=socat`.
- - `--gpu`: changed availability checks.
+ - `--gpu`: changed X dependency checks.
  - `--hostdisplay --gpu --xc=no`: Do not enable `--ipc=host` automatically.
 ### Fixed
  - `--user`: Fix in setup of `/etc/gshadow`.
