@@ -2,6 +2,9 @@
 x11docker ToDo notes
 
 ## Work in progress
+ - SECURITY BUG: --hostdisplay --xoverip --network. Error out if xhost has openings, offer --disable-xhost
+
+ - --cleanup: remove internal networks
 
  - --kwin in weston segfaults
  - --xc --xorg: MIT-SHM fails
