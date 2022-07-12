@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.4.0-beta-5"
+Version="7.4.0-beta-6"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -616,7 +616,7 @@ finish() {                      # trap EXIT routine to clean up background proce
   [ "$Pulseaudiomoduleid" ] && unpriv "pactl unload-module '$Pulseaudiomoduleid'"
 
   # --xc --xoverip: remove possible internal network
-  [ -n "$Internalnetwork" ] && unpriv_backend "$Backendbin network remove $Internalnetwork" >>$Xinitlogfile 2>&1
+  setup_internalnetwork remove
 
   # Check if container is still running -> docker stop
   case "$Backend" in
@@ -3143,7 +3143,7 @@ check_xdepends() {              # check dependencies on host for X server option
     ;;
     iglx)
       case "${1:-}" in
-        --xorg|--xwin|--runx) ;;
+        --xorg|--xwin|--runx|--weston-xwayland) ;;
         *)
           $Message "${1:-}: --gpu=$Sharegpu not possible. You can try --gpu=virgl."
           Return=1
@@ -4580,6 +4580,7 @@ echo '
 ' >> "$Xcontainerrc"
 
   [ "$Sharegpu" = "virgl" ] && echo "
+# --gpu=virgl
 virgl_test_server &
 " >> "$Xcontainerrc"
 
@@ -5003,6 +5004,28 @@ $(xtool "xhost 2>&1" )"
   }
   return 0
 }
+setup_internalnetwork() {       # --xoverip --xc: start internal network between X container and command container
+  case "${1:-}" in
+    "")
+      [ "$Xcontainer" = "yes" ] && [ "$Network" = "none" ] && {
+        case "$Xoverip" in
+          yes|socat)
+            Internalnetworkname="x11docker_X${Newdisplaynumber}_network_${Cachenumber}"
+            Internalnetworkid="$(unpriv_backend "$Backendbin network create --internal $Internalnetworkname")" 2>>$Xinitlogfile || return 1
+            debugnote "setup_internalnetwork(): Creating $Internalnetworkname $Internalnetworkid"
+          ;;
+        esac
+      }
+    ;;
+    remove)
+      [ -n "$Internalnetworkid" ] && {
+        debugnote "setup_internalnetwork(): Removing $Internalnetworkname $Internalnetworkid"
+        unpriv_backend "$Backendbin network remove $Internalnetworkid" >>$Xinitlogfile 2>&1 || return 1
+      }
+    ;;
+  esac
+  return 0
+}
 store_newxenv() {               # store display variables
   Newdisplay="${Newdisplay//"XCONTAINERIP"/"$Xcontainerip"}"
   # create $Newxenv: collection of environment variables to access new X from host (e.g. in xinitrc)
@@ -5039,7 +5062,7 @@ XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
   }
   return 0
 }
-xtool() {                      # run X tool command in X container if available, otherwise on host
+xtool() {                       # run X tool command in X container if available, otherwise on host
   local Tool Toolinfo Usexcontainer Check= Message
 
   Message="note"
@@ -8125,17 +8148,6 @@ start_compositor() {            # start Wayland compositor Weston or KWin
   esac
   return 0
 }
-start_internalnetwork() {       # --xoverip --xc: start internal network between X container and command container
-  [ "$Xcontainer" = "yes" ] && [ "$Network" = "none" ] && {
-    case "$Xoverip" in
-      yes|socat)
-        Internalnetworkname="x11docker_X${Newdisplaynumber}_network_${Cachenumber}"
-        Internalnetwork="$(unpriv_backend "$Backendbin network create --internal $Internalnetworkname")" 2>>$Xinitlogfile || return 1
-      ;;
-    esac
-  }
-  return 0
-}
 start_xcontainer() {            # --xc
   local Containerinspect Xpid1pid
 
@@ -9858,7 +9870,7 @@ check_options_interferences() { # check multiple option interferences, change se
   # --fullscreen is nonsense on tty at all. Avoids weston error on tty.
   [ "$Runsonconsole" = "yes" ] || [ "$Newxvt" ] && Fullscreen="no"
 
-  # --xoverip
+  # --gpu --xoverip
   case "$Xoverip" in
     socat)
       store_runoption env "LIBGL_ALWAYS_SOFTWARE=1"
@@ -10694,7 +10706,7 @@ declare_variables() {           # declare global variables
   Xservercookie="Xauthority.server"               # Generated X server cookie
 
   # X in container
-  Internalnetwork=""
+  Internalnetworkid=""
   Internalnetworkname=""
   Xcontainer="auto"
   Xcontainerbackend=""
@@ -11016,7 +11028,7 @@ main() {
   check_xserver                  # check chosen X server or auto-choose one
 
   check_newxenv                  # find free display
-  start_internalnetwork          # internal network for --xc --xoverip=socat
+  setup_internalnetwork          # internal network for --xc --xoverip=socat
   [ "$Xserver" = "--xorg" ] || [ -n "$Newxvt" ] || [ "$Runsonconsole" = "yes" ] && check_vt   # --vt: find free tty/virtual terminal for Xorg or weston
   [ "$Xcontainer" = "yes" ] && {                                                  # --xc
     create_xcontainercommand
