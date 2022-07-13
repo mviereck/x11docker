@@ -616,7 +616,7 @@ finish() {                      # trap EXIT routine to clean up background proce
   [ "$Pulseaudiomoduleid" ] && unpriv "pactl unload-module '$Pulseaudiomoduleid'"
 
   # --xc --xoverip: remove possible internal network
-  setup_internalnetwork remove
+  setup_xcnetwork remove
 
   # Check if container is still running -> docker stop
   case "$Backend" in
@@ -2506,6 +2506,9 @@ check_newxenv()  {              # find free display
     ;;
   esac
 
+  # --xc --xoverip
+  Xcnetworkname="x11docker_X${Newdisplaynumber}_network_${Cachenumber}"
+
   ###
   Xoverip="${Xoverip:-no}"
 
@@ -2717,7 +2720,7 @@ check_xcontainer() {            # option --xc: check backend, rootless and image
   local Auto= Fail=
 
   # check if X container should run rootful or rootless (for tty access it must be rootful)
-  case "$Rootlessbackend" in
+  case "$Backendrootless" in
     yes)
       { [ "$Xserver" = "--xorg" ] || [ -n "$Newxvt" ] ; } && Xcrootless="no" || Xcrootless="yes"
     ;;
@@ -2729,7 +2732,7 @@ check_xcontainer() {            # option --xc: check backend, rootless and image
     yes|auto) 
       case "$Backend" in
         docker|podman|nerdctl)
-          Xcrootless="${Xcrootless:-$Rootlessbackend}"
+          Xcrootless="${Xcrootless:-$Backendrootless}"
           Xcontainerbackend="$Backend"
           unpriv_xcbackend "$Xcontainerbackend inspect $Xcontainerimage" >/dev/null 2>&1 || Fail="yes"
         ;;
@@ -4328,9 +4331,9 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   --network=none"
     ;;
     socat)
-      [ "$Network" = "none" ] && {
+      [ -n "$Xcnetworkid" ] && {
         Xcontainercommand="$Xcontainercommand \\
-  --network=$Internalnetworkname"
+  --network=$Xcnetworkname"
       }
     ;;
   esac
@@ -4697,8 +4700,16 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
       echo           "export $Newxenv"
       case "$Xoverip" in
         socat)
-          echo "echo \"socat -d TCP-LISTEN:$((6000+Newdisplaynumber)),fork,bind=${Xcontainerip:-$Hostip} UNIX-CONNECT:$Newxsocket\""
-          echo        "socat -d TCP-LISTEN:$((6000+Newdisplaynumber)),fork,bind=${Xcontainerip:-$Hostip} UNIX-CONNECT:$Newxsocket &"
+          case "$Xcnetworkid" in
+            "")
+              echo "echo \"socat -d TCP-LISTEN:$((6000+Newdisplaynumber)),fork,bind=${Xcontainerip:-$Hostip} UNIX-CONNECT:$Newxsocket\""
+              echo        "socat -d TCP-LISTEN:$((6000+Newdisplaynumber)),fork,bind=${Xcontainerip:-$Hostip} UNIX-CONNECT:$Newxsocket &"
+            ;;
+            *)
+              echo "echo \"socat -d TCP-LISTEN:$((6000+Newdisplaynumber)),fork,bind=$Xcontainername UNIX-CONNECT:$Newxsocket\""
+              echo        "socat -d TCP-LISTEN:$((6000+Newdisplaynumber)),fork,bind=$Xcontainername UNIX-CONNECT:$Newxsocket &"
+            ;;
+          esac
           echo       "storepid \$! socat-tcp"
         ;;
       esac
@@ -4728,11 +4739,11 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
         esac
         case "$Runsoverssh" in
           no)
-            echo     "echo 'Requesting \$Trusted cookie from X server'"
+            echo     "echo \"Requesting \$Trusted cookie from X server\""
             echo     "xauth -v -i -f $Xclientcookie generate $Newdisplay . \$Trusted timeout 3600 && sed -i /\$Hostcookie/d $Xclientcookie"
           ;;
           yes)
-            echo     "verbose 'Can not use cookies created over SSH. Will bake one myself.'"
+            echo     "verbose 'Cannot use cookies created over SSH. Will bake one myself.'"
           ;;
         esac
         echo         ""
@@ -5004,23 +5015,29 @@ $(xtool "xhost 2>&1" )"
   }
   return 0
 }
-setup_internalnetwork() {       # --xoverip --xc: start internal network between X container and command container
+setup_xcnetwork() {       # --xoverip --xc: start internal network between X container and command container
+  local Internal
+  [ "$Backend" = "$Xcontainerbackend" ] && [ "$Xcrootless" = "$Backendrootless" ] || return 1
   case "${1:-}" in
     "")
-      [ "$Xcontainer" = "yes" ] && [ "$Network" = "none" ] && {
+      [ "$Xcontainer" = "yes" ] && {
         case "$Xoverip" in
           yes|socat)
-            Internalnetworkname="x11docker_X${Newdisplaynumber}_network_${Cachenumber}"
-            Internalnetworkid="$(unpriv_backend "$Backendbin network create --internal $Internalnetworkname")" 2>>$Xinitlogfile || return 1
-            debugnote "setup_internalnetwork(): Creating $Internalnetworkname $Internalnetworkid"
+            case "$Network" in
+              none) Internal="--internal" ;;
+              ""|bridge) Internal="";;
+              *) return 1 ;; ### FIXME
+            esac
+            Xcnetworkid="$(unpriv_backend "$Backendbin network create $Internal $Xcnetworkname")" 2>>$Xinitlogfile || return 1
+            debugnote "setup_xcnetwork(): Creating $Xcnetworkname $Xcnetworkid"
           ;;
         esac
       }
     ;;
     remove)
-      [ -n "$Internalnetworkid" ] && {
-        debugnote "setup_internalnetwork(): Removing $Internalnetworkname $Internalnetworkid"
-        unpriv_backend "$Backendbin network remove $Internalnetworkid" >>$Xinitlogfile 2>&1 || return 1
+      [ -n "$Xcnetworkid" ] && {
+        debugnote "setup_xcnetwork(): Removing $Xcnetworkname $Xcnetworkid"
+        unpriv_backend "$Backendbin network remove $Xcnetworkid" >>$Xinitlogfile 2>&1 || return 1
       }
     ;;
   esac
@@ -5183,19 +5200,19 @@ check_backend() {               # options --backend, --rootless
   esac
 
   # rootful or rootless
-  [ "$Rootlessbackend" = "no" ] && export DOCKER_HOST=
-  [ -z "$Rootlessbackend" ] && case "$Backend" in
+  [ "$Backendrootless" = "no" ] && export DOCKER_HOST=
+  [ -z "$Backendrootless" ] && case "$Backend" in
     docker) 
-      id -G -n | grep -q -w 'docker'              && Rootlessbackend="no"
-      grep -q "/run/user/" <<< "${DOCKER_HOST:-}" && Rootlessbackend="yes"
-      [ "$(id -un)" = "root" ]                    && Rootlessbackend="no"
+      id -G -n | grep -q -w 'docker'              && Backendrootless="no"
+      grep -q "/run/user/" <<< "${DOCKER_HOST:-}" && Backendrootless="yes"
+      [ "$(id -un)" = "root" ]                    && Backendrootless="no"
     ;;
     podman|nerdctl)
-      [ "$(id -u)" = "0" ] && Rootlessbackend="no" || Rootlessbackend="yes" ;;
+      [ "$(id -u)" = "0" ] && Backendrootless="no" || Backendrootless="yes" ;;
     proot) ;;
     host) ;;
   esac
-  case "$Rootlessbackend" in
+  case "$Backendrootless" in
     yes)
       case "$Backend" in
         docker)
@@ -5350,14 +5367,14 @@ Fallback: using command '$Containercommand' and enabling option --interactive."
       Sharewebcam=""
     ;;
   esac
-  debugnote "Backend: $Backend, Backendbin: $Backendbin, Rootless: $Rootlessbackend"
+  debugnote "Backend: $Backend, Backendbin: $Backendbin, Rootless: $Backendrootless"
   return 0
 }
 check_image() {                 # get some image information
 
   # Check if image $Imagename is available locally
   Imageinspect="$(unpriv_backend "$Backendbin inspect $Imagename" 2>> $Containerlogfile)" || error "Image $Imagename not found locally.
-  Please pull or build image first. (Backend $Backend, rootless $Rootlessbackend)"
+  Please pull or build image first. (Backend $Backend, rootless $Backendrootless)"
 
   # Check architecture
   Imagearchitecture=$(parse_inspect "$Imageinspect" "Architecture")
@@ -5568,7 +5585,7 @@ check_containerhome() {         # option --home: check HOME of container user.
   ## option '--home=DIR':    Share custom host folder as home
 
   # rootless with userns-remap
-  [ "$Rootlessbackend" = "yes" ] && {
+  [ "$Backendrootless" = "yes" ] && {
     case "$Backend" in
       docker|nerdctl)
         [ "$Sharehome" != "no" ] && {
@@ -5874,7 +5891,7 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
     # Disable user namespacing to avoid file permission issues with --home or --share. Files need same UID/GID.
     case "$Backend" in
       podman)
-        [ "$Rootlessbackend" = "yes" ] && Backendcommand="$Backendcommand \\
+        [ "$Backendrootless" = "yes" ] && Backendcommand="$Backendcommand \\
   --userns=keep-id"
       ;;
       docker)
@@ -5882,7 +5899,7 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
           sysbox-runc)
           ;;
           *)
-            [ "$Rootlessbackend" = "yes" ] || Backendcommand="$Backendcommand \\
+            [ "$Backendrootless" = "yes" ] || Backendcommand="$Backendcommand \\
   --userns=host"  ### FIXME option deprecated?
           ;;
         esac
@@ -5925,24 +5942,14 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
   # --network
   case "$Backend" in
     docker|podman|nerdctl)
-      case "$Network" in
+      case "$Xcnetworkid" in
         "")
-        ;;
-        none)
-          case "$Xoverip" in
-            no)
-              Backendcommand="$Backendcommand \\
-  --network=none"
-            ;;
-            socat)
-              Backendcommand="$Backendcommand \\
-  --network=$Internalnetworkname"
-            ;;
-          esac
+          [ -n "$Network" ] && Backendcommand="$Backendcommand \\
+  --network $Network"
         ;;
         *)
           Backendcommand="$Backendcommand \\
-  --network $Network"
+  --network=$Xcnetworkname"
         ;;
       esac
     ;;
@@ -6132,8 +6139,12 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
     esac
   }
 
-  # --xc
-  case "$Xcontainer" in
+  # --gpu=virgl
+  [ "$Sharegpu" = "virgl" ] && Backendcommand="$Backendcommand \\
+  --mount $(convertpath mount "$Cachefolder/tmp/.virgl_test" "/tmp/.virgl_test")"
+
+  # share X socket
+  [ "$Xoverip" = "no" ] && case "$Xcontainer" in
     yes)
       [ "$Newxsocket" ] && {
         case "$Backend" in
@@ -6154,7 +6165,7 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
                 *)
                   case "$Backend" in
                     docker|podman)
-                      [ "$Xcrootless" = "$Rootlessbackend" ] && Backendcommand="$Backendcommand \\
+                      [ "$Xcrootless" = "$Backendrootless" ] && Backendcommand="$Backendcommand \\
   --ipc=container:$Xcontainername"
                     ;;
                   esac
@@ -6176,8 +6187,6 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
           ;;
         esac
       }
-      [ "$Sharegpu" = "virgl" ] && Backendcommand="$Backendcommand \\
-  --mount $(convertpath mount "$Cachefolder/tmp/.virgl_test" "/tmp/.virgl_test")"
     ;;
     no)
       [ "$Newxsocket" ] && {
@@ -9064,7 +9073,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
          --newprivileges)     Allownewprivileges="${2:-yes}" ; shift ;; # [Don't] set --security-opt=no-new-privileges
          --no-entrypoint)     Noentrypoint="yes" ;;                  # Disable ENTRYPOINT of image
          --no-setup)          Containersetup="no" ;;                 # No setup of x11docker inside of container (noteable disables containerrootrc() )
-         --rootless)          Rootlessbackend="${2:-yes}"; shift ;;
+         --rootless)          Backendrootless="${2:-yes}"; shift ;;
          --runtime)           Runtime="${2:-}" ; shift               # Runtime=runc|nvidia|kata-runtime|crun
                               [ "$Runtime" = "kata" ]   && Runtime="kata-runtime"
                               [ "$Runtime" = "sysbox" ] && Runtime="sysbox-runc" ;;
@@ -9415,9 +9424,9 @@ check_options_arguments() {     # check for [likely] valid arguments
   esac
 
   # --rootless
-  case "$Rootlessbackend" in
+  case "$Backendrootless" in
     yes|no|"") ;;
-    *) error "Option --rootless: Unknown argument: $Rootlessbackend
+    *) error "Option --rootless: Unknown argument: $Backendrootless
       Allowed values: yes|no" ;;
   esac
 
@@ -10442,6 +10451,15 @@ check_options_messages() {      # some messages depending on options, but not ch
     ;;
   esac
 
+  # --xoverip
+  case "$Xoverip" in
+    no) ;;
+    *)
+      warning "Option --xoverip might allow undesired access to the X server.
+  Security hardening of X over TCP/IP setups is work in progress yet."
+    ;;
+  esac
+
   [ "$Customdockeroptions" ] && {
     warning "Found custom CUSTOM_RUN_OPTIONS.
   x11docker will add them to 'docker run' command without
@@ -10521,6 +10539,9 @@ declare_variables() {           # declare global variables
   grep -q ':/usr/local/games:' <<< ":$PATH:" || PATH="$PATH:/usr/local/games"
   grep -q ':/usr/games:'       <<< ":$PATH:" || PATH="$PATH:/usr/games"
   export PATH
+
+  Cachenumber="$(date +%s%N | cut -c6-17)"        # Number to use for cache folder
+  [ -z "$Cachenumber" ] && Cachenumber="$(makecookie | cut -c6-17)"
 
   # File descriptors
   FDcmdstdin=""                                   # --stdin channel to forward stdin to container. Previously &7
@@ -10707,8 +10728,8 @@ declare_variables() {           # declare global variables
   Xservercookie="Xauthority.server"               # Generated X server cookie
 
   # X in container
-  Internalnetworkid=""
-  Internalnetworkname=""
+  Xcnetworkid=""
+  Xcnetworkname=""
   Xcontainer="auto"
   Xcontainerbackend=""
   Xcontainercommand=""
@@ -10779,7 +10800,7 @@ declare_variables() {           # declare global variables
   Optionsetall=""                                 # list of all available long options
   Remountcgroup=""                                # --init=systemd with cgroupv2 in docker workaround
   Rootfs=""                                       # --backend=proot
-  Rootlessbackend=""                              # Check for rootful/rootless docker depending on DOCKER_HOST
+  Backendrootless=""                              # Check for rootful/rootless docker depending on DOCKER_HOST
   Runtime=""                                      # Runtime to use. runc|nvidia|kata-runtime|crun
   Snapsupport=""                                  # --snap: Fallback mode to support docker in snap
   Shareipc="no"
@@ -10806,8 +10827,6 @@ declare_variables() {           # declare global variables
 
   # Miscellaneous
   Buildimage=""                                   # --build: x11docker image to build from repo Dockerfile
-  Cachenumber="$(date +%s%N | cut -c6-17)"        # Number to use for cache folder
-  [ -z "$Cachenumber" ] && Cachenumber="$(makecookie)"
   Codename=""                                     # created from image name and command without special chars for use with container name and cache folder
   Fallback="yes"                                  # --fallback: Allow or deny fallbacks for failing options.
   Imagebasename=""                                # Image name without tags and / replaced with -. For use of --home folders.
@@ -10954,7 +10973,7 @@ unpriv() {                      # run a command as unprivileged user. Needed if 
 unpriv_backend(){               # run container backend rootful or rootless
   local Command
   Command="$(oneline "${1:-}")"
-  case "$Rootlessbackend" in
+  case "$Backendrootless" in
     yes)   unpriv                  "$Command" ;;
     no|"") eval   "env DOCKER_HOST= $Command" ;;
   esac
@@ -11029,7 +11048,7 @@ main() {
   check_xserver                  # check chosen X server or auto-choose one
 
   check_newxenv                  # find free display
-  setup_internalnetwork          # internal network for --xc --xoverip=socat
+  setup_xcnetwork ||:            # internal network for --xc --xoverip
   [ "$Xserver" = "--xorg" ] || [ -n "$Newxvt" ] || [ "$Runsonconsole" = "yes" ] && check_vt   # --vt: find free tty/virtual terminal for Xorg or weston
   [ "$Xcontainer" = "yes" ] && {                                                  # --xc
     create_xcontainercommand
@@ -11063,7 +11082,7 @@ main() {
   storeinfo "x11dockerpid=$$"    # store pid of x11docker
   debugnote "x11docker version:  $Version
   Backend version:               $(${Backendbin:-:} --version 2>&1)
-  Running rootless:              $Rootlessbackend
+  Running rootless:              $Backendrootless
   OCI Runtime:                   $Runtime
   Host system:                   $(grep '^PRETTY_NAME' /etc/os-release 2>/dev/null | cut -d= -f2 || echo "$Hostsystem")
   Host architecture:             $Hostarchitecture
@@ -11098,7 +11117,7 @@ main() {
     proot|docker|podman|nerdctl)
       create_backendcommand           # create 'docker run' command
       echo "$Backendcommand" >> "$Backendcommandfile"
-      debugnote "$Backend command (rootless ${Rootlessbackend:-undefined}):
+      debugnote "$Backend command (rootless ${Backendrootless:-undefined}):
   $Backendcommand"
       [ "$Containersetup" = "yes" ] && {
         ## containerrootrc runs as root in container.
