@@ -12,7 +12,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--printcheck`: New option to show X server dependency check messages.
 ### Changed
  - `--xoverip`: New optional arguments `yes|no|socat`.
-   Using `socat` allows X over TCP with Xwayland related options.
+   `socat` allows X over TCP with `--hostdisplay` and Xwayland related options.
  - `--hostdisplay`: Allow `--xoverip=socat`.
  - `--gpu`: changed X dependency checks.
  - `--hostdisplay --gpu --xc=no`: Do not enable `--ipc=host` automatically.
@@ -20,6 +20,8 @@ Project website: https://github.com/mviereck/x11docker
  - `--user`: Fix in setup of `/etc/gshadow`.
  - `--xc`: Provide X unix socket to host with `socat` instead of `ln`.
    GTK3 application failed to access X through a soft link.
+ `--shell --no-setup`: Set environment variable `SHELL`.
+   [(457)](https://github.com/mviereck/x11docker/issues/457)
 ### Deprecated
  - `--no-auth`: Use `--xauth=no` instead.
 
