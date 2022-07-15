@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.4.0-beta-6"
+Version="7.4.0-beta-7"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -4330,7 +4330,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
       Xcontainercommand="$Xcontainercommand \\
   --network=none"
     ;;
-    socat)
+    yes|socat)
       [ -n "$Xcnetworkid" ] && {
         Xcontainercommand="$Xcontainercommand \\
   --network=$Xcnetworkname"
@@ -4785,6 +4785,10 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
               echo   "# clean xhost"
               echo   "verbose 'Disabling any possible access to new X server possibly granted by xhost'"
               echo   "disable_xhost"
+#      echo "DISPLAY=:$Newdisplaynumber xhost +SI:hostname:$Cachenumber"
+#      echo "DISPLAY=:$Newdisplaynumber xhost +SI:hostname:$Containername"
+#      echo "xhost"
+#      echo "truncate -s0 $Xclientcookie"
             ;;
           esac
           [ -n "$Xhost" ] && {
@@ -5080,12 +5084,17 @@ XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
   return 0
 }
 xtool() {                       # run X tool command in X container if available, otherwise on host
-  local Tool Toolinfo Usexcontainer Check= Message
+  local Tool Toolinfo Usexcontainer Check= Nocheck= Message
 
   Message="note"
   case "${1:-}" in
     --check)
       Check="yes"
+      shift
+    ;;
+    --nocheck)
+      Check="no"
+      Message=":"
       shift
     ;;
   esac
@@ -5142,6 +5151,7 @@ xtool() {                       # run X tool command in X container if available
       Usexcontainer="no"
     ;;
   esac
+  [ "$Check" = "no" ] && Usexcontainer="yes"
   Usexcontainer="${Usexcontainer:-no}" # in case xinitrc already runs in X container.
   verbose "xtool(): (usexc $Usexcontainer): ${1:-}"
   case "$Usexcontainer" in
@@ -8022,6 +8032,7 @@ start_container() {             # docker run
     proot|host) ;;
     docker|podman|nerdctl)
       # Wait for container to be ready
+      debugnote "start_container(): Running repeated checks if container is ready."
       for ((Count=1 ; Count<=40 ; Count++)); do
         unpriv_backend "$Backendbin exec $Containername sh -c ':'" 2>&1 | rmcr >> $Containerlogfile && {
           debugnote 'start_container(): Container is up and running.'
@@ -8063,8 +8074,16 @@ start_container() {             # docker run
 $(rmcr < "$Containerlogfile" | uniq )"
 
       # Get IP of container
-      Containerip="$(parse_inspect "$Containerinspect" "NetworkSettings" "IPAddress")"
+      case "$Xcnetworkid" in
+        "")
+          Containerip="$(parse_inspect "$Containerinspect" "NetworkSettings" "IPAddress")"
+        ;;
+        *)
+          Containerip="$(parse_inspect "$Containerinspect" "NetworkSettings" "Networks" "$Xcnetworkname" "IPAddress")"
+        ;;
+      esac
       storeinfo "containerip=$Containerip"
+
       # Get ID of container
       Containerid="$(parse_inspect "$Containerinspect" "Id")"
       storeinfo "containerid=$Containerid"
@@ -9612,7 +9631,7 @@ check_options_interferences() { # check multiple option interferences, change se
 
   # Check whether host X server has MIT-SHM enabled.
   [ "$Winsubsystem" ] && Hostmitshm="no" || {
-    xtool "xdpyinfo >/dev/null ; env LD_PRELOAD= xdpyinfo 2>>$Xinitlogfile | grep -q 'MIT-SHM'" && Hostmitshm="yes" || Hostmitshm="no"
+    xtool --nocheck "env LD_PRELOAD= xdpyinfo 2>>$Xinitlogfile | grep -q 'MIT-SHM'" && Hostmitshm="yes" || Hostmitshm="no"
     xtool --check --quiet xdpyinfo || Hostmitshm="yes" # if unknown, assume yes
   }
 
@@ -11148,7 +11167,7 @@ $(nl -ba <$Cmdrc)"
     # wait for X to be ready
     waitforlogentry 'start_container()' $Xinitlogfile 'xinitrc is ready' "$Xiniterrorcodes"
 
-    # softlink to X or Wayland unix socket in container                           # --xc
+    # softlink (or socat) to X or Wayland unix socket in container                           # --xc
     case "$Xcontainer" in
       yes)
         #[ "$Newdisplay" ]       && ln -s "$Cachefolder/tmp/.X11-unix/X$Newdisplaynumber"  "/tmp/.X11-unix/X$Newdisplaynumber"  2>>$Xinitlogfile ||:
@@ -11179,6 +11198,18 @@ $(nl -ba <$Cmdrc)"
     # start container
     start_container
     Pid1pid="$(storeinfo dump pid1pid)"
+    Containerip="$(storeinfo dump containerip)"
+
+    ### FIXME experimental
+    # --xoverip -listen tcp: Use xhost instead of XAUTHORITY
+    case "$Xoverip" in
+      yes)
+        xtool "xhost >/dev/null ; env DISPLAY=:$Newdisplaynumber XAUTHORITY=$Xclientcookie xhost +INET:$Containerip"
+#        xtool "xhost >/dev/null ; env DISPLAY=:$Newdisplaynumber XAUTHORITY=$Xclientcookie xhost +SI:hostname:$Containername"
+#        xtool "xhost >/dev/null ; env DISPLAY=:$Newdisplaynumber XAUTHORITY=$Xclientcookie xhost -"
+        truncate -s0 $Xclientcookie
+      ;;
+    esac
 
     # watch container
     case "$Winsubsystem" in
