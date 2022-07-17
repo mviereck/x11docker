@@ -294,9 +294,15 @@ Container init system, elogind and DBus daemon:
      --hostdbus        Connect to DBus user session from host.
      --init [=INITSYSTEM] Run an init system as PID 1 in container. Solves the
                        zombie reaping issue. INITSYSTEM can be:
-                         tini: Default. Mostly present as docker-init on host.
-                         none: No init system, container command will be PID 1.
-                       Others: systemd, sysvinit, runit, openrc, s6-overlay.
+                         tini:       Default. Mostly present as docker-init
+                                     on host. x11docker might as well use
+                                     catatonit provided by podman.
+                         systemd:    systemd in container.
+                         sysvinit:   sysvinit in container.
+                         runit:      runit in container
+                         openrc:     openrc in container
+                         s6-overlay: s6-overlay in container.
+                         none:       No init system, CMD will be PID 1.
      --sharecgroup     Share /sys/fs/cgroup. Allows elogind in container if
                        used with one of --init=openrc|runit|sysvinit
 
@@ -5486,19 +5492,19 @@ check_runtime() {               # option --runtime
 
   return 0
 }
-check_tini() {
-  grep -q "catatonit" <<< "$Xcontainertools" && Tinibinaryfile="$Sharefolder/catatonit" && return 0
-  [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="$(command -v catatonit ||:)"
-  [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="/usr/libexec/catatonit/catatonit"
-  [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="$(command -v docker-init ||:)"
-  [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="/usr/local/share/x11docker/tini-static"
-  [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="/usr/bin/tini-static"
-  [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="$Localsharedir/tini-static"
-  [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="/snap/docker/current/bin/docker-init"
-  [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="/snap/docker/current/usr/bin/docker-init"
-  Tinibinaryfile="$(myrealpath "$Tinibinaryfile" 2>/dev/null ||:)"
-  [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile=""
-  [ -z "$Tinibinaryfile" ] && {
+check_smallinit() {                  # find container init binary on host
+  grep -q "catatonit" <<< "$Xcontainertools" && Initbinaryfile="$Sharefolder/catatonit" && return 0
+  [ -x "$Initbinaryfile" ]                                      || Initbinaryfile="$(command -v catatonit ||:)"
+  [ -x "$Initbinaryfile" ]                                      || Initbinaryfile="/usr/libexec/catatonit/catatonit"
+  [ -x "$Initbinaryfile" ]                                      || Initbinaryfile="$(command -v docker-init ||:)"
+  [ -x "$Initbinaryfile" ]                                      || Initbinaryfile="/usr/local/share/x11docker/tini-static"
+  [ -x "$Initbinaryfile" ]                                      || Initbinaryfile="/usr/bin/tini-static"
+  [ -x "$Initbinaryfile" ]                                      || Initbinaryfile="$Localsharedir/tini-static"
+  [ -x "$Initbinaryfile" ]                                      || Initbinaryfile="/snap/docker/current/bin/docker-init"
+  [ -x "$Initbinaryfile" ]                                      || Initbinaryfile="/snap/docker/current/usr/bin/docker-init"
+  Initbinaryfile="$(myrealpath "$Initbinaryfile" 2>/dev/null ||:)"
+  [ -x "$Initbinaryfile" ]                                      || Initbinaryfile=""
+  [ -z "$Initbinaryfile" ] && {
     note "Option --init=$Initsystem: Did not find a tini container init system.
   Please install catatonit or tini-static.
   $Wikipackagesimage"
@@ -5787,7 +5793,7 @@ check_containeruser() {         # check container user (also option --user)
   return 0
 }
 create_backendcommand() {       ### create command to run docker|podman|nerdctl ###
-  local Line= Memory Tini= Grouplist=
+  local Line= Memory Initcommand= Grouplist=
 
   case "$Backend" in
     docker|podman|nerdctl)
@@ -6017,15 +6023,15 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
       esac
     ;;
     tini)
-      Tini="$Tinicontainerpath --"
+      Initcommand="$Initcontainerpath --"
       case "$Backend" in
         docker|podman|nerdctl)
           Backendcommand="$Backendcommand \\
-  --mount $(convertpath mount "$Tinibinaryfile:ro" "$Tinicontainerpath")"
+  --mount $(convertpath mount "$Initbinaryfile:ro" "$Initcontainerpath")"
         ;;
         proot)
           Backendcommand="$Backendcommand \\
-  --bind=$Tinibinaryfile:$Tinicontainerpath"
+  --bind=$Initbinaryfile:$Initcontainerpath"
         ;;
       esac
     ;;
@@ -6398,7 +6404,7 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
         no)
           case "$Backend" in
             docker|podman|nerdctl)
-              Backendcommand="$Backendcommand $Imagename $Tini /bin/sh - $(convertpath share "$Containerrc")"      # start_container runs containerrootrc with 'docker exec'
+              Backendcommand="$Backendcommand $Imagename $Initcommand /bin/sh - $(convertpath share "$Containerrc")"      # start_container runs containerrootrc with 'docker exec'
             ;;
             proot)
               Backendcommand="$Backendcommand /bin/sh - $(convertpath share "$Containerrc")"
@@ -6408,7 +6414,7 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
         yes)
           case "$Backend" in
             docker|podman|nerdctl)
-              Backendcommand="$Backendcommand $Imagename $Tini /bin/sh - $(convertpath share "$Containerrootrc")"  # containerrootrc runs containerrc
+              Backendcommand="$Backendcommand $Imagename $Initcommand /bin/sh - $(convertpath share "$Containerrootrc")"  # containerrootrc runs containerrc
             ;;
             proot)
               Backendcommand="$Backendcommand /bin/sh - $(convertpath share "$Containerrootrc")"
@@ -6421,7 +6427,7 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
       case "$Backend" in
         docker|podman|nerdctl)
           case "$Initsystem" in
-            tini) Backendcommand="$Backendcommand $Imagename $Tinicontainerpath $Containercommand" ;;
+            tini) Backendcommand="$Backendcommand $Imagename $Initcommand $Containercommand" ;;
             *) Backendcommand="$Backendcommand $Imagename $Containercommand" ;;
           esac
         ;;
@@ -6557,12 +6563,12 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
   case "$Initsystem" in
     none|dockerinit) ;;
     tini)
-      check_tini && {
+      check_smallinit && {
         case "$Runtime" in
           kata-runtime)
             # avoid sharing same file that might be shared with runc already.
-            cp -u "$Tinibinaryfile"  "$Localsharedir/tini-static-kata"
-            Tinibinaryfile="$Localsharedir/tini-static-kata"
+            cp -u "$Initbinaryfile" "$Localsharedir/init-kata"
+            Initbinaryfile="$Localsharedir/init-kata"
           ;;
         esac
       } || {
@@ -6574,8 +6580,8 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
   Please install catatonit to provide a container init system.
   $Wikipackagesimage"
       }
-      verbose "--init: Found init binary: ${Tinibinaryfile:-(none)}"
-      [ "$Tinibinaryfile" ] && storeinfo "tini=$Tinibinaryfile"
+      verbose "--init: Found init binary: ${Initbinaryfile:-(none)}"
+      [ "$Initbinaryfile" ] && storeinfo "tini=$Initbinaryfile"
     ;;
     systemd)
       Stopsignal="SIGRTMIN+3"
@@ -6634,7 +6640,7 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
   case "$Backend" in
     host)
       [ "$Initsystem" = "tini" ] && {
-        Containerentrypoint="$Tinibinaryfile --"
+        Containerentrypoint="$Initbinaryfile --"
         store_runoption env "TINI_SUBREAPER=1"
       }
     ;;
@@ -6871,8 +6877,8 @@ exec 1>&5 2>&6
       ;;
       tini)
         case "$Backend" in
-          proot)                 echo "exec env TINI_SUBREAPER=1 '$Tinicontainerpath' /bin/sh $(convertpath share "$Containerrc")" ;;
-          docker|podman|nerdctl) echo "exec '$Tinicontainerpath' -- /usr/local/bin/x11docker-agetty" ;;
+          proot)                 echo "exec env TINI_SUBREAPER=1 '$Initcontainerpath' -- /bin/sh $(convertpath share "$Containerrc")" ;;
+          docker|podman|nerdctl) echo "exec '$Initcontainerpath' -- /usr/local/bin/x11docker-agetty" ;;
         esac
       ;;
       sysvinit)
@@ -10852,8 +10858,8 @@ declare_variables() {           # declare global variables
   Initsystem="tini"                               # --init: Init system in container
   Sharecgroup="no"                                # --sharecgroup, --init=systemd: share /sys/fs/cgroup. Also needed for elogind
   Sharehostdbus="no"                              # --hostdbus: Connect to DBus user daemon on host
-  Tinibinaryfile=""                               # --init=tini (default): Binary of tini; either /usr/bin/docker-exec or provided by user in [...]/share/x11docker
-  Tinicontainerpath="/usr/local/bin/init"         # --init=tini: Path of tini (or catatonit) in container
+  Initbinaryfile=""                               # --init=tini (default): Binary of tini; either /usr/bin/docker-exec or provided by user in [...]/share/x11docker
+  Initcontainerpath="/usr/local/bin/init"         # --init=tini: Path of tini (or catatonit) in container
 
   # Custom additional commands
   Runasuser=""                                    # --runasuser: Add container command to containerrc
