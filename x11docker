@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.4.0-beta-7"
+Version="7.4.0-beta-8"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -4441,16 +4441,6 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
       Xcontainercommand="$Xcontainercommand $Xc_user"
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
       Xcontainercommand="$Xcontainercommand $Xc_gpu"
-
-#      Xpracontainername="x11docker_X${Newdisplaynumber}_xpraclient_${Cachenumber}"
-#      Xpracontainercommand="$(sed '/--ipc/d ; /--name/d' <<< "$Xcontainercommand")"
-#      Xpracontainercommand="$Xpracontainercommand $Xc_hostx"
-#      Xpracontainercommand="$Xpracontainercommand $Xc_hostwayland"
-#      Xpracontainercommand="$Xpracontainercommand \\
-#  --name $Xpracontainername \\
-#  --ipc=host \\
-#  --uts=host \\
-#  x11docker/xserver"
     ;;
     --xpra-xwayland)
       Xcontainercommand="$Xcontainercommand $Xc_capdrop"
@@ -4570,6 +4560,9 @@ mkdir -p -m 1777 /tmp/.X11-unix
 [ -S /X${Hostdisplaynumber} ] && ln -v -s /X$Hostdisplaynumber /tmp/.X11-unix/X$Hostdisplaynumber
 [ -S /${Hostwaylandsocket} ]  && ln -v -s /$Hostwaylandsocket \$XDG_RUNTIME_DIR/$Hostwaylandsocket
 ls -la /tmp/.X11-unix
+
+# --init
+cp /usr/bin/catatonit $Sharefolder/catatonit
 " >> "$Xcontainerrc"
 
 echo '
@@ -5493,6 +5486,26 @@ check_runtime() {               # option --runtime
 
   return 0
 }
+check_tini() {
+  grep -q "catatonit" <<< "$Xcontainertools" && Tinibinaryfile="$Sharefolder/catatonit" && return 0
+  [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="$(command -v catatonit ||:)"
+  [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="/usr/libexec/catatonit/catatonit"
+  [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="$(command -v docker-init ||:)"
+  [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="/usr/local/share/x11docker/tini-static"
+  [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="/usr/bin/tini-static"
+  [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="$Localsharedir/tini-static"
+  [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="/snap/docker/current/bin/docker-init"
+  [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="/snap/docker/current/usr/bin/docker-init"
+  Tinibinaryfile="$(myrealpath "$Tinibinaryfile" 2>/dev/null ||:)"
+  [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile=""
+  [ -z "$Tinibinaryfile" ] && {
+    note "Option --init=$Initsystem: Did not find a tini container init system.
+  Please install catatonit or tini-static.
+  $Wikipackagesimage"
+    return 1
+  }
+  return 0
+}
 check_cgroup() {                # check [and create] cgroup mountpoint for systemd or elogind
   local Remounted Needcgroup
 
@@ -6407,7 +6420,10 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
     no)
       case "$Backend" in
         docker|podman|nerdctl)
-          Backendcommand="$Backendcommand $Imagename $Containercommand"
+          case "$Initsystem" in
+            tini) Backendcommand="$Backendcommand $Imagename $Tinicontainerpath $Containercommand" ;;
+            *) Backendcommand="$Backendcommand $Imagename $Containercommand" ;;
+          esac
         ;;
         proot)
           Backendcommand="$Backendcommand $Containercommand"
@@ -6541,17 +6557,7 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
   case "$Initsystem" in
     none|dockerinit) ;;
     tini)
-      Tinibinaryfile="$(command -v catatonit ||:)"
-      [ -z "$Tinibinaryfile" ]                                      && Tinibinaryfile="/usr/libexec/catatonit/catatonit"
-      [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="$(command -v docker-init ||:)"
-      [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="/snap/docker/current/bin/docker-init"
-      [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile="/snap/docker/current/usr/bin/docker-init"
-      [ -x "/usr/bin/tini-static" ]                                 && Tinibinaryfile="/usr/bin/tini-static"
-      [ -x "/usr/local/share/x11docker/tini-static" ]               && Tinibinaryfile="/usr/local/share/x11docker/tini-static"
-      [ -x "$Localsharedir/tini-static" ]                           && Tinibinaryfile="$Localsharedir/tini-static"
-      Tinibinaryfile="$(myrealpath "$Tinibinaryfile" 2>/dev/null ||:)"
-      [ -x "$Tinibinaryfile" ]                                      || Tinibinaryfile=""
-      [ "$Tinibinaryfile" ] && {
+      check_tini && {
         case "$Runtime" in
           kata-runtime)
             # avoid sharing same file that might be shared with runc already.
@@ -6563,12 +6569,10 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
         Initsystem="none"
       }
       [ "$Initsystem" = "none" ] && {  ### FIXME --backend=host,proot
-        note "Did not find container init system 'tini' or 'catatonit'.
-  This is a bug in your distributions docker or podman package.
-  x11docker uses container init for clean process handling
-  and fast container shutdown.
-
-  Please install catatonit to provide a container init system."
+        note "--init=$Initsystem: Did not find container init system
+  'tini' or 'catatonit'. It should be provided by docker or podman package.
+  Please install catatonit to provide a container init system.
+  $Wikipackagesimage"
       }
       verbose "--init: Found init binary: ${Tinibinaryfile:-(none)}"
       [ "$Tinibinaryfile" ] && storeinfo "tini=$Tinibinaryfile"
@@ -10017,23 +10021,12 @@ check_options_interferences() { # check multiple option interferences, change se
       [ "$Langwunsch" ] && store_runoption env "LANG=$Langwunsch"
 
       case "$Initsystem" in
-        none) ;;
-        tini|dockerinit) 
-          case "$Backend" in
-            docker|nerdctl)
-              Initsystem="dockerinit"
-            ;;
-            podman)
-              Initsystem="none"
-              note "Option --no-setup --backend=podman: Running with --init=none
-  to allow regular terminal emulator behaviour in container.
-  Terminating x11docker with CTRL-C will fail."
-            ;;
-          esac
-        ;;
-        *) note "Option --no-setup: Option --init=$Initsystem is not supported.
+        none|tini|dockerinit) ;;
+        *) 
+          note "Option --no-setup: Option --init=$Initsystem is not supported.
   Fallback: Setting --init=tini"
-          Initsystem="dockerinit"
+          check_fallback
+          Initsystem="tini"
         ;;
       esac
 

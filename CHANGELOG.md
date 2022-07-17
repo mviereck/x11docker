@@ -20,7 +20,9 @@ Project website: https://github.com/mviereck/x11docker
  - `--user`: Fix in setup of `/etc/gshadow`.
  - `--xc`: Provide X unix socket to host with `socat` instead of `ln`.
    GTK3 application failed to access X through a soft link.
- `--shell --no-setup`: Set environment variable `SHELL`.
+ - `--shell --no-setup`: Set environment variable `SHELL`.
+   [(457)](https://github.com/mviereck/x11docker/issues/457)
+ - `--no-setup`: Share init binary from host instead of using `--init`.
    [(457)](https://github.com/mviereck/x11docker/issues/457)
 ### Deprecated
  - `--no-auth`: Use `--xauth=no` instead.
