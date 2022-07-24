@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.4.0-beta-8"
+Version="7.4.0-beta-9"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups.
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -240,8 +240,8 @@ X and Wayland special configuration:
      --xhost [=STR]    Set \"xhost STR\" on new X server (see 'man xhost').
                        Without STR will set:  +SI:localuser:\$USER
                        (Use with care. '--xhost=+' allows access for everyone).
-     --xoverip [=yes|no|socat] Connect to X over TCP network. For special setups
-                       only, usually only enabled by x11docker itself.
+     --xoverip [=yes|no|socat|listentcp] Connect to X over TCP network. Special
+                       setups only, usually only enabled by x11docker itself.
      --xauth [=yes|trusted|untrusted|no] Configure X cookie authentication.
                        Possible arguments:
                          yes|trusted: Enable cookie authentication with trusted
@@ -2463,15 +2463,22 @@ check_newxenv()  {              # find free display
   echo "$Newdisplaynumber" >> "$Numbersinusefile"
 
   # --xoverip
-  [ "$Xoverip" ] || {
+  [ -z "$Xoverip" ] && {
     case "$Mobyvm" in
       yes)
+        Xoverip="listentcp"
+      ;;
+    esac
+    case "$Runtime" in
+      kata-runtime)
+        note "Option --runtime=$Runtime works only with X over IP.
+  Enabling option --xoverip."
         Xoverip="yes"
       ;;
     esac
     case "$Xserver" in
       --xwin|--runx)
-        Xoverip="yes"
+        Xoverip="listentcp"
         [ "$Network" = "none" ] && {
           note "Option $Xserver needs network access.
   Enabling option -I, --network."
@@ -2480,21 +2487,28 @@ check_newxenv()  {              # find free display
         }
       ;;
       --hostdisplay)
-        [ "$Sharegpu" = "no" ] && xtool --check --quiet "socat" && {
-          [ "$Xcontainer" = "yes" ] && [ "$Network" = "none" ] && {
-            case "$Xoverip" in
-              ""|socat)
-                Xoverip="socat"
-              ;;
-            esac
-          }
-        }
-        [ -n "$(cut -d: -f1 <<< "$Hostdisplay")" ] && Xoverip="yes" || Xoverip="${Xoverip:-no}"
+        [ -n "$(cut -d: -f1 <<< "$Hostdisplay")" ] && Xoverip="listentcp"
       ;;
     esac
   }
   case "$Xoverip" in
-    yes|socat)
+    yes)
+      case "$Xserver" in
+        --hostdisplay)
+          grep -q -- '^:' <<< "$Hostdisplay" && Xoverip="socat" || Xoverip="listentcp"
+        ;;
+        --xwayland|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xpra2-xwayland)
+          Xoverip="socat"
+        ;;
+        *)
+          Xoverip="listentcp"
+        ;;
+      esac
+    ;;
+  esac
+  Xoverip="${Xoverip:-no}"
+  case "$Xoverip" in
+    socat|listentcp)
       case "$Backend" in
         docker|podman|nerdctl)
           case "$Xcontainer" in
@@ -2516,13 +2530,12 @@ check_newxenv()  {              # find free display
   Xcnetworkname="x11docker_X${Newdisplaynumber}_network_${Cachenumber}"
 
   ###
-  Xoverip="${Xoverip:-no}"
 
   # set $Newdisplay (DISPLAY of container) and $Newxsocket
   case "$Xserver" in
     --hostdisplay)
       case "$Xoverip" in
-        yes)
+        listentcp)
           [ "$(cut -c1 <<< "$Hostdisplay")" = ":" ] && Newdisplay="${Hostip}${Hostdisplay}" || Newdisplay="$Hostdisplay"  ;;
         no)
           Newdisplay="$Hostdisplay"
@@ -2545,7 +2558,7 @@ check_newxenv()  {              # find free display
     ;;
     *)
       case "$Xoverip" in
-        yes|socat)
+        socat|listentcp)
           case "$Xcontainer" in
             yes) Newdisplay="XCONTAINERIP:$Newdisplaynumber" ;;
             no)  Newdisplay="$Hostip:$Newdisplaynumber" ;;
@@ -3313,6 +3326,15 @@ check_xdepends() {              # check dependencies on host for X server option
         ;;
       esac
     ;;
+    listentcp)
+      case "${1:-}" in
+        --xephyr|--xorg|--nxagent|--xpra|--xpra2|--xvfb|--xwin|--runx) ;;
+        *)
+          $Message "${1:-} does not support --xoverip=listentcp."
+          Return=1
+        ;;
+      esac
+    ;;
   esac
 
   Return="${Return:-"0"}"
@@ -3400,31 +3422,6 @@ check_xserver() {               # check chosen X server, auto-choose X server
       esac
     }
   }
-
-  # X over TCP
-  case "$Xoverip" in
-    yes)
-      case "$Xserver" in
-        --hostdisplay|--xwayland|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xpra2-xwayland)
-          Xoverip="socat"
-        ;;
-      esac
-    ;;
-    "")
-      case "$Xserver" in
-        --weston|--kwin|--hostwayland) ;;
-        *)
-          case "$Runtime" in
-            kata-runtime)
-              note "Option --runtime=$Runtime works only with X over IP.
-  Enabling option --xoverip."
-              Xoverip="${Xoverip:-yes}"
-            ;;
-          esac
-        ;;
-      esac
-    ;;
-  esac
 
   case "$Sharegpu" in
     yes|direct)
@@ -3607,7 +3604,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   [ "$Xcontainer" = "yes" ] && [ "$Xcontainerbackend" = "nerdctl" ]  && Usemitshm="no"
   [ "$Shareipc" = "host" ]                                           && Usemitshm="yes"
   [ "$Xcontainer" = "yes" ] && [ -n "$Newxvt" ]                      && Usemitshm="no"
-  [ "$Xcontainer" = "no" ] &&[ "$Shareipc" != "host" ]               && Usemitshm="no"
+  [ "$Xcontainer" = "no" ]  && [ "$Shareipc" != "host" ]             && Usemitshm="no"
   [ "$Containeruser" != "$Hostuser" ]                                && Usemitshm="no"
   [ "$Xoverip" != "no" ]                                             && Usemitshm="no"
   case "$Runtime" in
@@ -3695,7 +3692,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   -ac"
       case "$Xoverip" in
         socat) ;; ### FIXME
-        yes) warning "Option --xauth=no: SECURITY RISK!
+        listentcp) warning "Option --xauth=no: SECURITY RISK!
   Allowing access to new X server for everyone.
   Your X server is accessible over TCP network without any restriction.
   That can be abused to take control over your system." ;;
@@ -3712,7 +3709,7 @@ create_xcommand() {             ### create command to start X server and/or Wayl
 
   # X over IP/TCP
   case "$Xoverip" in
-    yes)
+    listentcp)
       case "$Xserver" in
         --nxagent) ;;
         *) Xserveroptions="$Xserveroptions \\
@@ -4336,7 +4333,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
       Xcontainercommand="$Xcontainercommand \\
   --network=none"
     ;;
-    yes|socat)
+    listentcp|socat)
       [ -n "$Xcnetworkid" ] && {
         Xcontainercommand="$Xcontainercommand \\
   --network=$Xcnetworkname"
@@ -5018,14 +5015,14 @@ $(xtool "xhost 2>&1" )"
   }
   return 0
 }
-setup_xcnetwork() {       # --xoverip --xc: start internal network between X container and command container
+setup_xcnetwork() {             # --xoverip --xc: start internal network between X container and command container
   local Internal
   [ "$Backend" = "$Xcontainerbackend" ] && [ "$Xcrootless" = "$Backendrootless" ] || return 1
   case "${1:-}" in
     "")
       [ "$Xcontainer" = "yes" ] && {
         case "$Xoverip" in
-          yes|socat)
+          yes|listentcp|socat)
             case "$Network" in
               none) Internal="--internal" ;;
               ""|bridge) Internal="";;
@@ -7149,6 +7146,13 @@ Storeinfofile=\"$(convertpath share "$Storeinfofile")\"
 Timetosaygoodbyefile=$(convertpath share "$Timetosaygoodbyefile")
 
 [ -n \"\$DBUS_SESSION_BUS_ADDRESS\" ] && dbus-update-activation-environment --verbose --systemd DBUS_SESSION_BUS_ADDRESS DISPLAY XAUTHORITY WAYLAND_DISPLAY XDG_RUNTIME_DIR >$(convertpath share "$Containerlogfile") 2>&1
+"
+    echo "
+while rocknroll; do
+  [ -e '$(convertpath share $Sharefolder/xhostready)' ] && break
+  sleep 0.1
+  verbose 'cmdrc(): Waiting for /x11docker/xhostread'
+done
 "
 
     # --runasuser commands added here
@@ -9538,7 +9542,7 @@ check_options_arguments() {     # check for [likely] valid arguments
 
   # --xoverip
   case "$Xoverip" in
-    yes|no|socat|"") ;;
+    yes|no|listentcp|socat|"") ;;
     *)
       note "Option --xoverip: Unknown argument: $Xoverip
   Fallback: Disabling option --xoverip"
@@ -9611,7 +9615,7 @@ check_options_interferences() { # check multiple option interferences, change se
     *)
       xtool --check xauth || {
         case "$Xoverip" in
-          yes|socat)
+          yes|socat|listentcp)
             [ -z "$Hostxauthority" ] && [ "$Xserver" = "--hostdisplay" ] && Message="warning" || Message="error"
             $Message "Command 'xauth' not found.
       SECURITY RISK!
@@ -9932,7 +9936,7 @@ check_options_interferences() { # check multiple option interferences, change se
 
   # --gpu
   case "$Xoverip" in
-    yes)
+    yes|listentcp)
       case "$Sharegpu" in
         virgl|iglx) ;;
         yes)
@@ -11225,13 +11229,15 @@ $(nl -ba <$Cmdrc)"
     ### FIXME experimental
     # --xoverip -listen tcp: Use xhost instead of XAUTHORITY
     case "$Xoverip" in
-      yes)
+      listentcp)
+        debugnote "--xoverip=listentcp: Replacing cookie authentication with host based authentication."
         xtool "xhost >/dev/null ; env DISPLAY=:$Newdisplaynumber XAUTHORITY=$Xclientcookie xhost +INET:$Containerip"
 #        xtool "xhost >/dev/null ; env DISPLAY=:$Newdisplaynumber XAUTHORITY=$Xclientcookie xhost +SI:hostname:$Containername"
 #        xtool "xhost >/dev/null ; env DISPLAY=:$Newdisplaynumber XAUTHORITY=$Xclientcookie xhost -"
         truncate -s0 $Xclientcookie
       ;;
     esac
+    touch $Sharefolder/xhostready
 
     # watch container
     case "$Winsubsystem" in

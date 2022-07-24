@@ -11,9 +11,8 @@ Project website: https://github.com/mviereck/x11docker
  - `--xauth [=yes|trusted|untrusted|no]`: New option to configure X cookie.
  - `--printcheck`: New option to show X server dependency check messages.
 ### Changed
- - `--xoverip`: New optional arguments `yes|no|socat`.
-   `socat` allows X over TCP with `--hostdisplay` and Xwayland related options.
- - `--hostdisplay`: Allow `--xoverip=socat`.
+ - `--xoverip`: New optional arguments `yes|no|socat|listentcp`.
+   `socat` allows X over TCP with `--hostdisplay` and `Xwayland` related options.
  - `--gpu`: changed X dependency checks.
  - `--hostdisplay --gpu --xc=no`: Do not enable `--ipc=host` automatically.
 ### Fixed
