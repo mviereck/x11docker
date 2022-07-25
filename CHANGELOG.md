@@ -25,6 +25,7 @@ Project website: https://github.com/mviereck/x11docker
    [(457)](https://github.com/mviereck/x11docker/issues/457)
 ### Deprecated
  - `--no-auth`: Use `--xauth=no` instead.
+ - `--enforce-i`: Create group `weston-launch` instead and add your user to it.
 
 ## [7.3.2](https://github.com/mviereck/x11docker/releases/tag/v7.3.2) - 2022-07-08
 ### Added
