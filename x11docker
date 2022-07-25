@@ -1949,7 +1949,7 @@ clean_xhost() {                 # option --clean-xhost: disable xhost policies o
   an authentication cookie in \$XAUTHORITY.
   Host applications started after xhost cleanup might fail to start."
   echo "Option --clean-xhost:" >> "$Xinitlogfile"
-  DISPLAY="$Hostdisplay" XAUTHORITY="$Hostxauthority" disable_xhost >> "$Xinitlogfile" 2>&1
+  disable_xhost "DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority" >> "$Xinitlogfile" 2>&1
 }
 create_clipboardrc() {          # option --clipboard: create shareclipboard script
   echo "#! /usr/bin/env bash
@@ -4666,6 +4666,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   declare -f cookiebaker
   declare -f strlenhex
   declare -f pspid
+  declare -f disable_xhost
   declare -f rocknroll
   declare -f storeinfo
   declare -f saygoodbye
@@ -4683,24 +4684,9 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
       echo           "Unpriv='$Unpriv'"
     ;;
   esac
-  echo               "disable_xhost() {               # remove any access to X server granted by xhost"
-  echo               "  local Line="
-  echo               "  xhost 2>&1 | tail -n +2  /dev/stdin | while read -r Line ; do  # read all but the first line (header)"
-  echo               "    echo \"xhost: Removing entry $Line\""
-  echo               "    xhost -\"$Line\"                                # disable every entry"
-  echo               "  done"
-  echo               "  xhost -                                         # enable access control"
-  echo               "  [ \"\$(xhost 2>&1 | wc -l)\" -gt '1' ] && {"
-  echo               "    warning \"Remaining xhost permissions found on display \${DISPLAY:-}"
-  echo               "\$(xhost 2>&1)\""
-  echo               "    return 1"
-  echo               "  }"
-  echo               "  xhost 2>&1 | grep 'access control disabled' && {"
-  echo               "    warning \"Failed to restrict xhost permissions."
-  echo               "  Access to display \${DISPLAY:-} is allowed for everyone.\""
-  echo               "    return 1"
-  echo               "  }"
-  echo               "  return 0"
+  echo               "xtool() {"
+  echo               '  [ "${1:-}" = "--check" ] && command -v "${2:-}" && return'
+  echo               '  eval ${1:-}'
   echo               "}"
   echo               "getscreensize() {"
   echo               "  CurrentXaxis=\"\$(xrandr | grep primary | cut -d' ' -f4 | cut -dx -f1 )\""
@@ -5063,21 +5049,22 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   return 0
 }
 disable_xhost() {               # remove any access to X server granted by xhost
-  local Line=
+  local Line= Environment
+  Environment="${1:-"DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY"}"
   xtool --check xhost || return 1
-  xtool "xhost 2>&1 | tail -n +2  /dev/stdin" | while read -r Line ; do  # read all but the first line (header)
+  xtool "env $Environment xhost 2>&1 | tail -n +2  /dev/stdin" | while read -r Line ; do  # read all but the first line (header)
     debugnote "xhost: Removing entry $Line"
-    xtool "xhost -'$Line'"                                # disable every entry
+    xtool "env $Environment xhost -'$Line'"                                # disable every entry
   done
-  xtool "xhost -"                                         # enable access control
-  [ "$(xtool "xhost 2>&1 | wc -l")" -gt "1" ] && {
+  xtool "env $Environment xhost -"                                         # enable access control
+  [ "$(xtool "env $Environment xhost 2>&1 | wc -l")" -gt "1" ] && {
     warning "Remaining xhost permissions found on display ${DISPLAY:-}
-$(xtool "xhost 2>&1" )"
+$(xtool "env $Environment xhost 2>&1" )"
     return 1
   }
-  xtool "xhost 2>&1" | grep "access control disabled" && {
+  xtool "env $Environment xhost 2>&1" | grep -q "access control disabled" && {
     warning "Failed to restrict xhost permissions.
-  Access to display ${DISPLAY:-} is allowed for everyone."
+  Access to display ${1:-} is allowed for everyone."
     return 1
   }
   return 0
@@ -5154,6 +5141,9 @@ xtool() {                       # run X tool command in X container if available
     --check)
       Check="yes"
       shift
+      case "$Tool" in
+        env) return 0 ;;
+      esac
     ;;
     --nocheck)
       Check="no"
@@ -5204,7 +5194,7 @@ xtool() {                       # run X tool command in X container if available
   case "$Xcontainer" in
     yes)
       Usexcontainer="yes"
-      echo "$Xcontainertools" | grep -w -q "$Tool" || {
+      echo "$Xcontainertools env" | grep -w -q "$Tool" || {
         $Message "Option --xc: Please update image x11docker/xserver.
   Did not find command '$Tool' in image. Will try to run '$Tool' on host"
         Usexcontainer="no"
@@ -7218,7 +7208,7 @@ Timetosaygoodbyefile=$(convertpath share "$Timetosaygoodbyefile")
 while rocknroll; do
   [ -e '$(convertpath share $Sharefolder/xhostready)' ] && break
   sleep 0.1
-  verbose 'cmdrc(): Waiting for /x11docker/xhostread'
+  verbose 'cmdrc(): Waiting for /x11docker/xhostready'
 done
 "
 
@@ -11268,7 +11258,11 @@ $(nl -ba <$Cmdrc)"
       ;;
     esac
 
-    rocknroll || return 1
+    rocknroll || {
+      saygoodbye main-runshell
+      return 1
+    }
+
     # xinit(?) sets variables to new display for host applications, too. This undoes it.
     unpriv "dbus-update-activation-environment --systemd DISPLAY='$DISPLAY' XAUTHORITY='$XAUTHORITY'" >> "$Xinitlogfile" 2>&1 ||:
 
@@ -11283,15 +11277,18 @@ $(nl -ba <$Cmdrc)"
     Pid1pid="$(storeinfo dump pid1pid)"
     Containerip="$(storeinfo dump containerip)"
 
-    ### FIXME experimental
     # --xoverip -listen tcp: Use xhost instead of XAUTHORITY
     case "$Xoverip" in
       listentcp)
-        debugnote "--xoverip=listentcp: Replacing cookie authentication with host based authentication."
-        xtool "xhost >/dev/null ; env DISPLAY=:$Newdisplaynumber XAUTHORITY=$Xclientcookie xhost +INET:$Containerip"
-#        xtool "xhost >/dev/null ; env DISPLAY=:$Newdisplaynumber XAUTHORITY=$Xclientcookie xhost +SI:hostname:$Containername"
-#        xtool "xhost >/dev/null ; env DISPLAY=:$Newdisplaynumber XAUTHORITY=$Xclientcookie xhost -"
-        truncate -s0 $Xclientcookie
+        verbose "--xoverip=listentcp: Replacing cookie authentication with host based authentication."
+        xtool --check "xhost" && {
+          xtool "env DISPLAY=:$Newdisplaynumber XAUTHORITY=$Xclientcookie xhost +INET:$Containerip" >>$Xinitlogfile 2>&1
+          truncate -s0 $Xclientcookie
+        } || {
+          warning "--xoverip=$Xoverip: Failed to set up xhost access
+  instead of using a cookie. If the container shares the cookie with others,
+  others might be able to access X server $Xserver."
+        }
       ;;
     esac
     touch $Sharefolder/xhostready
@@ -11349,17 +11346,16 @@ $(cat $Storepidfile)"
     storeinfo "x11docker=ready"
   } <&0 & storepid $! containershell
 
+  rocknroll || return 1
   ## Create helper script xinitrc to set up X
   # xinitrc is started by xinit and does some setup within new X server.
   # Main job: create cookie, check xhost, set keyboard layout.
-  # Optional jobs: run window manager, run xfishtank, run host command, share clipboard, scale/rotate --xorg, create set of screen resolutions.
-  rocknroll && {
-    create_xinitrc >> "$Xinitrc"
-    verbose "Generated xinitrc:
+  # Optional jobs: run window manager, run xfishtank, share clipboard, scale/rotate --xorg, create set of screen resolutions.
+  create_xinitrc >> "$Xinitrc"
+  verbose "Generated xinitrc:
 $(nl -ba <$Xinitrc)"
     [ -s "$Westonini" ] && verbose "Generated weston.ini:
 $(nl -ba <$Westonini)"
-  }
 
   case "$Xserver" in
     --xpra*)
