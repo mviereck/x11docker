@@ -906,6 +906,61 @@ check_parent_sshd() {           # check whether pid $1 runs in SSH session
   done
   return "${Return:-1}"
 }
+cookiebaker() {                 # create an X cookie without xauth
+  # $1  DISPLAY
+  # Write directly to file, bash cannot store nullbytes in a string.
+  # Based on https://stackoverflow.com/questions/70932880/what-is-the-internal-format-of-xauthority-file
+  # and chapter 6.2.5 in https://refspecs.linuxfoundation.org/LSB_5.0.0/LSB-Desktop-generic/LSB-Desktop-generic/libx11-ddefs.html
+
+  local Display
+  local Address Addresslength Displaynumber Displaynumberlength Data Part Code
+
+  Display="${1:-$DISPLAY}"
+
+  Address="$(printf "%s" "$Display" | cut -d: -f1)"
+  case "$Address" in
+    "")
+      Address="$(hostname)/unix"
+      Addresslength="$(strlenhex "$Address")"
+    ;;
+    *.*.*.*)
+      Data="$Address"
+      Address=""
+      while [ "$(printf "%s" "$Data" | wc -c)" -gt 0 ]; do
+        Part="$( printf "%s" "$Data" | cut -d. -f1)"
+        Address="${Address}\x$(printf "%x" "$Part")"
+        Data="$( printf "%s" "$Data" | cut -s -d. -f2-)"
+      done
+      Addresslength="4"
+    ;;
+    *)
+      Addresslength="$(strlenhex "$Address")"
+    ;;
+  esac
+
+  Displaynumber="$(printf "%s" "$Display" | cut -d: -f2)"
+  Displaynumber="$(printf "%s" "$Displaynumber" | cut -d. -f1)"
+  Displaynumberlength="$(strlenhex "$Displaynumber")"
+
+  Data="$(makecookie)"
+  while [ "$(printf "%s" "$Data" | wc -c)" -gt 0 ]; do
+    Part="$( printf "%s" "$Data" | cut -c1-2)"
+    Code="${Code}\x$Part"
+    Data="$( printf "%s" "$Data" | cut -c3-)"
+  done
+
+  awk "BEGIN{
+    printf \"\xFF\xFF\"
+    printf \"\x00\x${Addresslength}\" 
+    printf \"${Address}\"
+    printf \"\x00\x${Displaynumberlength}\" 
+    printf \"${Displaynumber}\"
+    printf \"\x00\x12\"
+    printf \"MIT-MAGIC-COOKIE-1\"
+    printf \"\x00\x10\"
+    printf \"${Code}\"
+  }"
+}
 devicelist_gpu() {              # print list of GPU devices
   find /dev/dri/* /dev/nvidia* /dev/vga_arbiter /dev/nvhost* /dev/nvmap -maxdepth 0 -type c 2>/dev/null ||:
 }
@@ -1052,6 +1107,9 @@ rmcr() {                        # remove carriage return to translate DOS/Window
     "") sed    "s/$(printf "\r")//g" ;;
     *)  sed -i "s/$(printf "\r")//g"  "${1:-}" ;;
   esac
+}
+strlenhex() {                   # print byte length of string $1 as hex value
+  printf '%x' "$(printf "%s" "${1:-}" | wc -c)"
 }
 timestamp() {                   # print HH:MM:SS,NNN
   date +%T,%N | cut -c1-12
@@ -4607,6 +4665,8 @@ exit 0
 }
 create_xinitrc() {              # create xinitrc: set up X environment, create cookies
   echo "#! /bin/sh"
+  declare -f cookiebaker
+  declare -f strlenhex
   declare -f pspid
   declare -f rocknroll
   declare -f storeinfo
@@ -4692,7 +4752,6 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
         echo         'debugnote "xinitrc: Option --runx: Using cookie: $XAUTHORITY"'
         echo         "cp -T \"\$XAUTHORITY\" '$Xclientcookie'"
         echo         "cp -T \"\$XAUTHORITY\" '$Xservercookie'"
-        #echo         "debugnote \"xinitrc: Cookie: \$(xauth -i -f $Xclientcookie list 2>&1)\""
       }
       echo           "export $Newxenv"
     ;;
@@ -4737,40 +4796,46 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
             echo     "Trusted=untrusted"
           ;;
         esac
-        case "$Runsoverssh" in
-          no)
-            echo     "echo \"Requesting \$Trusted cookie from X server\""
-            echo     "xauth -v -n -i -f $Xclientcookie generate $Newdisplay . \$Trusted timeout 3600 && sed -i /\$Hostcookie/d $Xclientcookie"
-          ;;
-          yes)
-            echo     "verbose 'Cannot use cookies created over SSH. Will bake one myself.'"
-          ;;
-        esac
+        echo         "echo \"Requesting \$Trusted cookie from X server\""
+        echo         "xauth -v -n -i -f $Xclientcookie generate $Newdisplay . \$Trusted timeout 3600 && sed -i /\$Hostcookie/d $Xclientcookie"
         echo         ""
         echo         "[ -s '$Xclientcookie' ] || { "
-        echo         "  [ '\$Trusted' = 'untrusted' ] && note 'Failed to create untrusted cookie.
+            echo     "  :"
+        case "$Xauthentication" in
+          trusted|untrusted)
+            echo     "  error 'Failed to create $Xauthentication cookie.
   Maybe your X server misses extension SECURITY.'"
+          ;;
+        esac
         echo         "}"
         echo         "[ -s '$Xclientcookie' ] || { "
         echo         "  # still no cookie? try to create one without extension security"
-        echo         "  debugnote 'xinitrc: Failed to retrieve trusted cookie from X server. Will bake one myself.'"
-        echo         "  echo 'Failed to retrieve trusted cookie from X server. Will bake one myself.'"
+        echo         "  echo 'Failed to retrieve trusted cookie from X server. Will bake one directly with xauth'"
         echo         "  xauth -v -n -i -f $Xclientcookie add :$Newdisplaynumber . $(makecookie)"
-        echo         "  ls -l $Xclientcookie"
         echo         "}"
-        echo         ""
-        echo         "# Prepare cookie with localhost identification disabled by ffff, needed if X socket is shared. ffff means 'familiy wild'"
-        echo         "Cookie=\"\$(xauth -n -i -f $Xclientcookie nlist | sed -e 's/^..../ffff/')\""
-        #echo         "truncate -s0 $Xclientcookie"
-        echo         "echo \"\$Cookie\" | xauth -v -n -i -f $Xclientcookie nmerge -"
-        echo         ""
-        #echo         "debugnote \"xinitrc: Created cookie: \$(xauth -n -i -f $Xclientcookie list 2>&1)\""
+        echo         "[ -s '$Xclientcookie' ] && {"
+        echo         "  # Prepare cookie with localhost identification disabled by ffff, needed if X socket is shared. ffff means 'familiy wild'"
+        echo         "  Cookie=\"\$(xauth -n -i -f $Xclientcookie nlist | sed -e 's/^..../ffff/')\""
+        echo         "  truncate -s0 $Xclientcookie"
+        echo         "  echo \"\$Cookie\" | xauth -v -n -i -f $Xclientcookie nmerge -"
+        echo         "}"
+        echo         "[ -s '$Xclientcookie' ] || {"
+        echo         "  debugnote 'Failed to create cookie with xauth. Will try custom cookie baker script.'"
+        echo         "  cookiebaker '$Newdisplay' >> $Xclientcookie"
+        echo         "}"
         echo         "ls -l $Xclientcookie"
         echo         "truncate -s0 $Xservercookie"
         echo         "cat $Xclientcookie >> $Xservercookie"
-        echo         "chmod 644 $Xclientcookie"
+        case "$Containeruser" in
+          $Hostuser)
+            echo     "chmod 600 $Xclientcookie"
+          ;;
+          *)
+            echo     "chmod 644 $Xclientcookie"
+          ;;
+        esac
         echo         ""
-        echo         "[ -s '$Xclientcookie' ] || warning 'Cookie creation failed!'"
+        echo         "[ -s '$Xclientcookie' ] || error 'xinitrc(): Option --xauth=$Xauthentication: Cookie creation failed!'"
       }
       echo           "export XAUTHORITY=$Xclientcookie"
       echo           "[ '$Xauthentication' = 'no' ] || [ ! -s '$Xclientcookie' ] && unset XAUTHORITY && warning 'Option --xauth=no: X server $Newdisplay runs without cookie authentication.'"
@@ -4957,7 +5022,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   [ "$Xfishtank" = "yes" ] && echo "xfishtank & storepid \$! xfishtank"
 
   echo               "echo 'xinitrc: xinitrc is ready'"
-  echo               "storeinfo xinitrc=ready"
+  #echo               "storeinfo xinitrc=ready"
   echo               ""
 
   # --clipboard
@@ -8599,7 +8664,7 @@ check_hostxenv() {              # check environment variables for host X display
       xauth -n -i -f "${XAUTHORITY:-}" nlist "$Hostdisplay" 2>/dev/null | sed -e 's/^..../ffff/' | unpriv "xauth -n -i -f '$Hostxauthority' nmerge - 2>/dev/null"
     } || {
       unpriv "cp '${XAUTHORITY:-}' '$Hostxauthority'"
-      debugnote "xauth not found or failed. Cookie not set to ffff."
+      debugnote "check_hostxenv(): xauth not found or failed. Host cookie not set to ffff."
     }
     chown "$Hostuser" "$Hostxauthority"
     chmod 600 "$Hostxauthority"
@@ -9613,30 +9678,9 @@ check_options_interferences() { # check multiple option interferences, change se
     ;;
   esac
 
-  # xauth
+  # --xauth
   [ "$Xauthentication" != "no" ] && case "$Xserver" in
     --tty|--weston|--kwin|--hostwayland) Xauthentication="no" ;;
-    *)
-      xtool --check xauth || {
-        case "$Xoverip" in
-          yes|socat|listentcp)
-            [ -z "$Hostxauthority" ] && [ "$Xserver" = "--hostdisplay" ] && Message="warning" || Message="error"
-            $Message "Command 'xauth' not found.
-      SECURITY RISK!
-  Your X server would be accessible over network without authentication!
-  That could be abused to take control over your system.
-  You can disable cookie authentication with discouraged option --xauth=no."
-          ;;
-          no)
-            warning "Command 'xauth' not found.
-  Securing X access with cookie authentication is not possible.
-  Fallback: Disabling X authentication protocol (option --xauth=no)."
-            check_fallback
-          ;;
-        esac
-        Xauthentication="no"
-      }
-    ;;
   esac
 
   # --xtest
@@ -11217,7 +11261,7 @@ $(nl -ba <$Cmdrc)"
       ;;
     esac
 
-    rocknroll || timetosaygoodbye main
+    rocknroll || return 1
     # xinit(?) sets variables to new display for host applications, too. This undoes it.
     unpriv "dbus-update-activation-environment --systemd DISPLAY='$DISPLAY' XAUTHORITY='$XAUTHORITY'" >> "$Xinitlogfile" 2>&1 ||:
 
@@ -11320,8 +11364,7 @@ $(nl -ba <$Westonini)"
   esac
   rocknroll && [ "$Compositorcommand" ] && start_compositor
   rocknroll && start_xserver
-
-  saygoodbye main
 }
 
 main "$@"
+saygoodbye main
