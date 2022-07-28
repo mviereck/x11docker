@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.4.0-beta-11"
+Version="7.4.0-beta-12"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups. (deprecated)
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -380,7 +380,8 @@ Installation options and cleanup (need root permissions):
      --update-master   Download and install latest master version from github.
      --remove          Remove x11docker from your system. Includes --cleanup.
                        Preserves ~/.local/share/x11docker from option --home.
-     --cleanup         Clean up orphaned containers and cache files.
+     --cleanup         Clean up orphaned containers and cache files. Those
+                       can exist if x11docker still runs on system shutdown.
                        Terminates currently running x11docker containers, too.
                        Regards (only) option --backend=BACKEND.
 --update, --update-master and --remove regard a possible custom installation
@@ -3235,7 +3236,7 @@ check_xdepends() {              # check dependencies on host for X server option
     ;;
     iglx)
       case "${1:-}" in
-        --xorg|--xwin|--runx|--weston-xwayland) ;;
+        --xorg|--xwin|--runx) ;;
         *)
           $Message "${1:-}: --gpu=$Sharegpu not possible. You can try --gpu=virgl."
           Return=1
@@ -3493,6 +3494,7 @@ check_xserver() {               # check chosen X server, auto-choose X server
     }
   }
 
+  # some first --gpu checks
   case "$Sharegpu" in
     yes|direct)
       [ "$Nvidiaversion" ] && case "$Xserver" in
@@ -3502,6 +3504,23 @@ check_xserver() {               # check chosen X server, auto-choose X server
   GPU support will work only with options --hostdisplay and --xorg.
   Consider to use free open source driver nouveau instead.
   Using NVIDIA driver>=v470.x  and Xwayland>=v21.1.2 might work for $Xserver --gpu."
+        ;;
+      esac
+    ;;
+  esac
+  case "$Runtime" in
+    kata-runtime|sysbox-runc)
+      case "$Sharegpu" in
+        yes)
+          Sharegpu="iglx"
+        ;;
+        no) ;;
+        *) 
+          note "Option --gpu=$Sharegpu is not supported with --runtime=$Runtime.
+  You can try --gpu=iglx instead (--xorg only).
+  Fallback: Disabling option --gpu."
+          check_fallback
+          Sharegpu="no"
         ;;
       esac
     ;;
@@ -4791,7 +4810,8 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
           ;;
         esac
         echo         "echo \"Requesting \$Trusted cookie from X server\""
-        echo         "xauth -v -n -i -f $Xclientcookie generate $Newdisplay . \$Trusted timeout 3600 && sed -i /\$Hostcookie/d $Xclientcookie"
+        echo         "xauth -v -n -i -f $Xclientcookie generate $Newdisplay . \$Trusted timeout 3600"
+        echo         "[ '$Xserver' = '--hostdisplay' ] && sed -i /\$Hostcookie/d $Xclientcookie"
         echo         ""
         echo         "[ -s '$Xclientcookie' ] || { "
             echo     "  :"
@@ -4820,21 +4840,13 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
         echo         "ls -l $Xclientcookie"
         echo         "truncate -s0 $Xservercookie"
         echo         "cat $Xclientcookie >> $Xservercookie"
-        case "$Containeruser" in
-          $Hostuser)
-            echo     "chmod 600 $Xclientcookie"
-          ;;
-          *)
-            echo     "chmod 644 $Xclientcookie"
-          ;;
-        esac
+        echo         "chmod 644 $Xclientcookie"
         echo         ""
         echo         "[ -s '$Xclientcookie' ] || error 'xinitrc(): Option --xauth=$Xauthentication: Cookie creation failed.'"
       }
       echo           "export XAUTHORITY=$Xclientcookie"
       echo           "[ '$Xauthentication' = 'no' ] || [ ! -s '$Xclientcookie' ] && unset XAUTHORITY && warning 'Option --xauth=no: X server $Newdisplay runs without cookie authentication.'"
-        echo         ""
-
+      echo           ""
       case "$Xserver" in
         --hostdisplay) ;;   # do not change host settings
         --xwin) ;;          # xhost does not work over tcp
@@ -4844,10 +4856,6 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
               echo   "# clean xhost"
               echo   "verbose 'Disabling any possible access to new X server possibly granted by xhost'"
               echo   "disable_xhost"
-#      echo "DISPLAY=:$Newdisplaynumber xhost +SI:hostname:$Cachenumber"
-#      echo "DISPLAY=:$Newdisplaynumber xhost +SI:hostname:$Containername"
-#      echo "xhost"
-#      echo "truncate -s0 $Xclientcookie"
             ;;
           esac
           [ -n "$Xhost" ] && {
@@ -10519,9 +10527,6 @@ check_options_messages() {      # some messages depending on options, but not ch
 
   case "$Runtime" in
     sysbox-runc)
-      [ "$Sharegpu" = "yes" ] && note "Option --gpu with option --runtime=$Runtime:
-  GPU access might fail for some applications. 
-  In that case you can try --gpu=virgl or --gpu=iglx."
       case "$Backend" in
         docker) ;;
         *) note "Option --runtime=$Runtime --backend=$Backend: $Runtime is known
@@ -10560,7 +10565,8 @@ check_options_messages() {      # some messages depending on options, but not ch
       [ "$Xcontainer" = "yes" ] && [ "$Network" = "none" ] || warning "Option --xoverip might allow undesired access to the X server.
   Security hardening of X over TCP/IP setups is work in progress yet.
   At least along with image x11docker/xserver (option --xc) and 
-  --network=none (x11docker default) the setup is considered to be secure."
+  --network=none (x11docker default) the setup is considered to be secure
+  because a private network is used."
     ;;
   esac
 
@@ -11294,8 +11300,8 @@ $(nl -ba <$Cmdrc)"
       listentcp)
         verbose "--xoverip=listentcp: Replacing cookie authentication with host based authentication."
         xtool --check "xhost" && {
-          xtool "env DISPLAY=:$Newdisplaynumber XAUTHORITY=$Xclientcookie xhost +INET:$Containerip" >>$Xinitlogfile 2>&1
-          truncate -s0 $Xclientcookie
+          xtool "env DISPLAY=:$Newdisplaynumber XAUTHORITY=$Xclientcookie xhost +INET:$Containerip" >>$Xinitlogfile 2>&1 && \
+            truncate -s0 $Xclientcookie
         } || {
           warning "--xoverip=$Xoverip: Failed to set up xhost access
   instead of using a cookie. If the container shares the cookie with others,
