@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [7.4.0](https://github.com/mviereck/x11docker/releases/tag/v7.4.0) - 2022-07-28
 ### Added
  - `--xauth [=yes|trusted|untrusted|no]`: New option to configure X cookie.
  - `--printcheck`: New option to show X server dependency check messages.

@@ -2,21 +2,20 @@
 x11docker ToDo notes
 
 ## Work in progress
- - SECURITY BUG: --hostdisplay --xoverip --network. Error out if xhost has openings, offer --disable-xhost
+ - --runtime=sysbox --gpu=virgl fails.
 
- - --cleanup: remove internal networks
+ - kata: add new runtime for nerdctl io.containerd.kata.v2 
+ - try podman --rootfs
 
  - --kwin in weston segfaults
  - --xc --xorg: MIT-SHM fails
  - --xc --xorg rootless fails
  - --xc --kwin on console: tty switch fails with unprivileged user
- 
- - --runtime=sysbox --gpu=virgl fails.
- 
+
  - --build=nvidia?
  - x11docker/nvidia-base: use tags with version number?
 
- - --clipboard: improve Wayland clipboard
+ - --clipboard: improve Wayland clipboard support
 
  - centralize argument checks
  - change global "no" to ""
@@ -38,7 +37,6 @@ x11docker ToDo notes
    - clean /tmp
    - how to disable old binds? issue e.g. with/without --home, --share
  
- - kata: add new runtime for nerdctl io.containerd.kata.v2
 
 ## Issues to fix
  - --build: download files for COPY/ADD (x11docker/check, x11docker/xserver)
@@ -62,7 +60,6 @@ x11docker ToDo notes
  - `--kwin-xwayland`: broken? Xwayland says: "missing wl_shell protocol". Deprecated yet.
  - docker-for-win: DOS newline mess in `error()` #219.
  - docker-for-win: Double entries in log.
- - `--install`/`--update`: first install shows entire `CHANGELOG.md`. Should only show most recent release notes.
 
 ## Nice to fix
  - `--init=systemd`: check systemd warnings on x11docker services
@@ -91,7 +88,6 @@ x11docker ToDo notes
   
 ## Improvements
  - `--cleanup`: avoid hardcoded pathes
- - dependency wiki: Cygwin packages
  - `x11docker/check`: palinopsia: check video RAM size with `glxinfo`, adjust requested RAM size.
  - further checks of `/etc/pam.d`
  - further checks of multimonitor behaviour
