@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.4.1-beta-1"
+Version="7.4.1-beta-2"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups. (deprecated)
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -383,7 +383,7 @@ Installation options and cleanup (need root permissions):
      --remove          Remove x11docker from your system. Includes --cleanup.
                        Preserves ~/.local/share/x11docker from option --home.
      --cleanup         Clean up orphaned containers and cache files. Those
-                       can exist if x11docker still runs on system shutdown.
+                       can remain if x11docker still runs on system shutdown.
                        Terminates currently running x11docker containers, too.
                        Regards (only) option --backend=BACKEND.
 --update, --update-master and --remove regard a possible custom installation
@@ -5275,6 +5275,8 @@ xtool() {                       # run X tool command in X container if available
 
 #### backend command setup
 check_backend() {               # options --backend, --rootless
+  local Checkrootfs
+
   case "$Mobyvm" in
     no)
       Backendbin="$(command -v "$Backend")"
@@ -5360,12 +5362,14 @@ check_backend() {               # options --backend, --rootless
     ;;
   esac
 
+  # check image name
   case "$Backend" in
     docker|podman|nerdctl|proot)
       [ "${Imagename:0:1}" = "/" ] && {
         Rootfs="$Imagename"
         Imagename="$(basename "$Rootfs")"
       }
+      [ "$Podmanrootfs" = "yes" ] && Checkrootfs="yes"
       Imagebasename="$(echo "$Imagename" | tr / - | cut -d: -f1)"
       Codename="${Codename:-"$Imagename $Containercommand"}"
       verbose "Image name: $Imagename
@@ -5411,6 +5415,7 @@ check_backend() {               # options --backend, --rootless
       check_optionset "--backend=$Backend" "--cap-default --hostipc --ipc --limit --network --newprivileges --no-setup --runtime --sharecgroup --user" ||:
       check_optionset "--backend=$Backend" "--user" || error "Option --backend=$Backend: Option --user is not allowed.
   Please try option --hostuser instead."
+      Checkrootfs="yes"
       # set defaults. Some might look misleading just to avoid later messages, but not affecting the setup.
       Network="host"
       Shareipc="host"
@@ -5424,18 +5429,6 @@ check_backend() {               # options --backend, --rootless
       # needed
       Switchcontaineruser="yes"
 
-      [ -z "$Rootfs" ] && [ -d "$Hosthomebasefolder/ROOTFS/$Imagebasename" ] && Rootfs="$Hosthomebasefolder/ROOTFS/$Imagebasename"
-      [ -z "$Rootfs" ] && error "Option --backend=$Backend: Did not find a rootfs for $Imagename
-  in $Hosthomebasefolder/ROOTFS/$Imagebasename"
-      [ -z "$Containercommand" ] && [ -e "$Rootfs/start" ] && Containercommand="/bin/sh /start"
-      [ -z "$Containercommand" ] && {
-        [ -e "$Rootfs/bin/bash" ]                          && Containercommand="/bin/bash" || Containercommand="/bin/sh"
-        [ "$Containerusershell" != "auto" ]                && Containercommand="$Containerusershell"
-        note "Option --backend=$Backend: No command specified.
-Fallback: using command '$Containercommand' and enabling option --interactive."
-        check_fallback
-        Interactive="yes"
-      }
       [ "$Sudouser" ] && note "Option --backend=$Backend --sudouser: sudo fails in $Backend.
   Workaround: starting with user root.
   You can switch to user $Containeruser with 'su $Containeruser'.
@@ -5471,6 +5464,37 @@ Fallback: using command '$Containercommand' and enabling option --interactive."
       Sharewebcam=""
     ;;
   esac
+  
+  [ "$Checkrootfs" = "yes" ] && {
+    case "$Backend" in
+      proot) ;;
+      podman)
+        note "Option --backend=podman with --rootfs is experimental yet."
+        [ "$Containersetup" = "yes" ] && {
+          note "Options --backend=podman --rootfs: Need option --no-setup.
+  Fallback: Enabling option --no-setup."
+          check_fallback
+          Containersetup="no"
+        }
+      ;;
+      *)
+        error "Option --rootfs is supported by backends proot and podman only."
+      ;;
+    esac
+    [ -z "$Rootfs" ] && [ -d "$Hosthomebasefolder/ROOTFS/$Imagebasename" ] && Rootfs="$Hosthomebasefolder/ROOTFS/$Imagebasename"
+    [ -z "$Rootfs" ] && error "Option --backend=$Backend: Did not find a rootfs for $Imagename
+  in $Hosthomebasefolder/ROOTFS/$Imagebasename"
+    [ -z "$Containercommand" ] && [ -e "$Rootfs/start" ] && Containercommand="/bin/sh /start"
+    [ -z "$Containercommand" ] && {
+      [ -e "$Rootfs/bin/bash" ]                          && Containercommand="/bin/bash" || Containercommand="/bin/sh"
+      [ "$Containerusershell" != "auto" ]                && Containercommand="$Containerusershell"
+      note "Option --backend=$Backend: No command specified.
+Fallback: using command '$Containercommand' and enabling option --interactive."
+      check_fallback
+      Interactive="yes"
+    }
+  }
+
   debugnote "Backend: $Backend, Backendbin: $Backendbin, Rootless: $Backendrootless"
   return 0
 }
@@ -6482,6 +6506,14 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
     esac
   }
 
+  # --rootfs
+  case "$Backend" in
+    podman)
+      [ "$Podmanrootfs" = "yes" ] && Backendcommand="$Backendcommand \\
+  --rootfs"
+    ;;
+  esac
+
   case "$Backend" in
     docker|podman|nerdctl)
       Backendcommand="$Backendcommand \\
@@ -6499,7 +6531,7 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
         no)
           case "$Backend" in
             docker|podman|nerdctl)
-              Backendcommand="$Backendcommand $Imagename $Initcommand /bin/sh - $(convertpath share "$Containerrc")"      # start_container runs containerrootrc with 'docker exec'
+              Backendcommand="$Backendcommand ${Rootfs:-$Imagename} $Initcommand /bin/sh - $(convertpath share "$Containerrc")"      # start_container runs containerrootrc with 'docker exec'
             ;;
             proot)
               Backendcommand="$Backendcommand /bin/sh - $(convertpath share "$Containerrc")"
@@ -6509,7 +6541,7 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
         yes)
           case "$Backend" in
             docker|podman|nerdctl)
-              Backendcommand="$Backendcommand $Imagename $Initcommand /bin/sh - $(convertpath share "$Containerrootrc")"  # containerrootrc runs containerrc
+              Backendcommand="$Backendcommand ${Rootfs:-$Imagename} $Initcommand /bin/sh - $(convertpath share "$Containerrootrc")"  # containerrootrc runs containerrc
             ;;
             proot)
               Backendcommand="$Backendcommand /bin/sh - $(convertpath share "$Containerrootrc")"
@@ -6522,8 +6554,8 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
       case "$Backend" in
         docker|podman|nerdctl)
           case "$Initsystem" in
-            tini) Backendcommand="$Backendcommand $Imagename $Initcommand $Containercommand" ;;
-            *) Backendcommand="$Backendcommand $Imagename $Containercommand" ;;
+            tini) Backendcommand="$Backendcommand ${Rootfs:-$Imagename} $Initcommand $Containercommand" ;;
+            *) Backendcommand="$Backendcommand ${Rootfs:-$Imagename} $Containercommand" ;;
           esac
         ;;
         proot)
@@ -9033,7 +9065,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,checkwindow::,fallback::,preset:,pull::"                                                        # x11docker config
   Longoptions="$Longoptions,cachebasedir:,home::,homebasedir:,share:"                                                       # Host folders
   Longoptions="$Longoptions,alsa::,clipboard::,gpu::,lang::,printer::,pulseaudio::,webcam"                                  # Host integration features
-  Longoptions="$Longoptions,backend:,env:,mobyvm,name:,no-entrypoint,no-setup,rootless::,runtime:,snap,workdir:"            # Container config
+  Longoptions="$Longoptions,backend:,env:,mobyvm,name:,no-entrypoint,no-setup,rootfs,rootless::,runtime:,snap,workdir:"     # Container config
   Longoptions="$Longoptions,cap-default,ipc::,limit::,newprivileges::,network::"                                            # Container capabilities
   Longoptions="$Longoptions,group-add:,hostuser:,password::,sudouser::,user:,shell:"                                        # Container user
   Longoptions="$Longoptions,dbus::,init::,hostdbus,sharecgroup"                                                             # Container init and DBus
@@ -9204,6 +9236,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
          --newprivileges)     Allownewprivileges="${2:-yes}" ; shift ;; # [Don't] set --security-opt=no-new-privileges
          --no-entrypoint)     Noentrypoint="yes" ;;                  # Disable ENTRYPOINT of image
          --no-setup)          Containersetup="no" ;;                 # No setup of x11docker inside of container (noteable disables containerrootrc() )
+         --rootfs)            Podmanrootfs="yes" ;;                  # run a rootfs in posman instead of image
          --rootless)          Backendrootless="${2:-yes}"; shift ;;
          --runtime)           Runtime="${2:-}" ; shift               # Runtime=runc|nvidia|kata-runtime|crun
                               [ "$Runtime" = "kata" ]   && Runtime="kata-runtime"
@@ -11256,7 +11289,7 @@ main() {
   setup_initsystem               # init in container.                             # --init
   case "$Backend" in
     docker|podman|nerdctl)
-      check_image
+      [ -z "$Rootfs" ] && check_image
       setup_capabilities         # add linux capabilities if needed for some options. Default: --cap-drop=ALL
       [ "$Sharegpu" = "yes" ] && setup_vaapi                                      # --gpu
     ;;
