@@ -2,10 +2,9 @@
 x11docker ToDo notes
 
 ## Work in progress
- - --runtime=sysbox --gpu=virgl fails.
+ - --runtime=sysbox --gpu=virgl fails. Worked once.
 
  - kata: add new runtime for nerdctl io.containerd.kata.v2 
- - try podman --rootfs
 
  - --kwin in weston segfaults
  - --xc --xorg: MIT-SHM fails
@@ -17,10 +16,11 @@ x11docker ToDo notes
 
  - --clipboard: improve Wayland clipboard support
 
- - centralize argument checks
+ - further centralize argument checks
  - change global "no" to ""
+
  - --pulseaudio=host: check possible tcp setup
- - --interactive fails now with old systemd versions.
+ - --interactive fails now with old systemd versions. (wontfix, not important enough)
 
  - --interactive --init=runit|openrc|sysvinit: no job control in shell
  - --init=openrc|runit: elogind fails

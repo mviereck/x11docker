@@ -466,6 +466,9 @@ As root you can install, update and remove x11docker in system directories to be
  - `x11docker --remove` : remove all files installed by x11docker.
    - Note: This does not remove `~/.local/share/x11docker` where it stores persistent files of option `--home`.
 
+To see the difference between current and coming updated version, you can use optional argument `diff` for `--update` and `--update-master`.
+Example: `x11docker --update-master=diff` will show you the code changes from your current installation to latest master/beta version without installing it.
+
 #### Installed files
 What the installation does (just for information):
  - Copies script `x11docker` to `/usr/bin`. 
