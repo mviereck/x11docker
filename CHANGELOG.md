@@ -11,6 +11,9 @@ Project website: https://github.com/mviereck/x11docker
  - `--update`, `--update-master`: New optional argument `diff` to show
    the difference between installed and new version without installing it.
    [(460)](https://github.com/mviereck/x11docker/issues/460)
+### Fixed
+ - `--xpra*`: Fix check for `xinitrc is ready`.
+   [(462)](https://github.com/mviereck/x11docker/issues/462)
 
 ## [7.4.0](https://github.com/mviereck/x11docker/releases/tag/v7.4.0) - 2022-07-28
 ### Added
