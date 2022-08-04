@@ -11,6 +11,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--xpra*`: Fix for Wayland+X11 on host. Use Wayland for xpra client.
    Caused startup failure along with `--xc`.
    [(462)](https://github.com/mviereck/x11docker/issues/462)
+ - `--hostwayland`: Do not use container of `x11docker/xserver` (option `--xc`).
 
 ## [7.4.1](https://github.com/mviereck/x11docker/releases/tag/v7.4.1) - 2022-08-03
 ### Changed
