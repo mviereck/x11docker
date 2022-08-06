@@ -12,6 +12,7 @@ Project website: https://github.com/mviereck/x11docker
    Caused startup failure along with `--xc`.
    [(462)](https://github.com/mviereck/x11docker/issues/462)
  - `--hostwayland`: Do not use container of `x11docker/xserver` (option `--xc`).
+ - `--fullscreen`: Enable desktop mode.
 
 ## [7.4.1](https://github.com/mviereck/x11docker/releases/tag/v7.4.1) - 2022-08-03
 ### Changed
