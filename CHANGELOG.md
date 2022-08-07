@@ -13,6 +13,8 @@ Project website: https://github.com/mviereck/x11docker
    [(462)](https://github.com/mviereck/x11docker/issues/462)
  - `--hostwayland`: Do not use container of `x11docker/xserver` (option `--xc`).
  - `--fullscreen`: Enable desktop mode.
+ - Do not set `--hostname` to avoid `--network` issues.
+   [(463)](https://github.com/mviereck/x11docker/issues/463)
 
 ## [7.4.1](https://github.com/mviereck/x11docker/releases/tag/v7.4.1) - 2022-08-03
 ### Changed
