@@ -2,9 +2,9 @@
 x11docker ToDo notes
 
 ## Work in progress
- - --runtime=sysbox --gpu=virgl fails. Worked once.
-
  - kata: add new runtime for nerdctl io.containerd.kata.v2 
+ - kata-runtime: support --xc?
+ - kata-runtime: check --gpu=virgl
 
  - --kwin in weston segfaults
  - --xc --xorg: MIT-SHM fails

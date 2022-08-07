@@ -15,6 +15,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--fullscreen`: Enable desktop mode.
  - Do not set `--hostname` to avoid `--network` issues.
    [(463)](https://github.com/mviereck/x11docker/issues/463)
+ - `--runtime=sysbox`: support `--gpu=virgl` again.
 
 ## [7.4.1](https://github.com/mviereck/x11docker/releases/tag/v7.4.1) - 2022-08-03
 ### Changed
