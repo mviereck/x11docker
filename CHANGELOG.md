@@ -16,6 +16,8 @@ Project website: https://github.com/mviereck/x11docker
  - Do not set `--hostname` to avoid `--network` issues.
    [(463)](https://github.com/mviereck/x11docker/issues/463)
  - `--runtime=sysbox`: support `--gpu=virgl` again.
+### Deprecated
+ - `--runtime=kata-runtime`: recent kata v2.x does not provide `kata-runtime`.
 
 ## [7.4.1](https://github.com/mviereck/x11docker/releases/tag/v7.4.1) - 2022-08-03
 ### Changed

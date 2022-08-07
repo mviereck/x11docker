@@ -252,10 +252,6 @@ Container runtimes known and supported by x11docker are:
    Specialized fork of `runc` to support `nvidia/nvidia-docker` images.
  - [`crun`](https://github.com/giuseppe/crun): Fast and lightweight alternative to `runc` with same functionality.
  - `oci`: Runtime reported in [#205](https://github.com/mviereck/x11docker/issues/205), no documentation found. Handled by x11docker like `runc`.
- - [`kata-runtime`](https://katacontainers.io/) (provided by kata 1.x versions): Sets up a virtual machine with its own Linux kernel to run the container. 
-   `kata` aims to combine the security advantages of containers and virtual machines.
-   - Some x11docker options are not possible with `--runtime=kata-runtime`. Most important: `--hostdisplay`, `--webcam` and all Wayland related options. 
-     For `--gpu` only `--xorg` with indirect rendering is supported. 
  - [`sysbox-runtime`](https://github.com/nestybox/sysbox): Based on runc, aims to enhance container isolation. 
    Support is experimental yet. Needs Sybox>=0.5.0 and kernel version >=5.12.
 
@@ -266,12 +262,6 @@ Example: possible runtime configuration in `/etc/docker/daemon.json`:
 {
   "default-runtime": "runc",
   "runtimes": {
-    "kata-runtime": {
-      "path": "/opt/kata/bin/kata-runtime",
-      "runtimeArgs": [
-        "--kata-config /opt/kata/share/defaults/kata-containers/configuration.toml"
-      ]
-    },
     "crun": {
       "path": "/usr/local/bin/crun",
       "runtimeArgs": []
@@ -375,9 +365,6 @@ Core concept is:
 That being said, the default docker capabilities and the seccomp/SELinux/apparmor profiles are set up well to protect the host system.
 Nonetheless, x11docker follows the [principle of least privilege](https://en.wikipedia.org/wiki/Principle_of_least_privilege). 
 Containers should not have capabilities or privileges that they don't need for their job.
-
-Default runtimes like `runc` use Linux namespaces to isolate container applications, but share the kernel from host. 
-If you are concerned about container access to host kernel, consider to use [container runtime](#container-runtime) `kata-runtime` instead.
 
 ### Security weaknesses
  - Possible SELinux restrictions are degraded for x11docker containers with run option `--security-opt label=type:container_runtime_t` to allow access to new X unix socket. 
