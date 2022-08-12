@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Fixed
+ - `--tty` failed with `--xc`. Fix: disable `--xc`.
+   [(464)](https://github.com/mviereck/x11docker/issues/464)
+
 ## [7.4.2](https://github.com/mviereck/x11docker/releases/tag/v7.4.2) - 2022-08-7
 ### Fixed
  - `--xpra*`: Fix for Wayland+X11 on host. Use Wayland for xpra client.
