@@ -10,6 +10,8 @@ Project website: https://github.com/mviereck/x11docker
 ### Fixed
  - `--tty` failed with `--xc`. Fix: disable `--xc`.
    [(464)](https://github.com/mviereck/x11docker/issues/464)
+ - `--xonly`: run socat unprivileged to make the unix socket accessible.
+   [(466)](https://github.com/mviereck/x11docker/issues/466)
 
 ## [7.4.2](https://github.com/mviereck/x11docker/releases/tag/v7.4.2) - 2022-08-7
 ### Fixed
