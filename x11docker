@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.4.3-beta-8"
+Version="7.5.0-beta-1"
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups. (deprecated)
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -22,7 +22,7 @@ esac
 usage() {                       # --help: show usage information
   echo "
 x11docker: Run GUI applications and desktop environments in containers.
-           Supports docker, podman, nerdctl and proot.
+           Supports docker, podman, and (experimental) nerdctl.
            Can run X servers from host or in containers of x11docker/xserver.
            Can also provide X servers to host applications.
 
@@ -97,15 +97,8 @@ Basic settings:
      --backend=BACKEND  Container backend to use. BACKEND can be:
                          docker  (recommended for rootful) (default)
                          podman  (recommended for rootless and rootful)
-                         nerdctl
-                       Other backends: (no real containers)
-                         host   Run a host application.
-                         proot  Run in a rootfs file system. (rootless)
-                                Either specify path to rootfs as IMAGENAME,
-                                or provide one to call with 'image-name' at
-                                ~/.local/share/x11docker/ROOTFS/image-name
-                       Tool 'image2rootfs' helps to create a rootfs from docker
-                       images: https://github.com/mviereck/image2rootfs
+                         nerdctl (experimental)
+                         host    Run a host application, no container.
      --rootless [=yes|no]  Use (or disallow) rootless backend.
                        Default behaviour without option --rootless:
                        --backend=docker: rootful unless DOCKER_HOST is set.
@@ -2582,7 +2575,11 @@ check_newxenv()  {              # find free display
         }
       ;;
       --hostdisplay)
-        [ -n "$(cut -d: -f1 <<< "$Hostdisplay")" ] && Xoverip="listentcp"
+        [ "$Hostxoverip" = "yes" ] && {
+          note "Option $Xserver needs --xoverip because host X server
+  DISPLAY==$Hostdisplay uses X over TCP/IP. Enabling option --xoverip."
+          Xoverip="listentcp"
+        }
       ;;
     esac
   }
@@ -4478,16 +4475,31 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
     nerdctl) ;;
   esac
 
-  case "$Xoverip" in
-    no)
-      Xcontainercommand="$Xcontainercommand \\
-  --network=none"
-    ;;
-    listentcp|socat)
-      [ -n "$Xcnetworkid" ] && {
+  case "$Hostxoverip" in
+    yes)
+      grep -q "localhost" <<< "$Hostdisplay" && {
+        warning "Option --xc: Sharing host network stack
+  with container of x11docker/xserver to support 'ssh -X'."
         Xcontainercommand="$Xcontainercommand \\
-  --network=$Xcnetworkname"
+  --network=host"
+      } || {
+        Xcontainercommand="$Xcontainercommand \\
+  --network=bridge"
       }
+    ;;
+    no)
+      case "$Xoverip" in
+        no)
+          Xcontainercommand="$Xcontainercommand \\
+  --network=none"
+        ;;
+        listentcp|socat)
+          [ -n "$Xcnetworkid" ] && {
+            Xcontainercommand="$Xcontainercommand \\
+  --network=$Xcnetworkname"
+          }
+        ;;
+      esac
     ;;
   esac
 
@@ -5165,7 +5177,7 @@ setup_xcnetwork() {             # --xoverip --xc: start internal network between
   [ "$Backend" = "$Xcontainerbackend" ] && [ "$Xcrootless" = "$Backendrootless" ] || return 1
   case "${1:-}" in
     "")
-      [ "$Xcontainer" = "yes" ] && {
+      [ "$Xcontainer" = "yes" ] && [ "$Hostxoverip" = "no" ] && {
         case "$Xoverip" in
           yes|listentcp|socat)
             case "$Network" in
@@ -8781,6 +8793,8 @@ check_hostxenv() {              # check environment variables for host X display
   Hostdisplaynumber="$(echo "$Hostdisplay" | cut -d: -f2 | cut -d. -f1)"                       # display number without ":" and ".0"
   [ -n "$Hostdisplay" ] && Hostxsocket="/tmp/.X11-unix/X$Hostdisplaynumber" || Hostxsocket=""  # X socket from host, needed for --hostdisplay
   [ -e "$Hostxsocket" ] || Hostxsocket=""                                                      # can miss in SSH session
+  [ -n "$(cut -d: -f1 -s <<< "$Hostdisplay")" ] && Hostxoverip="yes" || Hostxoverip="no"
+  #Hostdisplay="$(sed "s/localhost/$Hostip/" <<< "$Hostdisplay")"
 
   # get cookie from host display
   XAUTHORITY=${XAUTHORITY:-}
@@ -10572,6 +10586,11 @@ check_options_messages() {      # some messages depending on options, but not ch
   In that case try other X server options like --nxagent, --xpra or --xephyr." ;;
   esac
 
+  # --backend
+  case "$Backend" in
+    proot) note "Option --backend=proot is deprecated." ;;
+  esac
+
   # --cap-default
   [ "$Capdropall" = "no" ] && warning "Option --cap-default disables security hardening
   for containers done by x11docker. Default docker capabilities are allowed.
@@ -10909,6 +10928,7 @@ declare_variables() {           # declare global variables
   Hostwaylandsocket="$WAYLAND_DISPLAY"            # Store host wayland socket name
   Hostxauthority="Xauthority.host.$(unspecialstring "${DISPLAY:-unknown}")"   # File to store copy of $XAUTHORITY
   Hostxenv=""                                     # Collection of host X environment variables
+  Hostxoverip=""                                  # Host X uses X over IP/TCP
   Hostxsocket=""                                  # Socket of DISPLAY in /tmp/.X11-unix
   Nvidiacontainerfile="/usr/local/bin/NVIDIA-installer.run"  # --gpu: Path to nvidia installer in container
   Nvidiaversion=""                                # --gpu: Proprietary nvidia driver version on host

@@ -12,6 +12,9 @@ Project website: https://github.com/mviereck/x11docker
    [(464)](https://github.com/mviereck/x11docker/issues/464)
  - `--xonly`: run socat unprivileged to make the unix socket accessible.
    [(466)](https://github.com/mviereck/x11docker/issues/466)
+### Deprecated
+ - `--backend=proot`: Deprecated because likely no one uses it,
+   but would need further checks and maintenance.
 
 ## [7.4.2](https://github.com/mviereck/x11docker/releases/tag/v7.4.2) - 2022-08-7
 ### Fixed

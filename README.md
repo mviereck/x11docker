@@ -280,7 +280,7 @@ Example: possible runtime configuration in `/etc/docker/daemon.json`:
 ### Backends other than docker
 x11docker supports container tools [Docker](https://en.wikipedia.org/wiki/Docker_(software)), [podman](http://docs.podman.io/en/latest/) 
 and [nerdctl](https://github.com/containerd/nerdctl) with option `--backend=BACKEND` in rootful and rootless mode.
-Supported `--backend` arguments: `docker` `podman` `nerdctl` `proot` `host`
+Supported `--backend` arguments: `docker` `podman` `nerdctl` `host`
 
 Container backends:
  - By default x11docker tries to run `docker`.
@@ -293,14 +293,6 @@ Container backends:
 
 Other supported backends that are in fact no containers:
  - `--backend=host` runs a host application on a new X server. No containerization is involved.
- - `--backend=proot` runs a command in a rootfs file system, i.e. in a folder that contains a full linux system.
-   - `--backend=proot` is useful if you cannot use or install a real container backend for some reasons. 
-     A statical build of [`proot`](https://github.com/proot-me/proot) is available, too.
-   - `proot` is similar to `chroot`, but does not need root privileges.
-   - Either specify a path to a folder with a rootfs as IMAGENAME, or provide a rootfs to call with 'image-name' at `~/.local/share/x11docker/ROOTFS/image-name`.
-     - Tool [`image2rootfs`}(https://github.com/mviereck/image2rootfs) helps to create a rootfs from docker images.
-   - Changes done in the `proot` environment are persistent, in opposite to backends `docker|podman|nerdctl` that always run a fresh container.
-   - Prefer a real container backend as they provide better isolation from host.
 
 ### Preconfiguration with --preset
 For often used option combinations you might want to use option `--preset FILENAME` to have a command shortcut. 
