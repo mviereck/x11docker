@@ -11,7 +11,11 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.4.3-beta-8"
+Version="7.4.2-2"
+
+# Installermode (--install --update* --remove) should be disable for package version.
+
+Installermode_Disabled=1
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups. (deprecated)
 grep -q -- "--enforce-i" <<< "$*" && case $- in
@@ -372,7 +376,14 @@ Verbosity options:
  -v, --verbose         Be verbose. Output of x11docker.log on stderr.
  -V                    Be verbose with colored output.
 
-Installation options and cleanup (need root permissions):
+Cleanup options (need root permissions):
+     --cleanup         Clean up orphaned containers and cache files. Those
+                       can remain if x11docker still runs on system shutdown.
+                       Terminates currently running x11docker containers, too.
+                       Regards (only) option --backend=BACKEND.
+
+Installation options (need root permissions):
+  Note: Installer mode should be disabled for packaged version of x11docker, e.g. .deb or .rpm
      --install         Install x11docker from current folder.
                        Useful to install from an extracted zip file.
      --update [=diff]  Download and install latest release from github.
@@ -381,10 +392,6 @@ Installation options and cleanup (need root permissions):
                        installed and new version without installing it.
      --remove          Remove x11docker from your system. Includes --cleanup.
                        Preserves ~/.local/share/x11docker from option --home.
-     --cleanup         Clean up orphaned containers and cache files. Those
-                       can remain if x11docker still runs on system shutdown.
-                       Terminates currently running x11docker containers, too.
-                       Regards (only) option --backend=BACKEND.
 --update, --update-master and --remove regard a possible custom installation
 path different from default /usr/bin directory.
 Additional options are disregarded.
@@ -1610,6 +1617,7 @@ installer() {                   # --install, --update, --update-master, --remove
 
   ### FIXME: (--update)
   ### maybe not install additional files if x11docker is owned by user
+  [ $Installermode_Disabled -eq 1 ] && error "Installermode is disabled.\n  --install --update --update-master and -- remove cannot work.\n  It is deliberate for x11docker installed by package manager."   # check if installermode is disabled.
   local Key1= Key2= Oldversion= Newversion= Format=
   local Binpath Binowner Bingroup Binpathdefault
 
@@ -2833,21 +2841,10 @@ check_vt() {                    # option --xorg: find free vt / tty
 check_xcontainer() {            # option --xc: check backend, rootless and image x11docker/xserver
   local Auto= Fail=
 
-  # workaround: X server options not supported by --xc already catched here if they are specified on cli
-  case "$Xserver" in
-    --tty|--hostwayland)
-      check_xdepends "$Xserver" && Xcontainer="no"
-    ;;
-  esac
-
   # check if X container should run rootful or rootless (for tty access it must be rootful)
   case "$Backendrootless" in
     yes)
       { [ "$Xserver" = "--xorg" ] || [ -n "$Newxvt" ] ; } && Xcrootless="no" || Xcrootless="yes"
-      experimental "run X container rootless" && Xcrootless="yes"
-    ;;
-    no)
-      Xcrootless="no"
     ;;
   esac
 
@@ -2913,7 +2910,6 @@ check_xcontainer() {            # option --xc: check backend, rootless and image
             }
             Xcontainer="no"
             Auto="yes"
-            experimental "allow rootless Xorg container" && Xcontainer="yes"
           }
         ;;
       esac
@@ -3344,7 +3340,6 @@ check_xdepends() {              # check dependencies on host for X server option
         [ "$Xcrootless" = "yes" ] && {
           $Message "${1:-} cannot claim a new virtual terminal (option --vt) with rootless X container (option --xc)."
           Return=1
-          experimental "allow rootless X container" && Return=0
         }
       ;;
       *)
@@ -4337,25 +4332,15 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   esac
 
   # user
-  case "$Xcrootless" in
-    yes)
-      case "$Xcontainerbackend" in
-        podman)
-          Xc_user="\\
-  --user ${Hostuseruid}:${Hostusergid} \\
-  --userns=keep-id"
-        ;;
-        *)
-          Xc_user="\\
-  --user 0:0"  # maps to same uid as unprivileged host user
-        ;;
-      esac
-    ;;
-    no)
-      Xc_user="\\
+  [ "$Containeruser" = "$Hostuser" ] && {
+    Xc_user="\\
+  --user ${Containeruseruid}:${Containerusergid}"
+  } || {
+    Xc_user="$Xc_user \\
   --user ${Hostuseruid}:${Hostusergid}"
-    ;;
-  esac
+  }
+  [ "$Xcrootless" = "yes" ] && Xc_user="\\
+  --user 0:0"  # maps to same uid as unprivileged host user
 
   # X in container
   Xc_containerx="\\
@@ -4497,7 +4482,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   --ipc=host"
     ;;
     no)
-      case "$Xcontainerbackend" in
+      case "$Backend" in
         docker)
           Xcontainercommand="$Xcontainercommand \\
   --ipc=shareable"
@@ -4552,7 +4537,6 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
       Xcontainercommand="$Xcontainercommand $Xc_hostx"
       Xcontainercommand="$Xcontainercommand $Xc_gpu"
       Xcontainercommand="$Xcontainercommand $Xc_console"
-      experimental "add --pid=host to Xorg container" && Xcontainercommand="$Xcontainercommand --pid=host"
     ;;
     --xephyr)
       Xcontainercommand="$Xcontainercommand $Xc_capdrop"
@@ -5295,7 +5279,7 @@ xtool() {                       # run X tool command in X container if available
   esac
   [ "$Check" = "no" ] && Usexcontainer="yes"
   Usexcontainer="${Usexcontainer:-no}" # in case xinitrc already runs in X container.
-  verbose "xtool(): (use xc $Usexcontainer): ${1:-}"
+  verbose "xtool(): (usexc $Usexcontainer): ${1:-}"
   case "$Usexcontainer" in
     no)
       command -v "$Tool" >/dev/null || {
@@ -5544,11 +5528,8 @@ Fallback: using command '$Containercommand' and enabling option --interactive."
 check_image() {                 # get some image information
 
   # Check if image $Imagename is available locally
-  Imageinspect="$(unpriv_backend "$Backendbin inspect $Imagename" 2>> $Containerlogfile)" || {
-    error "Image $Imagename not found locally.
+  Imageinspect="$(unpriv_backend "$Backendbin inspect $Imagename" 2>> $Containerlogfile)" || error "Image $Imagename not found locally.
   Please pull or build image first. (Backend $Backend, rootless $Backendrootless)"
-    return 1
-  }
 
   # Check architecture
   Imagearchitecture=$(parse_inspect "$Imageinspect" "Architecture")
@@ -5578,7 +5559,7 @@ check_image() {                 # get some image information
       Containeruser="${Imageuser:-root}"
     ;;
   esac
-  storeinfo "containeruser=$Containeruser"
+  storeinfo containeruser="$Containeruser"
 
   # Check ENTRYPOINT
   Imageentrypoint="$(parse_inspect "$Imageinspect" "Config" "Entrypoint")"
@@ -8247,11 +8228,18 @@ start_container() {             # docker run
         mysleep 0.1
       done
 
+      # store stdout and stderr
+      [ "$Containersetup" = "no" ] && {
+        # Store container output separated for stdout and stderr
+        unpriv_backend "$Backendbin logs -f $Containername" 1>> "$Cmdstdoutlogfile" 2>> "$Cmdstderrlogfile" & ### FIXME rootless, unpriv
+        storepid $! dockerlogs
+      }
+
       # Wait for pid 1 in container
       for ((Count=1 ; Count<=40 ; Count++)); do
-        debugnote "start_container(): $Count. check for PID 1"
         Containerinspect="$(unpriv_backend "$Backendbin inspect $Containername" 2>> $Containerlogfile | rmcr)" ||:
         [ -n "$Containerinspect" ] && [ "$Containerinspect" != "[]" ] && Pid1pid="$(parse_inspect "$Containerinspect" "State" "Pid")"
+        debugnote "start_container(): $Count. check for PID 1: $Pid1pid"
         case "$Mobyvm" in
           no)  checkpid "$Pid1pid" && break ;;
           yes) [ "$Pid1pid" ] && [ "$Pid1pid" != "0" ] && break
@@ -8260,7 +8248,6 @@ start_container() {             # docker run
         mysleep 0.1
       done
       [ "$Pid1pid" = "0" ] && Pid1pid=""
-      debugnote "start_container(): PID1=$Pid1pid"
 
       [ -z "$Pid1pid" ] && error "start_container(): Did not receive PID of PID1 in container.
   Maybe the container immediately stopped for unknown reasons.
@@ -8269,13 +8256,6 @@ start_container() {             # docker run
 
   Content of container log:
 $(rmcr < "$Containerlogfile" | uniq )"
-
-      # store stdout and stderr
-      [ "$Containersetup" = "no" ] && {
-        # Store container output separated for stdout and stderr
-        unpriv_backend "$Backendbin logs -f $Containername" 1>> "$Cmdstdoutlogfile" 2>> "$Cmdstderrlogfile" & ### FIXME rootless, unpriv
-        storepid $! dockerlogs
-      }
 
       # Get IP of container
       case "$Xcnetworkid" in
@@ -8784,8 +8764,9 @@ check_hostxenv() {              # check environment variables for host X display
 
   # get cookie from host display
   XAUTHORITY=${XAUTHORITY:-}
+  [ -z "$XAUTHORITY" ]   && command -v systemctl >/dev/null    && XAUTHORITY="$(systemctl --user show-environment | grep XAUTHORITY= | cut -d= -f2)"
   [ -z "$XAUTHORITY" ]   && [ -e "$Hostuserhome/.Xauthority" ] && XAUTHORITY="$Hostuserhome/.Xauthority"
-  #[ -z "$XAUTHORITY" ]   && command -v systemctl >/dev/null    && XAUTHORITY="$(systemctl --user show-environment | grep XAUTHORITY= | cut -d= -f2)"
+  [ -z "$XAUTHORITY" ]   && [ "$Runsoverssh" = "yes" ] && [ -e "$Hostuserhome/.Xauthority" ] && XAUTHORITY="$Hostuserhome/.Xauthority"
   [ "${XAUTHORITY:-}" ]  && {
     command -v xauth >/dev/null && {
       xauth -n -i -f "${XAUTHORITY:-}" nlist "$Hostdisplay" 2>/dev/null | sed -e 's/^..../ffff/' | unpriv "xauth -n -i -f '$Hostxauthority' nmerge - 2>/dev/null"
@@ -9142,7 +9123,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,build,cleanup,help,launcher,licence,license,version"                                            # Special options without starting X or container
   Longoptions="$Longoptions,install,remove,update::,update-master::"                                                        # Installation
   #
-  Longoptions="$Longoptions,experimental,keepcache,remountcgroup,xopt:,xorgconf:"                                           # Experimental
+  Longoptions="$Longoptions,keepcache,remountcgroup,xopt:,xorgconf:"                                                        # Experimental
   Longoptions="$Longoptions,dbus-system,enforce-i,exe,homedir:,hostipc,hostnet,iglx,kwin-xwayland"                          # Deprecated
   Longoptions="$Longoptions,no-auth,no-internet,no-xhost"                                                                   # Deprecated
   Longoptions="$Longoptions,sharedir:,sharessh,systemd,showenv,showid,showinfofile,showpid1"                                # Deprecated
@@ -9344,7 +9325,6 @@ ${2:-}"                       ; shift ;;                             # Add custo
          --launcher)          Createlauncher="yes" ;;                # Create application launcher on desktop and exit
 
      #### Experimental options
-         --experimental)      Experimental="yes" ;;                  # Allow some experimental code that might be changed at any time
          --keepcache)         Preservecachefiles="yes" ;          note "Option --keepcache: experimental option." ;;
          --remountcgroup)     Remountcgroup="yes" ;               note "Option --remountcgroup: experimental option." ;;
          --xopt)              Xserveroptions="${2:-}" ;   shift ; note "Option --xopt: experimental option." ;;      # Custom X server options
@@ -11096,7 +11076,6 @@ declare_variables() {           # declare global variables
   # Miscellaneous
   Buildimage=""                                   # --build: x11docker image to build from repo Dockerfile
   Codename=""                                     # created from image name and command without special chars for use with container name and cache folder
-  Experimental=""                                 # --experimental: use experimental code
   Fallback="yes"                                  # --fallback: Allow or deny fallbacks for failing options.
   Imagebasename=""                                # Image name without tags and / replaced with -. For use of --home folders.
   Parsedoptions_global=""                         # Parsed options
@@ -11233,13 +11212,6 @@ stdout() {
   echo \"\$*:STDOUT\"    | sed \"s/\\\$/ /\" >>\$Messagefile
 }'
 }
-experimental() {
-  [ "$Experimental" ] && {
-    note "Option --experimental: changed something: ${1:-"(no comment)"}"
-    return 0
-  }
-  return 1
-}
 unpriv() {                      # run a command as unprivileged user. Needed if x11docker was started by root or with sudo.
   # $Unpriv is declared in check_hostuser: 'eval' or 'su $Hostuser -c'
   local Command
@@ -11271,7 +11243,6 @@ main() {
   trap finish EXIT
   trap finish_sigint SIGINT
   exec {FDstderr}>&2            # stderr channel for warning(), note(), debugnote() and --verbose
-
   declare_variables
   parse_options "$@"
   [ "$Silent" = "yes" ]    && exec {FDstderr}>/dev/null                           # --quiet
@@ -11293,21 +11264,20 @@ main() {
   setup_verbosity                # create [and show] summary logfile              # --verbose
   check_containeruser            # unprivileged user in container                 # --user
   check_containerhomebasedir     # check base dir for --home and possible rootfs  # --homebasedir
-  check_backend                                                                   # --backend
-
   # Special x11docker jobs
   [ "$Createlauncher" ] && {
     create_launcher                                                               # --launcher: Create application launcher icon on desktop
     finish
   }
-  [ "$Cleanup" ] && {                                                             # --cleanup: Clean up cache and orphaned x11docker containers
-    check_optionset "--cleanup" "$(grep -v -E -- '--cleanup|--backend' <<< "$Optionsetall")" ||:
-    cleanup
-    finish
-  }
   [ "$Installermode" ] && {                                                       # --install, --update, --update-master, --remove
     check_optionset "$Installermode" "$(grep -v -E -- '--install|--update|--update-master|--remove' <<< "$Optionsetall")" ||:
     installer "$Installermode"
+    finish
+  }
+  check_backend                                                                   # --backend
+  [ "$Cleanup" ] && {                                                             # --cleanup: Clean up cache and orphaned x11docker containers
+    check_optionset "--cleanup" "$(grep -v -E -- '--cleanup|--backend' <<< "$Optionsetall")" ||:
+    cleanup
     finish
   }
   [ "$Buildimage" ] && {                                                          # --build: Build image from x11docker repository
@@ -11430,7 +11400,7 @@ $(nl -ba <$Cmdrc)"
       yes)
         #[ "$Newdisplay" ]       && ln -s "$Cachefolder/tmp/.X11-unix/X$Newdisplaynumber"  "/tmp/.X11-unix/X$Newdisplaynumber"  2>>$Xinitlogfile ||:
         command -v socat >/dev/null && {
-          [ "$Newdisplay" ]     && unpriv "socat -lf $Xinitlogfile -d UNIX-LISTEN:/tmp/.X11-unix/X$Newdisplaynumber,ignoreeof,fork UNIX:$Cachefolder/tmp/.X11-unix/X$Newdisplaynumber" &
+          [ "$Newdisplay" ]     && socat -lf $Xinitlogfile -d UNIX-LISTEN:/tmp/.X11-unix/X$Newdisplaynumber,ignoreeof,fork UNIX:$Cachefolder/tmp/.X11-unix/X$Newdisplaynumber &
           storepid "$!" socat-X
         } || {
           [ -n "$Showdisplayenvironment" ] && Message="note" || Message="debugnote"
