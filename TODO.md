@@ -2,6 +2,9 @@
 x11docker ToDo notes
 
 ## Work in progress
+ - bug: ssh: --hostdisplay fails
+ - bug: setting XAUTHORITY with systemctl
+
  - kata: add new runtime for nerdctl io.containerd.kata.v2 
 
  - --kwin in weston segfaults
@@ -12,35 +15,17 @@ x11docker ToDo notes
  - --build=nvidia?
  - x11docker/nvidia-base: use tags with version number?
 
- - --clipboard: improve Wayland clipboard support
-
  - further centralize argument checks
- - change global "no" to ""
-
  - --pulseaudio=host: check possible tcp setup
- - --interactive fails now with old systemd versions. (wontfix, not important enough)
-
- - --interactive --init=runit|openrc|sysvinit: no job control in shell
- - --init=openrc|runit: elogind fails
- - check elogind with cgroupv2. maybe drop --sharecgroup and set up in container only
 
  - sommelier
- - --backend=systemd-nspawn|lxc|lxd|runc
- - check empty XDG_RUNTIME_DIR e.g. with --user, --hostuser
- - --weston2-xwayland?
- 
- - --backend=proot
-   - --name
-   - --init except systemd possible?
-   - clean /tmp
-   - how to disable old binds? issue e.g. with/without --home, --share
- 
+ - check empty XDG_RUNTIME_DIR e.g. with --user, --hostuser 
 
 ## Issues to fix
  - --build: download files for COPY/ADD (x11docker/check, x11docker/xserver)
  - `--remove`: give note about not removed files in `~./config/x11docker` and `/etc/x11docker`
  - `--update`: Check if installs not into `/usr/bin` or `/usr/local/bin`. Do not install other files then.
-   Maybe change to $1 mode without `--`
+ - --clipboard: improve Wayland clipboard support
    
 ## Checks
  - check all `--init=` in all backends rootful and rootless.
@@ -55,6 +40,10 @@ x11docker ToDo notes
  - `--backend=podman` rootless: disallow `--home` for different `--user`.
 
 ## Old issues to fix
+ - --interactive --init=runit|openrc|sysvinit: no job control in shell
+ - --interactive fails now with old systemd versions. (wontfix, not important enough)
+ - --init=openrc|runit: elogind fails
+ - check elogind with cgroupv2. maybe drop --sharecgroup and set up in container only
  - `--kwin-xwayland`: broken? Xwayland says: "missing wl_shell protocol". Deprecated yet.
  - docker-for-win: DOS newline mess in `error()` #219.
  - docker-for-win: Double entries in log.
