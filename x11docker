@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.5.0-beta-2"
+Version="7.5.0-beta-4"
 Packagedversion="no" # Set to "yes" if you want to package x11docker. This disables installation options.
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups. (deprecated)
@@ -715,11 +715,20 @@ finish() {                      # trap EXIT routine to clean up background proce
   esac
 }
 finish_sigint() {               # trap SIGINT to activate debug mode on finish()
-  local Pid1pid
+  local Pid1pid  X11dockerpid
+  X11dockerpid="$(storeinfo dump x11dockerpid)"
   Debugmode="yes"
-  debugnote "Received SIGINT"
-  storeinfo error=130
-  finish
+  [ "$$" = "$X11dockerpid" ] && {
+    debugnote "Received SIGINT"
+    storeinfo error=130
+    finish
+    :
+  } || {
+    debugnote "Received SIGINT in subshell $SHLVL: $$"
+    kill -s SIGINT "$X11dockerpid"
+    trap - EXIT
+    exit 130
+  }
 }
 saygoodbye() {                  # create file signaling watching processes to terminate
   debugnote "time to say goodbye ($*)"
@@ -977,8 +986,8 @@ download() {                    # download file at URL $1 and store it in file $
   [ "$Downloader" ] || return 1
   [ "${1:-}" ]      || return 0
   case "$Downloader" in
-    wget) wget    "${1:-}" -O       "${2:-}" ;;
-    curl) curl -L "${1:-}" --output "${2:-}" ;;
+    wget) wget    "${1:-}"        -O       "${2:-}" || return 1;;
+    curl) curl -L "${1:-}" --fail --output "${2:-}" || return 1;;
   esac
   return $?
 }
@@ -1444,7 +1453,9 @@ buildimage() {                  # --build: build image from x11docker repository
 
   note "Download of $Wwwpath/Dockerfile"
   download "$Wwwpath/Dockerfile" "$Buildpath/Dockerfile"      || error "Option --build: Did not find a Dockerfile for $Imagename
-  at $Wwwpath"
+  at $Wwwpath
+  Option --build only supports Dockerfiles from https://github.com/mviereck.
+  For other sources please download Dockerfile and use 'docker build'."
   [ "$Imagename" = "x11docker/xserver" ] && {
     note "Download of $Wwwpath/XlibNoSHM.c"
     download "$Wwwpath/XlibNoSHM.c" "$Buildpath/XlibNoSHM.c"  || error "Option --build: Downloading XlibNoSHM.c failed."
@@ -2871,7 +2882,10 @@ check_xcontainer() {            # option --xc: check backend, rootless and image
           unpriv_xcbackend "$Xcontainerbackend inspect $Xcontainerimage" >/dev/null 2>&1 || Fail="yes"
         ;;
         host|proot)
-          unpriv_xcbackend "docker   inspect $Xcontainerimage" >/dev/null 2>&1 && Xcontainerbackend="docker" && Xcrootless="${Xcrootless:-no}"
+          Xcrootless="yes" unpriv_xcbackend "docker inspect $Xcontainerimage" >/dev/null 2>&1 && Xcontainerbackend="docker" && Xcrootless="yes"
+          [ -z "$Xcontainerbackend" ] && {
+            Xcrootless="no"  unpriv_xcbackend "docker inspect $Xcontainerimage" >/dev/null 2>&1 && Xcontainerbackend="docker" && Xcrootless="no"
+          }
           [ -z "$Xcontainerbackend" ] && {
             unpriv_xcbackend "podman inspect $Xcontainerimage" >/dev/null 2>&1 && Xcontainerbackend="podman" && Xcrootless="${Xcrootless:-yes}"
           }
@@ -2908,7 +2922,9 @@ check_xcontainer() {            # option --xc: check backend, rootless and image
     }
     Xcontainer="no"
   }
-
+  
+  [ -z "$Xcontainerbackend" ] && Xcontainer="no"
+  
   case "$Xcontainer" in
     yes|auto)
       case "$Xcontainerbackend" in
@@ -11279,7 +11295,7 @@ unpriv() {                      # run a command as unprivileged user. Needed if 
   $Unpriv "$Command"
   return $?
 }
-unpriv_backend(){               # run container backend rootful or rootless
+unpriv_backend() {              # run container backend rootful or rootless
   local Command
   Command="$(oneline "${1:-}")"
   case "$Backendrootless" in
@@ -11288,10 +11304,10 @@ unpriv_backend(){               # run container backend rootful or rootless
   esac
   return $?
 }
-unpriv_xcbackend(){             # run X container backend rootful or rootless
+unpriv_xcbackend() {            # run X container backend rootful or rootless
   local Command
   Command="$(oneline "${1:-}")"
-  case "$Xcrootless" in
+  case "${Xcrootless:-no}" in
     yes) unpriv                  "$Command" ;;
     no)  eval   "env DOCKER_HOST= $Command" ;;
   esac
