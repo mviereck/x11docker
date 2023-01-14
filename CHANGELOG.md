@@ -8,13 +8,17 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Added
- - `man` page for x11docker.
+ - `man` page for x11docker. (Run update from 7.4.2 twice to install it.)
    [(469)](https://github.com/mviereck/x11docker/issues/469)
 ### Fixed
  - `--tty` failed with `--xc`. Fix: disable `--xc`.
    [(464)](https://github.com/mviereck/x11docker/issues/464)
  - `--xonly`: run socat unprivileged to make the unix socket accessible.
    [(466)](https://github.com/mviereck/x11docker/issues/466)
+- `--share`: Softlink fix for folders in `HOME`.
+   [(475)](https://github.com/mviereck/x11docker/issues/475)
+- `jq` support to lessen python dependency.
+   [(478)](https://github.com/mviereck/x11docker/issues/478)
 ### Deprecated
  - `--backend=proot`: Deprecated because likely no one uses it,
    but would need further checks and maintenance.
