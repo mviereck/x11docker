@@ -15,10 +15,12 @@ Project website: https://github.com/mviereck/x11docker
    [(464)](https://github.com/mviereck/x11docker/issues/464)
  - `--xonly`: run socat unprivileged to make the unix socket accessible.
    [(466)](https://github.com/mviereck/x11docker/issues/466)
-- `--share`: Softlink fix for folders in `HOME`.
+ - `--share`: Softlink fix for folders in `HOME`.
    [(475)](https://github.com/mviereck/x11docker/issues/475)
-- `jq` support to lessen python dependency.
+ - `jq` support to lessen python dependency.
    [(478)](https://github.com/mviereck/x11docker/issues/478)
+ - Replace `getent` with custom `grep` command.
+   [(477)](https://github.com/mviereck/x11docker/issues/477)
 ### Deprecated
  - `--backend=proot`: Deprecated because likely no one uses it,
    but would need further checks and maintenance.
