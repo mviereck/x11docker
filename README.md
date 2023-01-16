@@ -5,6 +5,7 @@
 
 ## Table of contents
  - [Introduction](#introduction)
+   - [Docker Desktop or Docker Engine](#docker-desktop-or-docker-engine)
    - [TL;DR](#tldr)
    - [Features](#features)
    - [Supported systems](#supported-systems)
@@ -72,6 +73,12 @@ This can help to run or deploy software that is difficult to install on several 
 Files to work on can be shared between host and container.
 
 [x11docker wiki](https://github.com/mviereck/x11docker/wiki) provides some how-to's for basic setups without x11docker.
+
+### Docker Desktop or Docker Engine
+Since a while Docker distributes a version called "Docker Desktop" that runs Docker in a QEMU VM. x11docker is not designed to support this VM based version.
+Instead, use x11docker with the native ["Docker Engine Server version"](https://docs.docker.com/engine/install/#server) that uses your host kernel to run containers.
+ - If you install Docker from your distribution's repository, you'll likely get this native version.
+ - If you prefer podman over Docker, you'll don't need to care about this difference.
 
 ### TL;DR
 For a quick start:
