@@ -8,12 +8,16 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [7.6.0](https://github.com/mviereck/x11docker/releases/tag/v7.6.0) - 2023-01-18
 ### Changed
- - Up to version 7.5.0 x11docker installed itself with prefix `/usr`,
-   now it uses `/usr/local`. This serves to follow the 
-   [Linux Foundation specifications of `/usr/local`.](https://refspecs.linuxfoundation.org/FHS_3.0/fhs/ch04s09.html).
+ - `--install|--update|--update-master`: Up to version 7.5.0
+   x11docker installed itself with prefix `/usr`,
+   now it uses `/usr/local`. This serves to follow the
+   [Linux Foundation specifications of `/usr/local`](https://refspecs.linuxfoundation.org/FHS_3.0/fhs/ch04s09.html).
    To help with the transition, a new option `--remove-oldprefix`
-   was introduced. Recommended procedure:
+   was introduced.
+   An update from previous versions must be done twice to take effect.
+   Recommended procedure:
    - First run:      `x11docker --update`
+   - Again run:      `x11docker --update`
    - Afterwards run: `x11docker --remove-oldprefix`
 ### Added
  - `--remove-oldprefix`: Remove installation in old prefix `/usr`.
