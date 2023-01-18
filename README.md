@@ -78,7 +78,8 @@ Files to work on can be shared between host and container.
 Since a while Docker distributes a version called "Docker Desktop" that runs Docker in a QEMU VM. x11docker is not designed to support this VM based version.
 Instead, use x11docker with the native ["Docker Engine Server version"](https://docs.docker.com/engine/install/#server) that uses your host kernel to run containers.
  - If you install Docker from your distribution's repository, you'll likely get this native version.
- - If you prefer podman over Docker, you'll don't need to care about this difference.
+ - The supported native Docker Engine package name is mostly `docker.io` or `docker-ce`, in opposite to the non-supported VM based `docker-desktop` package.
+ - If you prefer podman over Docker, you don't need to care about this difference.
 
 ### TL;DR
 For a quick start:
@@ -452,16 +453,18 @@ As root you can install, update and remove x11docker in system directories to be
  - `x11docker --update-master` : download and install latest master version from github.
  - `x11docker --remove` : remove all files installed by x11docker.
    - Note: This does not remove `~/.local/share/x11docker` where it stores persistent files of option `--home`.
+ - `x11docker --remove-oldprefix` : Before version 7.6.0 x11docker installed itself into `/usr/bin`.
+   Now it installs into `/usr/local/bin`. Use `--remove-oldprefix` to remove `/usr/bin` installations.
 
 To see the difference between current and coming updated version, you can use optional argument `diff` for `--update` and `--update-master`.
 Example: `x11docker --update-master=diff` will show you the code changes from your current installation to latest master/beta version without installing it.
 
 #### Installed files
 What the installation does (just for information):
- - Copies script `x11docker` to `/usr/bin`. 
- - Installs icon `x11docker.png` in `/usr/share/icons` using `xdg-icon-resource`. 
- - Copies documentation `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/share/doc/x11docker`.
- - Stores `man` page for x11docker in `/usr/share/man/man1/x11docker.1.gz`.
+ - Copies script `x11docker` to `/usr/local/bin`. 
+ - Installs icon `x11docker.png` below `/usr/share/icons` using `xdg-icon-resource`. 
+ - Copies documentation `README.md`, `CHANGELOG.md` and `LICENSE.txt` to `/usr/local/share/doc/x11docker`.
+ - Stores `man` page for x11docker in `/usr/local/share/man/man1/x11docker.1.gz`.
  
 #### Shortest way for first installation:
  - For systems using `sudo`:

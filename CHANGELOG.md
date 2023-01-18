@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [7.6.0](https://github.com/mviereck/x11docker/releases/tag/v7.6.0) - 2023-01-18
+### Changed
+ - Up to version 7.5.0 x11docker installed itself with prefix `/usr`,
+   now it uses `/usr/local`. This serves to follow the 
+   [Linux Foundation specifications of `/usr/local`.](https://refspecs.linuxfoundation.org/FHS_3.0/fhs/ch04s09.html).
+   To help with the transition, a new option `--remove-oldprefix`
+   was introduced. Recommended procedure:
+   - First run:      `x11docker --update`
+   - Afterwards run: `x11docker --remove-oldprefix`
+### Added
+ - `--remove-oldprefix`: Remove installation in old prefix `/usr`.
+   [(479)](https://github.com/mviereck/x11docker/issues/479)
+
 ## [7.5.0](https://github.com/mviereck/x11docker/releases/tag/v7.5.0) - 2023-01-16
 ### Added
  - `man` page for x11docker. (Run update from 7.4.2 twice to install it.)
@@ -21,7 +34,7 @@ Project website: https://github.com/mviereck/x11docker
    [(478)](https://github.com/mviereck/x11docker/issues/478)
  - Replace `getent` with custom `grep` command.
    [(477)](https://github.com/mviereck/x11docker/issues/477)
- - `--install|--update*`: Do not dpend on backend.
+ - `--install|--update*`: Do not depend on backend.
    [(470)](https://github.com/mviereck/x11docker/issues/470)
 ### Deprecated
  - `--backend=proot`: Deprecated because likely no one uses it,
