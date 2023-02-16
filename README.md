@@ -588,7 +588,7 @@ Feel free to open a [ticket](https://github.com/mviereck/x11docker/issues) if yo
 If reporting an [issue](https://github.com/mviereck/x11docker/issues):
  - Have a look at chapter [Troubleshooting](#troubleshooting).
  - Most times it makes sense to store the `--verbose` output (or `~/.cache/x11docker/x11docker.log`) at [pastebin.com](https://pastebin.com/).
-   - Personal information in the logfile are mainly the user name (also in paths) and some hardware and system information.
+   - Personal information in the logfile is mainly the user name (also in paths) and some hardware and system information.
 ### Contributing
 If you want to contribute to x11docker, please open a [ticket](https://github.com/mviereck/x11docker/issues) before creating a pull request. 
 Often it is possible to accomplish desired tasks with already available options.
