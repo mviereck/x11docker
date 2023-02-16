@@ -630,7 +630,7 @@ x11docker --build x11docker/fvwm
 | --- | --- |
 | Xfce4 Terminal | `x11docker x11docker/xfce xfce4-terminal` |
 | GLXgears with hardware acceleration | `x11docker --gpu x11docker/xfce glxgears` |
-| [Kodi media center](https://kodi.tv/) with hardware <br> acceleration, Pulseaudio sound <br> and shared `Videos` folder. <br> For setup look at [enough/docker-kodi](https://github.com/enough/docker-kodi). | `x11docker --gpu --pulseaudio --share ~/Videos erichough/kodi`. |
+| [Kodi media center](https://kodi.tv/) with hardware <br> acceleration, Pulseaudio sound <br> and shared `Videos` folder. <br> For setup look at [ehough/docker-kodi](https://github.com/ehough/docker-kodi). | `x11docker --gpu --pulseaudio --share ~/Videos erichough/kodi`. |
 | [XaoS](https://github.com/patrick-nw/xaos) fractal generator | `x11docker patricknw/xaos` |
 | [Telegram messenger](https://telegram.org/) with persistent <br> `HOME` for configuration storage | `x11docker --home xorilog/telegram` |
 | Firefox with shared `Download` folder<br> and internet access. | `x11docker -I --share $HOME/Downloads -- --tmpfs /dev/shm -- jess/firefox` |
