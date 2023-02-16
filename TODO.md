@@ -74,7 +74,7 @@ x11docker ToDo notes
    https://bugzilla.redhat.com/show_bug.cgi?id=1498669
   
 ## Improvements
- - `--cleanup`: avoid hardcoded pathes
+ - `--cleanup`: avoid hardcoded paths
  - `x11docker/check`: palinopsia: check video RAM size with `glxinfo`, adjust requested RAM size.
  - further checks of `/etc/pam.d`
  - further checks of multimonitor behaviour
