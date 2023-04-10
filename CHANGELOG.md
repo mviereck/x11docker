@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Fixed
+ - `mygetent()`: check for system `getent`.
+   [(496)](https://github.com/mviereck/x11docker/issues/496)
+
 ## [7.6.0](https://github.com/mviereck/x11docker/releases/tag/v7.6.0) - 2023-01-18
 ### Changed
  - `--install|--update|--update-master`: Up to version 7.5.0
