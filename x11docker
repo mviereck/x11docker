@@ -1035,26 +1035,26 @@ parse_inspect() {               # parse json of inspect output using python
   local Parserscript
   local Jsonstring Keystring Output
 
-  command -v jq >/dev/null && {
+  [[ "$Jqbin" ]] && {
     Jsonstring="${1:-}" ; shift
-    [ "${Jsonstring:0:1}" = "[" ] && Keystring=".[]" || Keystring=""
+    [[ $("$Jqbin" -r 'type' <<< "$Jsonstring") == array ]] && Keystring=".[0]" || Keystring=""
     while [ $# -gt 0 ]; do
       Keystring="$Keystring.${1:-}"
       shift
     done
-    Output="$(jq "$Keystring" <<< "$Jsonstring")"
-    while [ "${Output:0:1}" = "[" ]; do
-      Output="$(jq '.[]' <<< "$Output" )"
-    done
+    Output="$("$Jqbin" "$Keystring" <<< "$Jsonstring")"
+    if [[ $("$Jqbin" -r 'type' <<< "$Output") == array ]]; then
+      Output="$("$Jqbin" -r $'map(tostring | "\'" + . + "\'") | join(" ")' <<< "$Output" )"
+    fi
+    if [[ $("$Jqbin" -r 'type' <<< "$Output" 2>/dev/null) == string ]]; then
+        Output="$("$Jqbin" -r '.' <<< "$Output")"
+    fi
     [ "$Output" = "null" ] && Output=""
-    [ "${Output:0:1}" = '"' ] && Output="${Output:1:-1}"
     echo "$Output"
     return
   }
 
-  Parserscript="$Cachefolder/parse_inspect.py"
-  Parserscript="#! $Pythonbin
-$(cat << EOF
+  Parserscript="#! $Pythonbin"$'
 import json,sys
 
 def parse_inspect(*args):
@@ -1066,16 +1066,17 @@ def parse_inspect(*args):
      2..n: json keys. For second level keys provide e.g. "Config","Cmd"
     Prints key value as a string.
     Prints empty string if key not found.
-    A list is printed as a string with '' around each element.
+    A list is printed as a string with \'\' around each element.
     """
 
     output=""
     inspect=args[1]
     inspect=inspect.strip()
-    if inspect[0] == "[" :
-        inspect=inspect[1:-2] # remove enclosing [ ]
 
     obj=json.loads(inspect)
+
+    if "\'list\'" in str(type(obj)):
+        obj = obj[0]
 
     for arg in args[2:]: # recursively find the desired object. Command.Cmd is found with args "Command" , "Cmd"
         try:
@@ -1084,11 +1085,12 @@ def parse_inspect(*args):
             obj=""
 
     objtype=str(type(obj))
-    if "'list'" in objtype:
+    if "\'list\'" in objtype:
         for i in obj:
-            output=output+"'"+str(i)+"' "
+            output += "\'" + str(i) + "\' "
+        output = output.strip()
     else:
-        output=str(obj)
+        output = str(obj)
 
     if output == "None":
         output=""
@@ -1096,8 +1098,7 @@ def parse_inspect(*args):
     print(output)
 
 parse_inspect(*sys.argv)
-EOF
-  )"
+'
   echo "$Parserscript" | $Pythonbin - "$@" || warning "parse_inspect(): Error while parsing json for
   ${2:-} ${3:-} ${4:-} ${5:-} ${6:-} (Line $BASH_LINENO)"
 }
@@ -5675,7 +5676,11 @@ check_image() {                 # get some image information
 
   # Check WORKDIR
   Imageworkdir="$(parse_inspect "$Imageinspect" "Config" "Workdir")"
-  debugnote "Image WORKDIR: $Workdir"
+  # It seems Config.Workdir is Config.WorkingDir in more recent versions?
+  [ -z "$Imageworkdir" ] && {
+    Imageworkdir="$(parse_inspect "$Imageinspect" "Config" "WorkingDir")"
+  }
+  debugnote "Image WORKDIR: $Imageworkdir"
   [ -z "$Workdir" ] && [ -n "$Imageworkdir" ] && {
     note "Found 'WORKDIR $Imageworkdir' in image.
   You can change it with option --workdir=DIR."
@@ -7406,20 +7411,18 @@ done
     # --runasuser commands added here
     [ -n "$Runasuser" ] && {
       while read Line; do
-        echo "
-debugnote 'cmdrc: running --runsasuser command:
-  $Line'
-"
+        # The echoed string containing the debugnote command should not contain a newline character
+        # to avoid problems with the generated cmdrc.
+        echo "debugnote \"cmdrc: running --runsasuser command: $Line\""
         echo "
 $Line
 "
       done <<< "$(grep . <<< "$Runasuser")"
     }
 
-    echo "
-debugnote \"cmdrc: Running container command:
-  $Containerentrypoint $Containercommand\"
-"
+    # The echoed string containing the debugnote command should not contain a newline character
+    # to avoid problems with the generated cmdrc.
+    echo "debugnote \"cmdrc: Running container command: $Containerentrypoint $Containercommand\""
     case "$Forwardstdin" in
       yes) echo "$Containerentrypoint $Containercommand <$(convertpath share "$Cmdstdinfifo")" ;;
       no)  echo "$Containerentrypoint $Containercommand" ;;
@@ -8749,13 +8752,14 @@ check_host() {                  # check host environment
   #Nvidiaversion="470.74"
 
   # check python version
-  Pythonbin="$(command -v jq ||:)"
-  [ -z "$Pythonbin" ] && Pythonbin="$(command -v python ||:)"
+  Pythonbin="$(command -v python ||:)"
   [ -z "$Pythonbin" ] && Pythonbin="$(command -v python3 ||:)"
   [ -z "$Pythonbin" ] && Pythonbin="$(command -v python2 ||:)"
+  # check jq version
+  Jqbin="$(command -v jq ||:)"
   case "$Backend" in
     docker|podman|nerdctl)
-      [ -z "$Pythonbin" ] && error "x11docker needs 'jq' or 'python' to parse output
+      [ -z "$Pythonbin" ] && [ -z "$Jqbin" ] && error "x11docker needs 'jq' or 'python' to parse output
   of '$Backend inspect'. Please install 'jq' or 'python' version 2.x or 3.x."
     ;;
   esac
@@ -10981,6 +10985,7 @@ declare_variables() {           # declare global variables
   Nvidiaversion=""                                # --gpu: Proprietary nvidia driver version on host
   Nvidiainstallerfile=""                          # --gpu: Proprietary nvidia driver installer for container in [...]local/share/x11docker
   Pythonbin=""                                    # path to python binary
+  Jqbin=""                                        # path to jq binary
 
   # MS Windows
   Winpty=""                                       # Path to winpty for --interactive on MS Windows
