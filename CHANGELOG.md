@@ -8,6 +8,8 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Fixed
+ - `jq` and `python` parsing.
+   [(525)](https://github.com/mviereck/x11docker/issues/525)
  - `mygetent()`: check for system `getent`.
    [(496)](https://github.com/mviereck/x11docker/issues/496)
 
