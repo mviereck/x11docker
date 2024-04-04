@@ -10,6 +10,11 @@ Project website: https://github.com/mviereck/x11docker
 ### Fixed
  - `jq` and `python` parsing.
    [(525)](https://github.com/mviereck/x11docker/issues/525)
+   [(485)](https://github.com/mviereck/x11docker/issues/485)
+   [(493)](https://github.com/mviereck/x11docker/issues/493)
+   [(504)](https://github.com/mviereck/x11docker/issues/504)
+ - `--pulseaudio`: share cookie file.
+   [(507)](https://github.com/mviereck/x11docker/issues/507)
  - `mygetent()`: check for system `getent`.
    [(496)](https://github.com/mviereck/x11docker/issues/496)
 

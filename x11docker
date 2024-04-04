@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.6.2-beta"
+Version="7.6.3-beta"
 Packagedversion="no" # Set to "yes" if you want to package x11docker. This disables installation options.
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups. (deprecated)
@@ -1007,7 +1007,7 @@ getrandomnumber() {             # get random number
 }
 isint() {                       # check if $1 is a positive integer
   #[[ $var =~ ^-?[0-9]+$ ]]
-  [[ "${1:-}" =~ ^[0-9]+$ ]]
+  [[ "${1:-EMPTY}" =~ ^[0-9]+$ ]]
 }
 isnum() {                       # check if $1 is a number
   [ "1" = "$(awk -v a="${1:-}" 'BEGIN {print (a == a + 0)}')" ]
@@ -2406,9 +2406,9 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
   # TCP module is created after container startup to authenticate it with container IP.
   # Detailed documentation at: https://github.com/mviereck/x11docker/wiki/Container-sound:-ALSA-or-Pulseaudio
   #
-  # g  $Pulseaudiomode    =tcp or =socket: Connect over tcp or with shared socket
+  # g  $Pulseaudiomode    =tcp or =socket or=host: Connect over tcp or with shared socket
   # g  $Pulseaudioport    TCP port
-  local Lowerport= Upperport=
+  local Lowerport= Upperport= Setcookie=
 
   command -v pactl >/dev/null || {
     note "Option --pulseaudio: pactl not found.
@@ -2445,21 +2445,24 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
   case "$Pulseaudiomode" in
     socket|tcp)
       grep -q -i "PipeWire" <<< "$(unpriv "pactl info")" && note "Option --pulseaudio: Found pipewire sound server.
-  If pulseaudio sound fails, you can try --pulseaudio=host instead."
+  If pulseaudio sound fails, you can try 
+  --pulseaudio=tcp or --pulseaudio=host instead."
     ;;
   esac
   
   case "$Pulseaudiomode" in
     socket)
       # create pulseaudio socket
-      Pulseaudiomoduleid="$(unpriv "pactl load-module module-native-protocol-unix socket='$Pulseaudiosocket' 2>&1")"
+      Pulseaudiomoduleid="$(unpriv "pactl load-module module-native-protocol-unix socket='$Pulseaudiosocket' 2>&1 ||:")"
+      #Pulseaudiomoduleid="$(unpriv "pactl load-module libpipewire-module-protocol-native socket='$Pulseaudiosocket' 2>&1 ||:")" # fails with pipewire
 
-      [ "$Pulseaudiomoduleid" ] && {
+      isint "$Pulseaudiomoduleid" && {
         storeinfo "pulseaudiomoduleid=$Pulseaudiomoduleid"
         store_runoption env "PULSE_SERVER=unix:$(convertpath share "$Pulseaudiosocket")"
-        store_runoption env "PULSE_COOKIE=$(convertpath share "$Pulseaudiocookie")"
+        Setcookie="yes"
       } || {
-        note "Option --pulseaudio: command pactl failed.
+        note "Option --pulseaudio: command pactl failed with output:
+  '$Pulseaudiomoduleid'
   Is pulseaudio running at all on your host?
   Fallback: Disabling option --pulseaudio.
   You can try option --alsa instead."
@@ -2490,13 +2493,25 @@ $(nl -ba < "$Pulseaudioconf")"
       [ -e "$Hostuserhome/.config/pulse/cookie" ] && cp "$Hostuserhome/.config/pulse/cookie" "$Pulseaudiocookie" || note "Option --pulseaudio: Did not find cookie
   $Hostuserhome/.config/pulse/cookie"
       store_runoption env "PULSE_SERVER=tcp:$Hostip:$Pulseaudioport"
+      Setcookie="yes"
     ;;
     host)
       Pulseaudiosocket="$(unpriv "env LC_ALL=C pactl info" | grep 'Server String' |rev|cut -d' ' -f1|rev)"
       store_runoption env "PULSE_SERVER=unix:/tmp/pulseaudio.socket.host"
-#      store_runoption env "PULSE_COOKIE=$(convertpath share "$Pulseaudiocookie")"
+      Setcookie="yes"
     ;;
   esac
+
+  [ "$Setcookie" = "yes" ] && {
+    [ -e "$Hostuserhome/.config/pulse/cookie" ] && {
+      cp "$Hostuserhome/.config/pulse/cookie" "$Pulseaudiocookie"
+      store_runoption env "PULSE_COOKIE=$(convertpath share "$Pulseaudiocookie")"
+    } || {
+      note "Option --pulseaudio: Did not find cookie
+  $Hostuserhome/.config/pulse/cookie"
+    }
+  }
+
   return 0
 }
 setup_vaapi() {                 # option --gpu: setup for VAAPI and VDPAU video decoding acceleration
