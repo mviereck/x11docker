@@ -8,6 +8,8 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Fixed
+ - `ssh`: add softlink to `~/.Xauthority` and create `/run/sshd`.
+   [(554)](https://github.com/mviereck/x11docker/issues/554)
  - `jq` and `python` parsing.
    [(525)](https://github.com/mviereck/x11docker/issues/525)
    [(485)](https://github.com/mviereck/x11docker/issues/485)
