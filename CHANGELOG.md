@@ -8,6 +8,7 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Fixed
+ - `--backend`: Docker Desktop: Exit with error, not supported.
  - `ssh`: add softlink to `~/.Xauthority` and create `/run/sshd`.
    Create helper script `/x11docker/sshenv`for environment setup.
    [(554)](https://github.com/mviereck/x11docker/issues/554)
