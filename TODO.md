@@ -1,6 +1,11 @@
 # ToDo
 x11docker ToDo notes
 
+Xwayland: use xrandr, try fullscreen on tty
+--kwin-xwayland stays black
+--gpu fails
+logout does not terminate desktop sessions anymore
+
 ## Work in progress
  - bug: ssh: --hostdisplay fails
  - bug: setting XAUTHORITY with systemctl

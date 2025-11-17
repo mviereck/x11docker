@@ -8,6 +8,9 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Fixed
+ - `--xwayland`: use `-decorate`.
+ - `--*xwayland'`: use `-force-xrandr-emulation`.
+ - `--weston-xwayland`: print `-xopt`possibilities.
  - `--backend`: Docker Desktop: Exit with error, not supported.
  - `ssh`: add softlink to `~/.Xauthority` and create `/run/sshd`.
    Create helper script `/x11docker/sshenv`for environment setup.
@@ -21,6 +24,8 @@ Project website: https://github.com/mviereck/x11docker
    [(507)](https://github.com/mviereck/x11docker/issues/507)
  - `mygetent()`: check for system `getent`.
    [(496)](https://github.com/mviereck/x11docker/issues/496)
+### Added
+ - `--xopt=ARG`: Add custom arguments to X server command.
 
 ## [7.6.0](https://github.com/mviereck/x11docker/releases/tag/v7.6.0) - 2023-01-18
 ### Changed
