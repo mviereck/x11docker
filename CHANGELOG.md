@@ -24,8 +24,12 @@ Project website: https://github.com/mviereck/x11docker
    [(507)](https://github.com/mviereck/x11docker/issues/507)
  - `mygetent()`: check for system `getent`.
    [(496)](https://github.com/mviereck/x11docker/issues/496)
+   [(510)](https://github.com/mviereck/x11docker/issues/510)
 ### Added
  - `--xopt=ARG`: Add custom arguments to X server command.
+### Deprecated
+ - `--kwin`: Deprecated because of issues and likely rare use.
+   Use `--weston` instead.
 
 ## [7.6.0](https://github.com/mviereck/x11docker/releases/tag/v7.6.0) - 2023-01-18
 ### Changed
