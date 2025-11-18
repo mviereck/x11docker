@@ -8,6 +8,9 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Fixed
+ - `--password`: fix mkdir issue if `~/.config/x11docker` does not exist.
+   [(535)](https://github.com/mviereck/x11docker/issues/554)
+   [(537)](https://github.com/mviereck/x11docker/issues/554)
  - `--xwayland`: use `-decorate`.
  - `--*xwayland'`: use `-force-xrandr-emulation`.
  - `--weston-xwayland`: print `-xopt`possibilities.
