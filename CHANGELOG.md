@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [7.7.0](https://github.com/mviereck/x11docker/releases/tag/v7.7.0) - 2025-011-18
 ### Fixed
  - `--password`: fix mkdir issue if `~/.config/x11docker` does not exist.
    [(535)](https://github.com/mviereck/x11docker/issues/554)
