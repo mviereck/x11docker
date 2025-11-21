@@ -3000,6 +3000,9 @@ check_xcontainer() {            # option --xc: check backend, rootless and image
       Xcontaineroptions="${Xcontaineroptions:-"--nxagent --xpra --xpra2 --xpra2-xwayland --xephyr --weston-xwayland --xvfb --xwayland --weston"}"
       Xcontaineroptionsconsole="$(parse_inspect "$Xcontainerinspect" "Config" "Labels" "options_console")"
       Xcontainertools="$(parse_inspect "$Xcontainerinspect" "Config" "Labels" "tools")"
+      Xcontainerversion="$(parse_inspect "$Xcontainerinspect" "Config" "Labels" "version")"
+      verlt "$Xcontainerversion" "2.0" && note "Option --xc: Please update image x11docker/xserver
+  with 'docker pull x11docker/xserver'."
     ;;
     no)
       debugnote "check_xcontainer(): --xc disabled"
@@ -3787,6 +3790,7 @@ create_modelinefile() {         # generate a set of smaller modelines for screen
 create_xcommand() {             ### create command to start X server and/or Wayland compositor
   local Xserveroptions_custom= Xpraoptions= Nxagentoptions= Compositorpid= Weston= Westonoutput= Count= Usemitshm Xkbmodel Xdpyinfooutput
   local Connector Connectorlist Status
+  local Xrandremulation Decorate
 
   Xserveroptions_custom="$Xserveroptions"
   Xserveroptions=""
@@ -3800,6 +3804,9 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   [ "$Xcontainer" = "no" ]  && [ "$Shareipc" != "host" ]             && Usemitshm="no"
   [ "$Containeruser" != "$Hostuser" ]                                && Usemitshm="no"
   [ "$Xoverip" != "no" ]                                             && Usemitshm="no"
+  [ "$Xcontainer" = "yes" ] && case "$Xserver" in
+    --weston*) [ "$Shareipc" != "host" ]                                Usemitshm="no" ;;
+  esac
   case "$Runtime" in
     kata-runtime|sysbox-runc)                                           Usemitshm="no" ;;
   esac
@@ -4059,6 +4066,15 @@ startup-animation=fade
       esac
     ;;
   esac
+  
+  # Xwayland -force-xrandr-emulation
+  case "$Xserver" in
+    *xwayland)
+      Xwayland -help 2>&1 | grep -q "force-xrandr-emulation" && Xrandremulation="-force-xrandr-emulation"
+      Xwayland -help 2>&1 | grep -q "decorate" && Decorate="-decorate"
+      verlt "$Xcontainerversion" "2.0" && Xrandremulation="" && Decorate=""
+    ;;
+  esac
 
 
   #### create command to run X server
@@ -4101,13 +4117,13 @@ startup-animation=fade
 
     --xwayland)
       Xcommand="$(get_xpath Xwayland) :$Newdisplaynumber -ac $Xserveroptions \\
-  -decorate \\
-  -force-xrandr-emulation"
+  $Decorate \\
+  $Xrandremulation"
     ;;
 
     --xpra-xwayland|--xpra2-xwayland)
       Xcommand="$(get_xpath Xwayland) :$Newdisplaynumber -ac $Xserveroptions \\
-  -force-xrandr-emulation"
+  $Xrandremulation"
 
       echo "[output]
 name=${Westonoutput}1
@@ -4131,7 +4147,7 @@ mode=$Screensize" >> "$Westonini"
     ;;
     --weston|--weston-xwayland)
       Xcommand="$(get_xpath Xwayland) :$Newdisplaynumber -ac $Xserveroptions \\
-  -force-xrandr-emulation"
+  $Xrandremulation"
       [ "$Fullscreen" = "yes" ] && Xcommand="$Xcommand \\
   -fullscreen"
 
@@ -4178,8 +4194,8 @@ mode=$Screensize" >> "$Westonini"
 
     --kwin|--kwin-xwayland)
       Xcommand="$(get_xpath Xwayland) :$Newdisplaynumber -ac $Xserveroptions \\
-  -force-xrandr-emulation \\
-  -decorate"
+  $Xrandremulation \\
+  $Decorate"
 
       Compositorcommand="kwin_wayland \\
   --xwayland \\
@@ -4575,10 +4591,18 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   --ipc=host"
     ;;
     no)
-      case "$Xcontainerbackend" in
-        docker)
+      case "$Xserver" in
+        --weston*)
           Xcontainercommand="$Xcontainercommand \\
+  --ipc=host"
+        ;;
+        *) # if possible, share IPC with X client container to allow MIT-SHM
+          case "$Xcontainerbackend" in
+            docker)
+              Xcontainercommand="$Xcontainercommand \\
   --ipc=shareable"
+            ;;
+          esac
         ;;
       esac
     ;;
@@ -4785,6 +4809,10 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
       return 1
     ;;
   esac
+  
+  experimental "--xc privileged" && {
+    Xcontainercommand="$Xcontainercommand --ipc=host"
+  }
 
   Xcontainercommand="$Xcontainercommand \\
   $Xcontainerimage bash /xcontainerrc"
@@ -6469,8 +6497,13 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
                 *)
                   case "$Backend" in
                     docker)
-                      [ "$Xcrootless" = "$Backendrootless" ] && Backendcommand="$Backendcommand \\
+                      case "$Xserver" in
+                        --weston*) ;; # needs ipc=host in Xcontainer
+                        *)
+                          [ "$Xcrootless" = "$Backendrootless" ] && Backendcommand="$Backendcommand \\
   --ipc=container:$Xcontainername"
+                        ;;
+                      esac
                     ;;
                     podman)
                       case "$Runtime" in
@@ -11160,6 +11193,7 @@ declare_variables() {           # declare global variables
   Xcontaineroptions=""
   Xcontaineroptionsconsole=""
   Xcontainertools=""
+  Xcontainerversion=""
   Xcrootless=""
 
   # Window manager
