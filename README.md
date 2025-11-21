@@ -232,10 +232,10 @@ x11docker provides option `--lang` for flexible language locale settings.
  - Keyboard input methods like `fcitx-pinyin` are possible with some container setup. Compare ticket [#269](https://github.com/mviereck/x11docker/issues/269#issuecomment-667124421).
    
 ### Wayland
-To run  [Wayland](https://wayland.freedesktop.org/) instead of an X server x11docker provides options `--wayland`, `--weston`, `--kwin` and `--hostwayland`. 
+To run  [Wayland](https://wayland.freedesktop.org/) instead of an X server x11docker provides options `--wayland`, `--weston` and `--hostwayland`. 
 For further description loot at [wiki: Description of Wayland options](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options#description-of-wayland-options).
  - Option `--wayland` automatically sets up a Wayland environment. It regards option `--desktop`.
- - Options `--weston` and `--kwin` run Wayland compositors `weston` or `kwin_wayland`.
+ - Options `--weston` runs Wayland compositor `weston`.
  - Option `--hostwayland` can run applications seamless on host Wayland desktops like Gnome 3, KDE 5 and [Sway](https://github.com/swaywm/sway).
  - Example: `xfce4-terminal` on Wayland: `x11docker --wayland x11docker/xfce xfce4-terminal`
  
@@ -649,7 +649,7 @@ x11docker --build x11docker/fvwm
 | [FVWM](https://github.com/mviereck/dockerfile-x11docker-fvwm) (based on [Alpine](https://alpinelinux.org/), 22.5 MB) | `x11docker --desktop x11docker/fvwm` |
 | [Gnome 3](https://github.com/mviereck/dockerfile-x11docker-gnome) | `x11docker --desktop --gpu --init=systemd x11docker/gnome` |
 | [KDE Plasma](https://github.com/mviereck/dockerfile-x11docker-kde-plasma) on X| `x11docker --desktop --gpu --init=systemd x11docker/kde-plasma` |
-| [KDE Plasma](https://github.com/mviereck/dockerfile-x11docker-kde-plasma) on Wayland| `x11docker --kwin --wayland x11docker/kde-plasma plasmashell` |
+| [KDE Plasma](https://github.com/mviereck/dockerfile-x11docker-kde-plasma) on Wayland| `x11docker --weston --wayland x11docker/kde-plasma plasmashell` |
 | [KDE Plasma](https://github.com/mviereck/dockerfile-x11docker-kde-plasma) as nested Wayland compositor| `x11docker --gpu --init=systemd -- --cap-add SYS_RESOURCE -- x11docker/kde-plasma startplasma-wayland` |
 | [Lumina](https://github.com/mviereck/dockerfile-x11docker-lumina) ([website](https://lumina-desktop.org)) (based on [Void Linux](https://www.voidlinux.org/))| `x11docker --desktop x11docker/lumina` |
 | [LiriOS](https://liri.io/) (based on Fedora) | `x11docker --desktop --gpu lirios/unstable` |
