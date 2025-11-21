@@ -1,8 +1,7 @@
 # ToDo
 x11docker ToDo notes
 
-logout does not terminate desktop sessions anymore
-weston fails on console
+xpra option check
 
 ## Work in progress
  - bug: ssh: --hostdisplay fails
