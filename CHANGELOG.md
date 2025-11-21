@@ -8,6 +8,7 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Fixed
+ - `--xc --xorg`: Add `/dev/tty0 /dev/fb0`. Needed on Debian trixie.
  - `--password`: Show host user name for container user password.
    [(535)](https://github.com/mviereck/x11docker/issues/535)
    [(537)](https://github.com/mviereck/x11docker/issues/537)
