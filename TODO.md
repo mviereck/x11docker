@@ -2,6 +2,7 @@
 x11docker ToDo notes
 
 xpra option check
+virgl seems to fail
 
 ## Work in progress
  - bug: ssh: --hostdisplay fails
