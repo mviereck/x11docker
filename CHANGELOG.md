@@ -14,6 +14,7 @@ Project website: https://github.com/mviereck/x11docker
    Debian trixie X container to run nested in X.
  - `--xc --gpu`: fix nvidia driver installation in X container
  - `--xc=docker --backend=podman`: Fix capabilities / DAC_OVERRIDE
+ - `--xc --gpu`: fix check for already installed NVIDIA driver.
  - `--password`: Show host user name for container user password.
    [(535)](https://github.com/mviereck/x11docker/issues/535)
    [(537)](https://github.com/mviereck/x11docker/issues/537)

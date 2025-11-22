@@ -4505,6 +4505,12 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
     Xc_gpu="$Xc_gpu \\
   --mount type=bind,source=$Nvidiainstallerfile,target=$Nvidiacontainerfile,readonly"
     mkfile "$Sharefolder/nvidia_installer"
+  echo "
+$Messagefifofuncs
+Messagefile=$Messagefifo
+Storeinfofile=$Storeinfofile
+Timetosaygoodbyefile=$Timetosaygoodbyefile
+" >> "$Sharefolder/nvidia_installer"
     rootrc_nvidia_installer >> "$Sharefolder/nvidia_installer"
   }
   case "$Xcontainerbackend" in
@@ -4827,10 +4833,6 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
       return 1
     ;;
   esac
-  
-  experimental "--xc privileged" && {
-    Xcontainercommand="$Xcontainercommand --ipc=host"
-  }
 
   Xcontainercommand="$Xcontainercommand \\
   $Xcontainerimage bash /xcontainerrc"
@@ -4840,6 +4842,12 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
 # script running in X server container (option --xc)
 
 exec >> $Xinitlogfile 2>&1
+
+$Messagefifofuncs
+Messagefile=$Messagefifo
+Storeinfofile=$Storeinfofile
+Timetosaygoodbyefile=$Timetosaygoodbyefile
+
 LD_PRELOAD= cp /XlibNoSHM.so $Sharefolder/XlibNoSHM.so
 
 $(declare -f rocknroll)
@@ -4868,6 +4876,11 @@ echo '
 # --gpu=virgl
 virgl_test_server &
 " >> "$Xcontainerrc"
+
+#echo "note 'first nvidia Xc installation'" >> "$Xcontainerrc"
+#rootrc_nvidia_installer >> "$Xcontainerrc"
+
+echo "echo 'X server container: Possible GPU setup is ready.'" >> "$Xcontainerrc"
 
   echo "
 echo 'X server container is ready'
@@ -7142,7 +7155,10 @@ mkdir -v -p /run/sshd
   [ "$Screensize" ]          && rootrc_xrandr
   [ "$Hostlocaltimefile" ]   && rootrc_timezone
   [ "$Langwunsch" ]          && rootrc_create_locale
-  [ "$Nvidiainstallerfile" ] && rootrc_nvidia_installer
+  [ "$Nvidiainstallerfile" ] && {
+    echo "note 'Option --gpu: Installing NVIDIA driver in container.'"
+    rootrc_nvidia_installer
+  }
 
   echo "
 rocknroll || exit 64
@@ -7707,23 +7723,25 @@ rootrc_nvidia_installer() {
   # print code to install NVIDIA driver in container
   # $Nvidiainstallerfile must be shared with container as $Nvidiacontainerfile
   ### FIXME $Containerlibc
+
   echo "
 # Install NVIDIA driver
-Nvidiaversion=\"\$(nvidia-settings -v 2>/dev/null | grep version | rev | cut -d' ' -f1 | rev)\"
-[ \"\$Nvidiaversion\" ] && note \"Found NVIDIA driver \$Nvidiaversion in image.\"
+#Nvidiaversion=\"\$(nvidia-settings -v 2>/dev/null | grep version | rev | cut -d' ' -f1 | rev)\"
+Nvidiaversion=\"\$(ls /lib/firmware/nvidia | grep -x -E '[0-9.]+')\"
+[ -n \"\$Nvidiaversion\" ] && note \"Found NVIDIA driver \$Nvidiaversion in image.\"
 case \"\$Nvidiaversion\" in
   $Nvidiaversion) note 'NVIDIA driver version in image matches version on host. Skipping installation.' ;;
   *)
     Installationwillsucceed=maybe
     case \"\$Containerlibc\" in
-      musl) note 'Installing NVIDIA driver in container systems
-  based on musl libc like Alpine is not possible due to
+      musl) note 'Option --gpu: Installing NVIDIA driver in container
+  systems based on musl libc like Alpine is not possible due to
   proprietary closed source policy of NVIDIA corporation.'
         Installationwillsucceed=no
       ;;
     esac
     [ \"\$Installationwillsucceed\" = \"maybe\" ] && {
-      note 'Installing NVIDIA driver $Nvidiaversion in container.'
+      debugnote 'rootrc_nvidia_installer(): Starting NVIDIA driver installation'
       mkdir -m 1777 /tmp2
       # provide fake tools to fool installer dependency check
       ln -s /bin/true /tmp2/modprobe
@@ -7740,6 +7758,7 @@ case \"\$Nvidiaversion\" in
       env TMPDIR=/tmp2 PATH=\"/tmp2:\$PATH\" sh $Nvidiacontainerfile --tmpdir /tmp2 \$Nvidiaoptions || note 'ERROR: Installation of NVIDIA driver failed.
   Run with option --verbose to see installer output.'
       rm -R /tmp2 && unset TMPDIR
+      :
     } || note 'Skipping installation of $Nvidiacontainerfile'
   ;;
 esac"
@@ -8578,6 +8597,7 @@ $(tail "$Xinitlogfile")"
   }
 
   [ "$Nvidiainstallerfile" ] && {
+    waitforlogentry "start_xcontainer()" "$Xinitlogfile" "X server container: Possible GPU setup is ready." || return 1
     note "Option --gpu: Installing NVIDIA driver in X container."
     unpriv_xcbackend "$Xcontainerbackend exec --tty --privileged --user=root $Xcontainername bash $Sharefolder/nvidia_installer" >> "$Xinitlogfile" 2>&1 || note 'ERROR: NVIDIA driver installation in X container failed.'
   }
