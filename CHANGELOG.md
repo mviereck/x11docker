@@ -13,6 +13,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--xc --weston*`: Use `--ipc=host` for X container. Needed for
    Debian trixie X container to run nested in X.
  - `--xc --gpu`: fix nvidia driver installation in X container
+ - `--xc=docker --backend=podman`: Fix capabilities / DAC_OVERRIDE
  - `--password`: Show host user name for container user password.
    [(535)](https://github.com/mviereck/x11docker/issues/535)
    [(537)](https://github.com/mviereck/x11docker/issues/537)
