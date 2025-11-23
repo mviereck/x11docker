@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.7.1"
+Version="7.7.2-beta"
 Packagedversion="no" # Set to "yes" if you want to package x11docker. This disables installation and update options.
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups. (deprecated)
@@ -2194,10 +2194,6 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
   # NVIDIA
   # check for closed source nvidia driver on host, provide automated installation, warn about disadvantages
   [ -z "$Nvidiaversion" ] && return 0
-  debugnote "NVIDIA: Detected driver version $Nvidiaversion on host."
-
-  Nvidiainstallerfile="$(find /usr/local/share/x11docker/NVIDIA*$Nvidiaversion*.run $Localsharedir/NVIDIA*$Nvidiaversion*.run 2>/dev/null | tail -n1 )"
-  Nvidiainstallerfile="$(myrealpath "$Nvidiainstallerfile" 2>/dev/null)"
 
   { [ "$Runtime" = "nvidia" ] || [ -n "$Nvidiainstallerfile" ] ; } && {
     case "$Xserver" in
@@ -2230,6 +2226,13 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
     Allownewprivileges="yes"
     store_runoption cap CHOWN
     store_runoption cap FOWNER
+    
+  [ "$Xcontainer" = "yes" ] && {
+    waitforlogentry "start_xcontainer()" "$Xinitlogfile" "X server container is ready" || return 1
+    note "Option --gpu: Installing NVIDIA driver in X container."
+    unpriv_xcbackend "$Xcontainerbackend exec --tty --privileged --user=root $Xcontainername bash $Sharefolder/nvidia_installer" >> "$Xinitlogfile" 2>&1 || note 'ERROR: NVIDIA driver installation in X container failed.'
+  }
+  
     return 0
   }
 
@@ -2736,6 +2739,13 @@ check_newxenv()  {              # find free display
   esac
 
   return 0
+}
+check_nvidiainstaller() {       # option --gpu: look for nvidia driver installer file
+  [ -n "$Nvidiaversion" ] && {
+    Nvidiainstallerfile="$(find /usr/local/share/x11docker/NVIDIA*$Nvidiaversion*.run $Localsharedir/NVIDIA*$Nvidiaversion*.run 2>/dev/null | tail -n1 )"
+    Nvidiainstallerfile="$(myrealpath "$Nvidiainstallerfile" 2>/dev/null)"
+    [ -n "$Nvidiainstallerfile" ] && debugnote "Found NVIDIA installer $Nvidiainstallerfile"
+  }
 }
 check_screensize() {            # check physical and virtual screen size (also option --size)
   local Line= Xrandroutput=
@@ -4423,7 +4433,6 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
   --cap-add DAC_OVERRIDE"
   Xc_nopriv="\\
   --security-opt=no-new-privileges"
-  #[ "$Xcrootless" = "yes" ] && Xc_capdrop="" && Xc_nopriv=""
   case "$Backend" in
     nerdctl)
       Xc_capdrop=""
@@ -4876,11 +4885,6 @@ echo '
 # --gpu=virgl
 virgl_test_server &
 " >> "$Xcontainerrc"
-
-#echo "note 'first nvidia Xc installation'" >> "$Xcontainerrc"
-#rootrc_nvidia_installer >> "$Xcontainerrc"
-
-echo "echo 'X server container: Possible GPU setup is ready.'" >> "$Xcontainerrc"
 
   echo "
 echo 'X server container is ready'
@@ -8596,12 +8600,6 @@ $(tail "$Xinitlogfile")"
     return 1
   }
 
-  [ "$Nvidiainstallerfile" ] && {
-    waitforlogentry "start_xcontainer()" "$Xinitlogfile" "X server container: Possible GPU setup is ready." || return 1
-    note "Option --gpu: Installing NVIDIA driver in X container."
-    unpriv_xcbackend "$Xcontainerbackend exec --tty --privileged --user=root $Xcontainername bash $Sharefolder/nvidia_installer" >> "$Xinitlogfile" 2>&1 || note 'ERROR: NVIDIA driver installation in X container failed.'
-  }
-
   waitforlogentry "start_xcontainer()" "$Xinitlogfile" "X server container is ready" || return 1
 
   return 0
@@ -8885,7 +8883,7 @@ check_host() {                  # check host environment
 
   # Check if host uses proprietary NVIDIA driver
   Nvidiaversion=$(head -n1 2>/dev/null </proc/driver/nvidia/version | awk '{ print $8 }')
-  #Nvidiaversion="470.74"
+  debugnote "NVIDIA: Detected driver version $Nvidiaversion on host."
 
   # check python version
   Pythonbin="$(command -v python ||:)"
@@ -11566,11 +11564,19 @@ main() {
   check_snap                     # check if docker is installed in snap; causes restrictions
   check_xcontainer               # check if x11docker/xserver can/will be used    # --xc
   check_xserver                  # check chosen X server or auto-choose one
+  check_nvidiainstaller ||:      # look for nvidia installer file                 # --gpu
 
   check_newxenv                  # find free display
   setup_xcnetwork ||:            # internal network for --xc --xoverip
   [ "$Xserver" = "--xorg" ] || [ -n "$Newxvt" ] || [ "$Runsonconsole" = "yes" ] && check_vt   # --vt: find free tty/virtual terminal for Xorg or weston
   store_newxenv
+
+  [ "$Xcontainer" = "yes" ] && {                                                  # --xc
+    create_xcontainercommand
+    debugnote "X container command (rootless ${Xcrootless:-undefined}):
+  $Xcontainercommand"
+    start_xcontainer
+  }
 
   check_options_interferences    # check options, change settings if needed
   check_containerhome            # create persistent container home               # --home
@@ -11582,13 +11588,6 @@ main() {
   [ "$Pulseaudiomode" ]          && setup_sound_pulseaudio                        # --pulseaudio
   [ "$Sharealsa" = "yes" ]       && setup_sound_alsa                              # --alsa
   [ "$Sharehostdbus" = "yes" ]   && setup_hostdbus                                # --hostdbus
-
-  [ "$Xcontainer" = "yes" ] && {                                                  # --xc
-    create_xcontainercommand
-    debugnote "X container command (rootless ${Xcrootless:-undefined}):
-  $Xcontainercommand"
-    start_xcontainer
-  }
 
   #### Create command to run X server [and/or Wayland compositor]
   [ "$Cleanxhost" = "yes" ]      && clean_xhost                                   # --clean-xhost

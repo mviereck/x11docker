@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Fixed
+ - `--xc`: fix command order for `xtool()` and nvidia driver installation.
+
 ## [7.7.1](https://github.com/mviereck/x11docker/releases/tag/v7.7.1) - 2025-011-23
 ### Fixed
  - `--xc --xorg`: Add `/dev/tty0 /dev/fb0`. Needed on Debian trixie
