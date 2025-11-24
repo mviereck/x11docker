@@ -2197,10 +2197,10 @@ setup_gpu() {                   # option --gpu: share /dev/dri and check nvidia 
 
   { [ "$Runtime" = "nvidia" ] || [ -n "$Nvidiainstallerfile" ] ; } && {
     case "$Xserver" in
-      --xorg) ;;
+      --xorg|--hostdisplay) ;;
       *)
         note "Option --gpu: Acceleration with NVIDIA might work
-  with option --xorg and maybe option --hostdisplay only."
+  with option --xorg and option --hostdisplay only."
       ;;
     esac
   }
@@ -3537,6 +3537,42 @@ check_xdepends() {              # check dependencies on host for X server option
 
   return "$Return"
 }
+check_xlibnoshm() {             # search XlibNoSHM.so and libdl.so.2 for fake MIT-SHM
+  # check for XlibNoSHM.so
+  Xlibnoshmfile="$(find "/usr/local/share/x11docker/XlibNoSHM.so" "$Localsharedir/XlibNoSHM.so"  2>/dev/null | tail -n1 )"
+  [ -z "$Xlibnoshmfile" ] && {
+    Xlibnoshmfile="$(find "$Sharefolder/XlibNoSHM.so" 2>/dev/null)" # might be provided by --xc
+    [ -n "$Xlibnoshmfile" ] && cp "$Xlibnoshmfile" "$Localsharedir/XlibNoSHM.so"
+  }
+  [ -n "$Xlibnoshmfile" ] && [ ! -f "$Sharefolder/XlibNoSHM.so" ] && cp "$Xlibnoshmfile" "$Sharefolder/XlibNoSHM.so" && Xlibnoshmfile="$Sharefolder/XlibNoSHM.so"
+  [ -f "$Xlibnoshmfile" ] && debugnote "check_xlibnoshm(): Found XlibNoSHM.so" || {
+    debugnote "check_xlibnoshm(): Did NOT find XlibNoSHM.so"
+    return 1
+  }
+
+  # check for libdl.so.2. Might be provided by X container. Prefer one from host.
+  Libdlsofile="$(find "/lib/x86_64-linux-gnu/libdl.so.2" "/usr/local/share/x11docker/libdl.so.2" "$Localsharedir/libdl.so.2"  2>/dev/null | head -n1 )"
+  [ -n "$Libdlsofile" ] && cp "$Libdlsofile" "$Sharefolder/libdl.so.2" && Libdlsofile="$Sharefolder/libdl.so.2"
+  [ ! -f "$Libdlsofile" ] && Libdlsofile=""
+  [ -f "$Libdlsofile" ] && {
+    cp "$Libdlsofile" "$Localsharedir/libdl.so.2"
+    debugnote "check_xlibnoshm(): Found libdl.so.2"
+    return 0
+  }
+
+  # fallback check for libdl.so
+  Libdlsofile="$(find "/lib/x86_64-linux-gnu/libdl.so" "/usr/local/share/x11docker/libdl.so" "$Localsharedir/libdl.so"  2>/dev/null | head -n1 )"
+  [ -n "$Libdlsofile" ] && cp "$Libdlsofile" "$Sharefolder/libdl.so" && Libdlsofile="$Sharefolder/libdl.so"
+  [ ! -f "$Libdlsofile" ] && Libdlsofile=""
+  [ -f "$Libdlsofile" ] && {
+    cp "$Libdlsofile" "$Localsharedir/libdl.so"
+    debugnote "check_xlibnoshm(): Found libdl.so"
+    return 0
+  }
+
+  debugnote "check_xlibnoshm(): Did NOT find libdl.so or libdl.so.2"
+  return 1
+}
 check_xpraoption() {            # check if xpra option $1 is available
   local Option
 
@@ -4858,6 +4894,7 @@ Storeinfofile=$Storeinfofile
 Timetosaygoodbyefile=$Timetosaygoodbyefile
 
 LD_PRELOAD= cp /XlibNoSHM.so $Sharefolder/XlibNoSHM.so
+LD_PRELOAD= cp lib/x86_64-linux-gnu/libdl.so.2 $Sharefolder/libdl.so.2
 
 $(declare -f rocknroll)
 Timetosaygoodbyefile=$Timetosaygoodbyefile
@@ -7159,7 +7196,7 @@ mkdir -v -p /run/sshd
   [ "$Screensize" ]          && rootrc_xrandr
   [ "$Hostlocaltimefile" ]   && rootrc_timezone
   [ "$Langwunsch" ]          && rootrc_create_locale
-  [ "$Nvidiainstallerfile" ] && {
+  [ "$Nvidiainstallerfile" ] && [ "$Sharegpu" = "direct" ] && {
     echo "note 'Option --gpu: Installing NVIDIA driver in container.'"
     rootrc_nvidia_installer
   }
@@ -10218,21 +10255,20 @@ check_options_interferences() { # check multiple option interferences, change se
       }
       # MIT-SHM
       [ "$Hostmitshm" = "yes" ] && [ "$Shareipc" != "host" ] && [ "$Xoverip" = "no" ] && {
-        case "$Xcontainer" in
-          yes)
-            [ -e "/lib/x86_64-linux-gnu/libdl.so.2" ] && {
-              store_runoption env "LD_PRELOAD=/lib/x86_64-linux-gnu/libdl.so.2:$Sharefoldercontainer/XlibNoSHM.so"
-            } || {
-              store_runoption env "LD_PRELOAD=$Sharefoldercontainer/XlibNoSHM.so"
-            }
-          ;;
-          no)
+        case "$Xlibnoshmfile" in
+          "")
             case "$Sharegpu" in
               yes|direct)
                 [ "$Xauthentication" != "trusted" ] && {
-                  note "Option --hostdisplay --gpu=direct without image x11docker/xserver
+                  note "Option --hostdisplay --gpu=direct
   (option --xc) would require insecure option --ipc=host to avoid MIT-SHM
   errors. (If you don't care for MIT-SHM errors, use --xauth=trusted.)
+  Possible solutions:
+   - Use option --xc to use image x11docker/xserver
+   - Provide XlibNoSHM.so in ~/.local/share/x11docker
+     or in /usr/local/share/x11docker.
+     (Either Download it from x11docker repo,
+     or run with --xc once, it will be stored.)
   Fallback: Disabling option --gpu."
                   check_fallback
                   Sharegpu="no"
@@ -10245,23 +10281,34 @@ check_options_interferences() { # check multiple option interferences, change se
                   yes)
                     note "Option --hostdisplay: To avoid MIT-SHM errors,
   x11docker sets uncomfortable option --xauth=untrusted to limit X access.
-  If you don't care about MIT-SHM errors, set --xauth=trusted.
-  Insecure and discouraged option --ipc=host avoids MIT-SHM errors.
-  Recommendation: Provide image x11docker/xserver (option --xc) that contains
-  a fake MIT-SHM library, or use another X server option like --nxagent."
+  Some applications might misbehave or crash.
+  Possible solutions:
+   - Use option --xc to use image x11docker/xserver.
+   - Provide XlibNoSHM.so in ~/.local/share/x11docker.
+     (Either Download it from x11docker repo,
+     or run with --xc once, it will be stored.)
+   - If you don't care about MIT-SHM errors, set --xauth=trusted.
+   - Use another X server option like --nxagent."
                     Xauthentication="untrusted"
                   ;;
                 esac
               ;;
             esac
-            case "$Xauthentication" in
-              trusted)
-                note "Option --hostdisplay --xauth=trusted: MIT-SHM errors might occur."
-                store_runoption env "QT_X11_NO_MITSHM=1"
-                store_runoption env "_X11_NO_MITSHM=1"
-                store_runoption env "_MITSHM=0"
-              ;;
-            esac
+          ;;
+          *)
+            [ -f "$Libdlsofile" ] && {
+              store_runoption env "LD_PRELOAD=$Sharefoldercontainer/$(basename "$Libdlsofile"):$Sharefoldercontainer/XlibNoSHM.so"
+            } || {
+              store_runoption env "LD_PRELOAD=$Sharefoldercontainer/XlibNoSHM.so"
+            }
+          ;;
+        esac
+        case "$Xauthentication" in
+          trusted|yes)
+            note "Option --hostdisplay --xauth=trusted: MIT-SHM errors might occur."
+            store_runoption env "QT_X11_NO_MITSHM=1"
+            store_runoption env "_X11_NO_MITSHM=1"
+            store_runoption env "_MITSHM=0"
           ;;
         esac
       }
@@ -11134,11 +11181,11 @@ declare_variables() {           # declare global variables
   Hostxenv=""                                     # Collection of host X environment variables
   Hostxoverip=""                                  # Host X uses X over IP/TCP
   Hostxsocket=""                                  # Socket of DISPLAY in /tmp/.X11-unix
+  Jqbin=""                                        # path to jq binary
   Nvidiacontainerfile="/usr/local/bin/NVIDIA-installer.run"  # --gpu: Path to nvidia installer in container
   Nvidiaversion=""                                # --gpu: Proprietary nvidia driver version on host
   Nvidiainstallerfile=""                          # --gpu: Proprietary nvidia driver installer for container in [...]local/share/x11docker
   Pythonbin=""                                    # path to python binary
-  Jqbin=""                                        # path to jq binary
 
   # MS Windows
   Winpty=""                                       # Path to winpty for --interactive on MS Windows
@@ -11170,6 +11217,7 @@ declare_variables() {           # declare global variables
   Fullscreen="no"                                 # --fullscreen: Fullscreen mode
   Lastcheckedxserver=""                           # check_xdepends(): Last X server option that was checked
   Lastcheckedxserverresult=""                     # check_xdepends(): Result of last check. Avoids double-checking.
+  Libdlsofile=""                                  # --hostdisplay: needed for XlibNoSHM
   Maxxaxis=""                                     # Maximal X screen size of display
   Maxyaxis=""                                     # Maximal Y screen size of display
   Modelinefilebasepath="modelines"
@@ -11200,6 +11248,7 @@ declare_variables() {           # declare global variables
   Xhost=""                                        # --xhost: custom xhost setting on new X server
   Xiniterrorcodes="xinit: giving up|unable to connect to X server|Connection refused|server error|Only console users are allowed"
   Xlegacywrapper=""                               # --xorg: /etc/X11/Xwrapper.config is configured to run within X yes/no
+  Xlibnoshmfile=""                                # --hostdisplay: fake MIT-SHM library
   Xpraborder=""                                   # --border: Colored border for xpra clients
   Xpracontainerenv="UBUNTU_MENUPROXY= QT_X11_NO_NATIVE_MENUBAR=1 MWNOCAPTURE=true MWNO_RIT=true MWWM=allwm GTK_OVERLAY_SCROLLING=0 GTK_CSD=0 NO_AT_BRIDGE=1" # environment variables
   Xprahelp=""                                     # Output of 'xpra --help'
@@ -11578,6 +11627,7 @@ main() {
     start_xcontainer
   }
 
+  check_xlibnoshm ||:            # look for XlibNoSHM.so and libdl.so.2 / fake MIT-SHM
   check_options_interferences    # check options, change settings if needed
   check_containerhome            # create persistent container home               # --home
   check_options_messages         # some messages depending on options, but not changing anything
