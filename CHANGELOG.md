@@ -9,6 +9,8 @@ Project website: https://github.com/mviereck/x11docker
 ## [Unreleased]
 ### Fixed
  - `--xc`: fix command order for `xtool()` and nvidia driver installation.
+ - `/etc/profile.d/10-x11docker-env.sh`: Do not set DISPLAY,
+    set XAUTHORITY=~/.Xauthority because of ssh issues.
  - fix `ps` calls for alpine/busybox.
    [(556)](https://github.com/mviereck/x11docker/issues/556)
 ### Added
@@ -36,9 +38,6 @@ Project website: https://github.com/mviereck/x11docker
  - `--*xwayland'`: use `-force-xrandr-emulation`.
  - `--weston-xwayland`: print `-xopt`possibilities.
  - `--backend`: Docker Desktop: Exit with error, not supported.
- - `ssh`: add softlink to `~/.Xauthority` and create `/run/sshd`.
-   Create helper script `/x11docker/sshenv`for environment setup.
-   [(554)](https://github.com/mviereck/x11docker/issues/554)
  - `jq` and `python` parsing.
    [(525)](https://github.com/mviereck/x11docker/issues/525)
    [(485)](https://github.com/mviereck/x11docker/issues/485)
@@ -51,6 +50,9 @@ Project website: https://github.com/mviereck/x11docker
    [(510)](https://github.com/mviereck/x11docker/issues/510)
 ### Added
  - `--xopt=ARG`: Add custom arguments to X server command.
+ - `ssh`: add softlink to `~/.Xauthority` and create `/run/sshd`.
+   Create helper script `/x11docker/sshenv`for environment setup.
+   [(554)](https://github.com/mviereck/x11docker/issues/554)
 ### Deprecated
  - `--kwin`: Deprecated because of issues and likely rare use.
    Use `--weston` instead.
