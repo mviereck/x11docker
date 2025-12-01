@@ -2,6 +2,9 @@
 x11docker ToDo notes
 
 virgl seems to fail
+--xc --gpu --xorg (nvidia): black screen after terminating, no tty switch possible
+--backend=podman --hostdisplay fails
+-- check pulseaudio again
 
 ## Work in progress
  - bug: ssh: --hostdisplay fails

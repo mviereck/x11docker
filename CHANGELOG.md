@@ -7,10 +7,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
-### Added
- - `--hostdisplay`: Use `XlibNoSHM.so` without `--xc`, too.
 ### Fixed
  - `--xc`: fix command order for `xtool()` and nvidia driver installation.
+ - fix `ps` calls for alpine/busybox.
+   [(556)](https://github.com/mviereck/x11docker/issues/556)
+### Added
+ - `--hostdisplay`: Use `XlibNoSHM.so` without `--xc`, too.
 
 ## [7.7.1](https://github.com/mviereck/x11docker/releases/tag/v7.7.1) - 2025-011-23
 ### Fixed

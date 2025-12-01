@@ -738,7 +738,6 @@ saygoodbye() {                  # create file signaling watching processes to te
 
 #### watching processes
 checkpid() {                    # check if PID $1 is active
-  #ps -p ${1:-} >/dev/null 2>&1
   [ -e "/proc/${1:-NONSENSE}" ]
 }
 containerisrunning() {          # check if container is running
@@ -748,11 +747,8 @@ containerisrunning() {          # check if container is running
     yes)  unpriv_backend "$Backendbin inspect '$(storeinfo dump containerid)'" >/dev/null 2>&1 ;;
   esac
 }
-pspid() {                       # ps -p $1 --no-headers
-  # On some systems ps does not have option --no-headers.
-  # On some systems (busybox) ps -p is not supported  ### FIXME
-  # return 1 if not found
-  LC_ALL=C ps -p "${1:-}" 2>/dev/null | grep -v 'TIME'
+pspid() {                       # Return some info to pid $1
+  LC_ALL=C ps ax -o user,pid,comm | grep " ${1:-} "
 }
 rocknroll() {                   # check whether x11docker session is still running
   [ -s "$Timetosaygoodbyefile" ]   && return 1
@@ -802,7 +798,7 @@ termpid() {                     # kill PID $1 with codename $2
   checkpid "${1:-}" && kill -s KILL "${1:-}" 2>/dev/null
   mysleep 0.2
   checkpid "${1:-}" && {
-    note "Failed to terminate ${1:-} (${2:-}): $(ps -u -p "${1:-}" 2>/dev/null | tail -n1)"
+    note "Failed to terminate ${1:-} (${2:-}): $(pspid "${1:-}" ||:)"
     return 1
   }
 
@@ -899,20 +895,11 @@ check_envvar() {                # allow only chars in string $1 that can be expe
   $Newvar"
   return 1
 }
+get_ppid() {                  # get ppid of pid $1
+  ps ax -o pid,ppid | awk '$1 ~ /'${1:-}'/ { SUM += $2 } END { print SUM } '
+}
 check_parent_sshd() {           # check whether pid $1 runs in SSH session
-  local Wanted_pid="${1:-}" Process_line
-  local Return=
-  ps -p 1 >/dev/null 2>&1 || {
-    debugnote "check_parent_sshd(): Failed to check for sshd. ps -p not supported."
-    return 1
-  }
-  while [ "$Wanted_pid" -ne 1 ] ; do
-    Process_line="$(ps -f -p "$Wanted_pid"| tail -n1)"
-    Wanted_pid="$(echo "$Process_line" | awk '{print $3}')"
-    [[ $Process_line =~ sshd ]] && Return=0
-    [ "$Return" ] && break
-  done
-  return "${Return:-1}"
+  ps ax -o pid,comm | awk '$1 ~ /'$(get_ppid "${1:-}")'/ { SUM += $2 } END { print SUM } ' | grep -q "sshd"
 }
 cookiebaker() {                 # create an X cookie without xauth
   # $1  DISPLAY
@@ -8003,7 +7990,7 @@ echo \"Waiting for services to stop...\"
 sv -w196 force-stop /service/*
 sv exit /service/*
 # kill any other processes still running in the container
-for ORPHAN_PID in \$(ps --no-headers -eo \"%p,\" -o stat | tr -d \" \" | grep \"Z\" | cut -d, -f1); do
+for ORPHAN_PID in \$(ps ax -o pid,stat | tr -d ' ' | grep 'Z' | tr -d 'Z'; do
     timeout 5 /bin/sh -c \"kill \$ORPHAN_PID && wait \$ORPHAN_PID || kill -9 \$ORPHAN_PID\"
 done
 \" >/etc/runit/3
@@ -8601,7 +8588,7 @@ start_compositor() {            # start Wayland compositor Weston or KWin
   case "$Xcontainer" in
     yes)
       unpriv_xcbackend "$Xcontainerbackend exec --detach $Xcontainername sh -c '$Compositorcommand >> $Compositorlogfile  2>&1'" 2>> $Compositorlogfile
-      Compositorpid="$(ps aux | grep weston | grep "$Newwaylandsocket" | head -n1 | awk '{print $2}')"
+      Compositorpid="$(ps ax -o pid,args | grep weston | grep "$Newwaylandsocket" | head -n1 | awk '{print $1}')"
     ;;
     no)
       unpriv "$Compositorcommand  >> '$Compositorlogfile'  2>&1 & echo compositorpid=\$! >> '$Storeinfofile'"
@@ -8714,11 +8701,9 @@ $Xpraservercommand"
   case "$Xcontainer" in
     no)
       unpriv "$Xpraservercommand ||:" >> "$Xpraserverlogfile" 2>&1 &
-      #Xpraserverpid=$!
     ;;
     yes)
       unpriv_xcbackend "$Xcontainerbackend exec $Xcontainername sh -c '$Xpraservercommand'" >> "$Xpraserverlogfile" 2>&1 &
-      #Xpraserverpid="$(ps aux | grep "/usr/bin/xpra start $Newdisplay" | grep -v grep | awk '{print $2}')"
     ;;
   esac
 
@@ -8737,15 +8722,15 @@ $Xpraclientcommand"
 
   # get pids
   sleep 3   # avoid race condition not finding the process
-  Xpraserverpid="$(ps aux | grep -E "/usr/bin/xpra start :$Newdisplaynumber|/usr/bin/xpra start-desktop :$Newdisplaynumber" | grep -v grep | awk '{print $2}')"
+  Xpraserverpid="$(ps ax -o pid,args | grep -E "xpra start :$Newdisplaynumber|xpra start-desktop :$Newdisplaynumber" | grep -v grep | awk '{print $1}')"
   storepid "$Xpraserverpid" xpraserver
-  Xpraclientpid="$(ps aux | grep "/usr/bin/xpra attach :$Newdisplaynumber" | grep -v grep | awk '{print $2}')"
+  Xpraclientpid="$(ps ax -o pid,args | grep "xpra attach :$Newdisplaynumber" | grep -v grep | awk '{print $1}')"
   storepid "$Xpraclientpid" xpraclient
 
   # catch possible xpra crashes
   while rocknroll; do
-    ps -p "$Xpraserverpid" >/dev/null || { debugnote "xpra server terminated" ; break ; }
-    ps -p "$Xpraclientpid" >/dev/null || { debugnote "xpra client terminated" ; break ; }
+    pspid "$Xpraserverpid" >/dev/null || { debugnote "xpra server terminated" ; break ; }
+    pspid "$Xpraclientpid" >/dev/null || { debugnote "xpra client terminated" ; break ; }
     sleep 1
   done
 
@@ -8886,11 +8871,10 @@ check_host() {                  # check host environment
   export -f rmcr
 
   # Check whether x11docker runs over SSH
-  pstree -ps $$ >/dev/null 2>&1 && {
-    pstree -ps $$ | grep -q sshd && Runsoverssh="yes" || Runsoverssh="no"
-  } || {
-    check_parent_sshd "$$"       && Runsoverssh="yes" || Runsoverssh="no"
-  }
+  check_parent_sshd "$$"                && Runsoverssh="yes"
+  pstree -ps $$ | grep -q sshd          && Runsoverssh="yes"
+  [ -n "${SSH_CLIENT:-}${SSH_TTY:-}" ]  && Runsoverssh="yes"
+  [ -z "$Runsoverssh" ]                 && Runsoverssh="no"
 
   # Check whether x11docker runs in a terminal
   tty -s && Runsinterminal="yes" || Runsinterminal="no"
@@ -8908,7 +8892,7 @@ check_host() {                  # check host environment
   } || {
     Hosthidepid="no"
   }
-  ps aux | cut -d' ' -f1 | grep -q root && {
+  ps ax -o user | grep -q root && {
     Hostcanwatchroot="yes"
   } || {
     Hostcanwatchroot="no"
@@ -9399,7 +9383,7 @@ parse_options() {               # parse cli options
   Parsedoptions="$(getopt --options "$Shortoptions" --longoptions "$Longoptions" --name "$0" -- "$@" )" || error "Failed to parse options."
   eval set -- "$Parsedoptions"
   Parsedoptions_global="$Parsedoptions_global
-  () $Parsedoptions"
+  $Parsedoptions"
 
   [ "$*" = "-h --" ] &&       usage &&        exit 0                 # Catch single -h for usage info, otherwise it means --hostdisplay
   [ "$*" = "--" ]    &&       usage &&        exit 0                 # x11docker without options
@@ -11786,7 +11770,7 @@ $(nl -ba <$Sshenvscript)"
       *)
         Xinitpid="$(pgrep -a xinit 2>/dev/null | grep "xinit $Xinitrc" | awk '{print $1}')"
         checkpid "$Xinitpid"   && setonwatchpidlist "$Xinitpid" xinit
-        Xserverpid=$(ps aux | rmcr | grep "$(echo "${Xcommand:-nothingtolookfor}" | cut -d' ' -f1-2)" | grep -v grep | grep -v xinit | awk '{print $2}')
+        Xserverpid=$(ps ax -o pid,args | rmcr | grep "$(echo "${Xcommand:-nothingtolookfor}" | cut -d' ' -f1-2))" | grep -v grep | grep -v xinit | awk '{print $1}')
         checkpid "$Xserverpid" && setonwatchpidlist "$Xserverpid" Xserver
       ;;
     esac
@@ -11795,7 +11779,7 @@ $(nl -ba <$Sshenvscript)"
 
     # some debug output
     checkpid "$Pid1pid" && debugnote "Process tree of container: (maybe not complete yet)
-$(pstree -cp "$Pid1pid" 2>&1 ||:)"
+$(pstree -p "$Pid1pid" 2>&1 ||:)"
     debugnote "Process tree of x11docker:
 $(pstree -p $$ 2>&1 ||:)"
     debugnote "storeinfo(): Stored info:
