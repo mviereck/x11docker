@@ -8,7 +8,7 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Fixed
- - `WSL2g`: use `--overip` if `/tmp/.X11-unix` is not writeable.
+ - `WSL2g`: use `socat` to create a unix socket from vitual socket.
    [(557)](https://github.com/mviereck/x11docker/issues/557)
  - `--xc`: fix command order for `xtool()` and nvidia driver installation.
  - `/etc/profile.d/10-x11docker-env.sh`: Do not set DISPLAY,
