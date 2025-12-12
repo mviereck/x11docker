@@ -20,6 +20,9 @@ Project website: https://github.com/mviereck/x11docker
    [(554)](https://github.com/mviereck/x11docker/issues/554)
  - fix `ps` calls for alpine/busybox.
    [(556)](https://github.com/mviereck/x11docker/issues/556)
+### Changed
+ - `--weston*`: Set backend in `weston.ini` instead of weston command.
+   [(501)](https://github.com/mviereck/x11docker/issues/501)
 ### Added
  - `--hostdisplay`: Use `XlibNoSHM.so` without `--xc`, too.
 
