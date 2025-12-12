@@ -8,6 +8,8 @@ Project website: https://github.com/mviereck/x11docker
 
 ## [Unreleased]
 ### Fixed
+ - `--hostdisplay --xauth`: fix cookie if extension SECURITY is missing.
+   [(557)](https://github.com/mviereck/x11docker/issues/557)
  - `WSL2g`: don't default to `--runx` if `DISPLAY` is set.
    [(557)](https://github.com/mviereck/x11docker/issues/557)
  - `WSL2g`: use `socat` to create a unix socket from vitual socket.
