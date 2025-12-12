@@ -16,7 +16,7 @@ Project website: https://github.com/mviereck/x11docker
    [(557)](https://github.com/mviereck/x11docker/issues/557)
  - `--xc`: fix command order for `xtool()` and nvidia driver installation.
  - `/etc/profile.d/10-x11docker-env.sh`: Do not set DISPLAY,
-    set `XAUTHORITY=~/.Xauthority` because of ssh issues.
+   set `XAUTHORITY=~/.Xauthority` because of ssh issues.
    [(554)](https://github.com/mviereck/x11docker/issues/554)
  - fix `ps` calls for alpine/busybox.
    [(556)](https://github.com/mviereck/x11docker/issues/556)
