@@ -24,6 +24,12 @@ Project website: https://github.com/mviereck/x11docker
  - `--weston*`: Set backend in `weston.ini` instead of weston command.
    [(501)](https://github.com/mviereck/x11docker/issues/501)
 ### Added
+ - `--pipewire`: New option for PipeWire sound in container.
+   [(545)](https://github.com/mviereck/x11docker/issues/545)
+   [(527)](https://github.com/mviereck/x11docker/issues/527)
+   [(507)](https://github.com/mviereck/x11docker/issues/507)
+   [(418)](https://github.com/mviereck/x11docker/issues/418)
+   [(380)](https://github.com/mviereck/x11docker/issues/380)
  - `--hostdisplay`: Use `XlibNoSHM.so` without `--xc`, too.
 
 ## [7.7.1](https://github.com/mviereck/x11docker/releases/tag/v7.7.1) - 2025-011-23

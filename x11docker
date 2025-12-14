@@ -44,7 +44,7 @@ Runs on Linux and (with some restrictions) on MS Windows. Not adapted for macOS.
 
 Optional features:
   * GPU hardware acceleration
-  * Sound with pulseaudio or ALSA
+  * Sound with PipeWire, Pulseaudio or ALSA
   * Clipboard sharing
   * Printer access
   * Webcam access
@@ -137,6 +137,9 @@ Host integration:
                        If LOCALE is missing in image, x11docker generates it
                        with 'localedef' in container (needs 'locales' package).
                        Examples for LOCALE: ru, en, de, zh_CN, cz, fr, fr_BE.
+     --pipewire        Sound with pipewire. Needs 'pipewire' on host and
+                       'pipewire', 'pipewire-pulse'  and 'pipewire-alsa'
+                       in image.
  -P, --printer [=MODE] Share host printers through CUPS server.
                        Optional MODE can be 'socket' or 'tcp'. Default: socket
  -p, --pulseaudio [=MODE]  Sound with pulseaudio. Needs 'pulseaudio' on host
@@ -2400,6 +2403,51 @@ setup_sound_alsa() {            # option --alsa: share sound devices
 
   return 0
 }
+setup_sound_pipewire() {        # option --pipewire: pipewire sound in container
+  local Pipewiresocket Pipewirescript
+
+  pactl info | grep -q "PipeWire" || {
+    note "Option --pipewire: It seems that PipeWire is not running.
+  pactl info does not report it.
+  Fallback: Disabling option --pipewire."
+    check_fallback
+    Sharepipewire=""
+    return 1
+  }
+
+  command -v pw-container >/dev/null || {
+    note "Option --pipewire: Command pw-container not found.
+  Is pipewire installed on your system?
+  Fallback: Disabling option --pipewire
+  You can try options --pulseaudio or --alsa instead."
+    check_fallback
+    Sharepipewire="no"
+    return 1
+  }
+
+  warning "Option --pipewire allows container applications
+  to catch your audio output and microphone input."
+
+  # create and share restricted pipewire socket
+  Pipewirescript="$Cachefolder/pw-script"
+  echo "#! /bin/bash
+# helper script to get socket path. Reading output of pw-container directly somehow not possible.
+echo \$PIPEWIRE_REMOTE >$Cachefolder/PIPEWIRE_REMOTE
+while :; do
+  sleep 1000
+done
+" >"$Pipewirescript"
+  unpriv "pw-container 'bash $Pipewirescript'" &
+  storepid $! "pw-container"
+  Pipewiresocket="$(cat "$Cachefolder/PIPEWIRE_REMOTE")"
+  Pipewiresocket="/$(echo "$Pipewiresocket" | cut -d/ -f2-)"
+  store_runoption env "PIPEWIRE_REMOTE=$Pipewiresocket"
+  store_runoption volume "$Pipewiresocket"
+
+  # share pulseaudio socket created by pipewire
+  Pipewirepulseaudiosocket="$(unpriv "env LC_ALL=C pactl info")"
+  Pipewirepulseaudiosocket="/$(grep "Server String" <<< "$Pipewirepulseaudiosocket" | cut -d/ -f2-)"
+}
 setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connection
   # Allowing container access to Pulseaudio on host can be done with a shared socket or over TCP.
   # Sharing host user socket in XDG_RUNTIME_DIR fails since Pulseaudio v12.0.
@@ -2415,7 +2463,7 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
     note "Option --pulseaudio: pactl not found.
   Is pulseaudio installed and running on your host system?
   Fallback: Disabling option --pulseaudio.
-  You can try option --alsa instead."
+  You can try options --pipewire or --alsa instead."
     check_fallback
     Pulseaudiomode=""
     return 1
@@ -2434,7 +2482,8 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
 
   [ "$Pulseaudiomode" = "tcp" ] && [ "$Network" = "none" ] && {
     note "Option --pulseaudio: Without option -I, --network
-  pulseaudio sound over TCP is not possible but needed in your setup."
+  pulseaudio sound over TCP is not possible but needed in your setup.
+  Fallback: Disabling option --pulseaudio."
     Pulseaudiomode=""
     check_fallback
     return 1
@@ -2447,7 +2496,7 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
     socket|tcp)
       grep -q -i "PipeWire" <<< "$(unpriv "pactl info")" && note "Option --pulseaudio: Found pipewire sound server.
   If pulseaudio sound fails, you can try 
-  --pulseaudio=tcp or --pulseaudio=host instead."
+  --pipewire, --pulseaudio=tcp or --pulseaudio=host instead."
     ;;
   esac
   
@@ -2466,7 +2515,7 @@ setup_sound_pulseaudio() {      # option --pulseaudio: set up pulseaudio connect
   '$Pulseaudiomoduleid'
   Is pulseaudio running at all on your host?
   Fallback: Disabling option --pulseaudio.
-  You can try option --alsa instead."
+  You can try options --pipewire or --alsa instead."
         check_fallback
         Pulseaudiomode=""
         return 1
@@ -4117,14 +4166,6 @@ create_xcommand() {             ### create command to start X server and/or Wayl
         WL) echo "backend=wayland-backend.so" >> $Westonini ;;
         X)  echo "backend=x11-backend.so"     >> $Westonini ;;
         *)  echo "backend=drm-backend.so"     >> $Westonini ;;
-#        *)
-#          case "$Newxvt" in
-#            "")  Compositorcommand="$Compositorcommand \\
-#  --backend=x11-backend.so" ;;
-#            *) Compositorcommand="$Compositorcommand \\
-#  --backend=drm-backend.so" ;;
-#          esac
-#        ;;
       esac
       echo "
 shell=desktop-shell.so
@@ -6743,6 +6784,15 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
   --bind=$Pulseaudioconf:/etc/pulse/client.conf"
         ;;
       esac
+    ;;
+  esac
+  
+  ##pipewire
+  case "$Sharepipewire" in
+    yes)
+      Backendcommand="$Backendcommand \\
+  --mount $(convertpath mount "$Pipewirepulseaudiosocket:ro" "/tmp/pipewirepulseaudio.socket.host") \\
+  --env PULSE_SERVER=/tmp/pipewirepulseaudio.socket.host"
     ;;
   esac
 
@@ -9419,7 +9469,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,clean-xhost,composite::,display:,keymap:,vt::,westonini:,xauth::,xhost::,xoverip::,xtest::"     # X/Wayland config
   Longoptions="$Longoptions,checkwindow::,fallback::,preset:,pull::"                                                        # x11docker config
   Longoptions="$Longoptions,cachebasedir:,home::,homebasedir:,share:"                                                       # Host folders
-  Longoptions="$Longoptions,alsa::,clipboard::,gpu::,lang::,printer::,pulseaudio::,webcam"                                  # Host integration features
+  Longoptions="$Longoptions,alsa::,clipboard::,gpu::,lang::,printer::,pipewire,pulseaudio::,webcam"                         # Host integration features
   Longoptions="$Longoptions,backend:,env:,mobyvm,name:,no-entrypoint,no-setup,rootfs,rootless::,runtime:,snap,workdir:"     # Container config
   Longoptions="$Longoptions,cap-default,ipc::,limit::,newprivileges::,network::"                                            # Container capabilities
   Longoptions="$Longoptions,group-add:,hostuser:,password::,sudouser::,user:,shell:"                                        # Container user
@@ -9546,6 +9596,7 @@ ${2:-${LANG:-}}" ; shift                                             # Locale/la
                               [ "$Langwunsch" ] || note "Option --lang: Environment variable \$LANG is empty.
   Please specify desired language locale with e.g. --lang=en_US or --lang=zh_CN." ;;
       -P|--printer)           Sharecupsmode="${2:-auto}" ; shift ;;  # Printer sharing with CUPS
+         --pipewire)          Sharepipewire="yes" ;;                 # Pipewire sound
       -p)                     Pulseaudiomode="auto" ;;               # Pulseaudio sound
          --pulseaudio)        Pulseaudiomode="${2:-auto}"; shift ;;  # Pulseaudio sound
          --webcam)            Sharewebcam="yes" ;;                   # Webcam sharing
@@ -11336,6 +11387,8 @@ declare_variables() {           # declare global variables
   Alsacard="$ALSA_CARD"                           # --alsa: Specified ALSA card
   Hosthomebasefolder=""                           # --homebasedir: Base directory for container home with --home
   Langwunsch=""                                   # --lang: Search or create UTF-8 locale in container and set LANG
+  Sharepipewire="no"                              # --pipewire
+  Pipewirepulseaudiosocket=""                     # --pipewire Pipewire pulseaudio socket
   Pulseaudioconf="pulseaudio.client.conf"         # --pulseaudio: Client config in container
   Pulseaudiocookie="pulseaudio.cookie"            # --pulseaudio: possible pulse cookie from host to share
   Pulseaudiomode=""                               # --pulseaudio: 'tcp', 'socket' or 'auto'
@@ -11679,7 +11732,8 @@ main() {
   [ "$Sharegpu" = "direct" ]     && setup_gpu ||:                                 # --gpu
   [ "$Sharewebcam" = "yes" ]     && setup_webcam                                  # --webcam
   [ "$Sharecupsmode" ]           && setup_printer                                 # --printer
-  [ "$Pulseaudiomode" ]          && setup_sound_pulseaudio                        # --pulseaudio
+  [ "$Sharepipewire" = "yes" ]   && setup_sound_pipewire ||:                      # --pipewire
+  [ "$Pulseaudiomode" ]          && setup_sound_pulseaudio ||:                    # --pulseaudio
   [ "$Sharealsa" = "yes" ]       && setup_sound_alsa                              # --alsa
   [ "$Sharehostdbus" = "yes" ]   && setup_hostdbus                                # --hostdbus
 
