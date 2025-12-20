@@ -2,10 +2,10 @@
 x11docker ToDo notes
 
 use ~/.Xauthority in general? issues with --retain setups, need to check images for HOME and USER etc.
-virgl seems to fail
+--gpu=virgl seems to fail
 --xc --gpu --xorg (nvidia): black screen after terminating, no tty switch possible
 --backend=podman --hostdisplay fails
--- check pulseaudio again
+--weston-x --xc on tty issues
 
 ## Work in progress
  - bug: ssh: --hostdisplay fails

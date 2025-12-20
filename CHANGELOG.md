@@ -14,6 +14,8 @@ Project website: https://github.com/mviereck/x11docker
    [(557)](https://github.com/mviereck/x11docker/issues/557)
  - `WSL2g`: use `socat` to create a unix socket from vitual socket.
    [(557)](https://github.com/mviereck/x11docker/issues/557)
+ - `WSL2`: Determine Windows host ip in `/etc/resolv.conf`
+   [(557)](https://github.com/mviereck/x11docker/issues/557)
  - `--xc`: fix command order for `xtool()` and nvidia driver installation.
  - `/etc/profile.d/10-x11docker-env.sh`: Do not set DISPLAY,
    set `XAUTHORITY=~/.Xauthority` because of ssh issues.
