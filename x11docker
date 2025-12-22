@@ -253,6 +253,8 @@ X and Wayland special configuration:
 
 Container user settings:
      --group-add=GROUP Add container user to group GROUP.
+     --keep-groups     Expose host groups for current user to container.
+                       (Only works with rootless podman, and 'crun' backend.)
      --hostuser=USER   Run X (and container user) as user USER. Default is
                        result of \$(logname). (x11docker must run as root).
      --password [=WORD]   Change container user password and exit.
@@ -4637,14 +4639,16 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
 " >> "$Sharefolder/nvidia_installer"
     rootrc_nvidia_installer >> "$Sharefolder/nvidia_installer"
   }
-  case "$Xcontainerbackend" in
-    docker|podman)
-      mygetent group video >/dev/null && Xc_gpu="$Xc_gpu \\
-  --group-add $(mygetent group video  | cut -d: -f3)"
-      mygetent group render >/dev/null && Xc_gpu="$Xc_gpu \\
-  --group-add $(mygetent group render | cut -d: -f3)"
-    ;;
-  esac
+  if "$Keepgroups" = "no"; then
+    case "$Xcontainerbackend" in
+      docker|podman)
+        mygetent group video >/dev/null && Xc_gpu="$Xc_gpu \\
+    --group-add $(mygetent group video  | cut -d: -f3)"
+        mygetent group render >/dev/null && Xc_gpu="$Xc_gpu \\
+    --group-add $(mygetent group render | cut -d: -f3)"
+      ;;
+    esac
+  fi
 
   # console
   Xc_console="\\
@@ -4668,12 +4672,14 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
   --cap-add CHOWN \\
   --env XDG_VTNR=$Newxvt \\
   --mount type=bind,source=$Compositorlogfile,target=/x11docker/compositor.log"
-  case "$Xcontainerbackend" in
-    docker|podman)
-      Xc_weston="$Xc_weston \\
+  if "$Keepgroups" = "no"; then
+    case "$Xcontainerbackend" in
+      docker|podman)
+        Xc_weston="$Xc_weston \\
   --group-add 104"
-    ;;
-  esac
+      ;;
+    esac
+  fi
 
   # connect to systemd from host
   Xc_systemd="\\
@@ -5746,6 +5752,7 @@ check_backend() {               # options --backend, --rootless
   unprivileged user namespace setup. Please run as root:
     sysctl -w kernel.unprivileged_userns_clone=1"
       store_runoption cap "CHOWN"
+      check_optionset "--keep-groups" "--runtime=runc --group-add" || error "Option --keep-groups incompatible with --group-add"
     ;;
     nerdctl)
       note "Option --backend=nerdctl: Support of nerdctl is experimental yet.
@@ -6406,10 +6413,15 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
   [ "$Switchcontaineruser" = "no" ] && {
     case "$Backend" in
       docker|podman)
-        for Line in $Containerusergroups; do
-          mygetent group "${Line:-nonsense}" >/dev/null && Backendcommand="$Backendcommand \\
+	if [ "$Keepgroups" = "yes" ]; then
+          Backendcommand="$Backendcommand \\
+  --group-add keep-groups"
+	else
+          for Line in $Containerusergroups; do
+            mygetent group "${Line:-nonsense}" >/dev/null && Backendcommand="$Backendcommand \\
   --group-add $(mygetent group "$Line" | cut -d: -f3)"
-        done
+          done
+	fi
       ;;
     esac
   }
@@ -9518,7 +9530,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,alsa::,clipboard::,gpu::,lang::,printer::,pipewire,pulseaudio::,webcam"                         # Host integration features
   Longoptions="$Longoptions,backend:,env:,mobyvm,name:,no-entrypoint,no-setup,rootfs,rootless::,runtime:,snap,workdir:"     # Container config
   Longoptions="$Longoptions,cap-default,ipc::,limit::,newprivileges::,network::"                                            # Container capabilities
-  Longoptions="$Longoptions,group-add:,hostuser:,password::,sudouser::,user:,shell:"                                        # Container user
+  Longoptions="$Longoptions,group-add:,keep-groups,hostuser:,password::,sudouser::,user:,shell:"                            # Container user
   Longoptions="$Longoptions,dbus::,init::,hostdbus,sharecgroup"                                                             # Container init and DBus
   Longoptions="$Longoptions,stdin,interactive"                                                                              # Container interaction
   Longoptions="$Longoptions,runasuser:,runfromhost:,runasroot:"                                                             # Additional commands to execute
@@ -9662,6 +9674,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
 
      #### User settings
          --group-add)         Containerusergroups="$Containerusergroups ${2:-}" ; shift ;; # Additional groups for container user
+	 --keep-groups)       Keepgroups="yes" ;;                    # Keep user groups
          --hostuser)          Hostuser="${2:-}" ; shift ;;           # Set host user different from logged in user
          --password)          Containeruserpassword="${2:-INTERACTIVE}" ; shift ;; # Change encrypted password in ~/.config/x11docker/passwd
          --shell)             Containerusershell="${2:-}" ; shift ;; # Set preferred user shell
@@ -11525,6 +11538,7 @@ declare_variables() {           # declare global variables
   Presetdirsystem="/etc/x11docker/preset"         # --preset storage dir (system)
   Presetlist=""                                   # List of already parsed preset files to avoid a loop
   Preservecachefiles="no"                         # If yes, don't delete cache files on exit. For few failure cases only.
+  Keepgroups="no"                                 # If yes, use host-user groups instead of using --add-groups
 
   # Verbosity options
   Debugmode="no"                                  # --debug: Excerpt of --verbose, also bash error checks
