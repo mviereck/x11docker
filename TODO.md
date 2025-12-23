@@ -8,8 +8,8 @@ use ~/.Xauthority in general? issues with --retain setups, need to check images 
 --weston-x --xc on tty issues
 
 runx:
-telnet
 --clean
+--xoverip: use xhost only, delete cookie. Maybe except for socat solutions.
 
 ## Work in progress
  - bug: ssh: --hostdisplay fails
