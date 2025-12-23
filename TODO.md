@@ -7,6 +7,10 @@ use ~/.Xauthority in general? issues with --retain setups, need to check images 
 --backend=podman --hostdisplay fails
 --weston-x --xc on tty issues
 
+runx:
+telnet
+--clean
+
 ## Work in progress
  - bug: ssh: --hostdisplay fails
  - bug: setting XAUTHORITY with systemctl
