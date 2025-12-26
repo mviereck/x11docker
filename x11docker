@@ -4212,18 +4212,6 @@ vt-switching=true" >> "$Westonini"
       [ -z "$Xkblayout" ] && [ -n "$Newxvt" ] && echo "$(echo -n "keymap_layout=" && grep XKBLAYOUT <"/etc/default/keyboard" | cut -d= -f2 | cut -d'"' -f2)" >> "$Westonini"
     ;;
   esac
-  echo '#! /bin/bash
-# x11docker wrapper for Xwayland
-case "$X11DOCKER_DISPLAY" in
-  "") /usr/bin/Xwayland "$@" ;;
-  *)
-    shift
-    Westonoptions="$@"
-    Westonoptions="$(sed "s/-terminate//" <<< "$Westonoptions")"
-    /usr/bin/Xwayland "$X11DOCKER_DISPLAY" $Westonoptions $X11DOCKER_XWAYLAND_OPTIONS >>'$Xinitlogfile' 2>&1
-  ;;
-esac
-' >> "$Xwaylandwrapperfile"
   
   # Xwayland -force-xrandr-emulation
   case "$Xserver" in
@@ -4232,7 +4220,7 @@ esac
         yes)
           Xrandremulation="-force-xrandr-emulation"
           Decorate="-decorate"
-          verlt "$Xcontainerversion" "2.0" && Xrandremulation="" #&& Decorate=""
+          verlt "$Xcontainerversion" "2.0" && Xrandremulation="" && Decorate=""
         ;;
         no)
           Xwayland -help 2>&1 | grep -q "force-xrandr-emulation" && Xrandremulation="-force-xrandr-emulation"
@@ -4323,7 +4311,7 @@ mode=$Screensize" >> "$Westonini"
   -fullscreen"
         ;;
       esac
-      Xcommand="$Xcommand -ac $Xserveroptions"
+      Xcommand="$Xcommand  -ac $Xserveroptions"
 
       [ -n "${Westonoutput:-$Connectorlist}" ] && for ((Count=1 ; Count<="$Outputcount" ; Count++)) ; do
         [ "$Westonoutput" = "WL" ] || [ "$Westonoutput" = "X" ] || {
@@ -4351,6 +4339,13 @@ mode=$Screensize" >> "$Westonini"
       [ -n "$Customwestonini" ] && Westonini="$Customwestonini"
       Compositorcommand="$Compositorcommand \\
   --config='$Westonini'"
+
+  echo "#! /bin/bash
+# x11docker wrapper for Xwayland
+$(get_xpath Xwayland) \$(sed 's/-terminate//' <<< \"\$@\") \\
+$Xcommand \\
+>> $Xinitlogfile 2>&1
+" >> "$Xwaylandwrapperfile"
     ;;
 
     --kwin|--kwin-xwayland)
@@ -8771,16 +8766,14 @@ start_compositor() {            # start Wayland compositor Weston or KWin
     --kwin|--kwin-xwayland)                    Compositorkeyword="XKEYBOARD" ;;
   esac
 
-  Xcommand="$(tr -d '\n\\' <<< "$Xcommand")"
   case "$Xcontainer" in
     yes)
       unpriv_xcbackend "$Xcontainerbackend exec --detach $Xcontainername \
-        sh -c 'env X11DOCKER_DISPLAY=:$Newdisplaynumber X11DOCKER_XWAYLAND_OPTIONS=\"$Xcommand\" $Compositorcommand \
-        >> $Compositorlogfile  2>&1'" 2>> $Compositorlogfile
+        sh -c '$Compositorcommand >> $Compositorlogfile  2>&1'" 2>> $Compositorlogfile
       Compositorpid="$($Myps ax -o pid,args | grep weston | grep "$Newwaylandsocket" | head -n1 | awk '{print $1}')"
     ;;
     no)
-      unpriv  "env X11DOCKER_DISPLAY=:$Newdisplaynumber X11DOCKER_XWAYLAND_OPTIONS=\"$Xcommand\" $Compositorcommand \
+      unpriv  "$Compositorcommand \
         >> '$Compositorlogfile'  2>&1 & echo compositorpid=\$! >> '$Storeinfofile'"
       Compositorpid="$(storeinfo dump compositorpid)"
     ;;
@@ -11877,8 +11870,16 @@ main() {
   [ "$Shareclipboard" != "no" ]  && create_clipboardrc >> "$Clipboardrc"          # --clipboard
   check_screensize               # size of host X and of new X server             # --size
   create_xcommand                # set up start command for X server              # all X server and Wayland options
-  [ "$Xcommand" ]                && debugnote "X server command:
+  [ "$Xcommand" ]                && case "$Xwaylandwrapper" in
+    no) 
+      debugnote "X server command:
   $Xcommand"
+    ;;
+    yes)
+      debugnote "Xwayland wrapper:
+$(cat $Xwaylandwrapperfile)"
+    ;;
+  esac
   [ "$Compositorcommand" ]       && debugnote "Wayland compositor command:
   $Compositorcommand"
 
@@ -12081,8 +12082,6 @@ $(cat $Storepidfile)"
 $(nl -ba <$Xinitrc)"
     [ -s "$Westonini" ] && verbose "Generated weston.ini:
 $(nl -ba <$Westonini)"
-    [ -s "$Xwaylandwrapperfile" ] && verbose "Generated Xwayland wrapper:
-$(nl -ba <$Xwaylandwrapperfile)"
 
   case "$Xserver" in
     --xpra*)
