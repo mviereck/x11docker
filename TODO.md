@@ -6,6 +6,7 @@ use ~/.Xauthority in general? issues with --retain setups, need to check images 
 --xc --gpu --xorg (nvidia): black screen after terminating, no tty switch possible
 --backend=podman --hostdisplay fails
 --weston-x --xc on tty issues
+x11docker --backend=host xfce4-terminal --xpra-x --gpu --xc=yes: Speicherfehler
 
 runx:
 --clean
