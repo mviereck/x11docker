@@ -79,11 +79,9 @@ Dependencies on host:
   See also: https://github.com/mviereck/x11docker/wiki/Dependencies
 
 Dependencies in image:
-  No dependencies in image except for a few feature options. Most important:
-   --gpu:  OpenGL/MESA packages, collected often in 'mesa-utils' package.
-   --pulseaudio: Needs pulseaudio on host and pulseaudio client libs in image.
-   --printer: Needs cups on host and cups client libs in image.
-  See also: https://github.com/mviereck/x11docker/wiki/Dependencies
+  No dependencies in image except for some feature options.
+  Most noteable, check option descriptions for
+  --gpu, --pipewire, --pulseaudio, --printer.
 
 Options: (short options do not accept arguments)
      --help            Display this message and exit.
@@ -137,11 +135,11 @@ Host integration:
                        If LOCALE is missing in image, x11docker generates it
                        with 'localedef' in container (needs 'locales' package).
                        Examples for LOCALE: ru, en, de, zh_CN, cz, fr, fr_BE.
-     --pipewire        Sound with pipewire. Needs 'pipewire' on host and
-                       'pipewire', 'pipewire-pulse'  and 'pipewire-alsa'
-                       in image.
+     --pipewire        Sound with pipewire. Needs 'pipwire', 'pipewire-pulse'
+                       and 'pipewire-alsa'on host and in image.
  -P, --printer [=MODE] Share host printers through CUPS server.
                        Optional MODE can be 'socket' or 'tcp'. Default: socket
+                       Needs cups on host and cups client libs in image.
  -p, --pulseaudio [=MODE]  Sound with pulseaudio. Needs 'pulseaudio' on host
                        and in image. Optional arg MODE can be 'socket', 'tcp'
                        or 'host'. tcp mode needs network access with --network.
@@ -170,8 +168,18 @@ X server options:
                        Faster than --xpra, but can have compositing issues.
  -y, --xephyr          Nested X server for --desktop mode. Without --desktop
                        a host window manager will be provided (option --wm).
- -Y, --weston-xwayland Desktop mode like --xephyr, but supports option --gpu.
-                       Runs from console, within X and within Wayland.
+ -Y, --weston-xwayland Opens a weston window with (default) rootless Xwayland.
+                       Supports option --gpu in many environments.
+                       Needs --gpu in some environments to start up at all.
+                       Without further options it provides Westons built-in
+                       window manager.
+                       With option --wayland X11 and Wayland apps can run
+                       side by side.
+                       With option --desktop or --wm a rootful Xwayland is
+                       started (that means with X root window).
+                       Adding option '--xopt=-decorate' or '--xopt=-fullscreen'
+                       can help to manage the X root window.
+                       Move X root window with [SUPER]+[LeftMouseButton].
  -x, --xorg            Core Xorg server. Runs ootb from console.
                        Switch tty with <CTRL><ALT><F1>....<F12>. Always switch
                        to a black tty before switching to X to avoid crashes.
@@ -750,7 +758,7 @@ containerisrunning() {          # check if container is running
   esac
 }
 pspid() {                       # Return some info to pid $1
-  LC_ALL=C ps ax -o user,pid,comm | grep " ${1:-} "
+  LC_ALL=C $Myps ax -o user,pid,comm | grep " ${1:-} "
 }
 rocknroll() {                   # check whether x11docker session is still running
   [ -s "$Timetosaygoodbyefile" ]   && return 1
@@ -897,11 +905,11 @@ check_envvar() {                # allow only chars in string $1 that can be expe
   $Newvar"
   return 1
 }
-get_ppid() {                  # get ppid of pid $1
-  ps ax -o pid,ppid | awk '$1 ~ /'${1:-}'/ { SUM += $2 } END { print SUM } '
+get_ppid() {                    # get ppid of pid $1
+  $Myps ax -o pid,ppid | awk '$1 ~ /'${1:-}'/ { SUM += $2 } END { print SUM } '
 }
 check_parent_sshd() {           # check whether pid $1 runs in SSH session
-  ps ax -o pid,comm | awk '$1 ~ /'$(get_ppid "${1:-}")'/ { SUM += $2 } END { print SUM } ' | grep -q "sshd"
+  $Myps ax -o pid,comm | awk '$1 ~ /'$(get_ppid "${1:-}")'/ { SUM += $2 } END { print SUM } ' | grep -q "sshd"
 }
 cookiebaker() {                 # create an X cookie without xauth
   # $1  DISPLAY
@@ -2638,16 +2646,21 @@ setup_webcam() {                # option --webcam: share webcam devices
 
 #### X server setup
 check_newxenv()  {              # find free display
-  local Line
+  local Line Newwaylandnumber
   # find free display number
   [ "$Newdisplaynumber" ] || {
-    Newdisplaynumber="100"
+    Newdisplaynumber="0"
     while :; do
+      [ -n "$(find "/tmp/.X11-unix/X$Newdisplaynumber" "/tmp/.X$Newdisplaynumber-lock" 2>/dev/null)" ] || break
       case "$Xserver" in
         --xwin|--runx) Newdisplaynumber="$((RANDOM / 10 + 200))" ;;
         *)             Newdisplaynumber="$((Newdisplaynumber + 1))" ;;
       esac
-      grep -q -x "$Newdisplaynumber" < "$Numbersinusefile" || [ -n "$(find "/tmp/.X11-unix/X$Newdisplaynumber" "/tmp/.X$Newdisplaynumber-lock" "$XDG_RUNTIME_DIR/wayland-$Newdisplaynumber" 2>/dev/null)" ] || break
+    done
+    Newwaylandnumber="0"
+    while :; do
+      Newwaylandnumber="$((Newwaylandnumber + 1))"
+      [ -n "$(find "$XDG_RUNTIME_DIR/wayland-$Newwaylandnumber" 2>/dev/null)" ] || break
     done
   }
   echo "$Newdisplaynumber" >> "$Numbersinusefile"
@@ -2792,7 +2805,7 @@ check_newxenv()  {              # find free display
 
   # set $Newwaylandsocket
   case "$Xserver" in
-    --weston*|--kwin*|--xpra-xwayland|--xpra2-xwayland) Newwaylandsocket="wayland-$Newdisplaynumber" ;;
+    --weston*|--kwin*|--xpra-xwayland|--xpra2-xwayland) Newwaylandsocket="wayland-$Newwaylandnumber" ;;
     --hostwayland|--xwayland)                           Newwaylandsocket="$Hostwaylandsocket" ;;
   esac
 
@@ -2802,7 +2815,7 @@ check_nvidiainstaller() {       # option --gpu: look for nvidia driver installer
   [ -n "$Nvidiaversion" ] && {
     Nvidiainstallerfile="$(find /usr/local/share/x11docker/NVIDIA*$Nvidiaversion*.run $Localsharedir/NVIDIA*$Nvidiaversion*.run 2>/dev/null | tail -n1 )"
     Nvidiainstallerfile="$(myrealpath "$Nvidiainstallerfile" 2>/dev/null)"
-    [ -n "$Nvidiainstallerfile" ] && debugnote "Found NVIDIA installer $Nvidiainstallerfile"
+    [ -n "$Nvidiainstallerfile" ] && debugnote "check_nvidiainstaller(): Found NVIDIA installer $Nvidiainstallerfile"
   }
 }
 check_screensize() {            # check physical and virtual screen size (also option --size)
@@ -3079,7 +3092,7 @@ check_xcontainer() {            # option --xc: check backend, rootless and image
       Xcontaineroptionsconsole="$(parse_inspect "$Xcontainerinspect" "Config" "Labels" "options_console")"
       Xcontainertools="$(parse_inspect "$Xcontainerinspect" "Config" "Labels" "tools")"
       Xcontainerversion="$(parse_inspect "$Xcontainerinspect" "Config" "Labels" "version")"
-      verlt "$Xcontainerversion" "2.0" && note "Option --xc: Please update image x11docker/xserver
+      verlt "$Xcontainerversion" "2.1" && note "Option --xc: Please update image x11docker/xserver
   with 'docker pull x11docker/xserver'."
     ;;
     no)
@@ -3142,9 +3155,10 @@ check_xdepends() {              # check dependencies on host for X server option
     ;;
   esac
   [ "$Setupwayland" = "yes" ] && case "$Xserver" in
-    --weston|--kwin|--hostwayland) ;;
+    --weston|--weston-xwayland|--kwin|--hostwayland) ;;
     *) 
-      $Message "${1:-} does not support a Wayland environment." 
+      $Message "Option --wayland: Opttion ${1:-}
+  does not support a Wayland environment." 
       Return=1
     ;;
   esac
@@ -3902,7 +3916,7 @@ create_modelinefile() {         # generate a set of smaller modelines for screen
 create_xcommand() {             ### create command to start X server and/or Wayland compositor
   local Xserveroptions_custom= Xpraoptions= Nxagentoptions= Compositorpid= Weston= Westonoutput= Count= Usemitshm Xkbmodel Xdpyinfooutput
   local Card Connectorlist= Status
-  local Xrandremulation Decorate
+  local Xrandremulation= Decorate=
 
   Xserveroptions_custom="$Xserveroptions"
   Xserveroptions=""
@@ -4184,20 +4198,41 @@ locking=false
 background-color=0xff002244
 animation=fade
 startup-animation=fade
+[xwayland]
+path=$Xwaylandwrapperfile
 [keyboard]" >> "$Westonini"
       # --keymap: keyboard layout
       [ -n "$Xkblayout" ] && echo "keymap_layout=$Xkblayout" >> "$Westonini"
       [ -z "$Xkblayout" ] && [ -n "$Newxvt" ] && echo "$(echo -n "keymap_layout=" && grep XKBLAYOUT <"/etc/default/keyboard" | cut -d= -f2 | cut -d'"' -f2)" >> "$Westonini"
-
     ;;
   esac
+  echo '#! /bin/bash
+# x11docker wrapper for Xwayland
+case "$X11DOCKER_DISPLAY" in
+  "") /usr/bin/Xwayland "$@" ;;
+  *)
+    shift
+    Westonoptions="$@"
+    Westonoptions="$(sed "s/-terminate//" <<< "$Westonoptions")"
+    /usr/bin/Xwayland "$X11DOCKER_DISPLAY" $Westonoptions $X11DOCKER_XWAYLAND_OPTIONS >>'$Xinitlogfile' 2>&1
+  ;;
+esac
+' >> "$Xwaylandwrapperfile"
   
   # Xwayland -force-xrandr-emulation
   case "$Xserver" in
     *xwayland)
-      Xwayland -help 2>&1 | grep -q "force-xrandr-emulation" && Xrandremulation="-force-xrandr-emulation"
-      Xwayland -help 2>&1 | grep -q "decorate" && Decorate="-decorate"
-      verlt "$Xcontainerversion" "2.0" && Xrandremulation="" && Decorate=""
+      case "$Xcontainer" in
+        yes)
+          Xrandremulation="-force-xrandr-emulation"
+          Decorate="-decorate"
+          verlt "$Xcontainerversion" "2.0" && Xrandremulation="" #&& Decorate=""
+        ;;
+        no)
+          Xwayland -help 2>&1 | grep -q "force-xrandr-emulation" && Xrandremulation="-force-xrandr-emulation"
+          #Xwayland -help 2>&1 | grep -q "decorate" && Decorate="-decorate"
+        ;;
+      esac
     ;;
   esac
 
@@ -4271,11 +4306,18 @@ mode=$Screensize" >> "$Westonini"
       esac
     ;;
     --weston|--weston-xwayland)
-      Xcommand="$(get_xpath Xwayland) :$Newdisplaynumber -ac $Xserveroptions \\
+      case "$Xwaylandwrapper" in
+        "yes")
+          Xcommand=""
+        ;;
+        no)
+          Xcommand="$(get_xpath Xwayland) :$Newdisplaynumber \\
   $Xrandremulation"
-      [ "$Fullscreen" = "yes" ] && Xcommand="$Xcommand \\
+          [ "$Fullscreen" = "yes" ] && Xcommand="$Xcommand \\
   -fullscreen"
-
+        ;;
+      esac
+      Xcommand="$Xcommand -ac $Xserveroptions"
 
       [ -n "${Westonoutput:-$Connectorlist}" ] && for ((Count=1 ; Count<="$Outputcount" ; Count++)) ; do
         [ "$Westonoutput" = "WL" ] || [ "$Westonoutput" = "X" ] || {
@@ -4298,20 +4340,8 @@ mode=$Screensize" >> "$Westonini"
   --fullscreen"
       [ "$Outputcount" = "1" ]  || Compositorcommand="$Compositorcommand \\
   --output-count=$Outputcount"
-#      case "$Westonoutput" in
-#        WL) Compositorcommand="$Compositorcommand \\
-#  --backend=wayland-backend.so" ;;
-#        X)  Compositorcommand="$Compositorcommand \\
-#  --backend=x11-backend.so" ;;
-#        *)
-#          case "$Newxvt" in
-#            "")  Compositorcommand="$Compositorcommand \\
-#  --backend=x11-backend.so" ;;
-#            *) Compositorcommand="$Compositorcommand \\
-#  --backend=drm-backend.so" ;;
-#          esac
-#        ;;
-#      esac
+      [ "$Xwaylandwrapper" = "yes" ] && Compositorcommand="$Compositorcommand \\
+  --xwayland"
       [ -n "$Customwestonini" ] && Westonini="$Customwestonini"
       Compositorcommand="$Compositorcommand \\
   --config='$Westonini'"
@@ -4692,7 +4722,7 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
     ;;
     nerdctl) ;;
   esac
-set -x
+
   case "$Hostxoverip" in
     yes)
       grep -q "localhost" <<< "$Hostdisplay" && {
@@ -4706,7 +4736,6 @@ set -x
       }
     ;;
     no)
-    warning $Xoverip
       case "$Xoverip" in
         no)
           Xcontainercommand="$Xcontainercommand \\
@@ -4721,7 +4750,7 @@ set -x
       esac
     ;;
   esac
-set +x
+
   case "$Shareipc" in
     host)
       Xcontainercommand="$Xcontainercommand \\
@@ -8706,22 +8735,39 @@ $(tail "$Containerlogfile")"
   return 0
 }
 start_compositor() {            # start Wayland compositor Weston or KWin
-  local Compositorkeyword
+  local Compositorkeyword Number
 
   debugnote "start_compositor(): starting $Xserver"
-
   case "$Xserver" in
-    --weston|--weston-xwayland|--xpra-xwayland|--xpra2-xwayland) Compositorkeyword="weston-desktop-shell" ;;
-    --kwin|--kwin-xwayland)                                      Compositorkeyword="XKEYBOARD" ;;
+    --weston|--xpra-xwayland|--xpra2-xwayland) Compositorkeyword="weston-desktop-shell" ;;
+    --weston-xwayland) 
+      case "$Xwaylandwrapper" in
+        yes)                                   Compositorkeyword="xserver listening on display" ;;
+        no)                                    Compositorkeyword="weston-desktop-shell" ;;
+      esac
+      for Number in 0 $(seq $Newdisplaynumber); do
+        case "$Number" in
+          "$Newdisplaynumber") ;;
+          *) 
+            unpriv "touch $Cachefolder/tmp/.X${Number}-lock" 2>/dev/null ||:
+          ;;
+        esac
+      done
+    ;;
+    --kwin|--kwin-xwayland)                    Compositorkeyword="XKEYBOARD" ;;
   esac
 
+  Xcommand="$(tr -d '\n\\' <<< "$Xcommand")"
   case "$Xcontainer" in
     yes)
-      unpriv_xcbackend "$Xcontainerbackend exec --detach $Xcontainername sh -c '$Compositorcommand >> $Compositorlogfile  2>&1'" 2>> $Compositorlogfile
-      Compositorpid="$(ps ax -o pid,args | grep weston | grep "$Newwaylandsocket" | head -n1 | awk '{print $1}')"
+      unpriv_xcbackend "$Xcontainerbackend exec --detach $Xcontainername \
+        sh -c 'env X11DOCKER_DISPLAY=:$Newdisplaynumber X11DOCKER_XWAYLAND_OPTIONS=\"$Xcommand\" $Compositorcommand \
+        >> $Compositorlogfile  2>&1'" 2>> $Compositorlogfile
+      Compositorpid="$($Myps ax -o pid,args | grep weston | grep "$Newwaylandsocket" | head -n1 | awk '{print $1}')"
     ;;
     no)
-      unpriv "$Compositorcommand  >> '$Compositorlogfile'  2>&1 & echo compositorpid=\$! >> '$Storeinfofile'"
+      unpriv  "env X11DOCKER_DISPLAY=:$Newdisplaynumber X11DOCKER_XWAYLAND_OPTIONS=\"$Xcommand\" $Compositorcommand \
+        >> '$Compositorlogfile'  2>&1 & echo compositorpid=\$! >> '$Storeinfofile'"
       Compositorpid="$(storeinfo dump compositorpid)"
     ;;
   esac
@@ -8764,8 +8810,18 @@ start_xserver() {               # start X server
   debugnote "start_xserver(): starting $Xserver. X Container = $Xcontainer"
 
   case "$Xserver" in
-    --xpra*|--xephyr|--xvfb|--nxagent|--xwayland|--weston-xwayland|--kwin-xwayland|--xwin|--xorg)
+    --xpra*|--xephyr|--xvfb|--nxagent|--xwayland|--kwin-xwayland|--xwin|--xorg)
       Command="env WAYLAND_DISPLAY=$Newwaylandsocket xinit $Xinitrc -- $Xcommand"
+    ;;
+    --weston-xwayland)
+      case "$Xwaylandwrapper" in
+        yes) 
+          Command="sh $Xinitrc"
+        ;;
+        no)
+          Command="env WAYLAND_DISPLAY=$Newwaylandsocket xinit $Xinitrc -- $Xcommand"
+        ;;
+      esac
     ;;
     --hostdisplay|--hostwayland|--weston|--kwin|--tty)
       Command="sh $Xinitrc"
@@ -8854,9 +8910,9 @@ $Xpraclientcommand"
 
   # get pids
   sleep 3   # avoid race condition not finding the process
-  Xpraserverpid="$(ps ax -o pid,args | grep -E "xpra start :$Newdisplaynumber|xpra start-desktop :$Newdisplaynumber" | grep -v grep | awk '{print $1}')"
+  Xpraserverpid="$($Myps ax -o pid,args | grep -E "xpra start :$Newdisplaynumber|xpra start-desktop :$Newdisplaynumber" | grep -v grep | awk '{print $1}')"
   storepid "$Xpraserverpid" xpraserver
-  Xpraclientpid="$(ps ax -o pid,args | grep "xpra attach :$Newdisplaynumber" | grep -v grep | awk '{print $1}')"
+  Xpraclientpid="$($Myps ax -o pid,args | grep "xpra attach :$Newdisplaynumber" | grep -v grep | awk '{print $1}')"
   storepid "$Xpraclientpid" xpraclient
 
   # catch possible xpra crashes
@@ -8979,6 +9035,18 @@ check_host() {                  # check host environment
   Winsubpath="${Winsubpath%/}"
   [ "$Winsubsystem" ] && Hostsystem="MSWindows-$Winsubsystem"
   [ -z "$Mobyvm" ]    && Mobyvm="no"
+  
+  # Check for procps
+  case "$Winsubsystem" in
+    MSYS2|CYGWIN)
+      command -v procps >/dev/null || error "On Cygwin and MSYS2 x11docker needs procps.
+  Please install package procps."
+      Myps="procps"
+    ;;
+    *)
+      Myps="ps"
+    ;;
+  esac
 
   # Check host IP. Needed for --pulseaudio=tcp, --printer=tcp, --xoverip and --runx
   case "$Winsubsystem" in
@@ -9019,7 +9087,7 @@ check_host() {                  # check host environment
 
   # Check whether x11docker runs over SSH
   check_parent_sshd "$$"                && Runsoverssh="yes"
-  command -v pstree && {
+  command -v pstree >/dev/null && {
     pstree -ps $$ | grep -q sshd          && Runsoverssh="yes"
   } || note "Command 'pstree' not found. x11docker needs it to 
   check whether it runs within an ssh session."
@@ -9042,7 +9110,7 @@ check_host() {                  # check host environment
   } || {
     Hosthidepid="no"
   }
-  ps ax -o user | grep -q root && {
+  $Myps ax -o user | grep -q root && {
     Hostcanwatchroot="yes"
   } || {
     Hostcanwatchroot="no"
@@ -9317,6 +9385,7 @@ $Hostuserhome/.cache/x11docker/symlink
   Watchpidfifo="$Cachefolder/$Watchpidfifo"
   Xservercookie="$Cachefolder/$Xservercookie"                       && mkfile $Xservercookie
   Xtermrc="$Cachefolder/$Xtermrc"                                   && mkfile $Xtermrc
+  Xwaylandwrapperfile="$Sharefolder/$Xwaylandwrapperfile"           && mkfile $Xwaylandwrapperfile 777
                                                                        mkfolder "$Cachefolder/tmp/.X11-unix"
                                                                        mkfolder "$Cachefolder/XDG_RUNTIME_DIR" 0700
 
@@ -10470,7 +10539,12 @@ check_options_interferences() { # check multiple option interferences, change se
   }
 
   # window manager
-  [ "$Desktopmode" = "no" ] && [ -z "$Windowmanagermode" ] && [ "$Xfishtank" = "no" ] && case "$Xserver" in
+  case "$Xserver" in
+    --weston-xwayland)
+      [ "$Desktopmode" = "no" ] && [ -z "$Windowmanagermode" ] && Xwaylandwrapper="yes"
+    ;;
+  esac
+  [ "$Desktopmode" = "no" ] && [ -z "$Windowmanagermode" ] && [ "$Xwaylandwrapper" = "no" ] && case "$Xserver" in
     --xephyr|--weston-xwayland|--kwin-xwayland|--xorg|--xwayland)
       note "Option $Xserver: x11docker assumes that you need
   a window manager. If you don't want this, run with option --desktop.
@@ -10943,7 +11017,7 @@ check_options_messages() {      # some messages depending on options, but not ch
     ;;
 
     --weston-xwayland)
-        [ "$Fullscreen" = "no" ] && note "Option $Xserver: The Xwayland screen
+        [ "$Fullscreen" = "no" ] && [ "$Xwaylandwrapper" = "no" ] && note "Option $Xserver: The Xwayland screen
   might not sit at 0:0 / top left.
   You can use --xopt='-fullscreen' to fix this, but resizing the weston
   window might lead to a crash.
@@ -11319,6 +11393,7 @@ declare_variables() {           # declare global variables
   Hostxoverip=""                                  # Host X uses X over IP/TCP
   Hostxsocket=""                                  # Socket of DISPLAY in /tmp/.X11-unix
   Jqbin=""                                        # path to jq binary
+  Myps=""                                         # Command ps or procps
   Nvidiacontainerfile="/usr/local/bin/NVIDIA-installer.run"  # --gpu: Path to nvidia installer in container
   Nvidiaversion=""                                # --gpu: Proprietary nvidia driver version on host
   Nvidiainstallerfile=""                          # --gpu: Proprietary nvidia driver installer for container in [...]local/share/x11docker
@@ -11396,6 +11471,7 @@ declare_variables() {           # declare global variables
   Xoverip=""                                      # --xoverip: Connect to X over TCP yes/no
   Xserveroptions=""                               # --xopt: Custom X server options
   Xtest=""                                        # --xtest: Enable extension Xtest yes/no. If empty, yes for --xpra/--xvfb, otherwise no
+  Xwaylandwrapper="no"                            # use wrapper for --weston-xwayland yes/no
   Yaxis=""                                        # Virtual screen height
 
   # X and Wayland config and cookie files
@@ -11405,6 +11481,7 @@ declare_variables() {           # declare global variables
   Xkbkeymapfile="xkb.keymap"                      # --keymap: File to store output of host keymap in xinitrc
   Xorgconf=""                                     # --xorgconf: custom xorg.conf
   Xservercookie="Xauthority.server"               # Generated X server cookie
+  Xwaylandwrapperfile="Xwayland.wrapper"          # Xwayland wrapper script for --weston-xwayland
 
   # X in container
   Xcnetworkid=""
@@ -11939,7 +12016,7 @@ $(nl -ba <$Sshenvscript)"
       *)
         Xinitpid="$(pgrep -a xinit 2>/dev/null | grep "xinit $Xinitrc" | awk '{print $1}')"
         checkpid "$Xinitpid"   && setonwatchpidlist "$Xinitpid" xinit
-        Xserverpid=$(ps ax -o pid,args | rmcr | grep "$(echo "${Xcommand:-nothingtolookfor}" | cut -d' ' -f1-2))" | grep -v grep | grep -v xinit | awk '{print $1}')
+        Xserverpid=$($Myps ax -o pid,args | rmcr | grep "$(echo "${Xcommand:-nothingtolookfor}" | cut -d' ' -f1-2))" | grep -v grep | grep -v xinit | awk '{print $1}')
         checkpid "$Xserverpid" && setonwatchpidlist "$Xserverpid" Xserver
       ;;
     esac
@@ -11990,6 +12067,8 @@ $(cat $Storepidfile)"
 $(nl -ba <$Xinitrc)"
     [ -s "$Westonini" ] && verbose "Generated weston.ini:
 $(nl -ba <$Westonini)"
+    [ -s "$Xwaylandwrapperfile" ] && verbose "Generated Xwayland wrapper:
+$(nl -ba <$Xwaylandwrapperfile)"
 
   case "$Xserver" in
     --xpra*)

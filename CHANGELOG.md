@@ -20,9 +20,12 @@ Project website: https://github.com/mviereck/x11docker
  - `/etc/profile.d/10-x11docker-env.sh`: Do not set DISPLAY,
    set `XAUTHORITY=~/.Xauthority` because of ssh issues.
    [(554)](https://github.com/mviereck/x11docker/issues/554)
- - fix `ps` calls for alpine/busybox.
+ - fix `ps` calls for alpine/busybox. Use `psproc` on MSYS2 and Cygwin.
    [(556)](https://github.com/mviereck/x11docker/issues/556)
+   [(558)](https://github.com/mviereck/x11docker/issues/558)
 ### Changed
+ - `--weston-xwayland`: Support rootless Xwayland.
+ - `--weston-xwayland`: Support option `--wayland`.
  - `--weston*`: Set backend in `weston.ini` instead of weston command.
    [(501)](https://github.com/mviereck/x11docker/issues/501)
 ### Added

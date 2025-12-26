@@ -168,7 +168,7 @@ x11docker assumes that you want to run a single application in seamless mode, i.
  - Desktop mode with `--desktop` is supported with all X server options except `--hostdisplay`. If available, x11docker prefers `--xephyr` and `--nxagent`.
  - Special case: Single applications with a window manager (option `--wm`).
    - If neither `nxagent` nor `xpra` are installed, but x11docker finds a desktop capable X server like `Xephyr`, it avoids insecure option `--hostdisplay` and runs Xephyr with a window manager.
-   
+ - Running X and Wayland applications side by side is possible with `--weston-xwayland --wayland`, or, if running in a Wayland environment, with `--hostdisplay --hostwayland`.
 ### Internet access
 By default x11docker disables Network access for containers with `--network=none` because it targets best possible container isolation.
 To allow internet access set option `-I` or `--network`.
@@ -313,7 +313,7 @@ For often used option combinations you might want to use option `--preset FILENA
    --gpu
    --webcam
    --printer
-   --pulseaudio
+   --pipewire
    --clipboard
    --share ~/Videos
    --share ~/Music
@@ -392,7 +392,7 @@ _Most important:_
     - If additionally using `--gpu` or `--clipboard`, option `--ipc=host` and trusted cookies are enabled and no protection against X security leaks is left. 
     - If you don't care about container isolation, `x11docker --hostdisplay --gpu` is an insecure but quite fast setup without any overhead.
   - `--gpu` allows access to GPU hardware. This can be abused to get window content from host ([palinopsia bug](https://hsmr.cc/palinopsia/)) and makes [GPU rootkits](https://github.com/LucaBongiorni/jellyfish) like [keyloggers](http://www.cs.columbia.edu/~mikepo/papers/gpukeylogger.eurosec13.pdf) possible.
-  - `--pulseaudio` and `--alsa` allow catching audio output and microphone input from host.
+  - `--pipewire`, `--pulseaudio` and `--alsa` allow catching audio output and microphone input from host.
   
 _Rather special options reducing security, but not needed for regular use:_
   - `--sudouser` allows `su` and `sudo` with password `x11docker`for container user.
@@ -515,7 +515,7 @@ most optional x11docker dependencies and several X servers and Wayland composito
      - See [wiki: Dependencies - Recommended base](https://github.com/mviereck/x11docker/wiki/Dependencies#recommended-base) for a package list matching your distribution.
 
 Dependencies in image:
- - Some feature options have additional dependencies on host and/or in image. This affects especially options `--gpu`, `--printer` and `--pulseaudio`.
+ - Some feature options have additional dependencies on host and/or in image. This affects especially options `--gpu`, `--printer`, `--pipewire` and `--pulseaudio`.
  - Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
 
 
