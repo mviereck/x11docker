@@ -37,6 +37,7 @@ Project website: https://github.com/mviereck/x11docker
    [(380)](https://github.com/mviereck/x11docker/issues/380)
  - `--hostdisplay`: Use `XlibNoSHM.so` without `--xc`, too.
 ### Deprecated
+ - `--backend=nerdctl`: Deprecated, likely rarely needed.
  - `--runtime=kata-runtime`: Deprecated, likely rarely used.
    [(543)](https://github.com/mviereck/x11docker/issues/543)
  - `--xwin`: Deprecated in favour of `--runx`.

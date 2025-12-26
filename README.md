@@ -60,9 +60,9 @@
 
 ## Introduction
 x11docker allows to run graphical desktop applications (and entire desktops) in Linux containers.
- - [Container tools](#backend-docker-podman-or-nerdctl) like [Docker](https://en.wikipedia.org/wiki/Docker_(software)), [podman](http://docs.podman.io/en/latest/) and [nerdctl](https://github.com/containerd/nerdctl) allow to run applications in an isolated [container](https://en.wikipedia.org/wiki/Operating-system-level_virtualization) environment. 
+ - [Container tools](#backend-docker-podman-or-nerdctl) like [Docker](https://en.wikipedia.org/wiki/Docker_(software)) and [podman](http://docs.podman.io/en/latest/) allow to run applications in an isolated [container](https://en.wikipedia.org/wiki/Operating-system-level_virtualization) environment. 
    Containers need much less resources than [virtual machines](https://en.wikipedia.org/wiki/Virtual_machine) for similar tasks.
- - Docker, podman and nerdctl do not provide a [display server](https://en.wikipedia.org/wiki/Display_server) that would allow to run applications with a [graphical user interface](https://en.wikipedia.org/wiki/Graphical_user_interface).
+ - Docker and podman do not provide a [display server](https://en.wikipedia.org/wiki/Display_server) that would allow to run applications with a [graphical user interface](https://en.wikipedia.org/wiki/Graphical_user_interface).
  - x11docker fills the gap. It runs an [X display server](https://en.wikipedia.org/wiki/X_Window_System) and provides it to containers. 
    X servers can run from host or in a container of image [x11docker/xserver](https://github.com/mviereck/dockerfile-x11docker-xserver).
  - Additionally x11docker does some [security setup](https://github.com/mviereck/x11docker#security) to enhance container isolation and to avoid X security leaks. 
@@ -109,7 +109,7 @@ For a quick start:
    - Restricts container capabilities to bare minimum.
    - Container user is same as host user to avoid root in container.
  - Low [dependencies](#dependencies):
-   - No obliging dependencies on host beside X and one of `docker`, `podman` or `nerdctl`. Recommended: `nxagent` and `Xephyr`, alternatively image `x11docker/xserver`.
+   - No obliging dependencies on host beside X and one of `docker` or `podman`. Recommended: `nxagent` and `Xephyr`, alternatively image `x11docker/xserver`.
    - No dependencies inside of images except for some optional features.
  - Several [optional features](#options) like [GPU](#gpu-hardware-acceleration), [sound](#sound), [webcam](#webcam) and [printer](#printer) support.
  - Remote access with [SSH](https://github.com/mviereck/x11docker/wiki/Remote-access-with-SSH), [VNC](https://github.com/mviereck/x11docker/wiki/VNC) 
@@ -147,7 +147,7 @@ To run a host application on a new X server:
 To run only an empty new X server:
   x11docker [OPTIONS] --xonly
 ```
-`CUSTOM_RUN_OPTIONS` are just added to the `docker|podman|nerdctl run` command without a serious check by x11docker.
+`CUSTOM_RUN_OPTIONS` are just added to the `docker|podman run` command without a serious check by x11docker.
 
 ## Options
 Description of some commonly used feature [options](https://github.com/mviereck/x11docker/wiki/x11docker-options-overview).
@@ -289,9 +289,9 @@ Example: possible runtime configuration in `/etc/docker/daemon.json`:
 ```
 
 ### Backends other than docker
-x11docker supports container tools [Docker](https://en.wikipedia.org/wiki/Docker_(software)), [podman](http://docs.podman.io/en/latest/) 
-and [nerdctl](https://github.com/containerd/nerdctl) with option `--backend=BACKEND` in rootful and rootless mode.
-Supported `--backend` arguments: `docker` `podman` `nerdctl` `host`
+x11docker supports container tools [Docker](https://en.wikipedia.org/wiki/Docker_(software)) and [podman](http://docs.podman.io/en/latest/) 
+with option `--backend=BACKEND` in rootful and rootless mode.
+Supported `--backend` arguments: `docker` `podman` `host`
 
 Container backends:
  - By default x11docker tries to run `docker`.
@@ -300,7 +300,6 @@ Container backends:
  - Recommended for rootless container backend: `podman` 
    - Only `podman` allows option `--home` in rootless mode yet.
    - Only `podman` provides useful file ownerships with option `--share` in rootless mode yet.
- - `--backend=nerdctl` is experimental yet. It supports rootful and rootless mode. `nerdctl` is in heavy development stage.
 
 Other supported backends that are in fact no containers:
  - `--backend=host` runs a host application on a new X server. No containerization is involved.
@@ -397,7 +396,7 @@ _Most important:_
 _Rather special options reducing security, but not needed for regular use:_
   - `--sudouser` allows `su` and `sudo` with password `x11docker`for container user.
     If an application somehow breaks out of container, it can harm your host system. Allows many container capabilities that x11docker would drop otherwise.
-  - `--cap-default` disables x11docker's container security hardening and falls back to default container capabilities as provided by the backends docker, podman or nerdctl.
+  - `--cap-default` disables x11docker's container security hardening and falls back to default container capabilities as provided by the backends docker or podman.
     If an application somehow breaks out of container, it can harm your host system.
   - `--init=systemd|sysvinit|openrc|runit` allow some container capabilities that x11docker would drop otherwise. 
     `--init=systemd` also shares access to `/sys/fs/cgroup`. Some processes will run as root in container.
@@ -429,7 +428,7 @@ To check container isolation and some feature options use image `x11docker/check
   
 ## Installation
 Note that x11docker is just a **bash script** without library dependencies. 
-Basically it is just a wrapper for X servers and container backends docker, podman and nerdctl. 
+Basically it is just a wrapper for X servers and container backends docker and podman. 
 To allow advanced usage of x11docker abilities have a look at chapter [Dependencies](#dependencies).
 
 ### Installation from distribution repositories
@@ -506,7 +505,7 @@ x11docker will **not** remove:
 
 ## Dependencies
 x11docker can run with standard system utilities without additional dependencies on host or in image. 
- - As a core it only needs `bash` and one of [`docker`](https://www.docker.com/), [`podman`](http://docs.podman.io/en/latest/) or [`nerdctl`](https://github.com/containerd/nerdctl) to run containers on X.
+ - As a core it only needs `bash` and one of [`docker`](https://www.docker.com/) or [`podman`](http://docs.podman.io/en/latest/) or to run containers on X.
  - x11docker also needs an X server. x11docker can automatically use image [`x11docker/xserver`](https://github.com/mviereck/dockerfile-x11docker-xserver) that provides 
 most optional x11docker dependencies and several X servers and Wayland compositors so you won't need to install them on host.
    - If you prefer to install dependencies on host:
@@ -551,7 +550,7 @@ One attempt is to allow several privileges until the setup works. Than reduce pr
  - Drop options one by one in this order: `--privileged` `--security-opt apparmor=unconfined` `--security-opt seccomp=unconfined` `--cap-add ALL`
    `--share /run/udev/data:ro` `--network=host` `--ipc=host` `--cap-default`. 
    Only leave options that are needed to keep the setup working.
- - Option `--cap-default` might already be enough. It allows default container capabilities as docker|podman|nerdctl would do on themself. 
+ - Option `--cap-default` might already be enough. It allows default container capabilities as docker|podman would do on themself. 
    - You can just stop debugging and reducing here if you like to.
    - You can try to reduce `--cap-default`. Partially remove additional options to find out which one(s) are needed:
      - First try `x11docker --newprivileges -- IMAGENAME`
