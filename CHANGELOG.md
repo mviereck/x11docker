@@ -12,7 +12,7 @@ Project website: https://github.com/mviereck/x11docker
    [(557)](https://github.com/mviereck/x11docker/issues/557)
  - `WSL2g`: don't default to `--runx` if `DISPLAY` is set.
    [(557)](https://github.com/mviereck/x11docker/issues/557)
- - `WSL2g`: use `socat` to create a unix socket from vitual socket.
+ - `WSL2g`: use `socat` to create a unix socket from virtual socket.
    [(557)](https://github.com/mviereck/x11docker/issues/557)
  - `WSL2`: Determine Windows host ip in `/etc/resolv.conf`
    [(557)](https://github.com/mviereck/x11docker/issues/557)

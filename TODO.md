@@ -1,35 +1,25 @@
 # ToDo
 x11docker ToDo notes
 
+## Current
 use ~/.Xauthority in general? issues with --retain setups, need to check images for HOME and USER etc.
 --gpu=virgl seems to fail
 --xc --gpu --xorg (nvidia): black screen after terminating, no tty switch possible
 --backend=podman --hostdisplay fails
 --weston-x --xc on tty issues
 x11docker --backend=host xfce4-terminal --xpra-x --gpu --xc=yes: Speicherfehler
-
-runx:
---clean
 --xoverip: use xhost only, delete cookie. Maybe except for socat solutions.
+--xc=yes -decorate fails to decorate
+check xwayland-satellite https://github.com/Supreeeme/xwayland-satellite
+Xwayland -listen tcp is possible, check xhost
 
 ## Work in progress
  - bug: ssh: --hostdisplay fails
  - bug: setting XAUTHORITY with systemctl
-
- - kata: add new runtime for nerdctl io.containerd.kata.v2 
-
- - --kwin in weston segfaults
  - --xc --xorg: MIT-SHM fails
  - --xc --xorg rootless fails
- - --xc --kwin on console: tty switch fails with unprivileged user
-
- - --build=nvidia?
  - x11docker/nvidia-base: use tags with version number?
-
  - further centralize argument checks
- - --pulseaudio=host: check possible tcp setup
-
- - sommelier
  - check empty XDG_RUNTIME_DIR e.g. with --user, --hostuser 
 
 ## Issues to fix
