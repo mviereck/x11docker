@@ -9,7 +9,6 @@ use ~/.Xauthority in general? issues with --retain setups, need to check images 
 --weston-x --xc on tty issues
 x11docker --backend=host xfce4-terminal --xpra-x --gpu --xc=yes: Speicherfehler
 --xoverip: use xhost only, delete cookie. Maybe except for socat solutions.
---xc=yes -decorate fails to decorate
 check xwayland-satellite https://github.com/Supreeeme/xwayland-satellite
 Xwayland -listen tcp is possible, check xhost
 
