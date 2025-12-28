@@ -12,6 +12,12 @@ x11docker --backend=host xfce4-terminal --xpra-x --gpu --xc=yes: Speicherfehler
 check xwayland-satellite https://github.com/Supreeeme/xwayland-satellite
 Xwayland -listen tcp is possible, check xhost
 
+--xwayland-satellite
+ - check_xdepends()
+ - --xc
+ - check_xserver() default and fallback
+ - check Xserveroptions
+ 
 ## Work in progress
  - bug: ssh: --hostdisplay fails
  - bug: setting XAUTHORITY with systemctl

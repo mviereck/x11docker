@@ -23,6 +23,7 @@ Project website: https://github.com/mviereck/x11docker
  - fix `ps` calls for alpine/busybox. Use `psproc` on MSYS2 and Cygwin.
    [(556)](https://github.com/mviereck/x11docker/issues/556)
    [(558)](https://github.com/mviereck/x11docker/issues/558)
+ - `--wm`: minor fixes.
 ### Changed
  - `--weston-xwayland`: Support rootless Xwayland.
  - `--weston-xwayland`: Support option `--wayland`.
