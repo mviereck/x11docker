@@ -27,16 +27,19 @@ Project website: https://github.com/mviereck/x11docker
 ### Changed
  - `--weston-xwayland`: Support rootless Xwayland.
  - `--weston-xwayland`: Support option `--wayland`.
- - `--weston*`: Set backend in `weston.ini` instead of weston command.
+ - `--weston`: Set backend in `weston.ini` instead of weston command.
+ - `--weston =[ARG]`: New optional arguments,
+     `--weston=x`: run `--weston-xwayland --wayland`
+     `--weston=X`: run `--weston-xwayland --wayland --desktop`
    [(501)](https://github.com/mviereck/x11docker/issues/501)
-### Added
+ - `--hostdisplay`: Use `XlibNoSHM.so` without `--xc`, too.
+ ### Added
  - `--pipewire`: New option for PipeWire sound in container.
    [(545)](https://github.com/mviereck/x11docker/issues/545)
    [(527)](https://github.com/mviereck/x11docker/issues/527)
    [(507)](https://github.com/mviereck/x11docker/issues/507)
    [(418)](https://github.com/mviereck/x11docker/issues/418)
    [(380)](https://github.com/mviereck/x11docker/issues/380)
- - `--hostdisplay`: Use `XlibNoSHM.so` without `--xc`, too.
 ### Deprecated
  - `--backend=nerdctl`: Deprecated, likely rarely needed.
  - `--runtime=kata-runtime`: Deprecated, likely rarely used.

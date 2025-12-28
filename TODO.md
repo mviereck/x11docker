@@ -11,6 +11,12 @@ x11docker --backend=host xfce4-terminal --xpra-x --gpu --xc=yes: Speicherfehler
 --xoverip: use xhost only, delete cookie. Maybe except for socat solutions.
 check xwayland-satellite https://github.com/Supreeeme/xwayland-satellite
 Xwayland -listen tcp is possible, check xhost
+--weston=x check clipboard
+--hostwayland along with all X server options
+--xwayland note for libdecor-cairo
+rwaybar for weston?
+wayward
+--weston=ARG manpage
 
 --xwayland-satellite
  - check_xdepends()
