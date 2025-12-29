@@ -14,8 +14,6 @@ Xwayland -listen tcp is possible, check xhost
 --weston=x check clipboard
 --hostwayland along with all X server options
 --xwayland note for libdecor-cairo
-rwaybar for weston?
-wayward
 --weston=ARG manpage
 
 --xwayland-satellite
