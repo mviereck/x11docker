@@ -33,7 +33,9 @@ Project website: https://github.com/mviereck/x11docker
      `--weston=X`: run `--weston-xwayland --wayland --desktop`
    [(501)](https://github.com/mviereck/x11docker/issues/501)
  - `--hostdisplay`: Use `XlibNoSHM.so` without `--xc`, too.
- ### Added
+ - `--hostwayland`: Can be set additionally to X server options
+   to run X and Wayland applications side by side.
+### Added
  - `--pipewire`: New option for PipeWire sound in container.
    [(545)](https://github.com/mviereck/x11docker/issues/545)
    [(527)](https://github.com/mviereck/x11docker/issues/527)

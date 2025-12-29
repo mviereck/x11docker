@@ -102,6 +102,7 @@ Basic settings:
                        --backend=podman: rootless except started as root.
      --xc [=yes|no|BACKEND]  Run X server in container of x11docker/xserver.
                        BACKEND can specify one of docker|podman.
+                       Enabled by default if x11docker/xserver is available.
      --xonly           Only start empty X server.
 
 Host integration:
@@ -159,6 +160,7 @@ X server options:
  -h, --hostdisplay     Share host display :0. Quite bad container isolation!
                        Least overhead of all X server options.
  -a, --xpra            Nested X server supporting seamless and --desktop mode.
+                       Can run on Wayland compositors without Xwayland support.
      --xpra2           Like --xpra --xc, but runs xpra client on host.
  -A, --xpra-xwayland   Like --xpra, but supports option --gpu.
      --xpra2-xwayland  Like --xpra2, but supports option --gpu.
@@ -198,7 +200,8 @@ Wayland instead of X:
                        Optional argument ARG can be:
                          x: sets '--weston-xwayland --wayland'
                          X: sets '--weston-xwayland --wayland --desktop'
- -H, --hostwayland     Share host Wayland without X for pure Wayland apps.
+ -H, --hostwayland     Share host Wayland socket. Can be used along with other
+                       X server options to run X and Wayland apps side by side.
 
 X and Wayland appearance options:
      --border [=COLOR] Draw a colored border in windows of --xpra[-xwayland].
@@ -3172,14 +3175,14 @@ check_xdepends() {              # check dependencies on host for X server option
       }
     ;;
   esac
-  [ "$Setupwayland" = "yes" ] && case "$Xserver" in
-    --weston|--weston-xwayland|--kwin|--hostwayland) ;;
-    *) 
-      $Message "Option --wayland: Opttion ${1:-}
-  does not support a Wayland environment." 
-      Return=1
-    ;;
-  esac
+#  [ "$Setupwayland" = "yes" ] && case "$Xserver" in
+#    --weston|--weston-xwayland|--kwin|--hostwayland) ;;
+#    *) 
+#      $Message "Option --wayland: Opttion ${1:-}
+#  does not support a Wayland environment." 
+#      Return=1
+#    ;;
+#  esac
 
   # xinit
   case "${1:-}" in
@@ -3696,6 +3699,27 @@ check_xpraoption() {            # check if xpra option $1 is available
 }
 check_xserver() {               # check chosen X server, auto-choose X server
   local Xorgautochoice=
+
+  # --hostwayland
+  [ "$Sharehostwayland" = "yes" ] && {
+    [ -z "$Xserver" ] && Xserver="--hostwayland"
+    case "$Hostwaylandsocket" in
+      "") 
+        Sharehostwayland="no"
+        case "$Xserver" in
+          --hostwayland) ;;
+          *)
+            note "Option --hostwayland: WAYLAND_DISPLAY is not set.
+  Fallback: Disabling option --hostwayland."
+            check_fallback
+          ;;
+        esac
+      ;;
+      *)
+        Setupwayland="yes"
+      ;;
+    esac
+  }
 
   [ -n "$Xserver" ] && Autochooseserver="no"
   ## default option '--auto': Try to automatically choose best matching and available X server
@@ -4665,7 +4689,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
 
   # container X should not use MIT-SHM
   Xc_nomitshm="\\
-  --env LD_PRELOAD=/lib/x86_64-linux-gnu/libdl.so.2:$Sharefolder/XlibNoSHM.so"
+  --env LD_PRELOAD=/lib/x86_64-linux-gnu/libdl.so.2:/XlibNoSHM.so"
 
   # GPU
   while read -r Gpudevice ; do
@@ -4837,6 +4861,13 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
 
   # add code snippets
   case "$Xserver" in
+    --hostwayland)
+      Xcontainercommand="$Xcontainercommand $Xc_capdrop"
+      Xcontainercommand="$Xcontainercommand $Xc_nopriv"
+      Xcontainercommand="$Xcontainercommand $Xc_user"
+      Xcontainercommand="$Xcontainercommand $Xc_hostwayland"
+      Xcontainercommand="$Xcontainercommand $Xc_gpu"
+    ;;
     --hostdisplay)
       Xcontainercommand="$Xcontainercommand $Xc_capdrop"
       Xcontainercommand="$Xcontainercommand $Xc_nopriv"
@@ -6804,11 +6835,13 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
   [ "$Setupwayland" = "yes" ] && {
     case "$Containersetup" in
       yes)
+        [ "$Sharehostwayland" = "yes" ] && Backendcommand="$Backendcommand \\
+  --mount $(convertpath mount "$XDG_RUNTIME_DIR/$Hostwaylandsocket" "/$Hostwaylandsocket")"
         case "$Xcontainer" in
           yes)
             case "$Backend" in
               docker|podman|nerdctl)
-                Backendcommand="$Backendcommand \\
+                [ "$Newwaylandsocket" ] && Backendcommand="$Backendcommand \\
   --mount $(convertpath mount "$Cachefolder/XDG_RUNTIME_DIR/$Newwaylandsocket" "/$Newwaylandsocket")"
               ;;
               proot)
@@ -6820,7 +6853,7 @@ create_backendcommand() {       ### create command to run docker|podman|nerdctl 
           no)
             case "$Backend" in
               docker|podman|nerdctl)
-                Backendcommand="$Backendcommand \\
+                [ "$Newwaylandsocket" ] && Backendcommand="$Backendcommand \\
   --mount $(convertpath mount "$XDG_RUNTIME_DIR/$Newwaylandsocket" "/$Newwaylandsocket")"
               ;;
               proot)
@@ -7668,8 +7701,14 @@ export XDG_RUNTIME_DIR=/tmp/XDG_RUNTIME_DIR
     esac
 
     [ "$Setupwayland" = "yes" ] && {
-      echo "export WAYLAND_DISPLAY='$Newwaylandsocket'"
-      echo "ln -s /$Newwaylandsocket \$XDG_RUNTIME_DIR/$Newwaylandsocket"
+      [ "$Sharehostwayland" = "yes" ] && {
+        echo "export WAYLAND_DISPLAY='$Hostwaylandsocket'"
+        echo "ln -s /$Hostwaylandsocket \$XDG_RUNTIME_DIR/$Hostwaylandsocket"
+      }
+      [ -n "$Newwaylandsocket" ] && {
+        echo "export WAYLAND_DISPLAY='$Newwaylandsocket'"
+        echo "ln -s /$Newwaylandsocket \$XDG_RUNTIME_DIR/$Newwaylandsocket"
+      }
     } || {
       echo "export XDG_SESSION_TYPE=x11"
     }
@@ -9677,7 +9716,7 @@ ${1:-}"
      #### Choice of X servers and Wayland compositors
          --auto)              Autochooseserver="yes" ;;              # Default: auto-choose X server or Wayland compositor
       -h|--hostdisplay)       Xserver="--hostdisplay" ;;             # Host display :0 with shared X socket
-      -H|--hostwayland)       Xserver="--hostwayland" ;;             # Host wayland.
+      -H|--hostwayland)       Sharehostwayland="yes" ;;              # --hostwayland, Host wayland.
       -n|--nxagent)           Xserver="--nxagent" ;;                 # nxagent
          --runx)              Xserver="--runx" ;;                    # MS Windows: Will be Xwin or VcXsrv
          --satellite)         Xserver="--satellite" ;;               # rootless Xwayland on already running Wayland. X server xwayland-satellite
@@ -9699,7 +9738,7 @@ ${1:-}"
       -g)                     Sharegpu="yes" ;;                      # GPU access
          --gpu)               Sharegpu="${2:-yes}" ; shift ;;        # GPU access
       -W|--wayland)           Setupwayland="yes" ;;                  # set up wayland environment, regards --desktop
-      -w)                                      Windowmanagermode="auto" ; Desktopmode="yes" ;;
+      -w)                                        Windowmanagermode="auto" ; Desktopmode="yes" ;;
          --wm)                case "${2:-}" in                       # choose window manager
                                 "n"|"none"|"no") Windowmanagermode="none" ;;
                                 "host")          Windowmanagermode="host" ;;
@@ -11532,6 +11571,7 @@ declare_variables() {           # declare global variables
   Scaling=""                                      # --scale: Scaling factor for xpra and weston
   Screensize=""                                   # --size XxY: Display size
   Setupwayland="no"                               # --wayland, --kwin, --weston --hostwayland: Provide a Wayland environment
+  Sharehostwayland="no"                           # --hostwayland
   Waylandtoolkitenv="XDG_SESSION_TYPE=wayland GDK_BACKEND=wayland QT_QPA_PLATFORM=wayland CLUTTER_BACKEND=wayland SDL_VIDEODRIVER=wayland ELM_DISPLAY=wl ELM_ACCEL=opengl ECORE_EVAS_ENGINE=wayland_egl"
   Westonarg=""                                    # --weston=ARG
   Xauthentication="yes"                           # --xauth: cookie authentication
