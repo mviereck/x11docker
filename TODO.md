@@ -5,6 +5,8 @@ x11docker ToDo notes
 use ~/.Xauthority in general? issues with --retain setups, need to check images for HOME and USER etc.
 --gpu=virgl seems to fail
 --xc --gpu --xorg (nvidia): black screen after terminating, no tty switch possible
+ -> disable, but allow with --force=xc?
+--xc: use only if host dependencies are not fulfilled?
 --backend=podman --hostdisplay fails
 --weston-x --xc on tty issues
 x11docker --backend=host xfce4-terminal --xpra-x --gpu --xc=yes: Speicherfehler
@@ -14,7 +16,6 @@ Xwayland -listen tcp is possible, check xhost
 --weston=x check clipboard
 --hostwayland along with all X server options
 --xwayland note for libdecor-cairo
---weston=ARG manpage
 
 --xwayland-satellite
  - check_xdepends()
