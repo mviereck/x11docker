@@ -2,6 +2,8 @@
 x11docker ToDo notes
 
 ## Current
+wiki options
+wiki X servers
 --gpu=virgl seems to fail. nvidia issue?
 --xc --gpu --xorg (nvidia): black screen after terminating, no tty switch possible
 --xc: use only if host dependencies are not fulfilled?
