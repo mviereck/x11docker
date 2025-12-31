@@ -2,8 +2,7 @@
 x11docker ToDo notes
 
 ## Current
-use ~/.Xauthority in general? issues with --retain setups, need to check images for HOME and USER etc.
---gpu=virgl seems to fail
+--gpu=virgl seems to fail. nvidia issue?
 --xc --gpu --xorg (nvidia): black screen after terminating, no tty switch possible
 --xc: use only if host dependencies are not fulfilled?
 --backend=podman --hostdisplay fails
@@ -11,6 +10,8 @@ use ~/.Xauthority in general? issues with --retain setups, need to check images 
 --xoverip: use xhost only, delete cookie. Maybe except for socat solutions.
 Xwayland -listen tcp is possible, check xhost
 --weston=x check clipboard
+--hostwayland: check clipboard
+deprecate --build
 
 --xwayland-satellite
  - check_xdepends()
@@ -43,6 +44,7 @@ Xwayland -listen tcp is possible, check xhost
  - `--user`: Check in all rootless modes, maybe disallow except for `--user=root`.
  - `--user=root --home` in rootless docker and nerdctl: Set up HOME in host user ~/x11docker?
  - `--backend=podman` rootless: disallow `--home` for different `--user`.
+ - use ~/.Xauthority in general? issues with --retain setups, need to check images for HOME and USER etc.
 
 ## Old issues to fix
  - --interactive --init=runit|openrc|sysvinit: no job control in shell
@@ -56,9 +58,6 @@ Xwayland -listen tcp is possible, check xhost
 ## Nice to fix
  - `--init=systemd`: check systemd warnings on x11docker services
  - `--printer`: regard host environment variable `CUPS_SERVER`. Maybe already done by `lpadmin`.
- - `pspid()`: On some systems (busybox) `ps -p` is not supported
- - `--runtime=kata-runtime`: `x11docker/lxde` needs `--init=systemd`, why? Sort of `menud` issue.
- - `--runtime=kata-runtime --nxagent`: ALT-GR works wrong.
  - `myrealpath()`: If `realpath` is missing, the path argument is returned without resolving.
  - `--interactive` not possible without `winpty` in WSL and Cygwin
  - `--interactive --enforce-i` fails. Issue is subshell containershell & in main, would work without it.
