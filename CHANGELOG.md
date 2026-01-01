@@ -33,9 +33,9 @@ Project website: https://github.com/mviereck/x11docker
      `--weston=x`: run `--weston-xwayland --wayland`
      `--weston=X`: run `--weston-xwayland --wayland --desktop`
    [(501)](https://github.com/mviereck/x11docker/issues/501)
- - `--hostdisplay`: Use `XlibNoSHM.so` without `--xc`, too.
  - `--hostwayland`: Can be set additionally to X server options
    to run X and Wayland applications side by side.
+ - `--hostdisplay`: Use `XlibNoSHM.so` without `--xc`, too.
  - `--xc` using a tty: Needs `--force=xc`.
 ### Added
  - `--pipewire`: New option for PipeWire sound in container.
@@ -44,6 +44,7 @@ Project website: https://github.com/mviereck/x11docker
    [(507)](https://github.com/mviereck/x11docker/issues/507)
    [(418)](https://github.com/mviereck/x11docker/issues/418)
    [(380)](https://github.com/mviereck/x11docker/issues/380)
+  `--xw`: New option to run X and Wayland apps side by side.
  - `--force=ARG`: Force x11docker to bypass a restriction.
    Arguments ARG can differ/develop.
 ### Deprecated

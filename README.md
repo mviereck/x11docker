@@ -157,14 +157,13 @@ Description of some commonly used feature [options](https://github.com/mviereck/
    
 ### Choice of X servers and Wayland compositors
 If no X server option is specified, x11docker automatically chooses one depending on installed [dependencies](#dependencies)
-and on given or missing options `--desktop`, `--gpu` and `--wayland`. Most recommended are `nxagent` and `Xephyr`.
+and on given or missing options `--desktop`, `--gpu`, `--wayland` and `--xw`. Most lightweight are `nxagent` and `Xephyr`.
  - [Overview of all possible X server and Wayland options.](https://github.com/mviereck/x11docker/wiki/X-server-and-Wayland-Options)
    - [Hints to use option `--xorg` within X.](https://github.com/mviereck/x11docker/wiki/Setup-for-option---xorg)
-   - Use option `-t, --tty` to run without X at all.
-   - To run X and Wayland applications side by side, you can combine all X server options with option `--hostdisplay`.
-     Most recommended combinations:
-      - On X: `--weston=X`
-      - On Wayland: `--hostwayland --satellite` or `--hostwayland --xpra`
+ - Indicate a desktop environment with option `--desktop`.
+ - Use option `--wayland` to get a Wayland environment.
+ - Use option `--xw` to run X and Wayland applications side by side.
+ - Use option `-t, --tty` to run without X or Wayland at all.
 
 ### Desktop or seamless mode
 x11docker assumes that you want to run a single application in seamless mode, i.e. a single window on your regular desktop. If you want to run a desktop environment in image, add option `--desktop`. 
