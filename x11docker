@@ -1176,6 +1176,45 @@ verlte() {                      # version number check $1 less than or equal $2
 wincmd() {                      # execute a command on MS Windows with cmd.exe
   MSYS2_ARG_CONV_EXCL='*' cmd.exe /C "${@//&/^&}" | rmcr
 }
+mswindowsipcheck() {              # get WSL host IP and Windows host ip
+  # thanks to @eyespore in https://github.com/mviereck/x11docker/issues/557
+
+  local Hostips Mswindowsips Hostcidr Hostprefix Mswindowsnetwork Hostnetwork
+  #global: Hostip Hostipwindows
+
+  Hostips=$(ip -4 addr show scope global | awk '/inet / { if ($0 !~ /(docker|br-|veth|cni|podman)/) print $2 }')
+  if [[ -z "$Hostips" ]]; then 
+    note "mswindowsipcheck(): Failed to check Linux host IPs"
+    return 1
+  fi
+
+  Mswindowsips=$(ipconfig.exe | grep -i 'IPv4' | awk '{print $NF}' | tr -d '\r')
+  if [[ -z "$Mswindowsips" ]]; then 
+    note "mswindowsipcheck(): Failed to check Windows host IPs"
+    return 1
+  fi
+
+  command -v ipcalc >/dev/null || {
+    note "mswindowsipcheck(): command ipcalc not found.
+  Please install ipcalc"
+    return 1
+  }
+
+  for Hostcidr in $Hostips; do
+    Hostip="${Hostcidr%/*}"
+    Hostprefix="${Hostcidr#*/}"
+
+    for Winip in $Mswindowsips; do
+      Mswindowsnetwork=$(ipcalc -n "$Winip/$Hostprefix" | grep Network | awk '{print $2}')
+      Hostnetwork=$(ipcalc -n "$Hostip/$Hostprefix" | grep Network | awk '{print $2}')
+
+      if [[ "$Mswindowsnetwork" == "$Hostnetwork" ]]; then
+        Hostipwindows=$Winip
+        break 2
+      fi
+    done
+  done
+}
 
 #### file routines
 convertpath() {                 # convert unix and windows paths
@@ -9204,30 +9243,39 @@ check_host() {                  # check host environment
 
   # Check host IP. Needed for --pulseaudio=tcp, --printer=tcp, --xoverip and --runx
   case "$Winsubsystem" in
-    ""|WSL1)
+    "")
       case "$Network" in
         host) Hostip="127.0.0.1" ;;
-        *)
-          Hostip="$(hostname -I | awk '{print $1}')"
-          [ "$Hostip" ] || Hostip="$(ip -4 -o a |                  awk '{print $4}' | cut -d/ -f1 | grep    "^192\.168\.*" | head -n1)"
-          [ "$Hostip" ] || Hostip="$(ip -4 -o a | grep 'docker0' | awk '{print $4}' | cut -d/ -f1 | grep    "172.17.0.1" ||: )"
-          [ "$Hostip" ] || Hostip="$(ip -4 -o a | grep 'docker0' | awk '{print $4}' | cut -d/ -f1 | head -n1)"
-          [ "$Hostip" ] || Hostip="$(ip -4 -o a |                  awk '{print $4}' | cut -d/ -f1 | grep -v "127.0.0.1" | head -n1)"
-        ;;
+        *)    Hostip="$(hostname -I | awk '{print $1}')" ;;
       esac
     ;;
-    WSL2)
-      Hostipwindows="$(awk '/nameserver/ {print $2; exit}' /etc/resolv.conf)"
-      Hostip="$(hostname -I | awk '{print $1}')"
-      [ "$Hostip" ] || Hostip="$(ip -4 -o a |                  awk '{print $4}' | cut -d/ -f1 | grep    "^192\.168\.*" | head -n1)"
-      [ "$Hostip" ] || Hostip="$(ip -4 -o a | grep 'docker0' | awk '{print $4}' | cut -d/ -f1 | grep    "172.17.0.1" ||: )"
-      [ "$Hostip" ] || Hostip="$(ip -4 -o a | grep 'docker0' | awk '{print $4}' | cut -d/ -f1 | head -n1)"
-      [ "$Hostip" ] || Hostip="$(ip -4 -o a |                  awk '{print $4}' | cut -d/ -f1 | grep -v "127.0.0.1" | head -n1)"    ;;
-    *)
+    WSL1|WSL2)
+      mswindowsipcheck || error "check_host(): Checking IP of WSL and/or MS Windows host failed."
+    ;;
+    MSYS2|CYGWIN)
                        Hostip="$(ipconfig.exe | rmcr | grep 'IPv4' | grep -o '192\.168\.[0-9]*\.[0-9]*'       | head -n1 )"
       [ "$Hostip" ] || Hostip="$(ipconfig.exe | rmcr | grep 'IPv4' | grep -o '10\.0\.[0-9]*\.[0-9]*'          | head -n1 )"
       [ "$Hostip" ] || Hostip="$(ipconfig.exe | rmcr | grep 'IPv4' | grep -o '[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' | head -n1 )"
     ;;
+#    ""|WSL1)
+#      case "$Network" in
+#        host) Hostip="127.0.0.1" ;;
+#        *)
+#          Hostip="$(hostname -I | awk '{print $1}')"
+#          [ "$Hostip" ] || Hostip="$(ip -4 -o a |                  awk '{print $4}' | cut -d/ -f1 | grep    "^192\.168\.*" | head -n1)"
+#          [ "$Hostip" ] || Hostip="$(ip -4 -o a | grep 'docker0' | awk '{print $4}' | cut -d/ -f1 | grep    "172.17.0.1" ||: )"
+#          [ "$Hostip" ] || Hostip="$(ip -4 -o a | grep 'docker0' | awk '{print $4}' | cut -d/ -f1 | head -n1)"
+#          [ "$Hostip" ] || Hostip="$(ip -4 -o a |                  awk '{print $4}' | cut -d/ -f1 | grep -v "127.0.0.1" | head -n1)"
+#        ;;
+#      esac
+#    ;;
+#    WSL2)
+#      Hostipwindows="$(awk '/nameserver/ {print $2; exit}' /etc/resolv.conf)"
+#      Hostip="$(hostname -I | awk '{print $1}')"
+#      [ "$Hostip" ] || Hostip="$(ip -4 -o a |                  awk '{print $4}' | cut -d/ -f1 | grep    "^192\.168\.*" | head -n1)"
+#      [ "$Hostip" ] || Hostip="$(ip -4 -o a | grep 'docker0' | awk '{print $4}' | cut -d/ -f1 | grep    "172.17.0.1" ||: )"
+#      [ "$Hostip" ] || Hostip="$(ip -4 -o a | grep 'docker0' | awk '{print $4}' | cut -d/ -f1 | head -n1)"
+#      [ "$Hostip" ] || Hostip="$(ip -4 -o a |                  awk '{print $4}' | cut -d/ -f1 | grep -v "127.0.0.1" | head -n1)"    ;;
   esac
   debugnote "check_host(): Host IP: ${Hostip:-'IP not found'}"
   [ -n "$Winsubsystem" ] && {
