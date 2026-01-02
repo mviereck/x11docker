@@ -51,7 +51,6 @@ Project website: https://github.com/mviereck/x11docker
  - `--backend=nerdctl`: Deprecated, likely rarely needed.
  - `--runtime=kata-runtime`: Deprecated, likely rarely used.
    [(543)](https://github.com/mviereck/x11docker/issues/543)
- - `--xwin`: Deprecated in favour of `--runx`.
 
 ## [7.7.1](https://github.com/mviereck/x11docker/releases/tag/v7.7.1) - 2025-011-23
 ### Fixed
