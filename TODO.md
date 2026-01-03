@@ -4,12 +4,10 @@ x11docker ToDo notes
 ## Current
 wiki options
 wiki X servers
---reintroduce --win
 --gpu=virgl seems to fail. nvidia issue?
 --xc --gpu --xorg (nvidia): black screen after terminating, no tty switch possible
 --xc: use only if host dependencies are not fulfilled?
 --backend=podman --hostdisplay fails
---weston-x --xc on tty issues
 --xoverip: use xhost only, delete cookie. Maybe except for socat solutions.
 Xwayland -listen tcp is possible, check xhost
 --weston=x check clipboard
