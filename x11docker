@@ -57,7 +57,7 @@ Focus on security:
   * Avoids X security leaks using additional X servers.
   * Container user is same as host user to avoid root in container.
   * Restricts container capabilities to bare minimum.
-To switch between docker, podman and nerdctl use option --backend.
+To switch between docker and podman use option --backend.
 
 x11docker sets up an unprivileged container user with password 'x11docker'
 and restricts container capabilities. Some applications might behave different
@@ -66,7 +66,7 @@ Achieve a less restricted setup with --cap-default or --sudouser.
 
 Dependencies on host:
   For core functionality x11docker only needs bash, an X server and one of
-  docker, podman or nerdctl.
+  docker or podman.
   Depending on chosen options x11docker might need some additional tools.
   It checks for them on startup and shows messages if some are missing.
    * Most recommended: Provide image x11docker/xserver to run X or Wayland
@@ -702,7 +702,7 @@ finish() {                      # trap EXIT routine to clean up background proce
     unpriv "cp '$Logfile' '$Logfilebackup'"
     case "$Winsubsystem" in
       WSL1|WSL2)
-        [ "$Mobyvm" = "yes" ] && unpriv "cp -T '$Logfilebackup' '$Hostuserhome/.cache/x11docker/x11docker.log'"
+        [ "$Dockervm" = "moby" ] && unpriv "cp -T '$Logfilebackup' '$Hostuserhome/.cache/x11docker/x11docker.log'"
       ;;
     esac
     #unpriv "rmcr '$Logfilebackup'"
@@ -759,9 +759,9 @@ checkpid() {                    # check if PID $1 is active
 }
 containerisrunning() {          # check if container is running
   storeinfo test containerid || return 1
-  case "$Mobyvm" in
+  case "$Dockervm" in
     no)   checkpid      "$(storeinfo dump pid1pid)" ;;
-    yes)  unpriv_backend "$Backendbin inspect '$(storeinfo dump containerid)'" >/dev/null 2>&1 ;;
+    moby|desktop) unpriv_backend "$Backendbin inspect '$(storeinfo dump containerid)'" >/dev/null 2>&1 ;;
   esac
 }
 pspid() {                       # Return some info to pid $1
@@ -1333,15 +1333,15 @@ convertpath() {                 # convert unix and windows paths
         unix)         echo "$Winsubpath$Path" ;;
         subsystem)    echo "$Path" ;;
         volume)
-          case "$Mobyvm" in
-            no)  echo "'$Path':'${3:-$Path}'$Readwritemode" ;;
-            yes) echo "'$Winsubpath$Path':'${3:-$Path}'$Readwritemode" ;;
+          case "$Dockervm" in
+            no|desktop) echo "'$Path':'${3:-$Path}'$Readwritemode" ;;
+            moby)       echo "'$Winsubpath$Path':'${3:-$Path}'$Readwritemode" ;;
           esac
         ;;
         mount)
-          case "$Mobyvm" in
-            no)  echo "type=bind,source='$Path',target='${3:-$Path}'$Readwritemode_mount" ;;
-            yes) echo "type=bind,source='$Winsubpath$Path',target='${3:-$Path}'$Readwritemode_mount" ;;
+          case "$Dockervm" in
+            no|desktop)  echo "type=bind,source='$Path',target='${3:-$Path}'$Readwritemode_mount" ;;
+            moby)        echo "type=bind,source='$Winsubpath$Path',target='${3:-$Path}'$Readwritemode_mount" ;;
           esac
         ;;
         container)    echo "${3:-$Path}" ;;
@@ -2733,8 +2733,12 @@ check_newxenv()  {              # find free display
 
   # --xoverip
   [ -z "$Xoverip" ] && {
-    case "$Mobyvm" in
-      yes)
+    case "$Dockervm" in
+      moby)
+        Xoverip="listentcp"
+      ;;
+      desktop)
+        note "Option --xoverip is enabled to allow Docker Desktop VM."
         Xoverip="listentcp"
       ;;
     esac
@@ -3051,6 +3055,16 @@ check_xcontainer() {            # option --xc: check backend, rootless and image
       check_xdepends "$Xserver" && Xcontainer="no"
     ;;
   esac
+  
+  case "$Xcontainer" in
+    auto) Xcontainer="no" ;;
+    yes)
+      note "Option --xc is not supported with Docker Desktop VM.
+  Fallback: Disabling option --xc."
+      check_fallback
+      Xcontainer="no"
+    ;;
+  esac
 
   # check if X container should run rootful or rootless (for tty access it must be rootful)
   case "$Backendrootless" in
@@ -3208,9 +3222,9 @@ check_xdepends() {              # check dependencies on host for X server option
           Return=1
         ;;
       esac
-      case "$Mobyvm" in
-        yes)
-          $Message "${1:-} is not supported with MobyVM / docker-for-win"
+      case "$Dockervm" in
+        moby|desktop)
+          $Message "${1:-} is not supported with MobyVM / docker-for-win or Docker Desktop."
           Return=1
         ;;
       esac
@@ -5818,21 +5832,27 @@ xtool() {                       # run X tool command in X container if available
 check_backend() {               # options --backend, --rootless
   local Checkrootfs=
 
-  case "$Mobyvm" in
-    no)
+  case "$Dockervm" in
+    no|desktop)
       case "$Backend" in
         docker|podman|nerdctl) Backendbin="$(command -v "$Backend")" ;;
       esac
       case "$Backend" in
         docker)
-          docker version | grep -q "Desktop"  && error "docker in version 'Docker Desktop' is not supported.
+          docker info | grep -q "desktop-linux"  && {
+            note "docker in version 'Docker Desktop' found.
   Docker Desktop runs in a virtual machine and makes host integration
-  rather difficult. 
-  Please use native 'Docker Engine' running on your host linux kernel."
+  rather difficult. Support is experimental yet, feedback is appreciated.
+  For docker errors like 'bind source path does not exist: FILE' you can try
+  to allow file sharing in Docker Desktop GUI for file FILE.
+  Rather use native 'Docker Engine' running on your host linux kernel.
+  Docker Engine would allow all x11docker features and performes much better."
+            Dockervm="desktop"
+          }
         ;;
       esac
     ;;
-    yes)
+    moby)
       case "$Backend" in
         docker|host) ;;
         *) 
@@ -6302,9 +6322,9 @@ check_containerhomebasedir() {  # options --homebasedir, --home
       Hosthomebasefolder="$Localsharedir"
     ;;
     docker|podman|nerdctl)
-      [ "$Hosthomebasefolder" ] || case "$Mobyvm" in
-        no)  Hosthomebasefolder="$Containeruserhosthome/.local/share/x11docker" ;;
-        yes) Hosthomebasefolder="$(convertpath subsystem "$(wincmd 'echo %userprofile%') ")/x11docker/home" ;;
+      [ "$Hosthomebasefolder" ] || case "$Dockervm" in
+        no|desktop) Hosthomebasefolder="$Containeruserhosthome/.local/share/x11docker" ;;
+        moby)       Hosthomebasefolder="$(convertpath subsystem "$(wincmd 'echo %userprofile%') ")/x11docker/home" ;;
       esac
     ;;
   esac
@@ -7284,9 +7304,9 @@ setup_initsystem() {            # option init: set up capabilities, check or cre
   # some init system setup also in containerrootrc
   local Message=
 
-  # --init in Mobyvm. /usr/bin/docker-init is not available in MSYS2/Cygwin/WSL1
-  case "$Mobyvm" in
-    yes) [ "$Initsystem" = "tini" ] && Initsystem="dockerinit" ;;
+  # --init in Dockervm. /usr/bin/docker-init is not available in MSYS2/Cygwin/WSL1
+  case "$Dockervm" in
+    moby|desktop) [ "$Initsystem" = "tini" ] && Initsystem="dockerinit" ;;
   esac
 
   case "$Backend" in
@@ -8851,9 +8871,9 @@ start_container() {             # docker run
         debugnote "start_container(): $Count. check for PID 1"
         Containerinspect="$(unpriv_backend "$Backendbin inspect $Containername" 2>> $Containerlogfile | rmcr)" ||:
         [ -n "$Containerinspect" ] && [ "$Containerinspect" != "[]" ] && Pid1pid="$(parse_inspect "$Containerinspect" "State" "Pid")"
-        case "$Mobyvm" in
-          no)  checkpid "$Pid1pid" && break ;;
-          yes) [ "$Pid1pid" ] && [ "$Pid1pid" != "0" ] && break
+        case "$Dockervm" in
+          no)           checkpid "$Pid1pid" && break ;;
+          moby|desktop) [ "$Pid1pid" ] && [ "$Pid1pid" != "0" ] && break
         esac
         rocknroll || break
         mysleep 0.1
@@ -9224,7 +9244,7 @@ check_host() {                  # check host environment
     MSYS2|CYGWIN)
       Winsubmount="$(cygpath.exe -u "c:/" | rmcr | sed s%/c/%%)"
       Winsubpath="$(convertpath unix "$(cygpath.exe -w "/" | rmcr)" )"
-      Mobyvm="yes"
+      Dockervm="moby"
     ;;
     WSL1|WSL2)
       command -v "/mnt/c/Windows/System32/cmd.exe" >/dev/null && Winsubmount="/mnt"
@@ -9234,13 +9254,13 @@ check_host() {                  # check host environment
   in /mnt/c/Windows/System32 or /c/Windows/System32.
   Do you have a different path to your Windows system partition?"
       Winsubpath="$(convertpath unix "$(getwslpath)")"
-      [ "$Winsubsystem" = "WSL1" ] && Mobyvm="yes"
+      [ "$Winsubsystem" = "WSL1" ] && Dockervm="moby"
     ;;
   esac
   Winsubmount="${Winsubmount%/}"
   Winsubpath="${Winsubpath%/}"
   [ "$Winsubsystem" ] && Hostsystem="MSWindows-$Winsubsystem"
-  [ -z "$Mobyvm" ]    && Mobyvm="no"
+  [ -z "$Dockervm" ]  && Dockervm="no"
   
   # Check for procps
   case "$Winsubsystem" in
@@ -9560,8 +9580,8 @@ create_cachefiles() {           # create empty cache files owned by unprivileged
     case "$Winsubsystem" in
       ""|MSYS2|CYGWIN) Cachebasefolder="$Hostuserhome/.cache/x11docker" ;;
       WSL1|WSL2)
-        case "$Mobyvm" in
-          yes)
+        case "$Dockervm" in
+          moby)
             Cachebasefolder="$(convertpath subsystem "$(wincmd "echo %userprofile%")")/x11docker/cache"
             mkfolder "$Hostuserhome/.cache/x11docker/symlink"
             [ -e "$Hostuserhome/.cache/x11docker/symlink" ] || ln -s -T "$Cachebasefolder" "$Hostuserhome/.cache/x11docker/symlink"
@@ -9573,7 +9593,7 @@ A symbolic link is created in WSL at
 $Hostuserhome/.cache/x11docker/symlink
 " >> "$Hostuserhome/.cache/x11docker/symlink/symlink.txt"
           ;;
-          no)
+          no|desktop)
             Cachebasefolder="$Hostuserhome/.cache/x11docker"
           ;;
         esac
@@ -9688,9 +9708,9 @@ setup_fifo() {                  # set up fifo channels (also option --stdin)
   # FDcmdstdin          stdin>>$Cmdstinfile   --stdin with catstdin, redirection of &0
   # FDtimetosaygoodbye  $Timetosaygoodbyefifo for saygoodbye() and waitfortheend()
   # FDwatchpid          $Watchpidfifo         for watchpidlist()
-  case "$Mobyvm" in
-    yes) Usemkfifo="no" ;;
-    no)  Usemkfifo="yes" ;;
+  case "$Dockervm" in
+    moby|desktop) Usemkfifo="no" ;;
+    no)           Usemkfifo="yes" ;;
   esac
 
   [ "$Runtime" = "kata-runtime" ] && Usemkfifo="no"
@@ -9975,7 +9995,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
                               shift ;;
          --ipc)               Shareipc="${2:-host}" ; shift ;;
          --limit)             Limitresources="${2:-0.5}" ; shift ;;  # Limited CPU and RAM access
-         --mobyvm)            Mobyvm="yes" ;;                        # Use MobyVM in WSL2
+         --mobyvm)            Dockervm="moby" ;;                        # Use MobyVM in WSL2
          --name)              Containername="${2:-}" ; shift ;;      # Set container name
       -I)                     Network="" ;;
          --network)           Network="${2:-}" ; shift ;;            # Enable internet access
@@ -10508,15 +10528,43 @@ check_options_arguments() {     # check for [likely] valid arguments
 check_options_interferences() { # check multiple option interferences, change settings if needed
   local Message
 
+  case "$Dockervm" in
+    desktop)
+      # --pipewire, --pulseaudio, --alsa
+      [ "$Pulseaudiomode" = "auto" ] && Pulseaudiomode="tcp"
+      { [ "$Sharepipewire" = "yes" ] || [ "$Sharealsa" = "yes" ] || [ "$Pulseaudiomode" = "socket" ] || [ "$Pulseaudiomode" = "host" ] ; } && {
+        note "Options --pipewire and --alsa do not work
+  with Docker Desktop VM. Pulseaudio works only in tcp mode.
+  Fallback: Setting --pulseaudio=tcp"
+        check_fallback
+        Pulseaudiomode="tcp"
+        Sharealsa="no"
+        Sharepipewire="no"
+      }
+      # --printer
+      [ "$Sharecupsmode" = "auto" ] && Sharecupsmode="tcp"
+      [ "$Sharecupsmode" = "socket" ] && {
+        note "Option --printer=socket does not work
+  with Docker Desktop VM. It works only in tcp mode.
+  Fallback: Setting --printer=tcp"
+        check_fallback
+        Sharecupsmode="tcp"
+      }
+      case "$Sharegpu" in
+        no|iglx) ;;
+        *)
+          note "Option --gpu=$Sharegpu does not work
+  with Docker Desktop VM. Only --gpu=iglx would work with --xorg.
+  Fallback: Disabling option --gpu"
+          check_fallback
+          Sharegpu="no"
+        ;;
+      esac
+    ;;
+  esac
+
   # --runtime
   case "$Runtime" in
-    #nvidia)
-    #  [ "$Sharegpu" = "no" ] && {
-    #    note "Option --runtime=nvidia: Enabling option --gpu"
-    #    check_fallback
-    #    Sharegpu="${Sharegpu:-yes}"
-    #  }
-    #;;
     kata-runtime)
       [ "$Network" = "host" ] && {
         note "Option --network=host: Sharing host network stack does not work
@@ -11101,8 +11149,8 @@ check_options_interferences() { # check multiple option interferences, change se
     WSL2) note "WSL2 support is experimental and barely tested yet.
   Feedback and bug reports are appreciated!" ;;
   esac
-  case "$Mobyvm" in
-    yes)
+  case "$Dockervm" in
+    moby)
       case "$Winsubsystem" in
         WSL1|WSL2)
           grep -q "/c/" <<< "$Cachebasefolder" && [ -z "$Hosthomebasefolder" ] && note "With MobyVM and WSL x11docker stores its cache files on drive C:
@@ -11496,7 +11544,6 @@ check_options_messages() {      # some messages depending on options, but not ch
     no) ;;
     *)
       [ "$Xcontainer" = "yes" ] && [ "$Network" = "none" ] || warning "Option --xoverip might allow undesired access to the X server.
-  Security hardening of X over TCP/IP setups is work in progress yet.
   At least along with image x11docker/xserver (option --xc) and 
   --network=none (x11docker default) the setup is considered to be secure
   because a private network is used."
@@ -11702,7 +11749,7 @@ declare_variables() {           # declare global variables
   Winsubmount=""                                  # Path within subsystem to mounted MS Windows drives
   Winsubpath=""                                   # Path within MS Windows to subsystem files
   Winsubsystem=""                                 # MS Windows subsystem WSL1, WSL2, MSYS2 or CYGWIN
-  Mobyvm=""                                       # MS Windows: Use MobyVM yes/no (No only for WSL2 possible)
+  Dockervm=""                                       # MS Windows: Use MobyVM yes/no (No only for WSL2 possible)
 
   # Cache folders
   Cachebasefolder=""                              # --cachebasedir Base cache folder
@@ -12237,7 +12284,7 @@ $(nl -ba <$Sshenvscript)"
   Running on Windows subsystem:  $Winsubsystem
   Path to subsystem:             $(convertpath windows "$Winsubpath")/
   Mount path in subsystem:       $Winsubmount/
-  Using MobyVM:                  $Mobyvm"
+  Using docker VM:               $Dockervm"
 
   { #### Run docker image
     # For code flow logic, start_xserver() should run here first and be moved to background.
@@ -12313,10 +12360,15 @@ $(nl -ba <$Sshenvscript)"
     esac
     touch $Sharefolder/xhostready
 
-    # watch container
+    # watch container ### FIXME
     case "$Winsubsystem" in
-      "") setonwatchpidlist "${Pid1pid:-NOPID}" pid1pid ;;
-      *)  setonwatchpidlist "CONTAINER$Containername" ;;
+      "")
+        case "$Dockervm" in
+          desktop) setonwatchpidlist "CONTAINER$Containername" ;;
+          *)       setonwatchpidlist "${Pid1pid:-NOPID}" pid1pid ;;
+        esac
+      ;;
+      *)           setonwatchpidlist "CONTAINER$Containername" ;;
     esac
 
     # watch xinit and X server

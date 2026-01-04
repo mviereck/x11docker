@@ -75,10 +75,12 @@ Files to work on can be shared between host and container.
 [x11docker wiki](https://github.com/mviereck/x11docker/wiki) provides some how-to's for basic setups without x11docker.
 
 ### Docker Desktop or Docker Engine
-Since a while Docker distributes a version called "Docker Desktop" that runs Docker in a QEMU VM. x11docker is not designed to support this VM based version.
-Instead, use x11docker with the native ["Docker Engine Server version"](https://docs.docker.com/engine/install/#server) that uses your host kernel to run containers.
+Since a while Docker distributes a version called "Docker Desktop" that runs Docker in a QEMU VM.
+x11docker support of this VM based version is experimental only and some features won't work; however, basic functionality is given.
+Instead, rather use x11docker with the native and more performant ["Docker Engine Server version"](https://docs.docker.com/engine/install/#server)
+that uses your host kernel to run containers.
  - If you install Docker from your distribution's repository, you'll likely get this native version.
- - The supported native Docker Engine package name is mostly `docker.io` or `docker-ce`, in opposite to the non-supported VM based `docker-desktop` package.
+ - The supported native Docker Engine package name is mostly `docker.io` or `docker-ce`, in opposite to the less supported VM based `docker-desktop` package.
  - If you prefer podman over Docker, you don't need to care about this difference.
 
 ### TL;DR

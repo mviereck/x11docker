@@ -38,15 +38,14 @@ Project website: https://github.com/mviereck/x11docker
  - `--hostdisplay`: Use `XlibNoSHM.so` without `--xc`, too.
  - `--xc` using a tty: Needs `--force=xc`.
 ### Added
+  `--xw`: New option to run X and Wayland apps side by side.
  - `--pipewire`: New option for PipeWire sound in container.
    [(545)](https://github.com/mviereck/x11docker/issues/545)
    [(527)](https://github.com/mviereck/x11docker/issues/527)
    [(507)](https://github.com/mviereck/x11docker/issues/507)
    [(418)](https://github.com/mviereck/x11docker/issues/418)
    [(380)](https://github.com/mviereck/x11docker/issues/380)
-  `--xw`: New option to run X and Wayland apps side by side.
- - `--force=ARG`: Force x11docker to bypass a restriction.
-   Arguments ARG can differ/develop.
+ - Partial support of Docker Desktop edition.
 ### Deprecated
  - `--backend=nerdctl`: Deprecated, likely rarely needed.
  - `--runtime=kata-runtime`: Deprecated, likely rarely used.
