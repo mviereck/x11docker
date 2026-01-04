@@ -8,11 +8,10 @@ wiki X servers
 --xc --gpu --xorg (nvidia): black screen after terminating, no tty switch possible
 --xc: use only if host dependencies are not fulfilled?
 --backend=podman --hostdisplay fails
---xoverip: use xhost only, delete cookie. Maybe except for socat solutions.
-Xwayland -listen tcp is possible, check xhost
 --weston=x check clipboard
 --hostwayland: check clipboard
 deprecate --build
+nvidia-base
 
 --xwayland-satellite
  - check_xdepends()
