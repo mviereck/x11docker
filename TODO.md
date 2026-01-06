@@ -2,21 +2,20 @@
 x11docker ToDo notes
 
 ## Current
+--hostwayland: duplicate mount point
 wiki options
 wiki X servers
 --gpu=virgl seems to fail. nvidia issue?
 --xc --gpu --xorg (nvidia): black screen after terminating, no tty switch possible
 --xc: use only if host dependencies are not fulfilled?
---backend=podman --hostdisplay fails
+--backend=podman --hostdisplay fails > glxgears: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.34' not found (required by /x11docker/XlibNoSHM.so)
 --weston=x check clipboard
 --hostwayland: check clipboard
 deprecate --build
 nvidia-base
-
---xwayland-satellite
- - check_xdepends()
- - check_xserver() default and fallback
- - check Xserveroptions
+check --satellite --desktop
+--interactive: no X env due to ssh
+--satellite version check
  
 ## Work in progress
  - bug: ssh: --hostdisplay fails

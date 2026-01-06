@@ -2774,9 +2774,6 @@ check_newxenv()  {              # find free display
         --hostdisplay)
           grep -q -- '^:' <<< "$Hostdisplay" && Xoverip="socat" || Xoverip="listentcp"
         ;;
-#        --xwayland|--satellite|--weston-xwayland|--kwin-xwayland|--xpra-xwayland|--xpra2-xwayland)
-#          Xoverip="socat"
-#        ;;
         *)
           Xoverip="listentcp"
         ;;
@@ -2876,7 +2873,6 @@ check_newxenv()  {              # find free display
   # set $Newwaylandsocket
   case "$Xserver" in
     --weston*|--kwin*|--xpra-xwayland|--xpra2-xwayland) Newwaylandsocket="wayland-$Newwaylandnumber" ;;
-    --hostwayland|--xwayland|--satellite)               Newwaylandsocket="$Hostwaylandsocket" ;;
   esac
 
   return 0
@@ -4050,6 +4046,11 @@ check_xserver() {               # check chosen X server, auto-choose X server
         note "Option --xc disabled for option --hostwayland."
       }
     ;;
+  esac
+
+  # need host Wayland socket
+  case "$Xserver" in
+    --hostwayland|--xwayland|--satellite) Sharehostwayland="yes" ;;
   esac
 
   [ "$Autochooseserver" = "yes" ] && note "Using X server option $Xserver"
@@ -5695,17 +5696,23 @@ setup_xcnetwork() {             # --xoverip --xc: start internal network between
 store_newxenv() {               # store display variables
   Newdisplay="${Newdisplay//"XCONTAINERIP"/"$Xcontainerip"}"
   # create $Newxenv: collection of environment variables to access new X from host (e.g. in xinitrc)
-  [ "$Newdisplay" ]              && storeinfo "DISPLAY=$Newdisplay"                && Newxenv="$Newxenv
+  [ "$Newdisplay" ]                   && storeinfo "DISPLAY=$Newdisplay"                 && Newxenv="$Newxenv
 DISPLAY=$Newdisplay"
-  [ "$Xauthentication" != "no" ] && storeinfo "XAUTHORITY=$Xclientcookie"          && Newxenv="$Newxenv
+  [ "$Xauthentication" != "no" ]      && storeinfo "XAUTHORITY=$Xclientcookie"           && Newxenv="$Newxenv
 XAUTHORITY=$Xclientcookie"
-  [ "$Newxsocket" ]              && storeinfo "XSOCKET=$Newxsocket"                && Newxenv="$Newxenv
-XSOCKET=$Newxsocket"
-  [ "$Newwaylandsocket" ]        && storeinfo "WAYLAND_DISPLAY=$Newwaylandsocket"  && Newxenv="$Newxenv
+  case "$Newwaylandsocket" in
+    "")
+      [ "$Sharehostwayland" = "yes" ] && storeinfo "WAYLAND_DISPLAY=$Hostwaylandsocket"  && Newxenv="$Newxenv
+WAYLAND_DISPLAY=$Hostwaylandsocket"
+    ;;
+    *)
+                                         storeinfo "WAYLAND_DISPLAY=$Newwaylandsocket"   && Newxenv="$Newxenv
 WAYLAND_DISPLAY=$Newwaylandsocket"
-  [ "$Setupwayland" = "yes" ] && for Line in $Waylandtoolkitenv ; do                  Newxenv="$Newxenv
+    ;;
+  esac
+  [ "$Setupwayland" = "yes" ] && for Line in $Waylandtoolkitenv ; do                        Newxenv="$Newxenv
 $Line" ; done
-  [ -n "$XDG_RUNTIME_DIR" ] && storeinfo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"        && Newxenv="$Newxenv
+  [ -n "$XDG_RUNTIME_DIR" ]           && storeinfo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"    && Newxenv="$Newxenv
 XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
   Newxenv_cr="$(grep . <<< "$Newxenv")"
   Newxenv="$(echo $Newxenv)"
@@ -5719,8 +5726,11 @@ XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
     ;;
   esac
   case "$Xserver" in
-    --weston|--kwin|--hostwayland|--tty)
+    --weston|--kwin|--tty)
       store_runoption env "WAYLAND_DISPLAY=$Newwaylandsocket"
+    ;;
+    --hostwayland)
+      store_runoption env "WAYLAND_DISPLAY=$Hostwaylandsocket"
     ;;
   esac
   [ "$Setupwayland" = "yes" ] && {
@@ -9044,8 +9054,14 @@ start_xserver() {               # start X server
   debugnote "start_xserver(): starting $Xserver. X Container = $Xcontainer"
 
   case "$Xserver" in
-    --xpra*|--xephyr|--xvfb|--nxagent|--xwayland|--satellite|--kwin-xwayland|--xwin|--xorg)
+    --xpra|--xpra2|--xephyr|--xvfb|--nxagent|--xwin|--xorg)
+      Command="xinit $Xinitrc -- $Xcommand"
+    ;;
+    --xpra-xwayland|--xpra2-xwayland|--kwin-xwayland)
       Command="env WAYLAND_DISPLAY=$Newwaylandsocket xinit $Xinitrc -- $Xcommand"
+    ;;
+    --xwayland|--satellite)
+      Command="env WAYLAND_DISPLAY=$Hostwaylandsocket xinit $Xinitrc -- $Xcommand"
     ;;
     --weston-xwayland)
       case "$Xwaylandrootless" in
@@ -10814,11 +10830,20 @@ check_options_interferences() { # check multiple option interferences, change se
             esac
           ;;
           *)
-            [ -f "$Libdlsofile" ] && {
-              store_runoption env "LD_PRELOAD=$Sharefoldercontainer/$(basename "$Libdlsofile"):$Sharefoldercontainer/XlibNoSHM.so"
-            } || {
-              store_runoption env "LD_PRELOAD=$Sharefoldercontainer/XlibNoSHM.so"
-            }
+            case $Backend in
+              docker|host)
+                [ -f "$Libdlsofile" ] && {
+                  store_runoption env "LD_PRELOAD=$Sharefoldercontainer/$(basename "$Libdlsofile"):$Sharefoldercontainer/XlibNoSHM.so"
+                } || {
+                  store_runoption env "LD_PRELOAD=$Sharefoldercontainer/XlibNoSHM.so"
+                }
+              ;;
+              podman)
+                note "Option --hostdisplay: Cannot set LD_PRELOAD with
+  --backend=podman to avoid MIT-SHM issues. Graphical glitches might occur.
+  Rather use another X server option."
+              ;;
+            esac
           ;;
         esac
       }
@@ -11796,7 +11821,7 @@ declare_variables() {           # declare global variables
   Scaling=""                                      # --scale: Scaling factor for xpra and weston
   Screensize=""                                   # --size XxY: Display size
   Setupwayland="no"                               # --wayland, --kwin, --weston --hostwayland: Provide a Wayland environment
-  Sharehostwayland="no"                           # --hostwayland
+  Sharehostwayland="no"                           # --hostwayland, --wayland
   Waylandtoolkitenv="XDG_SESSION_TYPE=wayland GDK_BACKEND=wayland QT_QPA_PLATFORM=wayland CLUTTER_BACKEND=wayland SDL_VIDEODRIVER=wayland ELM_DISPLAY=wl ELM_ACCEL=opengl ECORE_EVAS_ENGINE=wayland_egl"
   Westonarg=""                                    # --weston=ARG
   Xauthentication="yes"                           # --xauth: cookie authentication
