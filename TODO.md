@@ -13,9 +13,10 @@ wiki X servers
 --hostwayland: check clipboard
 deprecate --build
 nvidia-base
-check --satellite --desktop
 --interactive: no X env due to ssh
 --satellite version check
+--xpra2 does not see x11docker/xserver
+nxagent: -ac -auth. bug report? warning messages?
  
 ## Work in progress
  - bug: ssh: --hostdisplay fails
