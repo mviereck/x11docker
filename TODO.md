@@ -2,13 +2,11 @@
 x11docker ToDo notes
 
 ## Current
---xc: use only if host dependencies are not fulfilled?
 --weston=x check clipboard
 --hostwayland: check clipboard
---gpu: print nvidia-base message with link to wiki
 --satellite version check, waiting for release yet
 --nxagent: -ac -auth. bug report? warning messages?
-BUG --xpra2 does not see x11docker/xserver
+--xauth=-ac
 BUG (NVIDIA?) --xc --gpu --xorg (nvidia): black screen after terminating, no tty switch possible
 BUG --gpu=virgl seems to fail. nvidia issue?
 WORKAROUND --backend=podman --hostdisplay fails > glxgears: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.34' not found (required by /x11docker/XlibNoSHM.so)
