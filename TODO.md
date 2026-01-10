@@ -6,11 +6,11 @@ x11docker ToDo notes
 --hostwayland: check clipboard
 --satellite version check, waiting for release yet
 --nxagent: -ac -auth. bug report?
+profile.d: check for xrdp #554
 BUG (NVIDIA?) --xc --gpu --xorg (nvidia): black screen after terminating, no tty switch possible
 BUG --gpu=virgl seems to fail. nvidia issue?
 WORKAROUND --backend=podman --hostdisplay fails > glxgears: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.34' not found (required by /x11docker/XlibNoSHM.so)
-ISSUE --interactive: no X env due to ssh
- 
+
 ## Work in progress
  - bug: ssh: --hostdisplay fails
  - bug: setting XAUTHORITY with systemctl

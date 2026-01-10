@@ -212,6 +212,7 @@ Sound is possible with options `--pipewire`, `--pulseaudio` and `--alsa`.
  - For pipewire sound with `--pipewire` you need `pipewire` on host and `pipewire` in image. You likely also need `pipewire-pulse` and/or `pipewire-alsa`.
    Pipewire packages for `jack` are available, too.
    Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
+   - Special case: If you have `pipewire` and `pipewire-pulse` on host and `pulseaudio` client libraries in image, `--pulseaudio=tcp` would work.
  - For pulseaudio sound with `--pulseaudio` you need `pulseaudio` on host and `pulseaudio` (at least the `pulseaudio` client libraries) in image. 
    Compare [wiki: feature dependencies](https://github.com/mviereck/x11docker/wiki/Dependencies#dependencies-of-feature-options).
  - For ALSA sound with `--alsa` you might need to specify a sound card with e.g. `--alsa=Generic`. Get a list of available sound cards with `aplay -l`.
