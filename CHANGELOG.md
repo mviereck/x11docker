@@ -37,6 +37,8 @@ Project website: https://github.com/mviereck/x11docker
    to run X and Wayland applications side by side.
  - `--hostdisplay`: Use `XlibNoSHM.so` without `--xc`, too.
  - `--xc` using a tty: Needs `--force=xc`.
+ - `--clipboard`: Support Wayland. Drop `primary` support.
+   Deprecate argument `oneway`. New arguments `c2h`, `h2c`.
 ### Added
   `--xw`: New option to run X and Wayland apps side by side.
  - `--pipewire`: New option for PipeWire sound in container.
@@ -45,6 +47,8 @@ Project website: https://github.com/mviereck/x11docker
    [(507)](https://github.com/mviereck/x11docker/issues/507)
    [(418)](https://github.com/mviereck/x11docker/issues/418)
    [(380)](https://github.com/mviereck/x11docker/issues/380)
+ - `--xeyes`: New option to run `xeyes`, helps with `--clipboard=superv|altv`
+   in Wayland+X11 containers (option `--xw`).
  - Partial support of Docker Desktop edition.
 ### Deprecated
  - `--backend=nerdctl`: Deprecated, likely rarely needed.

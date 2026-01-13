@@ -65,6 +65,7 @@ x11docker allows to run graphical desktop applications (and entire desktops) in 
  - Docker and podman do not provide a [display server](https://en.wikipedia.org/wiki/Display_server) that would allow to run applications with a [graphical user interface](https://en.wikipedia.org/wiki/Graphical_user_interface).
  - x11docker fills the gap. It runs an [X display server](https://en.wikipedia.org/wiki/X_Window_System) and provides it to containers. 
    X servers can run from host or in a container of image [x11docker/xserver](https://github.com/mviereck/dockerfile-x11docker-xserver).
+   x11docker supports [Wayland](https://wayland.freedesktop.org/) as well.
  - Additionally x11docker does some [security setup](https://github.com/mviereck/x11docker#security) to enhance container isolation and to avoid X security leaks. 
    This allows a [sandbox](#sandbox) environment that fairly well protects the host system from possibly malicious or buggy software.
 
@@ -205,7 +206,8 @@ Hardware acceleration for OpenGL is possible with option `-g, --gpu`.
 ### Clipboard
 Clipboard sharing is possible with option `-c, --clipboard [=ARG]`.
  - Optional arguments `superv` and `altv` only provide host clipboard content to container if keys `[SUPER][v]` or `[ALT][v]` are pressed.
- - Optional argument `oneway` only transfers clipboard content from container to host.
+ - Optional arguments `c2h` and `h2c` only transfers clipboard content from container to host or vice versa.
+ - Support of Wayland and X11 clipboards. Wayland windows might flicker due to focus issues with Wayland clipboard checks.
 
 ### Sound
 Sound is possible with options `--pipewire`, `--pulseaudio` and `--alsa`. 

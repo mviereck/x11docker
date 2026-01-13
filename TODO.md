@@ -2,10 +2,11 @@
 x11docker ToDo notes
 
 ## Current
---weston=x check clipboard
---hostwayland: check clipboard
+--clipboard: check if wl-clipboard is available
+--clipboard: use wl-paste --watch if possible
 --satellite version check, waiting for release yet
 --nxagent: -ac -auth. bug report?
+screen capture in x11docker/check
 profile.d: check for xrdp #554
 BUG (NVIDIA?) --xc --gpu --xorg (nvidia): black screen after terminating, no tty switch possible
 BUG --gpu=virgl seems to fail. nvidia issue?
@@ -21,10 +22,8 @@ WORKAROUND --backend=podman --hostdisplay fails > glxgears: /lib/x86_64-linux-gn
  - check empty XDG_RUNTIME_DIR e.g. with --user, --hostuser 
 
 ## Issues to fix
- - --build: download files for COPY/ADD (x11docker/check, x11docker/xserver)
  - `--remove`: give note about not removed files in `~./config/x11docker` and `/etc/x11docker`
  - `--update`: Check if installs not into `/usr/bin` or `/usr/local/bin`. Do not install other files then.
- - --clipboard: improve Wayland clipboard support
    
 ## Checks
  - check all `--init=` in all backends rootful and rootless.
@@ -44,7 +43,6 @@ WORKAROUND --backend=podman --hostdisplay fails > glxgears: /lib/x86_64-linux-gn
  - --interactive fails now with old systemd versions. (wontfix, not important enough)
  - --init=openrc|runit: elogind fails
  - check elogind with cgroupv2. maybe drop --sharecgroup and set up in container only
- - `--kwin-xwayland`: broken? Xwayland says: "missing wl_shell protocol". Deprecated yet.
  - docker-for-win: DOS newline mess in `error()` #219.
  - docker-for-win: Double entries in log.
 

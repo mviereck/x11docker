@@ -111,17 +111,17 @@ Basic settings:
 Host integration:
      --alsa [=ALSA_CARD]  Sound with ALSA. You can define a desired sound card
                        with ALSA_CARD. List of available sound cards: aplay -l
- -c, --clipboard [=yes|no|oneway|superv|altv] Share clipboard with host. 
+ -c, --clipboard [=yes|no|c2h|h2c|superv|altv] Share clipboard with host.
                        Possible arguments:
                          yes:    Share clipboard in both directions.
-                                 Includes middle-mouse-click selection.
-                         oneway: Copy clipboard from container to host only.
-                                 Includes middle-mouse-click selection.
+                         c2h:    Copy clipboard from container to host only.
+                         h22:    Copy clipboard from host to container only.
                          superv: Keys [SUPER][v] copy clipboard from host to 
-                                 container. Does not copy middle-mouse-click
-                                 to container. Otherwise same as 'oneway'.
+                                 container. Otherwise same as 'yes'
                          altv:   Same as 'superv' but using keys [ALT][v].
                          no:     Do not share clipboard.
+                       superv and altv need a focused X window of container.
+                       In Wayland+X11 containers option --xeyes can help.
  -g, --gpu [=yes|no|iglx|virgl] GPU access for hardware accelerated OpenGL.
                        Works best with open source drivers on host and in image.
                        For closed source nvidia drivers regard terminal output.
@@ -224,6 +224,10 @@ X and Wayland appearance options:
                          host: autodetection of a host window manager.
                          COMMAND: command of a desired host window manager.
                          none: Run without a window manager. Same as --desktop.
+     --xeyes [=ARG]    Run xeyes. Can help with --clipboard=superv|altv
+                       to provide an X window that accepts keycodes.
+                       Optional argument ARG can be an xeyes option, see
+                       'man xeyes'. Remove window decoration: '--xeyes=-shape'
  -F, --xfishtank       Show fish tank on new X server.
 
 X and Wayland special configuration:
@@ -1443,7 +1447,7 @@ waitforlogentry() {             # wait for entry $3 in logfile $2 of application
   # $5 time to wait in seconds or infinity. default: 60
 
   local Startzeit Uhrzeit Dauer Count=0 Schlaf
-  local Errorkeys="${4:-}"
+  local Errorkeys="${4:-}" Errorkey
   local Warten="${5:-60}"
   local Error=
 
@@ -1469,10 +1473,14 @@ waitforlogentry() {             # wait for entry $3 in logfile $2 of application
 $(tail "${2:-}")"
 
 #    grep -i -q -E 'xinit: giving up|unable to connect to X server|Connection refused|server error|Only console users are allowed|Failed to process Wayland|failed to create display|] fatal:' <"${2:-}" && \
-    [ "$Errorkeys" ] && grep -i -q -E "$Errorkeys" <"${2:-}" && \
-      error "waitforlogentry(): ${1:-}: Found error message in logfile.
+    [ "$Errorkeys" ] && {
+      Errorkey="$(grep -i -E "$Errorkeys" <"${2:-}")"
+      [ -n "$Errorkey" ] && error "waitforlogentry(): ${1:-}: Found error message in logfile:
+  <'$Errorkey'>
+
   Last lines of logfile $(basename "${2:-}"):
 $(tail "${2:-}")"
+    }
 
     rocknroll || {
       debugnote "waitforlogentry(): ${1:-}: Stopped waiting for ${3:-} in $(basename "${2:-}") due to terminating signal."
@@ -2077,122 +2085,161 @@ create_clipboardrc() {          # option --clipboard: create shareclipboard scri
   echo "#! /usr/bin/env bash
 $(declare -f rocknroll)
 $(declare -f mysleep)
-Timetosaygoodbyefile='$Timetosaygoodbyefile'
-X1auth='DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority WAYLAND_DISPLAY=$Hostwaylandsocket XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR'
-X2auth='DISPLAY=$Newdisplay  XAUTHORITY=$Xclientcookie  WAYLAND_DISPLAY=$Newwaylandsocket  XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR'
-"
+Timetosaygoodbyefile='$Timetosaygoodbyefile'"
+[ -n "$Hostdisplay" ]                                         && echo "X1auth='DISPLAY=$Hostdisplay XAUTHORITY=$Hostxauthority'"
+[ -z "$Hostdisplay" ] && [ -n "$Hostwaylandsocket" ]          && echo "X1auth=\"\$X1auth WAYLAND_DISPLAY=$Hostwaylandsocket XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR\""
+[ -n "$Newdisplay" ]                                          && echo "X2auth='DISPLAY=$Newdisplay  XAUTHORITY=$Xclientcookie'"
+case "$Xserver" in
+  --weston)
+                                                                 echo "X2auth=\"\$X2auth WAYLAND_DISPLAY=$Newwaylandsocket  XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR\""
+  ;;
+  --weston-xwayland)
+    [ "$Desktopmode" = "yes" ] && [ "$Setupwayland" = "yes" ] && echo "X2auth=\"\$X2auth WAYLAND_DISPLAY=$Newwaylandsocket  XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR\""
+  ;;
+esac
+[ "$Mytest" ] && echo 'echo "
+$X1auth
+$X2auth"'
+
   echo '
 clipexchange() {
-  # Send clipboard content of one X server to another X server and update on changes.
+  # Send clipboard content of one X server or Wayland compositor
+  # to another X server and/or Wayland compositor and update on changes.
   # Run function twice with switched credentials to sync the clipboards.
-  # $1  credentials to access 1. X server
-  # $2  credentials to access 2. X server
+  # Runs in a loop except $4 is set
+  # $1  credentials to access 1. X server and/or Wayland compositor
+  # $2  credentials to access 2. X server and/or Wayland compositor
   # $3  selection to use (primary or clipboard)
-  # X credentials look like "DISPLAY=:0 XAUTHORITY=~/.Xauthority"
+  # $4  set to noloop if you want to run only once without a loop
+  # Credentials look like "DISPLAY=:0 XAUTHORITY=~/.Xauthority WAYLAND_DISPLAY=wayland-1 XDG_RUNTIME_DIR=/run/user/1000"
 
-  local Selection Targets Imagetarget Clip Clipold Clipold2
+  local Selection SelectionW SelectionX
+  local TargetsW TargetsX ImagetargetW ImagetargetX
+  local Clip ClipW ClipX
+  local Clipold ClipoldW2 ClipoldX2
+  local CopyW CopyX
+  local Wprimary1 Wprimary2
+  local Noloop
+
   Selection="${3:-}"
+  Noloop="${4:-}"
+
+  export DISPLAY= WAYLAND_DISPLAY=
+  export ${1:-}
+  case "$Selection" in
+    primary)
+      SelectionX="-selection primary"
+      SelectionW="--primary"
+      env \$X1auth wl-paste -p >/dev/null 2>&1 || Wprimary1=no
+      env \$X2auth wl-paste -p >/dev/null 2>&1 || Wprimary2=no
+      [ -z \"\$Wprimary1\$Wprimary2\" ] && CopyW=yes
+      [ -z "$WAYLAND_DISPLAY" ]         && CopyW=""
+      CopyX="yes"
+      [ -z "$DISPLAY" ]                 && CopyX=""
+    ;;
+    clipboard)
+      SelectionX="-selection clipboard"
+      SelectionW=""
+      CopyW="yes"
+      [ -z "$WAYLAND_DISPLAY" ] && CopyW=""
+      CopyX="yes"
+      [ -z "$DISPLAY" ]         && CopyX=""
+    ;;
+  esac
 
   while rocknroll; do
+    export DISPLAY= WAYLAND_DISPLAY=
     export ${1:-}
-    case "$DISPLAY" in
-      "") 
-        case "$Selection" in
-          primary)   Targets="$(wl-paste --list-types --primary)" ;;
-          clipboard) Targets="$(wl-paste --list-types)" ;;
-        esac
+
+    # check for image clip
+    [ "$CopyW" ] && TargetsW="$(wl-paste --list-types $SelectionW)" 
+    [ "$CopyX" ] && TargetsX="$(xclip -out            $SelectionX -t TARGETS)"
+    grep -q "image/png" <<< "$TargetsW" && ImagetargetW="-t image/png" || ImagetargetW=""
+    grep -q "image/png" <<< "$TargetsX" && ImagetargetX="-t image/png" || ImagetargetX=""
+
+    # read content of $Selection of X server $1
+    [ "$CopyW" ] && ClipW="$(wl-paste   $SelectionW $ImagetargetW | base64 -i)"
+    [ "$CopyX" ] && ClipX="$(xclip -out $SelectionX $ImagetargetX | base64 -i)"
+
+    # check for new clip
+    [ -n "$ClipW" ] && [ "$ClipW" != "$Clipold" ] && Clip="$ClipW"
+    [ -n "$ClipX" ] && [ "$ClipX" != "$Clipold" ] && Clip="$ClipX"
+
+    # fill empty clipboards to prevent odd issues
+    case "$Selection" in
+      clipboard)
+        { [ -z "$ClipW" ] || [ -z "$ClipX" ] ; } && {
+          [ -z "$Clip" ]  && Clip="$(base64 -i <<< "x11docker")"
+          [ -z "$ClipW" ] && [ "$CopyW" ] && base64 -d -i <<< "$Clip" | wl-copy   $SelectionW && Clipold="$Clip"
+          [ -z "$ClipX" ] && [ "$CopyX" ] && base64 -d -i <<< "$Clip" | xclip -in $SelectionX && Clipold="$Clip"
+        }
       ;;
-      *)             Targets="$(xclip -out -selection $Selection -t TARGETS 2>/dev/null)" ;;
     esac
 
-    [ -n "$Targets" ] && {
-      # check for image clip
-      grep -q "image/png" <<< "$Targets" && Imagetarget="-t image/png" || Imagetarget=""
+    [ "'$Mytest'" ] && echo "
+Selection $Selection
+ClipX:    $ClipX $(base64 -d -i <<< "$ClipX")  D:$DISPLAY
+ClipW:    $ClipW $(base64 -d -i <<< "$ClipW")  D:$WAYLAND_DISPLAY
+Clipold:  $Clipold $(base64 -d -i <<< "$Clipold")
+Clip:     $Clip $(base64 -d -i <<< "$Clip")
+"
 
-      # read content of $Selection of X server $1
-      export ${1:-}
-      case "$DISPLAY" in
-        "") 
-          case "$Selection" in
-            primary)   Clip="$(wl-paste --primary               $Imagetarget | base64)" ;;
-            clipboard) Clip="$(wl-paste                         $Imagetarget | base64)" ;;
-          esac
-        ;;
-        *)             Clip="$(xclip -out -selection $Selection $Imagetarget | base64)" ;;
-      esac
+    [ -n "$Clip" ] && [ "$(base64 -d -i  <<< "$Clip")" != "$(base64 -d -i <<< "$Clipold")" ] && {
+      Clipold="$Clip"
+      export DISPLAY= WAYLAND_DISPLAY=
+      export ${2:-}
 
-      [ -n "$Clip" ] && [ "$Clip" != "$Clipold" ] && {
-        Clipold="$Clip"
+      # check existing content of target clipboard of $2
+      [ -n "$WAYLAND_DISPLAY" ] && ClipoldW2="$(wl-paste   $SelectionW $Imagetarget | base64 -i)"
+      [ -n "$DISPLAY" ]         && ClipoldX2="$(xclip -out $SelectionX $Imagetarget | base64 -i)"
 
-        # send only to clipboard of other X server if it has different content. Important to keep highlighting of text for primary/middle mouse click.
-        export ${2:-}
-        case "$DISPLAY" in
-          "") 
-            case "$Selection" in
-              primary)   Clipold2="$(wl-paste --primary               $Imagetarget | base64)" ;;
-              clipboard) Clipold2="$(wl-paste                         $Imagetarget | base64)" ;;
-            esac
-          ;;
-          *)             Clipold2="$(xclip -out -selection $Selection $Imagetarget | base64)" ;;
-        esac
-        [ "$Clipold2" != "$Clip" ] && {
-          export ${2:-}
-          case "$DISPLAY" in
-            "") 
-              case "$Selection" in
-                primary)   base64 -d <<< "$Clip" | wl-copy --primary               $Imagetarget ;;
-                clipboard) base64 -d <<< "$Clip" | wl-copy                         $Imagetarget ;;
-              esac
-            ;;
-            *)             base64 -d <<< "$Clip" | xclip -in -selection $Selection $Imagetarget ;;
-          esac
-          #echo "SEND $Selection to ${2:-} : $(base64 -d <<< "$Clip")"
-        }
-      }
+      # send only to clipboard of other X server if it has different content. Important to keep highlighting of text for primary/middle mouse click.
+      [ "$ClipoldW2" != "$Clip" ] && [ -n "$WAYLAND_DISPLAY" ] && base64 -d -i <<< "$Clip" | wl-copy   $SelectionW $Imagetarget
+      [ "$ClipoldX2" != "$Clip" ] && [ -n "$DISPLAY" ]         && base64 -d -i <<< "$Clip" | xclip -in $SelectionX $Imagetarget
+
+      [ "'$Mytest'" ] && echo "SEND $Selection to ${2:-} : V.$(base64 -d -i <<< "$Clip").V"
     }
-    # wait a bit to avoid high CPU usage
-    mysleep 0.5
+
+    [ "$Noloop" ] && break
+    # wait a bit to avoid high CPU usage and to reduce Wayland window flickering
+    mysleep 1
+    [ "'$Mytest'" ] && sleep 5
   done
 }'
+
   case "$Shareclipboard" in
     yes) # bidirectional
       echo '
 clipexchange "$X1auth" "$X2auth" clipboard &
-clipexchange "$X1auth" "$X2auth" primary &
-sleep 1 # copy from 1 to 2 will take precedence at startup
+#clipexchange "$X1auth" "$X2auth" primary &
+mysleep 1.4
 clipexchange "$X2auth" "$X1auth" clipboard &
-clipexchange "$X2auth" "$X1auth" primary &
+#clipexchange "$X2auth" "$X1auth" primary &
 '
     ;;
-    oneway) # only container to host
+    c2h) # only container to host
       echo '
 clipexchange "$X2auth" "$X1auth" clipboard &
-clipexchange "$X2auth" "$X1auth" primary &
+#clipexchange "$X2auth" "$X1auth" primary &
 '
     ;;
-    wayland) # limited fallback for wayland clients with --clipboard=yes. host to container only, selection clipboard only.
+    h2c) # only container to host
       echo '
 clipexchange "$X1auth" "$X2auth" clipboard &
+#clipexchange "$X1auth" "$X2auth" primary &
 '
     ;;
-    superv|altv) # always container to host, only with super + v or alt +v host to container
+    superv|altv) # always container to host, only with super + v or alt + v host to container ### FIXME no wayland support here
       echo '
-sendclip() {
-  # send clipboard content (selection clipboard) from X server $1 to X server $2
-  # used for --clipboard=superv
-  Targets="$(env ${1:-} xclip -out -selection clipboard -t TARGETS 2>/dev/null)"
-  [ -n "$Targets" ] && {
-    grep -q "image/png" <<< "$Targets" && Imagetarget="-t image/png" || Imagetarget=""
-    env ${1:-} xclip -out -selection clipboard $Imagetarget | env ${2:-} xclip -in -selection clipboard $Imagetarget
-  }
-}
 case "${1:-}" in
-  superv|altv)
-    sendclip "$X1auth" "$X2auth"
+  superv|altv) # recursive call with xbindkeys
+    [ "'$Mytest'" ] && echo "SUPERV"
+    clipexchange "$X1auth" "$X2auth" clipboard noloop
+    #clipexchange "$X1auth" "$X2auth" primary   noloop
   ;;
   "")
     clipexchange "$X2auth" "$X1auth" clipboard &
-    clipexchange "$X2auth" "$X1auth" primary &
+    #clipexchange "$X2auth" "$X1auth" primary &
 
     case "'$Shareclipboard'" in
       altv)
@@ -2208,7 +2255,7 @@ case "${1:-}" in
 "
       ;;
     esac
-
+    #env $X1auth xbindkeys -n -f <(echo "$Xbindkeycodes") & Xbindkeyspid=$!
     env $X2auth xbindkeys -n -f <(echo "$Xbindkeycodes") & Xbindkeyspid=$!
 
     # wait for the end
@@ -3041,7 +3088,7 @@ check_xcontainer() {            # option --xc: check backend, rootless and image
     Xcontainer="yes"
     Xcforce="yes"
   }
-  
+
   # workaround: X server options not supported by --xc already caught here if they are specified on cli
   case "$Xserver" in
     --tty|--hostwayland) ### FIXME allow --hostwayland?
@@ -3049,15 +3096,13 @@ check_xcontainer() {            # option --xc: check backend, rootless and image
     ;;
   esac
   
-  case "$Xcontainer" in
+  [ "$Dockervm" != "no" ] && case "$Xcontainer" in
     auto) Xcontainer="no" ;;
     yes)
-      [ "$Dockervm" != "no" ] && {
-        note "Option --xc is not supported with Docker Desktop VM.
+      note "Option --xc is not supported with Docker Desktop VM.
   Fallback: Disabling option --xc."
-        check_fallback
-        Xcontainer="no"
-      }
+      check_fallback
+      Xcontainer="no"
     ;;
   esac
 
@@ -3095,7 +3140,6 @@ check_xcontainer() {            # option --xc: check backend, rootless and image
     ;;
     docker)
       Xcontainerbackend="$Xcontainer"
-      Xcontainer="yes"
       [ -z "$Xcrootless" ] && {
         [ -n "$DOCKER_HOST" ] && Xcrootless="yes" || Xcrootless="no"
       }
@@ -3103,7 +3147,6 @@ check_xcontainer() {            # option --xc: check backend, rootless and image
     ;;
     podman|nerdctl)
       Xcontainerbackend="$Xcontainer"
-      Xcontainer="yes"
       Xcrootless="${Xcrootless:-yes}" unpriv_xcbackend "$Xcontainerbackend inspect $Xcontainerimage" >/dev/null 2>&1 && Xcrootless="${Xcrootless:-yes}" || Fail="yes"
       [ "$Fail" = "yes" ] && [ -z "$Xcrootless" ] && [ "$Startuser" = "root" ] && {
         Fail=""
@@ -3608,6 +3651,22 @@ check_xdepends() {              # check dependencies on host for X server option
       esac
     ;;
   esac
+
+  # --xeyes
+  [ "$Xeyes" = "yes" ] && {
+    xtool --check --quiet xeyes || {
+      $Message "xeyes not found.
+  Please install 'xeyes' for option --xeyes.
+  $Wikipackagesimage"
+      Return=1
+    }
+    case "$Xserver" in
+      --weston|--kwin|--hostwayland)
+        $Message "Option ${1:-} does not support option --xeyes"
+        Return=1
+      ;;
+    esac
+  }
 
   # --xfishtank
   [ "$Xfishtank" = "yes" ] && {
@@ -4279,6 +4338,28 @@ create_xcommand() {             ### create command to start X server and/or Wayl
   $(check_xpraoption --xsettings=no ||:)"
 #  $(check_xpraoption --clipboard-direction=both ||:) \\
 
+      case "$Shareclipboard" in
+        native-yes)
+          Xpraoptions="$Xpraoptions \\
+  --clipboard=yes \\
+  --clipboard-direction=both"
+        ;;
+      native-c2h)
+          Xpraoptions="$Xpraoptions \\
+  --clipboard=yes \\
+  --clipboard-direction=to-client"
+        ;;
+      nativeh2c)
+          Xpraoptions="$Xpraoptions \\
+  --clipboard=yes \\
+  --clipboard-direction=to-server"
+        ;;
+        *) 
+          Xpraoptions="$Xpraoptions \\
+  --clipboard=no"
+        ;;
+      esac
+
       # --keymap
       [ "$Xkblayout" ] && Xpraoptions="$Xpraoptions \\
   $(check_xpraoption --keyboard-layout="'$Xkblayout'" ||:) \\
@@ -4289,7 +4370,6 @@ create_xcommand() {             ### create command to start X server and/or Wayl
       # xpra server command
       [ "$Desktopmode" = "yes" ] && Xpraservercommand="xpra start-desktop" || Xpraservercommand="xpra start"
       Xpraservercommand="$Xpraservercommand :$Newdisplaynumber --use-display $Xpraoptions \\
-  $(check_xpraoption --clipboard=no ||:)\\
   $(check_xpraoption --dbus-launch=no ||:) \\
   $(check_xpraoption --daemon=no ||:) \\
   $(check_xpraoption --file-transfer=off ||:) \\
@@ -4569,7 +4649,12 @@ $Xserveroptions \\
 
       # Some additional nxagent options are stored in a file
       Nxagentoptions="nx/nx"
-      Nxagentoptions="$Nxagentoptions,clipboard=none"
+      case "$Shareclipboard" in
+        native-yes) Nxagentoptions="$Nxagentoptions,clipboard=both" ;;
+        native-c2h) Nxagentoptions="$Nxagentoptions,clipboard=server" ;;
+        native-h2c) Nxagentoptions="$Nxagentoptions,clipboard=client" ;;
+        *)          Nxagentoptions="$Nxagentoptions,clipboard=none" ;;
+      esac
       case "$Fullscreen" in
         yes) Nxagentoptions="$Nxagentoptions,fullscreen=1" ;;
         no)  [ -n "$Screensize" ] && Nxagentoptions="$Nxagentoptions,geometry=$Screensize" ;;
@@ -4780,7 +4865,7 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
     Xc_hostx="\\
   --env DISPLAY=$Hostdisplay"
     [ -S "/tmp/.X11-unix/X$Hostdisplaynumber" ] && {
-      case "$Xserver" in
+      case "$Xserver" in #### FIXME Is this differenciation needed? Link done in containerrc.
         --hostdisplay)
           Xc_hostx="$Xc_hostx \\
   --mount type=bind,source=/tmp/.X11-unix/X$Hostdisplaynumber,target=/tmp/.X11-unix/X$Hostdisplaynumber,readonly"
@@ -5001,7 +5086,7 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
       Xcontainercommand="$Xcontainercommand $Xc_capdrop"
       Xcontainercommand="$Xcontainercommand $Xc_nopriv"
       Xcontainercommand="$Xcontainercommand $Xc_user"
-      Xcontainercommand="$Xcontainercommand $Xc_hostx"
+      Xcontainercommand="$Xcontainercommand $Xc_hostx" && Xc_hostx=""
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
       Xcontainercommand="$Xcontainercommand $Xc_nomitshm"
       Xcontainercommand="$Xcontainercommand $Xc_gpu"
@@ -5010,7 +5095,7 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
       Xcontainercommand="$Xcontainercommand $Xc_capdrop"
       Xcontainercommand="$Xcontainercommand $Xc_user"
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
-      Xcontainercommand="$Xcontainercommand $Xc_hostx"
+      Xcontainercommand="$Xcontainercommand $Xc_hostx" && Xc_hostx=""
       Xcontainercommand="$Xcontainercommand $Xc_gpu"
       Xcontainercommand="$Xcontainercommand $Xc_console"
     ;;
@@ -5019,7 +5104,7 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
       Xcontainercommand="$Xcontainercommand $Xc_nopriv"
       Xcontainercommand="$Xcontainercommand $Xc_user"
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
-      Xcontainercommand="$Xcontainercommand $Xc_hostx"
+      Xcontainercommand="$Xcontainercommand $Xc_hostx" && Xc_hostx=""
       Xcontainercommand="$Xcontainercommand $Xc_nomitshm"
       Xcontainercommand="$Xcontainercommand $Xc_gpu"
     ;;
@@ -5028,7 +5113,7 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
       Xcontainercommand="$Xcontainercommand $Xc_nopriv"
       Xcontainercommand="$Xcontainercommand $Xc_user"
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
-      Xcontainercommand="$Xcontainercommand $Xc_hostx"
+      Xcontainercommand="$Xcontainercommand $Xc_hostx" && Xc_hostx=""
       Xcontainercommand="$Xcontainercommand $Xc_gpu"
     ;;
     --nxagent)
@@ -5036,7 +5121,7 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
       Xcontainercommand="$Xcontainercommand $Xc_nopriv"
       Xcontainercommand="$Xcontainercommand $Xc_user"
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
-      Xcontainercommand="$Xcontainercommand $Xc_hostx"
+      Xcontainercommand="$Xcontainercommand $Xc_hostx" && Xc_hostx=""
       Xcontainercommand="$Xcontainercommand $Xc_nomitshm"
       Xcontainercommand="$Xcontainercommand $Xc_gpu"
       Xcontainercommand="$Xcontainercommand \\
@@ -5048,7 +5133,7 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
       Xcontainercommand="$Xcontainercommand $Xc_user"
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
       [ -n "$Hostdisplay" ] && [ -z "$Hostwaylandsocket" ] && {
-        Xcontainercommand="$Xcontainercommand $Xc_hostx"
+        Xcontainercommand="$Xcontainercommand $Xc_hostx" && Xc_hostx=""
       }
       [ "$Hostwaylandsocket" ] && {
         Xcontainercommand="$Xcontainercommand $Xc_hostwayland"
@@ -5068,7 +5153,7 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
       Xcontainercommand="$Xcontainercommand $Xc_nopriv"
       Xcontainercommand="$Xcontainercommand $Xc_user"
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
-      Xcontainercommand="$Xcontainercommand $Xc_hostx"
+      Xcontainercommand="$Xcontainercommand $Xc_hostx" && Xc_hostx=""
       Xcontainercommand="$Xcontainercommand $Xc_containerwayland"
       Xcontainercommand="$Xcontainercommand $Xc_gpu"
       Xcontainercommand="$Xcontainercommand $Xc_nomitshm"
@@ -5080,7 +5165,7 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
           Xcontainercommand="$Xcontainercommand $Xc_nopriv"
           Xcontainercommand="$Xcontainercommand $Xc_user"
           Xcontainercommand="$Xcontainercommand $Xc_containerx"
-          Xcontainercommand="$Xcontainercommand $Xc_hostx"
+          Xcontainercommand="$Xcontainercommand $Xc_hostx" && Xc_hostx=""
           Xcontainercommand="$Xcontainercommand $Xc_hostwayland"
           Xcontainercommand="$Xcontainercommand $Xc_containerwayland"
           Xcontainercommand="$Xcontainercommand $Xc_nomitshm"
@@ -5102,7 +5187,7 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
       Xcontainercommand="$Xcontainercommand $Xc_nopriv"
       Xcontainercommand="$Xcontainercommand $Xc_user"
       Xcontainercommand="$Xcontainercommand $Xc_containerx"
-      Xcontainercommand="$Xcontainercommand $Xc_hostx"
+      Xcontainercommand="$Xcontainercommand $Xc_hostx" && Xc_hostx=""
       Xcontainercommand="$Xcontainercommand $Xc_containerwayland"
       Xcontainercommand="$Xcontainercommand $Xc_gpu"
     ;;
@@ -5132,7 +5217,7 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
           Xcontainercommand="$Xcontainercommand $Xc_capdrop"
           Xcontainercommand="$Xcontainercommand $Xc_nopriv"
           Xcontainercommand="$Xcontainercommand $Xc_user"
-          Xcontainercommand="$Xcontainercommand $Xc_hostx"
+          Xcontainercommand="$Xcontainercommand $Xc_hostx" && Xc_hostx=""
           Xcontainercommand="$Xcontainercommand $Xc_hostwayland"
           Xcontainercommand="$Xcontainercommand $Xc_containerwayland"
           Xcontainercommand="$Xcontainercommand $Xc_nomitshm"
@@ -5156,7 +5241,7 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
           Xcontainercommand="$Xcontainercommand \\
   --cap-add SYS_RESOURCE"
           Xcontainercommand="$Xcontainercommand $Xc_user"
-          Xcontainercommand="$Xcontainercommand $Xc_hostx"
+          Xcontainercommand="$Xcontainercommand $Xc_hostx" && Xc_hostx=""
           Xcontainercommand="$Xcontainercommand $Xc_hostwayland"
           Xcontainercommand="$Xcontainercommand $Xc_containerwayland"
           Xcontainercommand="$Xcontainercommand $Xc_nomitshm"
@@ -5178,6 +5263,14 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
     *)
       error "create_xcontainercommand(): Unknown X server option $Xserver"
       return 1
+    ;;
+  esac
+
+  # --clipboard
+  case "$Shareclipboard" in
+    no|""|native*) ;;
+    *)
+      Xcontainercommand="$Xcontainercommand $Xc_hostx"
     ;;
   esac
 
@@ -5593,6 +5686,12 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
     echo             "sleep 1 && wmctrl -n 1 &"
   }
 
+  # --xeyes
+  [ -n "$Xeyes" ] && {
+    echo             "xeyes +shape $Xeyes &"
+    echo             "storepid \$! xeyes"
+  }
+
   # --xfishtank
   [ "$Xfishtank" = "yes" ] && echo "xfishtank -nomenu & storepid \$! xfishtank"
 
@@ -5601,18 +5700,21 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   echo               ""
 
   # --clipboard
-  [ "$Shareclipboard" != "no" ] && {
-    case "$Xserver" in
-#      --xpra*|--nxagent|--xwin|--runx) ;;         # have their own clipboard management
-      --xwin|--runx) ;;                           # have their own clipboard management
-      --hostdisplay) ;;                           # already same clipboard
-      *)                                          # synchronizing between different X servers
-        echo         "# option '-c, --clipboard': Run clipboard script "
-        echo         "bash $Clipboardrc &"
-        echo         ""
-      ;;
-    esac
-  }
+  case "$Shareclipboard" in
+    no) ;;
+    native* ) ;;
+    yes|h2c|c2h|superv|altv)
+      case "$Xserver" in
+        --xwin|--runx) ;;                           # have their own clipboard management
+        --hostdisplay|--hostwayland) ;;             # already same clipboard
+        *)
+          echo       "# option '-c, --clipboard': Run clipboard script"
+          echo       "bash $Clipboardrc &"
+          echo       ""
+        ;;
+      esac
+    ;;
+  esac
 
   # --checkwindow
   [ "$Checkforopenwindow" ] && {
@@ -5775,6 +5877,8 @@ xtool() {                       # run X tool command in X container if available
   It tells x11docker about dpi and installed extensions like MIT-SHM." ;;
     xdotool)   Toolinfo="x11docker uses xdotool to hide the weston window
   that is used in background for --xpra-xwayland." ;;
+    xeyes)     Toolinfo="xeyes shows eyes following your mouse cursor. 
+  The xeyes X window can provide focus for --clipboard=superv|altv." ;;
     xfishtank) Toolinfo="xfishtank shows a fish tank with --xfishtank." ;;
     xhost)     Toolinfo="xhost controls network access to X. x11docker uses it to disable
   undesired network access, or to allow some with option --xhost=ARG." ;;
@@ -9835,7 +9939,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,hostdisplay,nxagent,runx,xephyr,xpra,xpra2,xorg,xvfb"                                             # X servers
   Longoptions="$Longoptions,weston-xwayland,xpra-xwayland,xpra2-xwayland,xwayland,satellite"                                  # X servers depending on a Wayland compositor
   Longoptions="$Longoptions,hostwayland,weston::"                                                                             # Wayland compositors without X
-  Longoptions="$Longoptions,border::,dpi:,fullscreen,output-count:,rotate:,scale:,size:,xfishtank"                            # X/Wayland appearance options
+  Longoptions="$Longoptions,border::,dpi:,fullscreen,output-count:,rotate:,scale:,size:"                                      # X/Wayland appearance options
   Longoptions="$Longoptions,clean-xhost,composite::,display:,keymap:,vt::,westonini:,xauth::,xhost::,xoverip::,xtest::,xopt:" # X/Wayland config
   Longoptions="$Longoptions,checkwindow::,fallback::,preset:,pull::"                                                          # x11docker config
   Longoptions="$Longoptions,cachebasedir:,home::,homebasedir:,share:"                                                         # Host folders
@@ -9845,7 +9949,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,group-add:,hostuser:,password::,sudouser::,user:,shell:"                                          # Container user
   Longoptions="$Longoptions,dbus::,init::,hostdbus,sharecgroup"                                                               # Container init and DBus
   Longoptions="$Longoptions,stdin,interactive"                                                                                # Container interaction
-  Longoptions="$Longoptions,runasuser:,runfromhost:,runasroot:"                                                               # Additional commands to execute
+  Longoptions="$Longoptions,runasuser:,runfromhost:,runasroot:,xeyes::,xfishtank"                                             # Additional commands to execute
   Longoptions="$Longoptions,printenv::,printid::,printinfofile::,printpid1::"                                                 # Output of vars on stdout
   Longoptions="$Longoptions,debug,printcheck,quiet,verbose::"                                                                 # Verbose options
   Longoptions="$Longoptions,build,cleanup,help,launcher,licence,license,version"                                              # Special options without starting X or container
@@ -9932,6 +10036,7 @@ ${1:-}"
          --scale)             Scaling=${2:-} ; shift ;;              # Zoom
          --size)              Screensize="${2:-}" ;  shift ;;        # Screen size
       -F|--xfishtank)         Xfishtank="yes" ;;                     # Run xfishtank on new X server
+         --xeyes)             Xeyes="${2:-"+shape"}" ; shift ;;      # Run xeyes on new X server
 
      #### X and Wayland configuration
          --composite)         Xcomposite="${2:-yes}" ; shift ;;      # Enable or disable X extension COMPOSITE
@@ -10055,7 +10160,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
          --launcher)          Createlauncher="yes" ;;                           # Create application launcher on desktop and exit
 
      #### Experimental options
-         --experimental)      Experimental="yes" ;;                  # Allow some experimental code that might be changed at any time
+         --experimental)      Mytest="yes" ;;                                   # Allow some experimental code that might be changed at any time
          --keepcache)         Preservecachefiles="yes" ;     note "Option --keepcache: experimental option." ;;
          --remountcgroup)     Remountcgroup="yes" ;          note "Option --remountcgroup: experimental option." ;;
          --xorgconf)          Xorgconf="${2:-}" ;    shift ; note "Option --xorgconf: experimental option." ;;  # Custom xorg.conf
@@ -10149,7 +10254,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
 
   # Generate a list of options in use
   for Line in -a,--xpra -A,--xpra-xwayland -c,--clipboard -d,--desktop -D,--debug -f,--fullscreen -g,--gpu -e,--exe \
-  -F,--xfishtank -h,--hostdisplay -H,--hostwayland -i,--interactive -I,--network -K,--kwin -l,--lang -m,--home -n,--nxagent \
+  -F,--xfishtank --xeyes -h,--hostdisplay -H,--hostwayland -i,--interactive -I,--network -K,--kwin -l,--lang -m,--home -n,--nxagent \
   --pipewire -p,--pulseaudio -P,--printer -q,--quiet -t,--tty -T,--weston -v,--verbose -w,--wm -W,--wayland \
   --xopt -x,--xorg -X,--xwayland --satellite -y,--xephyr -Y,--weston-xwayland; do
     grep -q -x -- "$(cut -d, -f1 <<< "$Line")" <<< "$Optionset" && Optionset="$Optionset
@@ -10253,7 +10358,13 @@ check_options_arguments() {     # check for [likely] valid arguments
 
   # --clipboard
   case "$Shareclipboard" in
-    yes|no|oneway|superv|altv) ;;
+    yes|no|superv|altv|h2c|c2h) ;;
+    oneway)
+      note "Option --clipboard=$Shareclipboard:
+  Argument $Shareclipboard is deprecated.
+  Please use --clipboard=c2h instead."
+      Shareclipboard="c2h"
+    ;;
     *)
       note "Option --clipboard: Unknown argument '$Shareclipboard'.
   Fallback: Disabling option --clipboard."
@@ -10622,10 +10733,11 @@ check_options_interferences() { # check multiple option interferences, change se
 
   # --clipboard
   case "$Shareclipboard" in
-    yes|oneway|superv|altv)
-      [ -z "$Hostdisplay" ] && {
+    yes|superv|altv|c2h|h2c)
+      [ -z "$Hostdisplay$Hostwaylandsocket" ] && {
         note "Option --clipboard: Did not find a host X display
-  to share the clipboard with. DISPLAY is empty.
+  or Wayland server to share the clipboard with.
+  DISPLAY and WAYLAND_DISPLAY are empty.
   Fallback: Disabling option --clipboard."
         check_fallback
         Shareclipboard="no"
@@ -10636,9 +10748,9 @@ check_options_interferences() { # check multiple option interferences, change se
     superv|altv)
       xtool --check xbindkeys || {
         note "Option --clipboard=$Shareclipboard needs xbindkeys.
-  Fallback: Setting --clipboard=oneway."
+  Fallback: Setting --clipboard=c2h."
         check_fallback
-        Shareclipboard="oneway"
+        Shareclipboard="c2h"
       }
       [ "$Xtest" = "yes" ] && warning "Options --xtest --clipboard=$Shareclipboard:
   X extension XTEST is enabled that allows container applications
@@ -10647,7 +10759,7 @@ check_options_interferences() { # check multiple option interferences, change se
     ;;
   esac
   case "$Shareclipboard" in
-    oneway|superv|altv)
+    c2h|h2c|superv|altv)
       case "$Xserver" in
         --hostdisplay|--xwin|--runx)
           note "Option --clipboard: Option $Xserver only supports arguments yes|no.
@@ -10655,21 +10767,33 @@ check_options_interferences() { # check multiple option interferences, change se
           check_fallback
           Shareclipboard="no"
         ;;
-        --weston|--kwin)
-          note "Option --clipboard=$Shareclipboard is not supported for $Xserver.
-  $Xserver only supports a limited --clipboard=yes.
-  Fallback: Disabling option --clipboard."
-          check_fallback
-          Shareclipboard="no"
-        ;;
       esac
     ;;
   esac
   case "$Shareclipboard" in
-    yes|oneway|superv|altv)
+    yes)
+      case "$Xserver" in
+        --xpra*|--nxagent)
+          [ "$Setupwayland" = "no" ] && Shareclipboard="native-$Shareclipboard"
+        ;;
+      esac
+    ;;
+    superv|altv)
+      [ -z "$Hostdisplay" ] && {
+        note "Option --clipboard=$Shareclipboard needs
+  a running X server on host for key binding. DISPLAY is empty.
+  Fallback: Disabling option --clipboard"
+        check_fallback
+        Shareclipboard="no"
+      }
+    ;;
+  esac
+  case "$Shareclipboard" in
+    yes|c2h|h2c|superv|altv)
       case "$Xserver" in
         --tty|--hostwayland)
           note "Option --clipboard is not supported for $Xserver.
+  Clipboard should be handled already by host Wayland compositor.
   Fallback: Disabling option --clipboard."
           check_fallback
           Shareclipboard="no"
@@ -10685,50 +10809,13 @@ check_options_interferences() { # check multiple option interferences, change se
             --weston|--kwin)
               xtool --check wl-copy || {
                 note "Option --clipboard with $Xserver needs wl-copy and wl-paste.
-  Fallback: Disabling option --clipboard."
+  Fallback: Disabling option --clipboard.
+  $Wikipackages"
                 check_fallback
                 Shareclipboard="no"
               }
             ;;
           esac
-        ;;
-      esac
-    ;;
-  esac
-  case "$Shareclipboard" in
-    oneway|superv|altv)
-      case "$Xserver" in
-        --hostdisplay|--xwin|--runx)
-          note "Option --clipboard: Option $Xserver only supports arguments yes|no.
-  Fallback: Disabling option --clipboard"
-          check_fallback
-          Shareclipboard="no"
-        ;;
-        --weston|--kwin)
-          note "Option --clipboard=$Shareclipboard is not supported for $Xserver.
-  $Xserver only supports a limited variation of --clipboard=yes.
-  Fallback: Disabling option --clipboard."
-          check_fallback
-          Shareclipboard="no"
-        ;;
-      esac
-    ;;
-  esac
-  case "$Shareclipboard" in
-    yes)
-      case "$Xserver" in
-        --weston|--kwin)
-          note "Option --clipboard=$Shareclipboard with $Xserver
-  is limited yet to copy from host to container.
-  Middle-mouse-click selection is not supported at all."
-          Shareclipboard="wayland"
-          [ -z "$Hostdisplay" ] && {
-            note "Option --clipboard with $Xserver is only supported
-  along with an X server running on host.
-  Fallback: Disabling option --clipboard."
-            check_fallback
-            Shareclipboard="no"
-          }
         ;;
       esac
     ;;
@@ -10764,7 +10851,7 @@ check_options_interferences() { # check multiple option interferences, change se
       }
       check_optionset "--tty" "--border --clipboard --composite --desktop --display --dpi
                                --fullscreen --keymap --output-count --rotate
-                               --scale --size --vt --wm --westonini --xauth --xc --xfishtank
+                               --scale --size --vt --wm --westonini --xauth --xc --xeyes --xfishtank
                                --xhost --xonly --xoverip --xtest" ||:
     ;;
     --hostdisplay)
@@ -11157,13 +11244,28 @@ check_options_interferences() { # check multiple option interferences, change se
     check_fallback
     Outputcount="1"
   }
-  
+
+  # --xeyes
+  [ -n "$Xeyes" ] && {
+    xtool --check xeyes || Xeyes=""
+    case "$Xserver" in
+      --weston|--kwin|--hostwayland|--tty)
+        note "Option --xeyes does not run on $Xserver.
+  Fallback: Disabling option --xeyes."
+        check_fallback
+        Xeyes=""
+      ;;
+    esac
+  }
+
   # --xfishtank
-  [ "$Xfishtank" = "yes" ] && case "$Xserver" in
-    --xpra*|--nxagent)
-      [ "$Desktopmode" = "no" ] && Windowmanagermode="${Windowmanagermode:-auto}" && Desktopmode="yes"
-    ;;
-  esac
+  [ "$Xfishtank" = "yes" ] && {
+    xtool --check xfishtank && case "$Xserver" in
+      --xpra*|--nxagent)
+        [ "$Desktopmode" = "no" ] && Windowmanagermode="${Windowmanagermode:-auto}" && Desktopmode="yes"
+      ;;
+    esac
+  }
 
   # MSYS2, Cygwin, WSL
   case "$Winsubsystem" in
@@ -11334,9 +11436,9 @@ check_options_messages() {      # some messages depending on options, but not ch
       # --gpu=iglx
       [ "$Sharegpu" = "iglx" ] && [ "$Xcontainer" = "no" ] && [ -e "/var/log/Xorg.0.log" ] && {
         Xorgversion="$(grep -m1 xorg-server </var/log/Xorg.0.log | cut -d: -f2 | cut -d' ' -f1)"
-        [ -z "$Nvidiaversion" ] && [ -n "$Xorgversion" ] && verlt "$Xorgversion" "1.20.8" && note "Options --xorg --gpu=iglx: It seems you have Xorg v$Xorgversion.
-  iGLX is known to have a bug in Xorg<v1.20.8.
-  --gpu=iglx may fail and give black content."
+        [ -z "$Nvidiaversion" ] && [ -n "$Xorgversion" ] && verlt "$Xorgversion" "1.20.8" && note "Options --xorg --gpu=iglx: 
+  It seems you have Xorg v$Xorgversion. iGLX is known to have a bug
+  in Xorg<v1.20.8. --gpu=iglx may fail and give black content."
       }
     ;;
 
@@ -11426,6 +11528,26 @@ check_options_messages() {      # some messages depending on options, but not ch
   [ "$Capdropall" = "no" ] && warning "Option --cap-default disables security hardening
   for containers done by x11docker. Default docker capabilities are allowed.
   This is considered to be less secure."
+
+  # --clipboard
+  case "$Shareclipboard" in
+    superv|altv)
+      [ "$Setupwayland" = "yes" ] && note "Option --clipboard=$Shareclipboard:
+  Keyboard binding works only with an X window that has focus.
+  Option --xeyes can provide an X window for this purpose."
+    ;;
+  esac
+  case "$Shareclipboard" in
+    native*) ;;
+    no) ;;
+    *)
+      { [ "$Setupwayland" = "yes" ] || [ -n "$Hostwaylandsocket" ] ; } && note "Option --clipboard:
+  Wayland windows might show undesired flickering due to
+  focus switches for clipboard checks with wl-clipboard."
+      note "Option --clipboard: For X11 options --xpra* and --nagent
+  provide the best clipboard support. (Supported args: yes|c2h|h2c)."
+    ;;
+  esac
 
   # --fullscreen
   [ "$Fullscreen" = "yes" ] && {
@@ -11833,6 +11955,7 @@ declare_variables() {           # declare global variables
   Xaxis=""                                        # Virtual screen width
   Xcomposite=""                                   # --xcomposite: +extension COMPOSITE yes/no
   Xkblayout=""                                    # --keymap: Layout for keymap, compare /usr/share/X11/xkb/symbols
+  Xeyes=""                                        # --xeyes: Run xeyes, eyes following your mouse cursor
   Xfishtank="no"                                  # --xfishtank: Show a fish tank on new X server
   Xhost=""                                        # --xhost: custom xhost setting on new X server
   Xiniterrorcodes="xinit: giving up|unable to connect to X server|Connection refused|server error|Only console users are allowed"
@@ -11966,9 +12089,9 @@ declare_variables() {           # declare global variables
   # Miscellaneous
   Buildimage=""                                   # --build: x11docker image to build from repo Dockerfile
   Codename=""                                     # created from image name and command without special chars for use with container name and cache folder
-  Experimental=""                                 # --experimental: use experimental code
   Fallback="yes"                                  # --fallback: Allow or deny fallbacks for failing options.
   Imagebasename=""                                # Image name without tags and / replaced with -. For use of --home folders.
+  Mytest=""                                       # --experimental: use experimental code
   Parsedoptions_global=""                         # Parsed options
   Presetdirlocal="$HOME/.config/x11docker/preset" # --preset storage dir (local)
   Presetdirsystem="/etc/x11docker/preset"         # --preset storage dir (system)
@@ -12104,8 +12227,8 @@ stdout() {
   echo \"\$*:STDOUT\"    | sed \"s/\\\$/ /\" >>\$Messagefile
 }'
 }
-experimental() {                # --experimental
-  [ "$Experimental" ] && {
+mytest() {                      # --experimental
+  [ "$Mytest" ] && {
     note "Option --experimental: changed something: ${1:-"(no comment)"}"
     return 0
   }
@@ -12236,15 +12359,16 @@ main() {
   [ "$Pulseaudiomode" ]          && setup_sound_pulseaudio ||:                    # --pulseaudio
   [ "$Sharealsa" = "yes" ]       && setup_sound_alsa                              # --alsa
   [ "$Sharehostdbus" = "yes" ]   && setup_hostdbus                                # --hostdbus
+  [ "$Cleanxhost" = "yes" ]      && clean_xhost                                   # --clean-xhost
+  case "$Shareclipboard" in
+    no|native*) ;;
+    *)                              create_clipboardrc >> "$Clipboardrc" ;;       # --clipboard
+  esac
+  check_screensize               # size of host X and of new X server             # --size
 
   #### Create command to run X server [and/or Wayland compositor]
-  [ "$Cleanxhost" = "yes" ]      && clean_xhost                                   # --clean-xhost
-  [ "$Shareclipboard" != "no" ]  && create_clipboardrc >> "$Clipboardrc"          # --clipboard
-  check_screensize               # size of host X and of new X server             # --size
   create_xcommand                # set up start command for X server              # all X server and Wayland options
 
-  [ -s "$Westonini" ]            && debugnote "Generated weston.ini:
-$(nl -ba <$Westonini)"
   [ "$Xcommand" ] && case "$Xwaylandrootless" in
     no)                             debugnote "X server command:
   $Xcommand" ;;
@@ -12253,6 +12377,8 @@ $(cat $Xwaylandwrapper)" ;;
   esac
   [ "$Compositorcommand" ]       && debugnote "Wayland compositor command:
   $Compositorcommand"
+  [ -s "$Westonini" ]            && debugnote "Generated weston.ini:
+$(nl -ba <$Westonini)"
 
   setup_initsystem               # init in container.                             # --init
   case "$Backend" in
@@ -12452,7 +12578,7 @@ $(cat $Storepidfile)"
   ## Create helper script xinitrc to set up X
   # xinitrc is started by xinit and does some setup within new X server.
   # Main job: create cookie, check xhost, set keyboard layout.
-  # Optional jobs: run window manager, run xfishtank, share clipboard, scale/rotate --xorg, create set of screen resolutions.
+  # Optional jobs: run window manager, run xfishtank+xeyes, share clipboard, scale/rotate --xorg, create set of screen resolutions.
   create_xinitrc >> "$Xinitrc"
   verbose "Generated xinitrc:
 $(nl -ba <$Xinitrc)"
