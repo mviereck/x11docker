@@ -205,7 +205,7 @@ Hardware acceleration for OpenGL is possible with option `-g, --gpu`.
  
 ### Clipboard
 Clipboard sharing is possible with option `-c, --clipboard [=ARG]`.
- - Optional arguments `superv` and `altv` only provide host clipboard content to container if keys `[SUPER][v]` or `[ALT][v]` are pressed.
+ - Optional argument `cmv` only provide host clipboard content to container if keys `[CTRL][META][v]` are pressed.
  - Optional arguments `c2h` and `h2c` only transfers clipboard content from container to host or vice versa.
  - Support of Wayland and X11 clipboards. Wayland windows might flicker due to focus issues with Wayland clipboard checks.
 

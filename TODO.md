@@ -6,9 +6,10 @@ x11docker ToDo notes
 --clipboard: use wl-paste --watch if possible
 --satellite version check, waiting for release yet
 --nxagent: -ac -auth. bug report?
+check wbindkeys
 screen capture in x11docker/check
 profile.d: check for xrdp #554
-BUG (NVIDIA?) --xc --gpu --xorg (nvidia): black screen after terminating, no tty switch possible
+BUG (NVIDIA?) --xc --gpu --xorg (nvidia): black screen after terminating, no tty switch possible. agetty issue in XC image?
 BUG --gpu=virgl seems to fail. nvidia issue?
 WORKAROUND --backend=podman --hostdisplay fails > glxgears: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.34' not found (required by /x11docker/XlibNoSHM.so)
 

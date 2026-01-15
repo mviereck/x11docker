@@ -111,17 +111,19 @@ Basic settings:
 Host integration:
      --alsa [=ALSA_CARD]  Sound with ALSA. You can define a desired sound card
                        with ALSA_CARD. List of available sound cards: aplay -l
- -c, --clipboard [=yes|no|c2h|h2c|superv|altv] Share clipboard with host.
+ -c, --clipboard [=yes|no|c2h|h2c] Share clipboard with host.
                        Possible arguments:
-                         yes:    Share clipboard in both directions.
-                         c2h:    Copy clipboard from container to host only.
-                         h22:    Copy clipboard from host to container only.
-                         superv: Keys [SUPER][v] copy clipboard from host to 
-                                 container. Otherwise same as 'yes'
-                         altv:   Same as 'superv' but using keys [ALT][v].
-                         no:     Do not share clipboard.
-                       superv and altv need a focused X window of container.
-                       In Wayland+X11 containers option --xeyes can help.
+                         yes: Share clipboard in both directions.
+                         no:  Do not share clipboard. (default)
+                         c2h: Copy clipboard from container to host only.
+                         h2c: Copy clipboard from host to container only.
+                         cmv: Keys [CTRL] + [SUPER] + [v] copy clipboard
+                              from host to container. Otherwise same as 'yes'.
+                              Needs a focused X window of container.
+                              In Wayland+X11 containers option --xeyes can
+                              help. Or provide image x11docker/xserver
+                              (option --xc) for a bindkey helper tool
+                              that sets up a Wayland key binding.
  -g, --gpu [=yes|no|iglx|virgl] GPU access for hardware accelerated OpenGL.
                        Works best with open source drivers on host and in image.
                        For closed source nvidia drivers regard terminal output.
@@ -224,7 +226,7 @@ X and Wayland appearance options:
                          host: autodetection of a host window manager.
                          COMMAND: command of a desired host window manager.
                          none: Run without a window manager. Same as --desktop.
-     --xeyes [=ARG]    Run xeyes. Can help with --clipboard=superv|altv
+     --xeyes [=ARG]    Run xeyes. Can help with --clipboard=cmv
                        to provide an X window that accepts keycodes.
                        Optional argument ARG can be an xeyes option, see
                        'man xeyes'. Remove window decoration: '--xeyes=-shape'
@@ -1174,7 +1176,7 @@ verlte() {                      # version number check $1 less than or equal $2
 wincmd() {                      # execute a command on MS Windows with cmd.exe
   MSYS2_ARG_CONV_EXCL='*' cmd.exe /C "${@//&/^&}" | rmcr
 }
-mswindowsipcheck() {              # get WSL host IP and Windows host ip
+mswindowsipcheck() {            # get WSL host IP and Windows host ip
   # thanks to @eyespore in https://github.com/mviereck/x11docker/issues/557
 
   local Hostips Mswindowsips Hostcidr Hostprefix Mswindowsnetwork Hostnetwork
@@ -1474,7 +1476,7 @@ $(tail "${2:-}")"
 
 #    grep -i -q -E 'xinit: giving up|unable to connect to X server|Connection refused|server error|Only console users are allowed|Failed to process Wayland|failed to create display|] fatal:' <"${2:-}" && \
     [ "$Errorkeys" ] && {
-      Errorkey="$(grep -i -E "$Errorkeys" <"${2:-}")"
+      Errorkey="$(grep -i -E "$Errorkeys" <"${2:-}")" ||:
       [ -n "$Errorkey" ] && error "waitforlogentry(): ${1:-}: Found error message in logfile:
   <'$Errorkey'>
 
@@ -2201,6 +2203,7 @@ Clip:     $Clip $(base64 -d -i <<< "$Clip")
     }
 
     [ "$Noloop" ] && break
+
     # wait a bit to avoid high CPU usage and to reduce Wayland window flickering
     mysleep 1
     [ "'$Mytest'" ] && sleep 5
@@ -2229,34 +2232,42 @@ clipexchange "$X1auth" "$X2auth" clipboard &
 #clipexchange "$X1auth" "$X2auth" primary &
 '
     ;;
-    superv|altv) # always container to host, only with super + v or alt + v host to container ### FIXME no wayland support here
+    cmv) # always container to host, only with super + alt + v host to container ### FIXME no wayland support here
       echo '
 case "${1:-}" in
-  superv|altv) # recursive call with xbindkeys
-    [ "'$Mytest'" ] && echo "SUPERV"
+  cmv) # recursive call with xbindkeys or bindkey
+    [ "'$Mytest'" ] && echo "CTRL+META+V"
     clipexchange "$X1auth" "$X2auth" clipboard noloop
     #clipexchange "$X1auth" "$X2auth" primary   noloop
   ;;
-  "")
+
+  "") # first call in xinitrc, run bindkey tools
     clipexchange "$X2auth" "$X1auth" clipboard &
     #clipexchange "$X2auth" "$X1auth" primary &
 
-    case "'$Shareclipboard'" in
-      altv)
-        Xbindkeycodes="
-\"bash '$Clipboardrc' altv\"
-  Mod1 + v
+    Xbindkeycodes="
+\"bash '$Clipboardrc' cmv\"
+  m:0x54 + c:55
+  Control+Mod2+Mod4 + v
 "
-        ;;
-      superv)
-        Xbindkeycodes="
-\"bash '$Clipboardrc' superv\"
-  Mod4 + v
-"
+    case "'$Xcontainer'" in
+      yes)
+        case "'$Xserver'" in
+          --weston|--weston-xwayland)
+            case "'$Setupwayland'" in
+              yes) env $X2auth bindkey '$Clipboardrc'                   & Xbindkeyspid=$! ;;
+              no)  env $X2auth xbindkeys -n -f <(echo "$Xbindkeycodes") & Xbindkeyspid=$! ;;
+            esac
+          ;;
+          *)
+                   env $X2auth xbindkeys -n -f <(echo "$Xbindkeycodes") & Xbindkeyspid=$!
+          ;;
+        esac
+      ;;
+      no)
+                   env $X2auth xbindkeys -n -f <(echo "$Xbindkeycodes") & Xbindkeyspid=$!
       ;;
     esac
-    #env $X1auth xbindkeys -n -f <(echo "$Xbindkeycodes") & Xbindkeyspid=$!
-    env $X2auth xbindkeys -n -f <(echo "$Xbindkeycodes") & Xbindkeyspid=$!
 
     # wait for the end
     case "'$Usemkfifo'" in
@@ -3215,7 +3226,7 @@ check_xcontainer() {            # option --xc: check backend, rootless and image
       Xcontaineroptionsconsole="$(parse_inspect "$Xcontainerinspect" "Config" "Labels" "options_console")"
       Xcontainertools="$(parse_inspect "$Xcontainerinspect" "Config" "Labels" "tools")"
       Xcontainerversion="$(parse_inspect "$Xcontainerinspect" "Config" "Labels" "version")"
-      verlt "$Xcontainerversion" "2.1" && note "Option --xc: Please update image x11docker/xserver
+      verlt "$Xcontainerversion" "2.3" && note "Option --xc: Please update image x11docker/xserver
   with 'docker pull x11docker/xserver'."
     ;;
     no)
@@ -4815,8 +4826,9 @@ create_xcontainercommand() {    # option --xc: create docker command for X in co
 
   mkfile "$Cachefolder/etcgroup.xcontainer"
   echo "video:x:$(mygetent group video   | cut -d: -f3):$Containeruser" >> "$Cachefolder/etcgroup.xcontainer"
+  echo "input:x:$(mygetent group input   | cut -d: -f3):$Containeruser" >> "$Cachefolder/etcgroup.xcontainer"
   echo "render:x:$(mygetent group render | cut -d: -f3):$Containeruser" >> "$Cachefolder/etcgroup.xcontainer"
-  echo "weston-launch:x:104:$Containeruser"                           >> "$Cachefolder/etcgroup.xcontainer"
+  #echo "weston-launch:x:104:$Containeruser"                             >> "$Cachefolder/etcgroup.xcontainer"
 
   ## code snippets:
 
@@ -4921,6 +4933,8 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
   --group-add $(mygetent group video  | cut -d: -f3)"
       mygetent group render >/dev/null && Xc_gpu="$Xc_gpu \\
   --group-add $(mygetent group render | cut -d: -f3)"
+      mygetent group render >/dev/null && Xc_gpu="$Xc_gpu \\
+  --group-add $(mygetent group input | cut -d: -f3)"
     ;;
   esac
 
@@ -5270,7 +5284,8 @@ Timetosaygoodbyefile=$Timetosaygoodbyefile
   case "$Shareclipboard" in
     no|""|native*) ;;
     *)
-      Xcontainercommand="$Xcontainercommand $Xc_hostx"
+      Xcontainercommand="$Xcontainercommand $Xc_hostx
+  --device /dev/input"
     ;;
   esac
 
@@ -5703,7 +5718,7 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
   case "$Shareclipboard" in
     no) ;;
     native* ) ;;
-    yes|h2c|c2h|superv|altv)
+    yes|h2c|c2h|cmv)
       case "$Xserver" in
         --xwin|--runx) ;;                           # have their own clipboard management
         --hostdisplay|--hostwayland) ;;             # already same clipboard
@@ -5878,7 +5893,7 @@ xtool() {                       # run X tool command in X container if available
     xdotool)   Toolinfo="x11docker uses xdotool to hide the weston window
   that is used in background for --xpra-xwayland." ;;
     xeyes)     Toolinfo="xeyes shows eyes following your mouse cursor. 
-  The xeyes X window can provide focus for --clipboard=superv|altv." ;;
+  The xeyes X window can provide focus for --clipboard=cmv." ;;
     xfishtank) Toolinfo="xfishtank shows a fish tank with --xfishtank." ;;
     xhost)     Toolinfo="xhost controls network access to X. x11docker uses it to disable
   undesired network access, or to allow some with option --xhost=ARG." ;;
@@ -10358,7 +10373,15 @@ check_options_arguments() {     # check for [likely] valid arguments
 
   # --clipboard
   case "$Shareclipboard" in
-    yes|no|superv|altv|h2c|c2h) ;;
+    yes|no|cmv|h2c|c2h) ;;
+    superv|altv)
+      note "Option --clipboard=$Shareclipboard is deprecated.
+  Please use --clipboard=csv instead.
+  This uses key combo [CRTL] + [META] + v
+  Fallback: Setting --clipboard=cmv"
+      check_fallback
+      Shareclipboard="cmv"
+    ;;
     oneway)
       note "Option --clipboard=$Shareclipboard:
   Argument $Shareclipboard is deprecated.
@@ -10733,7 +10756,8 @@ check_options_interferences() { # check multiple option interferences, change se
 
   # --clipboard
   case "$Shareclipboard" in
-    yes|superv|altv|c2h|h2c)
+    no) ;;
+    *)
       [ -z "$Hostdisplay$Hostwaylandsocket" ] && {
         note "Option --clipboard: Did not find a host X display
   or Wayland server to share the clipboard with.
@@ -10745,7 +10769,7 @@ check_options_interferences() { # check multiple option interferences, change se
     ;;
   esac
   case "$Shareclipboard" in
-    superv|altv)
+    cmv)
       xtool --check xbindkeys || {
         note "Option --clipboard=$Shareclipboard needs xbindkeys.
   Fallback: Setting --clipboard=c2h."
@@ -10754,12 +10778,12 @@ check_options_interferences() { # check multiple option interferences, change se
       }
       [ "$Xtest" = "yes" ] && warning "Options --xtest --clipboard=$Shareclipboard:
   X extension XTEST is enabled that allows container applications
-  to fake key presses like SUPER+v and ALT+v so they could fool x11docker
+  to fake key presses like [CTRL] + [META] + [v] so they could fool x11docker
   to provide the host clipboard content without user interaction."
     ;;
   esac
   case "$Shareclipboard" in
-    c2h|h2c|superv|altv)
+    c2h|h2c|cmv)
       case "$Xserver" in
         --hostdisplay|--xwin|--runx)
           note "Option --clipboard: Option $Xserver only supports arguments yes|no.
@@ -10778,18 +10802,9 @@ check_options_interferences() { # check multiple option interferences, change se
         ;;
       esac
     ;;
-    superv|altv)
-      [ -z "$Hostdisplay" ] && {
-        note "Option --clipboard=$Shareclipboard needs
-  a running X server on host for key binding. DISPLAY is empty.
-  Fallback: Disabling option --clipboard"
-        check_fallback
-        Shareclipboard="no"
-      }
-    ;;
   esac
   case "$Shareclipboard" in
-    yes|c2h|h2c|superv|altv)
+    yes|c2h|h2c|cmv)
       case "$Xserver" in
         --tty|--hostwayland)
           note "Option --clipboard is not supported for $Xserver.
@@ -11360,8 +11375,6 @@ check_options_messages() {      # some messages depending on options, but not ch
     xpra, Xephyr, nxagent, weston+Xwayland,
   or run a second Xorg server with option --xorg.
   $Wikipackagesimage"
-      # --clipboard
-      [ "$Shareclipboard" = "yes" ] || warning "Option --hostdisplay: The clipboard is not isolated."
       # --xauth
       case "$Xauthentication" in
         untrusted) ;;
@@ -11531,10 +11544,12 @@ check_options_messages() {      # some messages depending on options, but not ch
 
   # --clipboard
   case "$Shareclipboard" in
-    superv|altv)
-      [ "$Setupwayland" = "yes" ] && note "Option --clipboard=$Shareclipboard:
-  Keyboard binding works only with an X window that has focus.
-  Option --xeyes can provide an X window for this purpose."
+    cmv)
+      [ "$Setupwayland" = "yes" ] && [ "$Xcontainer" = "no" ] && note "Option --clipboard=$Shareclipboard:
+  Keyboard binding works only if an X window of container that has focus.
+  Option --xeyes can provide an X window for this purpose.
+  Alternatively provide image x11docker/xserver (option --xc)
+  that contains a bindkey helper for Wayland."
     ;;
   esac
   case "$Shareclipboard" in
@@ -11548,6 +11563,12 @@ check_options_messages() {      # some messages depending on options, but not ch
   provide the best clipboard support. (Supported args: yes|c2h|h2c)."
     ;;
   esac
+  [ "$Shareclipboard" = "yes" ] || {
+    [ "$Xserver" = "--hostdisplay" ] && warning "Option --hostdisplay:
+  The clipboard is not isolated."
+    [ "$Sharehostwayland" = "yes" ]  && warning "Option --hostwayland:
+  The clipboard is not isolated."
+  }
 
   # --fullscreen
   [ "$Fullscreen" = "yes" ] && {
@@ -12360,10 +12381,7 @@ main() {
   [ "$Sharealsa" = "yes" ]       && setup_sound_alsa                              # --alsa
   [ "$Sharehostdbus" = "yes" ]   && setup_hostdbus                                # --hostdbus
   [ "$Cleanxhost" = "yes" ]      && clean_xhost                                   # --clean-xhost
-  case "$Shareclipboard" in
-    no|native*) ;;
-    *)                              create_clipboardrc >> "$Clipboardrc" ;;       # --clipboard
-  esac
+                                    create_clipboardrc >> "$Clipboardrc"          # --clipboard
   check_screensize               # size of host X and of new X server             # --size
 
   #### Create command to run X server [and/or Wayland compositor]

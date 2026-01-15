@@ -38,7 +38,9 @@ Project website: https://github.com/mviereck/x11docker
  - `--hostdisplay`: Use `XlibNoSHM.so` without `--xc`, too.
  - `--xc` using a tty: Needs `--force=xc`.
  - `--clipboard`: Support Wayland. Drop `primary` support.
-   Deprecate argument `oneway`. New arguments `c2h`, `h2c`.
+   Deprecate argument `oneway`: New arguments `c2h`, `h2c`.
+   Deprecate arguments `superv|altv`: New argument `cmv`.
+   Wayland keybinding with `x11docker/xserver`.
 ### Added
   `--xw`: New option to run X and Wayland apps side by side.
  - `--pipewire`: New option for PipeWire sound in container.
