@@ -5,12 +5,13 @@ x11docker ToDo notes
 --clipboard: check if wl-clipboard is available
 --clipboard: use wl-paste --watch if possible
 --satellite version check, waiting for release yet
+weston Xwayland display number
+--weston-xwayland on console: Xwayland uses -decorate, should use --fullscreen instead
+--xpra: black window on first firefox startup
 --nxagent: -ac -auth. bug report?
-check wbindkeys
 screen capture in x11docker/check
 profile.d: check for xrdp #554
-BUG (NVIDIA?) --xc --gpu --xorg (nvidia): black screen after terminating, no tty switch possible. agetty issue in XC image?
-BUG --gpu=virgl seems to fail. nvidia issue?
+BUG NVIDIA: --xc --gpu --xorg (nvidia): black screen after terminating, no tty switch possible.
 WORKAROUND --backend=podman --hostdisplay fails > glxgears: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.34' not found (required by /x11docker/XlibNoSHM.so)
 
 ## Work in progress
@@ -18,7 +19,6 @@ WORKAROUND --backend=podman --hostdisplay fails > glxgears: /lib/x86_64-linux-gn
  - bug: setting XAUTHORITY with systemctl
  - --xc --xorg: MIT-SHM fails
  - --xc --xorg rootless fails
- - x11docker/nvidia-base: use tags with version number?
  - further centralize argument checks
  - check empty XDG_RUNTIME_DIR e.g. with --user, --hostuser 
 
