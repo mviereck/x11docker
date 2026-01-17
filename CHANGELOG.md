@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
-## [Unreleased]
+## [7.8.0](https://github.com/mviereck/x11docker/releases/tag/v7.8.0) - 2026-01-17
 ### Fixed
  - `--hostdisplay --xauth`: fix cookie if extension SECURITY is missing.
    [(557)](https://github.com/mviereck/x11docker/issues/557)
@@ -59,7 +59,7 @@ Project website: https://github.com/mviereck/x11docker
    [(543)](https://github.com/mviereck/x11docker/issues/543)
  - `--build`: Deprecated, would have needed `ADD` support.
 
-## [7.7.1](https://github.com/mviereck/x11docker/releases/tag/v7.7.1) - 2025-011-23
+## [7.7.1](https://github.com/mviereck/x11docker/releases/tag/v7.7.1) - 2025-11-23
 ### Fixed
  - `--xc --xorg`: Add `/dev/tty0 /dev/fb0`. Needed on Debian trixie
    to run from console.
