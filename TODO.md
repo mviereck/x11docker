@@ -2,18 +2,19 @@
 x11docker ToDo notes
 
 ## Current
---clipboard: check if wl-clipboard is available
 report: Xwayland -rootless -decorate: Misleading geometry error message
 report: weston Xwayland display number
+report?: --nxagent: -ac -auth bug
 --clipboard: use wl-paste --watch if possible
 --satellite version check, waiting for release yet
 --weston=X: Do not terminate if Xwayland terminates?
---xpra: black window on first firefox startup
---nxagent: -ac -auth. bug report?
+--xpra firefox: black window on first firefox startup
+--runtime=sysbox -xorg --xc fails
+--labwc?
 screen capture in x11docker/check
 profile.d: check for xrdp #554
-BUG NVIDIA: --xc=force --gpu --xorg (nvidia): black screen after terminating, no tty switch possible.
-WORKAROUND --backend=podman --hostdisplay fails > glxgears: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.34' not found (required by /x11docker/XlibNoSHM.so)
+bug NVIDIA: --xc=force --gpu --xorg (nvidia): black screen after terminating, no tty switch possible.
+workaround yet: --backend=podman --hostdisplay fails > glxgears: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.34' not found (required by /x11docker/XlibNoSHM.so)
 further centralize argument checks
 
 ## Old issues to check
