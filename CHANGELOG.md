@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 Project website: https://github.com/mviereck/x11docker
 
+## [Unreleased]
+### Added
+ - `--xlogo`: Run `xlogo`. Helper for `--clipboard=cmv` like `--xeyes`.
+
 ## [7.8.0](https://github.com/mviereck/x11docker/releases/tag/v7.8.0) - 2026-01-17
 ### Fixed
  - `--hostdisplay --xauth`: fix cookie if extension SECURITY is missing.
@@ -14,11 +18,11 @@ Project website: https://github.com/mviereck/x11docker
    [(557)](https://github.com/mviereck/x11docker/issues/557)
  - `WSL2g`: use `socat` to create a unix socket from virtual socket.
    [(557)](https://github.com/mviereck/x11docker/issues/557)
- - `WSL2`: Determine Windows host ip in `/etc/resolv.conf`
+ - `WSL2`: Improved IP check.
    [(557)](https://github.com/mviereck/x11docker/issues/557)
  - `--xc`: fix command order for `xtool()` and nvidia driver installation.
  - `/etc/profile.d/10-x11docker-env.sh`: Do not set DISPLAY,
-   set `XAUTHORITY=~/.Xauthority` because of ssh issues.
+   set `XAUTHORITY=~/.Xauthority` in ssh sessions.
    [(554)](https://github.com/mviereck/x11docker/issues/554)
  - fix `ps` calls for alpine/busybox. Use `psproc` on MSYS2 and Cygwin.
    [(556)](https://github.com/mviereck/x11docker/issues/556)
@@ -28,10 +32,9 @@ Project website: https://github.com/mviereck/x11docker
 ### Changed
  - `--weston-xwayland`: Support rootless Xwayland.
  - `--weston-xwayland`: Support option `--wayland`.
- - `--weston`: Set backend in `weston.ini` instead of weston command.
  - `--weston =[ARG]`: New optional arguments,
-     `--weston=x`: run `--weston-xwayland --wayland`
-     `--weston=X`: run `--weston-xwayland --wayland --desktop`
+     `--weston=x`: runs `--weston-xwayland --wayland`
+     `--weston=X`: runs `--weston-xwayland --wayland --desktop`
    [(501)](https://github.com/mviereck/x11docker/issues/501)
  - `--hostwayland`: Can be set additionally to X server options
    to run X and Wayland applications side by side.
@@ -41,9 +44,8 @@ Project website: https://github.com/mviereck/x11docker
    Deprecate argument `oneway`: New arguments `c2h`, `h2c`.
    Deprecate arguments `superv|altv`: New argument `cmv`.
    Wayland keybinding with `x11docker/xserver`.
- - `--gpu`: Deprecated argument `virgl`.
 ### Added
-  `--xw`: New option to run X and Wayland apps side by side.
+ - `--xw`: New option to run X and Wayland apps side by side.
  - `--pipewire`: New option for PipeWire sound in container.
    [(545)](https://github.com/mviereck/x11docker/issues/545)
    [(527)](https://github.com/mviereck/x11docker/issues/527)
@@ -54,10 +56,11 @@ Project website: https://github.com/mviereck/x11docker
    `--clipboard=cmv` in Wayland+X11 containers (option `--xw`).
  - Partial support of Docker Desktop edition.
 ### Deprecated
- - `--backend=nerdctl`: Deprecated, likely rarely needed.
+ - `--backend=nerdctl`: Deprecated, likely rarely used.
  - `--runtime=kata-runtime`: Deprecated, likely rarely used.
    [(543)](https://github.com/mviereck/x11docker/issues/543)
  - `--build`: Deprecated, would have needed `ADD` support.
+ - `--gpu`: Deprecated argument `virgl`.
 
 ## [7.7.1](https://github.com/mviereck/x11docker/releases/tag/v7.7.1) - 2025-11-23
 ### Fixed

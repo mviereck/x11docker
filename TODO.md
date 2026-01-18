@@ -11,6 +11,7 @@ report?: --nxagent: -ac -auth bug
 --xpra firefox: black window on first firefox startup
 --runtime=sysbox -xorg --xc fails
 --labwc?
+--display: Newwaylandnumber
 screen capture in x11docker/check
 profile.d: check for xrdp #554
 bug NVIDIA: --xc=force --gpu --xorg (nvidia): black screen after terminating, no tty switch possible.

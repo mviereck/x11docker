@@ -11,7 +11,7 @@
 # Run 'x11docker --help' or scroll down to read usage information.
 # More documentation at:  https://github.com/mviereck/x11docker
 
-Version="7.8.0"
+Version="7.8.1-beta"
 Packagedversion="no" # Set to "yes" if you want to package x11docker. This disables installation and update options.
 
 # --enforce-i: Enforce running in interactive mode to allow commands tty and weston-launch in special setups. (deprecated)
@@ -120,10 +120,10 @@ Host integration:
                          cmv: Keys [CTRL] + [SUPER] + [v] copy clipboard
                               from host to container. Otherwise same as 'yes'.
                               Needs a focused X window of container.
-                              In Wayland+X11 containers option --xeyes can
-                              help. Or provide image x11docker/xserver
-                              (option --xc) for a bindkey helper tool
-                              that sets up a Wayland key binding.
+                              In Wayland+X11 containers options --xeyes or
+                              --xlogo can help. Or provide image
+                              x11docker/xserver (option --xc) for a bindkey
+                              helper tool that sets up a Wayland key binding.
  -g, --gpu [=yes|no|iglx] GPU access for hardware accelerated OpenGL.
                        Works best with open source drivers on host and in image.
                        For closed source nvidia drivers regard terminal output.
@@ -229,6 +229,7 @@ X and Wayland appearance options:
                        Optional argument ARG can be an xeyes option, see
                        'man xeyes'. Remove window decoration: '--xeyes=-shape'
  -F, --xfishtank       Show fish tank on new X server.
+     --xlogo           Simlilar to --xeyes, helper for --clipboard=cmv.
 
 X and Wayland special configuration:
      --checkwindow [=ARG]  Run container until all X windows are closed.
@@ -3677,6 +3678,22 @@ check_xdepends() {              # check dependencies on host for X server option
     esac
   }
 
+  # --xlogo
+  [ "$Xlogo" = "yes" ] && {
+    xtool --check --quiet xlogo || {
+      $Message "xlogo not found.
+  Please install 'xlogo' for option --xlogo.
+  $Wikipackagesimage"
+      Return=1
+    }
+    case "$Xserver" in
+      --weston|--kwin|--hostwayland)
+        $Message "Option ${1:-} does not support option --xlogo"
+        Return=1
+      ;;
+    esac
+  }
+
   # --xfishtank
   [ "$Xfishtank" = "yes" ] && {
     xtool --check --quiet xfishtank || {
@@ -4141,7 +4158,7 @@ create_modelinefile() {         # generate a set of smaller modelines for screen
 create_xcommand() {             ### create command to start X server and/or Wayland compositor
   local Xserveroptions_custom= Xpraoptions= Nxagentoptions= Compositorpid= Weston= Westonoutput= Count= Usemitshm Xkbmodel Xdpyinfooutput
   local Card Connectorlist= Status Xserverextensions=
-  local Xrandremulation= Decorate=
+  local Xrandremulation= Decorate= Xwaylandoptions=
 
   Xserveroptions_custom="$Xserveroptions"
   Xserveroptions=""
@@ -4489,11 +4506,37 @@ vt-switching=true" >> "$Westonini"
         ;;
         no)
           Xwayland -help 2>&1 | grep -q "force-xrandr-emulation" && Xrandremulation="-force-xrandr-emulation"
-          Xwayland -help 2>&1 | grep -q "decorate" && Decorate="-decorate"
+          Xwayland -help 2>&1 | grep -q "decorate"               && Decorate="-decorate"
         ;;
       esac
     ;;
   esac
+  [ "$Xwaylandrootless" = "no" ] && case "$Setupwayland" in
+    yes) Xwaylandoptions="$Decorate" ;;
+    no)
+      case "$Runsonconsole" in
+        yes) Xwaylandoptions="-fullscreen" ;;
+        no)
+          case "$Fullscreen" in
+            yes) Xwaylandoptions="-fullscreen" ;;
+            no) Xwaylandoptions="$Decorate" ;;
+          esac
+        ;;
+      esac
+    ;;
+  esac
+  [ "$Xwaylandrootless" = "no" ] && [ -n "$Xrandremulation" ] && Xwaylandoptions="$Xwaylandoptions \\
+  $Xrandremulation"
+
+  # Xwayland wrapper script for rootless mode
+#echo \"$(get_xpath Xwayland) \$(sed 's/-terminate//' <<< \"\$@\") $Xserveroptions\" >> $Xinitlogfile 2>&1
+  echo "#! /bin/bash
+# x11docker wrapper for Xwayland
+$(get_xpath Xwayland) \$(sed 's/-terminate//' <<< \"\$@\") \\
+$Xserveroptions \\
+$Xwaylandoptions \\
+>> $Xinitlogfile 2>&1
+" >> "$Xwaylandwrapper"
 
   #### create command to run X server
   case "$Xserver" in
@@ -4573,28 +4616,8 @@ mode=$Screensize" >> "$Westonini"
     --weston|--weston-xwayland)
       Xcommand="$(get_xpath Xwayland) :$Newdisplaynumber"
 
-      [ "$Xwaylandrootless" = "no" ] && case "$Setupwayland" in
-        yes) Xserveroptions="$Xserveroptions \\
-  $Decorate" ;;
-        no)
-          case "$Runsonconsole" in
-            yes) Xserveroptions="$Xserveroptions \\
-  -fullscreen" ;;
-            no)
-              case "$Fullscreen" in
-                yes) Xserveroptions="$Xserveroptions \\
-  -fullscreen" ;;
-                no) Xserveroptions="$Xserveroptions \\
-  $Decorate" ;;
-              esac
-            ;;
-          esac
-        ;;
-      esac
-
-      [ "$Xwaylandrootless" = "no" ] && [ -n "$Xrandremulation" ] && Xserveroptions="$Xserveroptions \\
-  $Xrandremulation"
-
+      Xserveroptions="$Xserveroptions \\
+$Xwaylandoptions"
       Xcommand="$Xcommand $Xserveroptions"
 
       [ -n "${Westonoutput:-$Connectorlist}" ] && for ((Count=1 ; Count<="$Outputcount" ; Count++)) ; do
@@ -4625,14 +4648,6 @@ name=$Connector$Count" >> "$Westonini"
       [ -n "$Customwestonini" ] && Westonini="$Customwestonini"
       Compositorcommand="$Compositorcommand \\
   --config='$Westonini'"
-
-#echo \"$(get_xpath Xwayland) \$(sed 's/-terminate//' <<< \"\$@\") $Xserveroptions\" >> $Xinitlogfile 2>&1
-  echo "#! /bin/bash
-# x11docker wrapper for Xwayland
-$(get_xpath Xwayland) \$(sed 's/-terminate//' <<< \"\$@\") \\
-$Xserveroptions \\
->> $Xinitlogfile 2>&1
-" >> "$Xwaylandwrapper"
     ;;
 
     --kwin|--kwin-xwayland)
@@ -5720,6 +5735,12 @@ create_xinitrc() {              # create xinitrc: set up X environment, create c
     echo             "storepid \$! xeyes"
   }
 
+  # --xlogo
+  [ -n "$Xlogo" ] && {
+    echo             "xlogo &"
+    echo             "storepid \$! xlogo"
+  }
+
   # --xfishtank
   [ "$Xfishtank" = "yes" ] && echo "xfishtank -nomenu & storepid \$! xfishtank"
 
@@ -5907,6 +5928,8 @@ xtool() {                       # run X tool command in X container if available
   that is used in background for --xpra-xwayland." ;;
     xeyes)     Toolinfo="xeyes shows eyes following your mouse cursor. 
   The xeyes X window can provide focus for --clipboard=cmv." ;;
+    xlogo)     Toolinfo="xlogo shows the X11 logo in an X11 window. 
+  This window can provide focus for --clipboard=cmv." ;;
     xfishtank) Toolinfo="xfishtank shows a fish tank with --xfishtank." ;;
     xhost)     Toolinfo="xhost controls network access to X. x11docker uses it to disable
   undesired network access, or to allow some with option --xhost=ARG." ;;
@@ -9971,7 +9994,7 @@ parse_options() {               # parse cli options
   Longoptions="$Longoptions,group-add:,hostuser:,password::,sudouser::,user:,shell:"                                          # Container user
   Longoptions="$Longoptions,dbus::,init::,hostdbus,sharecgroup"                                                               # Container init and DBus
   Longoptions="$Longoptions,stdin,interactive"                                                                                # Container interaction
-  Longoptions="$Longoptions,runasuser:,runfromhost:,runasroot:,xeyes::,xfishtank"                                             # Additional commands to execute
+  Longoptions="$Longoptions,runasuser:,runfromhost:,runasroot:,xeyes::,xlogo,xfishtank"                                       # Additional commands to execute
   Longoptions="$Longoptions,printenv::,printid::,printinfofile::,printpid1::"                                                 # Output of vars on stdout
   Longoptions="$Longoptions,debug,printcheck,quiet,verbose::"                                                                 # Verbose options
   Longoptions="$Longoptions,build,cleanup,help,launcher,licence,license,version"                                              # Special options without starting X or container
@@ -10059,6 +10082,7 @@ ${1:-}"
          --size)              Screensize="${2:-}" ;  shift ;;        # Screen size
       -F|--xfishtank)         Xfishtank="yes" ;;                     # Run xfishtank on new X server
          --xeyes)             Xeyes="${2:-"+shape"}" ; shift ;;      # Run xeyes on new X server
+         --xlogo)             Xlogo="yes" ;;                         # Run xlogo on new X server
 
      #### X and Wayland configuration
          --composite)         Xcomposite="${2:-yes}" ; shift ;;      # Enable or disable X extension COMPOSITE
@@ -10275,7 +10299,7 @@ ${2:-}"                       ; shift ;;                             # Add custo
 
   # Generate a list of options in use
   for Line in -a,--xpra -A,--xpra-xwayland -c,--clipboard -d,--desktop -D,--debug -f,--fullscreen -g,--gpu -e,--exe \
-  -F,--xfishtank --xeyes -h,--hostdisplay -H,--hostwayland -i,--interactive -I,--network -K,--kwin -l,--lang -m,--home -n,--nxagent \
+  -F,--xfishtank --xeyes --xlogo -h,--hostdisplay -H,--hostwayland -i,--interactive -I,--network -K,--kwin -l,--lang -m,--home -n,--nxagent \
   --pipewire -p,--pulseaudio -P,--printer -q,--quiet -t,--tty -T,--weston -v,--verbose -w,--wm -W,--wayland \
   --xopt -x,--xorg -X,--xwayland --satellite -y,--xephyr -Y,--weston-xwayland; do
     grep -q -x -- "$(cut -d, -f1 <<< "$Line")" <<< "$Optionset" && Optionset="$Optionset
@@ -10888,7 +10912,7 @@ check_options_interferences() { # check multiple option interferences, change se
       }
       check_optionset "--tty" "--border --clipboard --composite --desktop --display --dpi
                                --fullscreen --keymap --output-count --rotate
-                               --scale --size --vt --wm --westonini --xauth --xc --xeyes --xfishtank
+                               --scale --size --vt --wm --westonini --xauth --xc --xeyes --xlogo --xfishtank
                                --xhost --xonly --xoverip --xtest" ||:
     ;;
     --hostdisplay)
@@ -11279,6 +11303,19 @@ check_options_interferences() { # check multiple option interferences, change se
     esac
   }
 
+  # --xlogo
+  [ -n "$Xlogo" ] && {
+    xtool --check xlogo || Xlogo=""
+    case "$Xserver" in
+      --weston|--kwin|--hostwayland|--tty)
+        note "Option --xlogo does not run on $Xserver.
+  Fallback: Disabling option --xlogo."
+        check_fallback
+        Xlogo=""
+      ;;
+    esac
+  }
+
   # --xfishtank
   [ "$Xfishtank" = "yes" ] && {
     xtool --check xfishtank && case "$Xserver" in
@@ -11550,7 +11587,7 @@ check_options_messages() {      # some messages depending on options, but not ch
     cmv)
       [ "$Setupwayland" = "yes" ] && [ "$Xcontainer" = "no" ] && note "Option --clipboard=$Shareclipboard:
   Keyboard binding works only if an X window of container that has focus.
-  Option --xeyes can provide an X window for this purpose.
+  Options --xeyes or --xlogo can provide an X window for this purpose.
   Alternatively provide image x11docker/xserver (option --xc)
   that contains a bindkey helper for Wayland."
     ;;
@@ -11977,6 +12014,7 @@ declare_variables() {           # declare global variables
   Xcomposite=""                                   # --xcomposite: +extension COMPOSITE yes/no
   Xkblayout=""                                    # --keymap: Layout for keymap, compare /usr/share/X11/xkb/symbols
   Xeyes=""                                        # --xeyes: Run xeyes, eyes following your mouse cursor
+  Xlogo=""                                        # --xlogo: Shows X logo
   Xfishtank="no"                                  # --xfishtank: Show a fish tank on new X server
   Xhost=""                                        # --xhost: custom xhost setting on new X server
   Xiniterrorcodes="xinit: giving up|unable to connect to X server|Connection refused|server error|Only console users are allowed"

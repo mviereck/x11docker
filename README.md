@@ -442,6 +442,9 @@ To allow advanced usage of x11docker abilities have a look at chapter [Dependenc
 ### Installation from distribution repositories
 x11docker is available as a package in some distributions.
 
+Much thanks to the maintainers who decided to provide these packages! There are some hints for
+[packaging x11docker](https://github.com/mviereck/x11docker/wiki/Packaging-x11docker) in the wiki.
+
 Stable releases:
 
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/mviereck/x11docker?label=x11docker%20latest%20release)
@@ -451,9 +454,6 @@ Stable releases:
 Latest git master/beta version:
 
 [![AUR latest git](https://repology.org/badge/version-for-repo/aur/x11docker.svg?allow_ignored=1)](https://repology.org/project/x11docker/versions)
-
-Much thanks to the maintainers who decided to provide these packages! There are some hints for
-[packaging x11docker](https://github.com/mviereck/x11docker/wiki/Packaging-x11docker) in the wiki.
 
 ### Manual installation
 #### Installation options
