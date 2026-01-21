@@ -39,7 +39,7 @@ Project website: https://github.com/mviereck/x11docker
  - `--hostwayland`: Can be set additionally to X server options
    to run X and Wayland applications side by side.
  - `--hostdisplay`: Use `XlibNoSHM.so` without `--xc`, too.
- - `--xc` using a tty: Needs `--force=xc`.
+ - `--xc` using a tty: Needs `--xc=force` with NVIDIA.
  - `--clipboard`: Support Wayland. Drop `primary` support.
    Deprecate argument `oneway`: New arguments `c2h`, `h2c`.
    Deprecate arguments `superv|altv`: New argument `cmv`.

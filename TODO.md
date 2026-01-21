@@ -10,11 +10,10 @@ report?: --nxagent: -ac -auth bug
 --weston=X: Do not terminate if Xwayland terminates?
 --xpra firefox: black window on first firefox startup
 --runtime=sysbox -xorg --xc fails
---labwc?
 --display: Newwaylandnumber
 screen capture in x11docker/check
 profile.d: check for xrdp #554
-bug NVIDIA: --xc=force --gpu --xorg (nvidia): black screen after terminating, no tty switch possible.
+bug NVIDIA: --xc=force --gpu --xorg/--weston (nvidia): black screen after terminating, no tty switch possible.
 workaround yet: --backend=podman --hostdisplay fails > glxgears: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.34' not found (required by /x11docker/XlibNoSHM.so)
 further centralize argument checks
 

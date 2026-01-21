@@ -2,6 +2,7 @@
 
 ## Avoid X security leaks and enhance container security
 [![DOI](http://joss.theoj.org/papers/10.21105/joss.01349/status.svg)](https://doi.org/10.21105/joss.01349)
+Latest release is [v7.8.0](https://github.com/mviereck/x11docker/releases/tag/v7.8.0)
 
 ## Table of contents
  - [Introduction](#introduction)
@@ -446,6 +447,8 @@ Much thanks to the maintainers who decided to provide these packages! There are 
 [packaging x11docker](https://github.com/mviereck/x11docker/wiki/Packaging-x11docker) in the wiki.
 
 Stable releases:
+Latest release is [v7.8.0](https://github.com/mviereck/x11docker/releases/tag/v7.8.0) . The following badges need some time to refresh.
+
 
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/mviereck/x11docker?label=x11docker%20latest%20release)
 
