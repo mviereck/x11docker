@@ -13,6 +13,8 @@ Project website: https://github.com/mviereck/x11docker
    [(560)](https://github.com/mviereck/x11docker/issues/560)
  - `--xoverip *xwayland`: use `-listen tcp` instead of `socat`.
    Should have been changed already in a previous release.
+ - `--xc`: Check for existing files/devices before mount.
+   [(564)](https://github.com/mviereck/x11docker/issues/564)
 ### Changed
  - `--satellite`: No longer experimental due to release v0.8.1
    of `xwayland-satellite` supporting several X options.
