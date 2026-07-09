@@ -914,12 +914,153 @@ check_envvar() {                # allow only chars in string $1 that can be expe
   $Newvar"
   return 1
 }
-get_ppid() {                    # get ppid of pid $1
-  $Myps ax -o pid,ppid | awk '$1 ~ /'${1:-}'/ { SUM += $2 } END { print SUM } '
+# Group: check_parent_sshd
+
+# Function: find_in_first_print_second
+# Usage:  cat "$file" | find_in_first_print_second query
+#
+# stdin: A file with at least two whitespace-separated columns.
+#         Whitespace before the first column is ignored.
+#
+# Argument:
+#   query : a string, containing no whitespace
+#
+# stdout: The value (or values) from column2 of the lines
+#         where column1 == query. The output values are separated by newlines.
+#
+# Used-by: get_ppid, check_parent_sshd
+#
+find_in_first_print_second() {
+    # Extra "" quotes around query, to make it a string for awk.
+    local query="\"${1:-}\""
+    awk ' $1 == '"${query}"' { print $2 } '
 }
-check_parent_sshd() {           # check whether pid $1 runs in SSH session
-  $Myps ax -o pid,comm | awk '$1 ~ /'$(get_ppid "${1:-}")'/ { SUM += $2 } END { print SUM } ' | grep -q "sshd"
+
+#
+# Function: get_ppid
+# Usage: get_ppid  pid_to_check
+# Brief: Get ppid of pid_to_check. Result goes to stdout.
+#
+# Argument:
+#    pid_to_check : An integer
+#
+# return: 0 on success. In this case ppid goes to stdout
+#         1 If pid_to_check not found
+#         2 If pid_to_check is empty or not an integer,
+#           call error(). If error() returns, return 2.
+#
+# stdout: the ppid on success, otherwise nothing.
+#
+# Note: ppid seems to be 0 if there is no parent.
+#
+# Used-by: check_parent_sshd
+#
+get_ppid() {
+    local pid_to_check="${1:-}"
+    local res=''
+    #
+    if [ -z "${pid_to_check}" ] || ! isint "${pid_to_check}"  ; then
+        error "get_ppid(): The argument '${pid_to_check}' is not an integer"
+        return 2
+    fi
+    #
+    # POSIX
+    #   https://pubs.opengroup.org/onlinepubs/9799919799/utilities/ps.html
+    #   Open Group Base Specifications Issue 8, 2024
+    #
+    #  ps
+    #
+    #   -p proclist : Write information for processes whose process ID
+    #      numbers are given in proclist. [...]  the proclist is a
+    #      single argument in the form of a <blank> or <comma>-separated
+    #      list.
+    #
+    #   -o format : Write information according to the format
+    #      specification given in format.
+    #
+    #      ppid=  : write ppid, with no header
+    #
+    #  awk '{ print $1 }' : remove  whitespace before number
+    #
+    # res="$( $Myps -p "${pid_to_check}" -o ppid=  2>/dev/null | awk '{ print $1 }' )"
+    #
+    #  Note: "busybox ps" does not support the -p ppid option.
+    #
+    #  If we need compatibility with "busybox ps", then we have to filter
+    #  the pid,ppid pairs ourselves.
+    #
+    # busybox ps
+    res="$( $Myps ax -o pid,ppid                         \
+          | find_in_first_print_second "${pid_to_check}"
+          )"
+    #
+    if [ -z "$res" ] ; then
+        return 1
+    else
+        echo "$res"
+        return 0
+    fi
 }
+
+
+#
+# Function check_parent_sshd
+# Usage:  check_parent_sshd pid_to_check
+# Brief: Check whether pid_to_check runs in an SSH session
+#
+# Argument:
+#   pid_to_check : an integer
+#
+# return: 0 if "sshd" found in the parent chain.
+#
+# Note: Modified to walk the parent chain. Earlier it only checked the
+#       direct parent of pid_to_check.
+#
+check_parent_sshd() {
+    local pid ppid
+    pid="${1:-}"
+    if [ -z "$pid" ] ; then
+        error "check_parent_sshd(): argument pid is empty"
+    fi
+    #
+    while [ ! -z "$pid" ] ; do
+        ppid="$( get_ppid "${pid}" )"
+        case  "$ppid" in
+            "")
+                error "check_parent_sshd(): Could not get ppid for pid '${pid}'"
+                # This may also happen, if the process with pid exited.
+                # In general, a warning() or note() may be more appropriate.
+                #
+                # On the other hand, the only call to check_parent_sshd()
+                # tests if x11docker is running under sshd. Losing x11docker
+                # or one of its parents might warrant an error() here.
+                ;;
+            0|1)
+                # reached the end of the parent chain
+                return 1 # Not running under sshd
+                ;;
+            [0-9]*)
+                # POSIX ps
+                #  if $Myps -p "$ppid" -o comm=               \
+                #          | grep -w -F -q  "sshd"            ;
+                #
+                # busybox ps
+                if $Myps ax -o pid,comm                           \
+                        | find_in_first_print_second "${ppid}"    \
+                        | grep -w -F -q  "sshd"                   ;
+                then
+                    return 0 # found sshd in the parent chain
+                else
+                    pid="$ppid"
+                fi
+                ;;
+            *)
+                error "check_parent_sshd(): unexpected ppid '$ppid'"
+                ;;
+        esac
+    done
+}
+
 cookiebaker() {                 # create an X cookie without xauth
   # $1  DISPLAY
   # Write directly to file, bash cannot store nullbytes in a string.
