@@ -920,6 +920,27 @@ get_ppid() {                    # get ppid of pid $1
 check_parent_sshd() {           # check whether pid $1 runs in SSH session
   $Myps ax -o pid,comm | awk '$1 ~ /'$(get_ppid "${1:-}")'/ { SUM += $2 } END { print SUM } ' | grep -q "sshd"
 }
+pstree_ps() {                   # show process tree of pid $1 (like pstree -p, without pstree)
+  # One ps call. Not pstree: pstree (psmisc) reads /proc/PID/ns/* of every
+  # process on the host, whatever the options. Where AppArmor or SELinux
+  # deny that, e.g. in a container sharing the host's pid namespace, each
+  # process is a denial and an audit record; with several x11docker
+  # starting at once the audit backlog fills and every process that writes
+  # an audit record waits for it.
+  $Myps ax -o pid,ppid,args 2>/dev/null | awk -v Root="${1:-}" '
+    function show(Pid, Indent,    N, Kid, I) {
+      print Indent Pid " " Args[Pid]
+      N = split(Kids[Pid], Kid, " ")
+      for (I = 1; I <= N; I++) show(Kid[I], Indent "  ")
+    }
+    NR > 1 {
+      Pid = $1; Ppid = $2
+      $1 = ""; $2 = ""; sub(/^ +/, "")
+      Args[Pid] = $0
+      Kids[Ppid] = Kids[Ppid] " " Pid
+    }
+    END { if (Root in Args) show(Root, "") }'
+}
 cookiebaker() {                 # create an X cookie without xauth
   # $1  DISPLAY
   # Write directly to file, bash cannot store nullbytes in a string.
@@ -9559,11 +9580,8 @@ $(sestatus 2>&1 ||:)"
   esac
 
   # Check whether x11docker runs over SSH
+  # Not pstree, see pstree_ps(); check_parent_sshd() and SSH_CLIENT/SSH_TTY
   check_parent_sshd "$$"                && Runsoverssh="yes"
-  command -v pstree >/dev/null && {
-    pstree -ps $$ | grep -q sshd        && Runsoverssh="yes" ||:
-  } || note "Command 'pstree' not found. x11docker needs it to 
-  check whether it runs within an ssh session."
   [ -n "${SSH_CLIENT:-}${SSH_TTY:-}" ]  && Runsoverssh="yes"
   [ -z "$Runsoverssh" ]                 && Runsoverssh="no"
 
@@ -12659,9 +12677,9 @@ $(nl -ba <$Sshenvscript)"
 
     # some debug output
     checkpid "$Pid1pid" && debugnote "Process tree of container: (maybe not complete yet)
-$(pstree -p "$Pid1pid" 2>&1 ||:)"
+$(pstree_ps "$Pid1pid" 2>&1 ||:)"
     debugnote "Process tree of x11docker:
-$(pstree -p $$ 2>&1 ||:)"
+$(pstree_ps $$ 2>&1 ||:)"
     debugnote "storeinfo(): Stored info:
 $(cat $Storeinfofile)"
     debugnote "storepid(): Stored pids:
