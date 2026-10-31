@@ -724,6 +724,9 @@ finish() {                      # trap EXIT routine to clean up background proce
     exec {Descriptor}>&-
   done
 
+  # the X server is gone: other x11docker may take its display number
+  release_displaynumber
+
   # remove cache files
   [ "$Preservecachefiles" = "no" ] && grep -q cache <<< "$Cachefolder" && grep -q x11docker <<< "$Cachefolder" && [ "x11docker" != "$(basename "$Cachefolder")" ] && unpriv "rm -f -R '$Cachefolder'"
 
@@ -2830,13 +2833,36 @@ setup_webcam() {                # option --webcam: share webcam devices
 }
 
 #### X server setup
+reserve_displaynumber() {       # reserve display number $1 for this x11docker; 1 if another one has it
+  # X socket and lock file exist only once the X server runs, seconds
+  # later; until then x11docker instances started at the same time would
+  # all take the same number. mkdir is atomic: only one of them succeeds.
+  # A reservation whose x11docker is gone is taken over; finish() releases.
+  local Folder="$Cachebasefolder/displaynumber.${1:-}" Pid
+  mkdir "$Folder" 2>/dev/null || {
+    Pid="$(cat "$Folder/pid" 2>/dev/null ||:)"
+    [ -n "$Pid" ] && ! checkpid "$Pid" || return 1
+    debugnote "reserve_displaynumber(): Taking over display number ${1:-} reserved by pid $Pid that is gone"
+    rm -f -R "$Folder"
+    mkdir "$Folder" 2>/dev/null || return 1
+  }
+  echo "$$" > "$Folder/pid"
+  return 0
+}
+release_displaynumber() {       # release the display number reserved by reserve_displaynumber()
+  local Folder="$Cachebasefolder/displaynumber.$Newdisplaynumber"
+  [ -n "$Newdisplaynumber" ] && [ "$(cat "$Folder/pid" 2>/dev/null)" = "$$" ] && rm -f -R "$Folder"
+  return 0
+}
 check_newxenv()  {              # find free display
   local Line Newwaylandnumber
   # find free display number
   [ "$Newdisplaynumber" ] || {
     Newdisplaynumber="0"
     while :; do
-      [ -n "$(find "/tmp/.X11-unix/X$Newdisplaynumber" "/tmp/.X$Newdisplaynumber-lock" 2>/dev/null)" ] || break
+      [ -n "$(find "/tmp/.X11-unix/X$Newdisplaynumber" "/tmp/.X$Newdisplaynumber-lock" 2>/dev/null)" ] || {
+        reserve_displaynumber "$Newdisplaynumber" && break
+      }
       case "$Xserver" in
         --xwin|--runx) Newdisplaynumber="$((RANDOM / 10 + 200))" ;;
         *)             Newdisplaynumber="$((Newdisplaynumber + 1))" ;;
